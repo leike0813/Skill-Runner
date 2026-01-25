@@ -1,0 +1,8 @@
+skill_id: "demo-missing-artifacts"
+cases:
+  - name: "Missing Required Artifact"
+    description: "Output succeeds but required artifact is missing"
+    parameters: {}
+    inputs: {}
+    expectations:
+      status: "failed"

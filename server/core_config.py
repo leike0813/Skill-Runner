@@ -37,6 +37,15 @@ _C.SYSTEM.RUNS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "runs")
 # Requests directory (pre-run staging)
 _C.SYSTEM.REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "requests")
 
+# uv cache directory (can be overridden via UV_CACHE_DIR)
+_C.SYSTEM.UV_CACHE_DIR = os.environ.get("UV_CACHE_DIR", os.path.join(_C.SYSTEM.DATA_DIR, "uv_cache"))
+
+# uv venv directory (can be overridden via UV_PROJECT_ENVIRONMENT)
+_C.SYSTEM.UV_PROJECT_ENVIRONMENT = os.environ.get(
+    "UV_PROJECT_ENVIRONMENT",
+    os.path.join(_C.SYSTEM.DATA_DIR, "uv_venv")
+)
+
 # Run database path
 _C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
 

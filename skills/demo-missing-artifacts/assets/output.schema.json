@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "result_artifact": {
+            "type": "string",
+            "x-type": "artifact",
+            "x-role": "result_artifact",
+            "x-filename": "result_artifact.md"
+        }
+    },
+    "required": [
+        "result_artifact"
+    ]
+}

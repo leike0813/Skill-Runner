@@ -1,0 +1,8 @@
+skill_id: "demo-missing-result"
+cases:
+  - name: "Missing Required Result"
+    description: "Output succeeds but no JSON output"
+    parameters: {}
+    inputs: {}
+    expectations:
+      status: "failed"

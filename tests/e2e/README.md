@@ -10,6 +10,14 @@ Run:
 tests/e2e/run_e2e_tests.sh -k demo-bible-verse -e gemini --no-cache
 ```
 
+Container run (targets a running service, default `http://localhost:8000`):
+```
+tests/e2e/run_container_e2e_tests.sh -k demo-bible-verse -e gemini --no-cache
+```
+
+Container bundle downloads are saved under:
+`/home/joshua/Workspace/Code/Skill-Runner/e2e-test-download/<request_id>/`.
+
 Covered behaviors:
 - `POST /v1/jobs` and `POST /v1/jobs/{request_id}/upload`
 - `GET /v1/jobs/{request_id}` status polling

@@ -30,6 +30,31 @@ class DummyAdapter:
         )
 
 
+class NoOutputAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            output_file_path=None,
+            artifacts_created=[]
+        )
+
+
+class MissingArtifactsAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "ok"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[]
+        )
+
+
 def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     req = RunCreateRequest(skill_id=skill.id, engine="codex", parameter={})
     with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill):
@@ -175,6 +200,102 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
 
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert "artifacts/extra.txt" in result_data["artifacts"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_fails_when_output_json_missing(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json"
+        }
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": NoOutputAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert "Output JSON missing" in result_data["error"]["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    output_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"]
+    }
+    (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        artifacts=[{"role": "result_file", "pattern": "required.txt", "required": True}],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json"
+        }
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": MissingArtifactsAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert "Missing required artifacts" in result_data["error"]["message"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

@@ -1,0 +1,15 @@
+{
+    "id": "demo-missing-result",
+    "version": "1.0.0",
+    "name": "Demo: Missing Result",
+    "description": "Intentionally omits required result JSON for validation.",
+    "engines": [
+        "gemini"
+    ],
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    },
+    "entrypoint": {}
+}

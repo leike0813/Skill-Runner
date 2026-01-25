@@ -135,14 +135,17 @@ class JobOrchestrator:
             warnings: list[str] = []
             output_data = {}
             output_errors: list[str] = []
-            if result.exit_code == 0 and result.output_file_path and result.output_file_path.exists():
-                try:
-                    with open(result.output_file_path, "r") as f:
-                        output_data = json.load(f)
-                    output_errors = schema_validator.validate_output(skill, output_data)
-                except Exception as e:
-                    output_errors = [f"Failed to validate output schema: {str(e)}"]
-                    output_data = {}
+            if result.exit_code == 0:
+                if result.output_file_path and result.output_file_path.exists():
+                    try:
+                        with open(result.output_file_path, "r") as f:
+                            output_data = json.load(f)
+                        output_errors = schema_validator.validate_output(skill, output_data)
+                    except Exception as e:
+                        output_errors = [f"Failed to validate output schema: {str(e)}"]
+                        output_data = {}
+                else:
+                    output_errors = ["Output JSON missing or unreadable"]
 
             # 6.1 Normalization (N0)
             # Create standard envelope
@@ -153,6 +156,20 @@ class JobOrchestrator:
                     if path.is_file():
                         artifacts.append(path.relative_to(run_dir).as_posix())
             artifacts.sort()
+            required_artifacts = [
+                artifact.pattern
+                for artifact in skill.artifacts
+                if artifact.required
+            ] if skill.artifacts else []
+            missing_artifacts = []
+            for pattern in required_artifacts:
+                expected_path = f"artifacts/{pattern}"
+                if expected_path not in artifacts:
+                    missing_artifacts.append(pattern)
+            if missing_artifacts:
+                output_errors.append(
+                    f"Missing required artifacts: {', '.join(missing_artifacts)}"
+                )
             has_output_error = bool(output_errors)
             normalized_status = "success" if result.exit_code == 0 and not has_output_error else "failed"
             normalized_error: dict[str, Any] | None = None

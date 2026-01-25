@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 from pathlib import Path
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-not-found]
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from ..config import config
 
 class CacheManager:
@@ -15,7 +15,7 @@ class CacheManager:
     """
     def __init__(self):
         self.scheduler = AsyncIOScheduler()
-        self.uv_cache_dir = Path(config.SYSTEM.RUNS_DIR).parent / "uv_cache"
+        self.uv_cache_dir = Path(config.SYSTEM.UV_CACHE_DIR)
 
     def start(self):
         # Schedule cleanup every day
