@@ -1,0 +1,26 @@
+{
+    "id": "literature-digest",
+    "version": "1.0.0",
+    "name": "Literature Digest",
+    "description": "Generate digests and extract references from academic papers (Markdown).",
+    "engines": [
+        "gemini",
+        "codex",
+        "iflow"
+    ],
+    "runtime": {
+        "language": "python",
+        "version": "3.11",
+        "dependencies": []
+    },
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    },
+    "entrypoint": {
+        "prompts": {
+            "gemini": "Please call the skill named \"{{ skill.id }}\".\n\nPlease ingest the markdown file at `{{ input.md_path }}`.\nThen generate a literature digest in `{{ parameter.language }}` following the SKILL.md protocol.\n\nOutput the final JSON object to stdout logic as defined in SKILL.md.\n\nInput Context:\n- md_path: {{ input.md_path }}\n- language: {{ parameter.language }}"
+        }
+    }
+}

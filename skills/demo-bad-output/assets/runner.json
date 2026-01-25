@@ -1,0 +1,15 @@
+{
+    "id": "demo-bad-output",
+    "version": "1.0.0",
+    "name": "Demo: Bad Output",
+    "description": "Produces output that violates schema for testing.",
+    "engines": [
+        "gemini"
+    ],
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    },
+    "entrypoint": {}
+}

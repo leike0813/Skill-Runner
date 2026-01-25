@@ -1,0 +1,47 @@
+{
+    "type": "object",
+    "properties": {
+        "digest_path": {
+            "type": "string",
+            "x-type": "artifact",
+            "x-role": "digest",
+            "x-filename": "digest.md"
+        },
+        "references_path": {
+            "type": "string",
+            "x-type": "artifact",
+            "x-role": "references",
+            "x-filename": "references.json"
+        },
+        "provenance": {
+            "type": "object",
+            "properties": {
+                "generated_at": {
+                    "type": "string"
+                },
+                "input_hash": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                }
+            }
+        },
+        "warnings": {
+            "type": "array"
+        },
+        "error": {
+            "type": [
+                "object",
+                "null"
+            ]
+        }
+    },
+    "required": [
+        "digest_path",
+        "references_path",
+        "provenance",
+        "warnings",
+        "error"
+    ]
+}

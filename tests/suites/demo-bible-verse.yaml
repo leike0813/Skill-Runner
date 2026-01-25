@@ -1,0 +1,17 @@
+skill_id: "demo-bible-verse"
+cases:
+  - name: "English Verse Test"
+    description: "Verify Bible verse generation in English"
+    parameters:
+      language: "English"
+    inputs: {}
+    expectations:
+      status: "succeeded"
+      artifacts_present:
+        - "text.md"
+        - "info.json"
+      # output_json:
+      #   status: "success"
+        # Check specific data returned by skill
+        # Nested check not supported by runner yet, but main keys are checked.
+

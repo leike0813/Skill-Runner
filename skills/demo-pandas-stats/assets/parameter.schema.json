@@ -1,0 +1,12 @@
+{
+    "type": "object",
+    "properties": {
+        "column": {
+            "type": "string",
+            "description": "Column name to analyze"
+        }
+    },
+    "required": [
+        "column"
+    ]
+}

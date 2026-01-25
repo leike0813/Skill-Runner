@@ -1,0 +1,153 @@
+import pytest
+import asyncio
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch, AsyncMock
+from server.adapters.gemini_adapter import GeminiAdapter
+from server.models import SkillManifest
+
+@pytest.fixture
+def adapter():
+    return GeminiAdapter()
+
+@pytest.fixture
+def mock_skill(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    
+    # Create schema files
+    input_schema = {
+        "type": "object",
+        "properties": {"input_file": {"type": "string"}},
+        "required": ["input_file"]
+    }
+    param_schema = {
+        "type": "object",
+        "properties": {"divisor": {"type": "integer"}},
+        "required": ["divisor"]
+    }
+    
+    (skill_dir / "input.schema.json").write_text(json.dumps(input_schema))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps(param_schema))
+    
+    return SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json"
+        }
+    )
+
+@pytest.mark.asyncio
+async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "input.json").write_text("{}")
+    
+    # Mock uploads
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content")
+    
+    input_data = {
+        "parameter": {"divisor": 5},
+        # "input" dict in request is not used for files anymore in strict mode
+    }
+    
+    options = {}
+    
+    # Create dummy template
+    template_file = tmp_path / "template.j2"
+    template_file.write_text(
+        "input_file: {{ input.input_file }}\n"
+        "divisor: {{ parameter.divisor }}"
+    )
+    
+    from server.config import config
+    old_template = config.GEMINI.DEFAULT_PROMPT_TEMPLATE
+    config.defrost()
+    config.GEMINI.DEFAULT_PROMPT_TEMPLATE = str(template_file)
+    config.freeze()
+    
+    try:
+        # Mock dependencies
+         with patch("server.services.config_generator.config_generator.generate_config"), \
+              patch("server.services.skill_patcher.skill_patcher.patch_skill_md"), \
+              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+             
+            mock_proc = MagicMock()
+            mock_proc.stdout = MagicMock()
+            mock_proc.stderr = MagicMock()
+            mock_proc.stdout.readline = AsyncMock(side_effect=[b""])
+            mock_proc.stderr.readline = AsyncMock(side_effect=[b""])
+            mock_proc.wait = AsyncMock()
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+            
+            await adapter.run(mock_skill, input_data, run_dir, options)
+            
+            # Check prompt log
+            prompt_path = run_dir / "logs" / "prompt.txt"
+            assert prompt_path.exists()
+            prompt_content = prompt_path.read_text()
+            
+            # Verify Context injection
+            # input.input_file should be absolute path
+            abs_path = str((uploads_dir / "input_file").absolute())
+            assert f"input_file: {abs_path}" in prompt_content
+            
+            # parameter.divisor should be 5
+            assert "divisor: 5" in prompt_content
+    finally:
+        config.defrost()
+        config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
+        config.freeze()
+
+@pytest.mark.asyncio
+async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "input.json").write_text("{}")
+    
+    # Mock uploads - but DO NOT create "input_file"
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    
+    input_data = {
+        "parameter": {"divisor": 5}
+    }
+    options = {}
+
+    # Create dummy template
+    template_file = tmp_path / "template.j2"
+    template_file.write_text(
+        "{% for key, val in input.items() %}\n"
+        "{{ key }}: {{ val }}\n"
+        "{% endfor %}"
+    )
+    
+    from server.config import config
+    old_template = config.GEMINI.DEFAULT_PROMPT_TEMPLATE
+    config.defrost()
+    config.GEMINI.DEFAULT_PROMPT_TEMPLATE = str(template_file)
+    config.freeze()
+    
+    try:
+         with patch("server.services.config_generator.config_generator.generate_config"), \
+              patch("server.services.skill_patcher.skill_patcher.patch_skill_md"), \
+              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+             
+            mock_proc = MagicMock()
+            mock_proc.stdout = MagicMock()
+            mock_proc.stderr = MagicMock()
+            mock_proc.stdout.readline = AsyncMock(side_effect=[b""])
+            mock_proc.stderr.readline = AsyncMock(side_effect=[b""])
+            mock_proc.wait = AsyncMock()
+            mock_exec.return_value = mock_proc
+            with pytest.raises(ValueError, match="Missing required input files"):
+                await adapter.run(mock_skill, input_data, run_dir, options)
+    finally:
+        config.defrost()
+        config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
+        config.freeze()

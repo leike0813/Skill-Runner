@@ -1,0 +1,13 @@
+${{ skill.id }}: Execute the skill using the inputs and parameters listed below.
+
+# Inputs
+{% for key, val in input.items() %}
+- {{ key }}: {{ val }}
+{% endfor %}
+
+# Parameters
+{% for key, val in parameter.items() %}
+- {{ key }}: {{ val }}
+{% endfor %}
+
+P.S. The skills can be found in {{ run_dir }}/.codex/skills

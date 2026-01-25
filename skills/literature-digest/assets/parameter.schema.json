@@ -1,0 +1,11 @@
+{
+    "type": "object",
+    "properties": {
+        "language": {
+            "type": "string",
+            "default": "zh-CN",
+            "description": "Target language for the digest"
+        }
+    },
+    "required": []
+}

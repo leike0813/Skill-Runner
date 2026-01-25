@@ -1,0 +1,28 @@
+{
+    "id": "demo-pandas-stats",
+    "version": "1.0.0",
+    "name": "Pandas Data Stats",
+    "description": "Calculate statistics from CSV using Pandas",
+    "engines": [
+        "gemini",
+        "codex",
+        "iflow"
+    ],
+    "runtime": {
+        "language": "python",
+        "version": "3.11",
+        "dependencies": [
+            "pandas"
+        ]
+    },
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    },
+    "entrypoint": {
+        "prompts": {
+            "gemini": "Please analyze the CSV file `{{ input.csv_file }}` using the provided script. Calculate the mean of column `{{ parameter.column }}`. \n\nIMPORTANT: Execute `{{ skill_dir }}/scripts/analyze.py` and output the FINAL result as a valid JSON object: `{\"mean\": <value>}`."
+        }
+    }
+}

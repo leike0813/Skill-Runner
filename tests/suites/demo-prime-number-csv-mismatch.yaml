@@ -1,0 +1,10 @@
+skill_id: "demo-prime-number"
+cases:
+  - name: "CSV Input Mismatch"
+    description: "Provide CSV input file where markdown is expected"
+    parameters:
+      divisor: 1
+    inputs:
+      input_file: "data.csv"
+    expectations:
+      status: "any"

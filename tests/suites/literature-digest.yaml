@@ -1,0 +1,13 @@
+skill_id: "literature-digest"
+cases:
+  - name: "Full Paper Digest"
+    description: "Verifies that the literature-digest skill correctly processes a full markdown paper and produces a digest and references."
+    inputs:
+      md_path: "example_full.md"
+    parameters:
+      language: "en-US"
+    expectations:
+      status: "succeeded"
+      artifacts_present:
+        - "digest.md"
+        - "references.json"

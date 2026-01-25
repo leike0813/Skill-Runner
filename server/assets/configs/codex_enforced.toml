@@ -1,0 +1,12 @@
+# Codex Enforced Configuration
+# These settings act as mandatory defaults/overrides.
+# They are merged on TOP of user runtime configuration to ensure security/stability.
+
+[profiles.skill-runner]
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+cli_auth_credentials_store = "file"
+
+[features]
+shell_tool = true
+web_search_request = true

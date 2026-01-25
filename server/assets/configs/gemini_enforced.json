@@ -1,0 +1,27 @@
+{
+    "ui": {
+        "quiet": true,
+        "hideBanner": true
+    },
+    "ide": {
+        "enabled": false
+    },
+    "output": {
+        "format": "json"
+    },
+    "security": {
+        "auth": {
+            "selectedType": "oauth-personal"
+        },
+        "disableYoloMode": false
+    },
+    "tools": {
+        "autoAccept": true,
+        "allowed": [
+            "run_shell_command"
+        ]
+    },
+    "experimental": {
+        "skills": true
+    }
+}

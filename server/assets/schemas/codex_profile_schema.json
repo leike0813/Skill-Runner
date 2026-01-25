@@ -1,0 +1,560 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Codex Profile Configuration",
+    "type": "object",
+    "properties": {
+        "model": {
+            "type": "string",
+            "description": "Model to use (e.g., `gpt-5-codex`)."
+        },
+        "review_model": {
+            "type": "string",
+            "description": "Optional model override used by `/review`."
+        },
+        "model_provider": {
+            "type": "string",
+            "description": "Provider id from `model_providers` (default: `openai`)."
+        },
+        "model_context_window": {
+            "type": "number",
+            "description": "Context window tokens available to the active model."
+        },
+        "model_auto_compact_token_limit": {
+            "type": "number",
+            "description": "Token threshold that triggers automatic history compaction."
+        },
+        "oss_provider": {
+            "type": "string",
+            "enum": [
+                "lmstudio",
+                "ollama"
+            ],
+            "description": "Default local provider used when running with `--oss`."
+        },
+        "approval_policy": {
+            "type": "string",
+            "enum": [
+                "untrusted",
+                "on-failure",
+                "on-request",
+                "never"
+            ],
+            "description": "Controls when Codex pauses for approval before executing commands."
+        },
+        "sandbox_mode": {
+            "type": "string",
+            "enum": [
+                "read-only",
+                "workspace-write",
+                "danger-full-access"
+            ],
+            "description": "Sandbox policy for filesystem and network access during command execution."
+        },
+        "sandbox_workspace_write": {
+            "type": "object",
+            "properties": {
+                "writable_roots": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "network_access": {
+                    "type": "boolean"
+                },
+                "exclude_tmpdir_env_var": {
+                    "type": "boolean"
+                },
+                "exclude_slash_tmp": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "notify": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Command invoked for notifications."
+        },
+        "check_for_update_on_startup": {
+            "type": "boolean",
+            "description": "Check for Codex updates on startup."
+        },
+        "feedback": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "instructions": {
+            "type": "string",
+            "description": "Reserved for future use; prefer `model_instructions_file`."
+        },
+        "developer_instructions": {
+            "type": "string",
+            "description": "Additional developer instructions injected into the session."
+        },
+        "compact_prompt": {
+            "type": "string",
+            "description": "Inline override for the history compaction prompt."
+        },
+        "model_instructions_file": {
+            "type": "string",
+            "description": "Replacement for built-in instructions instead of `AGENTS.md`."
+        },
+        "experimental_compact_prompt_file": {
+            "type": "string",
+            "description": "Load the compaction prompt override from a file."
+        },
+        "skills": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string"
+                            },
+                            "enabled": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "mcp_servers": {
+            "type": "object",
+            "patternProperties": {
+                "^.*$": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "env_vars": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "cwd": {
+                            "type": "string"
+                        },
+                        "url": {
+                            "type": "string"
+                        },
+                        "bearer_token_env_var": {
+                            "type": "string"
+                        },
+                        "http_headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "env_http_headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "startup_timeout_sec": {
+                            "type": "number"
+                        },
+                        "startup_timeout_ms": {
+                            "type": "number"
+                        },
+                        "tool_timeout_sec": {
+                            "type": "number"
+                        },
+                        "enabled_tools": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "disabled_tools": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "features": {
+            "type": "object",
+            "properties": {
+                "unified_exec": {
+                    "type": "boolean"
+                },
+                "shell_snapshot": {
+                    "type": "boolean"
+                },
+                "apply_patch_freeform": {
+                    "type": "boolean"
+                },
+                "web_search_request": {
+                    "type": "boolean"
+                },
+                "shell_tool": {
+                    "type": "boolean"
+                },
+                "exec_policy": {
+                    "type": "boolean"
+                },
+                "experimental_windows_sandbox": {
+                    "type": "boolean"
+                },
+                "elevated_windows_sandbox": {
+                    "type": "boolean"
+                },
+                "remote_compaction": {
+                    "type": "boolean"
+                },
+                "remote_models": {
+                    "type": "boolean"
+                },
+                "powershell_utf8": {
+                    "type": "boolean"
+                },
+                "child_agents_md": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "model_providers": {
+            "type": "object",
+            "patternProperties": {
+                "^.*$": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "base_url": {
+                            "type": "string"
+                        },
+                        "env_key": {
+                            "type": "string"
+                        },
+                        "env_key_instructions": {
+                            "type": "string"
+                        },
+                        "experimental_bearer_token": {
+                            "type": "string"
+                        },
+                        "requires_openai_auth": {
+                            "type": "boolean"
+                        },
+                        "wire_api": {
+                            "type": "string",
+                            "enum": [
+                                "chat",
+                                "responses"
+                            ]
+                        },
+                        "query_params": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "http_headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "env_http_headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "request_max_retries": {
+                            "type": "number"
+                        },
+                        "stream_max_retries": {
+                            "type": "number"
+                        },
+                        "stream_idle_timeout_ms": {
+                            "type": "number"
+                        }
+                    }
+                }
+            }
+        },
+        "model_reasoning_effort": {
+            "type": "string",
+            "enum": [
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+            ]
+        },
+        "model_reasoning_summary": {
+            "type": "string",
+            "enum": [
+                "auto",
+                "concise",
+                "detailed",
+                "none"
+            ]
+        },
+        "model_verbosity": {
+            "type": "string",
+            "enum": [
+                "low",
+                "medium",
+                "high"
+            ]
+        },
+        "model_supports_reasoning_summaries": {
+            "type": "boolean"
+        },
+        "shell_environment_policy": {
+            "type": "object",
+            "properties": {
+                "inherit": {
+                    "type": "string",
+                    "enum": [
+                        "all",
+                        "core",
+                        "none"
+                    ]
+                },
+                "ignore_default_excludes": {
+                    "type": "boolean"
+                },
+                "exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "include_only": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "set": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "experimental_use_profile": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "project_root_markers": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "project_doc_max_bytes": {
+            "type": "number"
+        },
+        "project_doc_fallback_filenames": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "profile": {
+            "type": "string"
+        },
+        "profiles": {
+            "type": "object",
+            "description": "Nested profiles are allowed but discouraged in this schema"
+        },
+        "include_apply_patch_tool": {
+            "type": "boolean",
+            "deprecated": true
+        },
+        "experimental_use_unified_exec_tool": {
+            "type": "boolean",
+            "deprecated": true
+        },
+        "experimental_use_freeform_apply_patch": {
+            "type": "boolean",
+            "deprecated": true
+        },
+        "projects": {
+            "type": "object",
+            "patternProperties": {
+                "^.*$": {
+                    "type": "object",
+                    "properties": {
+                        "trust_level": {
+                            "type": "string",
+                            "enum": [
+                                "trusted",
+                                "untrusted"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "notice": {
+            "type": "object",
+            "properties": {
+                "hide_full_access_warning": {
+                    "type": "boolean"
+                },
+                "hide_world_writable_warning": {
+                    "type": "boolean"
+                },
+                "hide_rate_limit_model_nudge": {
+                    "type": "boolean"
+                },
+                "hide_gpt5_1_migration_prompt": {
+                    "type": "boolean"
+                },
+                "hide_gpt-5.1-codex-max_migration_prompt": {
+                    "type": "boolean"
+                },
+                "model_migrations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "forced_login_method": {
+            "type": "string",
+            "enum": [
+                "chatgpt",
+                "api"
+            ]
+        },
+        "forced_chatgpt_workspace_id": {
+            "type": "string"
+        },
+        "chatgpt_base_url": {
+            "type": "string"
+        },
+        "cli_auth_credentials_store": {
+            "type": "string",
+            "enum": [
+                "file",
+                "keyring",
+                "auto"
+            ]
+        },
+        "mcp_oauth_credentials_store": {
+            "type": "string",
+            "enum": [
+                "auto",
+                "file",
+                "keyring"
+            ]
+        },
+        "mcp_oauth_callback_port": {
+            "type": "integer"
+        },
+        "history": {
+            "type": "object",
+            "properties": {
+                "persistence": {
+                    "type": "string",
+                    "enum": [
+                        "save-all",
+                        "none"
+                    ]
+                },
+                "max_bytes": {
+                    "type": "number"
+                }
+            }
+        },
+        "tool_output_token_limit": {
+            "type": "number"
+        },
+        "file_opener": {
+            "type": "string",
+            "enum": [
+                "vscode",
+                "vscode-insiders",
+                "windsurf",
+                "cursor",
+                "none"
+            ]
+        },
+        "otel": {
+            "type": "object",
+            "properties": {
+                "environment": {
+                    "type": "string"
+                },
+                "exporter": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "otlp-http",
+                        "otlp-grpc"
+                    ]
+                },
+                "trace_exporter": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "otlp-http",
+                        "otlp-grpc"
+                    ]
+                },
+                "log_user_prompt": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": true
+        },
+        "hide_agent_reasoning": {
+            "type": "boolean"
+        },
+        "show_raw_agent_reasoning": {
+            "type": "boolean"
+        },
+        "disable_paste_burst": {
+            "type": "boolean"
+        },
+        "windows_wsl_setup_acknowledged": {
+            "type": "boolean"
+        }
+    },
+    "required": [
+        "model"
+    ],
+    "additionalProperties": true
+}

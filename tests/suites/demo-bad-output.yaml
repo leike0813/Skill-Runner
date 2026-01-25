@@ -1,0 +1,8 @@
+skill_id: "demo-bad-output"
+cases:
+  - name: "Invalid Output Schema"
+    description: "Intentionally emits JSON that violates output schema; status may vary"
+    parameters: {}
+    inputs: {}
+    expectations:
+      status: "failed"

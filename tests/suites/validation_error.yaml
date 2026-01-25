@@ -1,0 +1,10 @@
+skill_id: "demo-bible-verse"
+cases:
+  - name: "Missing Required Parameter"
+    description: "Verify run fails when required 'language' parameter is missing"
+    parameters:
+      # Missing 'language'
+      foo: "bar"
+    inputs: {}
+    expectations:
+      status: "failed"

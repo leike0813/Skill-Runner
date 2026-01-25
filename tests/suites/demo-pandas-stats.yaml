@@ -1,0 +1,12 @@
+skill_id: "demo-pandas-stats"
+cases:
+  - name: "Calculate Mean"
+    description: "Verify pandas can read CSV and calculate mean"
+    inputs:
+      "csv_file": "data.csv"
+    parameters:
+      column: "value"
+    expectations:
+      status: "succeeded"
+      output_json:
+        mean: 24.0

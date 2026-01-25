@@ -1,0 +1,15 @@
+{
+    "id": "demo-bible-verse",
+    "version": "1.0.0",
+    "engines": [
+        "gemini",
+        "codex",
+        "iflow"
+    ],
+    "entrypoint": {},
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    }
+}

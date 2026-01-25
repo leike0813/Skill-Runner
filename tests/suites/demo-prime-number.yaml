@@ -1,0 +1,15 @@
+skill_id: "demo-prime-number"
+cases:
+  - name: "Basic Primality Test"
+    description: "Verify standard prime number filtering works"
+    parameters:
+      divisor: 1
+    inputs:
+      input_file: "basic_numbers.md"
+    expectations:
+      status: "succeeded"
+      artifacts_present:
+        - "primes.md"
+        - "results.json"
+      # output_json:
+      #   status: "success"
