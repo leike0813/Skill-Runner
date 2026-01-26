@@ -93,9 +93,10 @@ data/requests/
 - **Web 框架**: FastAPI
 - **模板引擎**: Jinja2 (用于 Prompt 渲染)
 - **校验**: JSON Schema (jsonschema)
-- **底层 CLI**: 
-  - **Gemini CLI**: Node.js based (通过 `subprocess` 调用)
-  - **Codex CLI**: Python based (通过 `subprocess` 调用)
+- **后端 AGENT CLI 引擎**: (通过 `subprocess` 调用) 
+  - [Gemini CLI](https://geminicli.com/)
+  - [Codex](https://openai.com/codex/)
+  - [iFlow CLI](https://cli.iflow.cn/)
 
 ## 日志配置
 日志默认输出到终端与 `data/logs/`，可通过环境变量控制：
