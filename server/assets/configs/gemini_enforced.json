@@ -10,9 +10,9 @@
         "format": "json"
     },
     "security": {
-        "auth": {
-            "selectedType": "oauth-personal"
-        },
+        // "auth": {
+        //     "selectedType": "oauth-personal"
+        // },
         "disableYoloMode": false
     },
     "tools": {

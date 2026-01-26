@@ -9,6 +9,16 @@ echo "Agents Prefix: ${NPM_CONFIG_PREFIX:-/opt/cache/npm}"
 echo "UV Cache Dir: ${UV_CACHE_DIR:-/opt/cache/uv_cache}"
 echo "UV Venv Dir: ${UV_PROJECT_ENVIRONMENT:-/opt/cache/uv_venv}"
 
+kernel_version="$(uname -r | cut -d- -f1)"
+kernel_major="$(printf '%s' "$kernel_version" | cut -d. -f1)"
+kernel_minor="$(printf '%s' "$kernel_version" | cut -d. -f2)"
+landlock_enabled=0
+if [ "${kernel_major:-0}" -gt 5 ] || { [ "${kernel_major:-0}" -eq 5 ] && [ "${kernel_minor:-0}" -ge 13 ]; }; then
+  landlock_enabled=1
+fi
+export LANDLOCK_ENABLED="${landlock_enabled}"
+echo "Landlock Enabled: ${LANDLOCK_ENABLED} (kernel ${kernel_version})"
+
 if [ -d "/opt/config" ]; then
   mkdir -p /opt/config/codex /opt/config/gemini /opt/config/iflow
   ln -sfn /opt/config/codex /root/.codex
@@ -32,6 +42,12 @@ EOF
 {
   "selectedAuthType": "iflow"
 }
+EOF
+  fi
+
+  if [ ! -f "/opt/config/codex/config.toml" ]; then
+    cat <<'EOF' > /opt/config/codex/config.toml
+cli_auth_credentials_store = "file"
 EOF
   fi
 fi

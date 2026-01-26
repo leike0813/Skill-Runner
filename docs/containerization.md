@@ -70,6 +70,15 @@ The entrypoint runs an agent check on startup and writes a status file:
   - If missing, the entrypoint writes `/opt/config/iflow/settings.json` with:
     - `selectedAuthType = "iflow"`
 
+### Codex sandbox compatibility
+
+Codex uses Landlock for sandboxing and requires Linux kernel >= 5.13. The
+entrypoint detects the kernel version at startup and exports
+`LANDLOCK_ENABLED=1/0`.
+
+- `LANDLOCK_ENABLED=1`: Codex runs with `--full-auto`
+- `LANDLOCK_ENABLED=0`: Codex runs with `--yolo`
+
 ### Agent CLI login workflows
 
 You can authenticate the CLI tools in two ways. Both methods populate the

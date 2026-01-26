@@ -139,11 +139,14 @@ class CodexAdapter(EngineAdapter):
         Phase 4: Execution (With optional streaming)
         """
         # Construct Command
+        sandbox_flag = "--full-auto"
+        if os.environ.get("LANDLOCK_ENABLED") == "0":
+            sandbox_flag = "--yolo"
         cmd = [
-            "codex", 
-            "exec", 
-            "--full-auto", 
-            "--skip-git-repo-check", 
+            "codex",
+            "exec",
+            sandbox_flag,
+            "--skip-git-repo-check",
             "--json",
             "-p", CodexConfigManager.PROFILE_NAME,
             prompt

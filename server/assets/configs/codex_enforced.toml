@@ -5,7 +5,7 @@
 [profiles.skill-runner]
 approval_policy = "never"
 sandbox_mode = "workspace-write"
-cli_auth_credentials_store = "file"
+# cli_auth_credentials_store = "file"
 
 [features]
 shell_tool = true
