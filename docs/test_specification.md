@@ -60,7 +60,38 @@ pytest tests/unit/
 ./tests/integration/run_integration_tests.sh
 ```
 
-### 2.3 REST E2E Tests
+### 2.3 Skill 包安装接口集成测试
+
+针对 `POST /v1/skill-packages/install` 与 `GET /v1/skill-packages/{request_id}` 的接口集成测试，使用 pytest 在进程内执行完整 API 流程。
+
+**覆盖范围**:
+- 新技能安装成功并可被 `/v1/skills/{skill_id}` 发现
+- 升版更新时旧版本归档 (`skills/.archive/{skill_id}/{old_version}`)
+- 降级更新被拒绝
+- 非法技能包（缺少必需文件）被拒绝
+
+**执行命令**:
+```bash
+conda run --no-capture-output -n DataProcessing python -u -m pytest tests/integration/test_skill_package_install_api.py -q
+```
+
+### 2.4 临时 Skill 运行接口集成测试
+
+针对 `/v1/temp-skill-runs` 两步式流程的集成测试，使用 pytest + TestClient 在进程内执行。
+
+**覆盖范围**:
+- 创建临时请求 -> 上传临时 skill 包 -> 启动执行
+- 状态/结果接口与 jobs 语义对齐
+- 临时 skill 不进入持久 `skills/` 注册表
+- 终态后临时 skill 包与解压目录清理
+- 非法临时 skill 包上传返回 400
+
+**执行命令**:
+```bash
+conda run --no-capture-output -n DataProcessing python -u -m pytest tests/integration/test_temp_skill_runs_api.py -q
+```
+
+### 2.5 REST E2E Tests
 
 REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流程。
 覆盖：create job、upload、status、result、artifacts、bundle。
@@ -74,7 +105,7 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 - 若 `engine` 不在 skill 的 `engines` 列表中，测试应预期失败（以 `workspace_manager` 抛错为判定）。
 - E2E 与集成测试共用 `tests/suites/*.yaml` 输入格式。
 
-### 2.4 日志配置 (Logging)
+### 2.5 日志配置 (Logging)
 
 测试与脚本支持通过环境变量配置日志输出，默认写入 `data/logs/`。
 

@@ -73,6 +73,11 @@ def _manifest_hash_for_content(tmp_path: Path, filename: str, content: str) -> s
     return compute_input_manifest_hash(manifest)
 
 
+class _RejectConcurrency:
+    async def admit_or_reject(self) -> bool:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
@@ -120,6 +125,34 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
     request_record = store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] == "run-cached"
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_when_queue_full(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr(jobs_router, "concurrency_manager", _RejectConcurrency())
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="gemini",
+                parameter={"a": 1},
+                model="gemini-2.5-pro"
+            ),
+            BackgroundTasks()
+        )
+
+    assert excinfo.value.status_code == 429
 
 
 @pytest.mark.asyncio
@@ -342,6 +375,46 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
 
     request_dir = Path(config.SYSTEM.REQUESTS_DIR) / create_response.request_id
     assert not (request_dir / "uploads").exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_file_rejects_when_queue_full(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr(jobs_router, "concurrency_manager", _RejectConcurrency())
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro"
+        ),
+        BackgroundTasks()
+    )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("input.txt", "hello")
+    buffer.seek(0)
+    upload = UploadFile(filename="input.zip", file=buffer)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.upload_file(
+            create_response.request_id,
+            upload,
+            BackgroundTasks()
+        )
+
+    assert excinfo.value.status_code == 429
 
 
 @pytest.mark.asyncio

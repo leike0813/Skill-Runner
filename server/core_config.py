@@ -49,11 +49,37 @@ _C.SYSTEM.UV_PROJECT_ENVIRONMENT = os.environ.get(
 # Run database path
 _C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
 
+# Skill package install status database path
+_C.SYSTEM.SKILL_INSTALLS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs.db")
+
+# Skill package working directories
+_C.SYSTEM.SKILL_INSTALLS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs")
+_C.SYSTEM.SKILLS_ARCHIVE_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".archive")
+_C.SYSTEM.SKILLS_STAGING_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".staging")
+
+# Temporary skill run working area
+_C.SYSTEM.TEMP_SKILL_RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "temp_skill_runs.db")
+_C.SYSTEM.TEMP_SKILL_REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "temp_skill_runs", "requests")
+_C.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES = int(
+    os.environ.get("TEMP_SKILL_PACKAGE_MAX_BYTES", str(20 * 1024 * 1024))
+)
+_C.SYSTEM.TEMP_SKILL_CLEANUP_INTERVAL_HOURS = int(
+    os.environ.get("TEMP_SKILL_CLEANUP_INTERVAL_HOURS", "12")
+)
+_C.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS = int(
+    os.environ.get("TEMP_SKILL_ORPHAN_RETENTION_HOURS", "24")
+)
+
 # Run cleanup retention in days (0 disables cleanup)
 _C.SYSTEM.RUN_RETENTION_DAYS = 7
 
 # Run cleanup scheduler interval in hours
 _C.SYSTEM.RUN_CLEANUP_INTERVAL_HOURS = 12
+
+# Concurrency policy config path
+_C.SYSTEM.CONCURRENCY_POLICY = os.path.join(
+    _C.SYSTEM.ROOT, "server", "assets", "configs", "concurrency_policy.json"
+)
 
 # -----------------------------------------------------------------------------
 # Gemini Configuration

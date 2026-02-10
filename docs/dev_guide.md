@@ -141,7 +141,8 @@ SKILL.md 的格式：
   ├── SKILL.md                         # 必需：标准 frontmatter + 指令正文
   ├── assets/                          # 推荐：Runner 扩展静态资源（标准允许）:contentReference[oaicite:11]{index=11}
   │   ├── runner.json                  # 必需（Runner 约定）：AutoSkill Manifest（见 5.3）
-  │   ├── input.schema.json            # 必需（Runner 约定）：输入 JSON Schema
+  │   ├── input.schema.json            # 必需（Runner 约定）：文件输入 JSON Schema
+  │   ├── parameter.schema.json        # 必需（Runner 约定）：参数 JSON Schema
   │   ├── output.schema.json           # 必需（Runner 约定）：输出 JSON Schema
   │   ├── gemini_settings.json         # 可选：Gemini CLI 推荐配置（遵循 CLI Schema）
   │   ├── iflow_settings.json          # 可选：iFlow CLI 推荐配置
@@ -158,6 +159,7 @@ SKILL.md 的格式：
 - 必须可全自动化执行（non-interactive），不得等待人工确认/交互。
 - 必须提供：
   - assets/input.schema.json
+  - assets/parameter.schema.json
   - assets/output.schema.json
   - assets/runner.json（AutoSkill Manifest）
 - 必须声明 artifacts 合同（在 runner.json 中），以便 Runner 能稳定地扫描/索引/返回产物。
@@ -185,6 +187,7 @@ SKILL.md 的格式：
   },
   "schemas": {
     "input": "assets/input.schema.json",
+    "parameter": "assets/parameter.schema.json",
     "output": "assets/output.schema.json"
   },
   "artifacts": [
@@ -255,7 +258,7 @@ EngineRunResult 字段建议：
 - exit_code: int
 - raw_stdout: str
 - raw_stderr: str
-- envelope_json: dict|null        # 若有（如 gemini --output-format json）
+- envelope_json: dict|null        # 若有（部分 CLI 可能输出结构化 envelope）
 - parsed_json: dict|null          # runner 尝试从输出中解析出的 JSON
 - output_file_path: str|null      # 若引擎直接写 result.json
 - artifacts_created: [str]        # 初步扫描得到的产物相对路径列表
@@ -273,7 +276,7 @@ GeminiAdapter(v0.2) 策略（建议）：
 - **Configuration**: Ensure `experimental.skills=true` in `settings.json`.
 - **Invocation**: Use an "Invocation Prompt" (defined in `runner.json` or default) to tell the agent to use the skill.
       Example: "Please call the skill named <skill-name>, with <parameters> to execute on <input_filepath>".
-- **Execution**: `gemini --output-format json --yolo "{invocation_prompt}"`.
+- **Execution**: `gemini --yolo "{invocation_prompt}"`.
 - **Result**: Agent natively executes skill steps (finding assets/scripts relative to itself) and outputs result.
 
 IFlowAdapter(v0.3) 策略（待定）：
@@ -302,7 +305,7 @@ N0 Deterministic Normalize（runner 内置）
 - 去 fence、trim、修复常见格式问题（仅语法层）
 - 再次 schema validate
 N1 Skill Normalizer（可选）
-- 若 skill.yaml 声明 normalizer.command：执行该脚本
+- 若 runner.json 声明 normalizer.command：执行该脚本
 - 该脚本输入：raw 输出文件路径 + schema 路径 + workspace
 - 输出：workspace/result/result.json
 - 校验
@@ -325,7 +328,7 @@ S4. 最终失败（error）
 8. Artifacts 管理与返回
 ================================================================================
 Artifact 索引规则：
-- 依据 skill.yaml artifacts[].pattern 扫描 workspace/artifacts/
+- 依据 runner.json artifacts 合同扫描 workspace/artifacts/
 - 对每个匹配文件计算：
   - sha256
   - size
@@ -345,14 +348,14 @@ Artifact 索引规则：
 基础：
 - Base URL: http://127.0.0.1:<port>/v1
 - 所有请求/响应 JSON，UTF-8
-- 响应统一 envelope（成功/失败）
+- 响应按接口各自的 Response Model 返回（见 API Reference）
 
 Endpoints：
 1) GET /v1/skills
 - 返回技能列表（id, version, name, description, engines）
 
 2) GET /v1/skills/{skill_id}
-- 返回 skill.yaml 信息 + input/output schema（或schema下载URL）
+- 返回 SkillManifest（包含 engines / schemas / artifacts / runtime 等）
 
 3) POST /v1/jobs
 Request:
@@ -515,13 +518,13 @@ Q6. iFlow CLI 的非交互能力与输出能力需要调研（命令/参数/是�
 ================================================================================
 - 请先生成项目目录结构与最小可运行 FastAPI skeleton
 - 定义数据模型（RunCreateRequest/RunStatus/SkillManifest/ArtifactManifest/Warnings/ErrorResponse）
-- 实现 Skill Registry：扫描 skills/*/skill.yaml，加载 schemas 路径
+- 实现 Skill Registry：扫描 skills/*/assets/runner.json，加载 schemas 路径
 - 实现 Workspace Manager：创建 run 目录、写 input.json、logs 目录
 - 实现 Job Orchestrator：后台任务队列（async），支持取消与超时
 - 实现 CodexAdapter：能运行 demo.echo（哪怕先用假命令/占位，也要接口对齐）
 - 实现 Output Validator：jsonschema 校验 + deterministic normalize（N0）
 - 实现 Artifact Manager：扫描 artifacts/ 并生成 manifest
-- 实现 REST endpoints：/v1/skills, /v1/jobs, /v1/jobs/{id}, /v1/jobs/{id}/result, /v1/jobs/{id}/artifacts, /v1/jobs/{id}/bundle
+- 实现 REST endpoints：/v1/skills, /v1/jobs, /v1/skill-packages, /v1/temp-skill-runs 及其查询/下载子路由
 - 在每个阶段提交可运行的最小实现（MVP），并用 demo skill 自测
 
 ================================================================================

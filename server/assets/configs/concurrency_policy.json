@@ -1,0 +1,12 @@
+{
+  "max_concurrent_hard_cap": 16,
+  "max_queue_size": 128,
+  "cpu_factor": 0.75,
+  "mem_reserve_mb": 1024,
+  "estimated_mem_per_run_mb": 1024,
+  "fd_reserve": 256,
+  "estimated_fd_per_run": 64,
+  "pid_reserve": 128,
+  "estimated_pid_per_run": 1,
+  "fallback_max_concurrent": 2
+}

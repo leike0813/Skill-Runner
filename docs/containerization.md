@@ -64,6 +64,17 @@ The entrypoint runs an agent check on startup and writes a status file:
   - `UV_CACHE_DIR=/opt/cache/uv_cache`
   - `UV_PROJECT_ENVIRONMENT=/opt/cache/uv_venv`
   - `NPM_CONFIG_PREFIX=/opt/cache/npm`
+- Concurrency policy (optional env overrides):
+  - `SKILL_RUNNER_MAX_CONCURRENT_HARD_CAP`
+  - `SKILL_RUNNER_MAX_QUEUE_SIZE`
+  - `SKILL_RUNNER_CPU_FACTOR`
+  - `SKILL_RUNNER_MEM_RESERVE_MB`
+  - `SKILL_RUNNER_ESTIMATED_MEM_PER_RUN_MB`
+  - `SKILL_RUNNER_FD_RESERVE`
+  - `SKILL_RUNNER_ESTIMATED_FD_PER_RUN`
+  - `SKILL_RUNNER_PID_RESERVE`
+  - `SKILL_RUNNER_ESTIMATED_PID_PER_RUN`
+  - `SKILL_RUNNER_FALLBACK_MAX_CONCURRENT`
 - Default config bootstrap:
   - If missing, the entrypoint writes `/opt/config/gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`

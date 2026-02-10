@@ -50,8 +50,8 @@
 ## 阶段四：执行 (Execution)
 
 1. **Command Construction**:
-   - Gemini: `gemini --output-format json --yolo <prompt>`
-   - Codex: `codex exec -p skill-runner <prompt>`
+   - Gemini: `gemini --yolo <prompt>`
+   - Codex: `codex exec --full-auto --skip-git-repo-check --json -p skill-runner <prompt>`（不支持 landlock 时回退 `--yolo`）
    - 设置工作目录为 `data/runs/<uuid>/`。
 2. **Subprocess**:
    - 启动异步子进程。

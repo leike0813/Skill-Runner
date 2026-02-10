@@ -19,3 +19,9 @@ def test_runtime_debug_allowed():
     policy = OptionsPolicy()
     runtime_opts = policy.validate_runtime_options({"debug": True})
     assert runtime_opts == {"debug": True}
+
+
+def test_runtime_debug_keep_temp_allowed():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options({"debug_keep_temp": True})
+    assert runtime_opts == {"debug_keep_temp": True}

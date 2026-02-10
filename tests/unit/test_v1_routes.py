@@ -119,3 +119,9 @@ def test_v1_jobs_cleanup_route(monkeypatch):
     assert body["runs_deleted"] == 1
     assert body["requests_deleted"] == 2
     assert body["cache_entries_deleted"] == 3
+
+
+def test_v1_temp_skill_runs_route_available():
+    client = TestClient(app)
+    response = client.get("/v1/temp-skill-runs/does-not-exist")
+    assert response.status_code == 404

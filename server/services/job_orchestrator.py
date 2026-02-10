@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from pathlib import Path
-from ..models import RunStatus
+from ..models import RunStatus, SkillManifest
 from ..services.workspace_manager import workspace_manager
 from ..services.skill_registry import skill_registry
 from ..adapters.codex_adapter import CodexAdapter
@@ -10,6 +10,7 @@ from ..adapters.gemini_adapter import GeminiAdapter
 from ..adapters.iflow_adapter import IFlowAdapter
 from ..services.schema_validator import schema_validator
 from ..services.run_store import run_store
+from ..services.concurrency_manager import concurrency_manager
 from ..config import config
 
 class JobOrchestrator:
@@ -37,7 +38,9 @@ class JobOrchestrator:
         skill_id: str,
         engine_name: str,
         options: Dict[str, Any],
-        cache_key: Optional[str] = None
+        cache_key: Optional[str] = None,
+        skill_override: Optional[SkillManifest] = None,
+        temp_request_id: Optional[str] = None,
     ):
         """
         Background task to execute the skill.
@@ -53,10 +56,16 @@ class JobOrchestrator:
             - Writes 'logs/stdout.txt', 'logs/stderr.txt'.
             - Writes 'result/result.json'.
         """
+        slot_acquired = False
+        run_dir: Path | None = None
+        await concurrency_manager.acquire_slot()
+        slot_acquired = True
         run_dir = workspace_manager.get_run_dir(run_id)
         if not run_dir:
             logger.error("Run dir %s not found", run_id)
             return
+        final_status: Optional[RunStatus] = None
+        normalized_error_message: Optional[str] = None
 
         # 1. Update status to RUNNING
         self._update_status(run_dir, RunStatus.RUNNING)
@@ -64,7 +73,7 @@ class JobOrchestrator:
 
         try:
             # 2. Get Skill
-            skill = skill_registry.get_skill(skill_id)
+            skill = skill_override or skill_registry.get_skill(skill_id)
             if not skill:
                 raise ValueError(f"Skill {skill_id} not found during execution")
             if not skill.schemas or not all(key in skill.schemas for key in ("input", "parameter", "output")):
@@ -199,6 +208,7 @@ class JobOrchestrator:
 
             # 7. Finalize status and bundles
             final_status = RunStatus.SUCCEEDED if normalized_status == "success" else RunStatus.FAILED
+            normalized_error_message = normalized_error["message"] if normalized_error else None
             self._build_run_bundle(run_dir, debug=False)
             self._build_run_bundle(run_dir, debug=True)
             self._update_status(run_dir, final_status, error=normalized_error, warnings=warnings)
@@ -208,8 +218,29 @@ class JobOrchestrator:
 
         except Exception as e:
             logger.exception("Job failed")
-            self._update_status(run_dir, RunStatus.FAILED, error={"message": str(e)})
+            final_status = RunStatus.FAILED
+            normalized_error_message = str(e)
+            if run_dir:
+                self._update_status(run_dir, RunStatus.FAILED, error={"message": str(e)})
             run_store.update_run_status(run_id, RunStatus.FAILED)
+        finally:
+            if temp_request_id and final_status:
+                try:
+                    from .temp_skill_run_manager import temp_skill_run_manager
+                    temp_skill_run_manager.on_terminal(
+                        temp_request_id,
+                        final_status,
+                        error=normalized_error_message,
+                        debug_keep_temp=bool(options.get("debug_keep_temp")),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to finalize temporary-skill lifecycle for request %s",
+                        temp_request_id,
+                        exc_info=True,
+                    )
+            if slot_acquired:
+                await concurrency_manager.release_slot()
 
     def _update_status(self, run_dir: Path, status: RunStatus, error: Optional[Dict] = None, warnings: Optional[List[str]] = None):
         # In v0, we might just rely on checking result/ but let's write a status file

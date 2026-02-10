@@ -2,6 +2,7 @@
   "runtime_options": [
     "verbose",
     "no_cache",
-    "debug"
+    "debug",
+    "debug_keep_temp"
   ]
 }

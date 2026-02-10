@@ -24,6 +24,14 @@ class RunStatus(str, Enum):
     FAILED = "failed"       # Finished with error or non-zero exit code
     CANCELED = "canceled"   # Terminated by user or timeout
 
+
+class SkillInstallStatus(str, Enum):
+    """Lifecycle state for async skill package install requests."""
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
 class ManifestArtifact(BaseModel):
     """
     Defines an expected output artifact from a skill execution.
@@ -138,6 +146,27 @@ class RunUploadResponse(BaseModel):
 
     extracted_files: List[str] = []
     """List of files extracted from the upload."""
+
+
+class TempSkillRunCreateRequest(BaseModel):
+    """Payload for creating a temporary skill run request."""
+    engine: str = "codex"
+    parameter: Dict[str, Any] = {}
+    model: Optional[str] = None
+    runtime_options: Dict[str, Any] = {}
+
+
+class TempSkillRunCreateResponse(BaseModel):
+    """Response for temporary skill run request creation."""
+    request_id: str
+    status: RunStatus
+
+
+class TempSkillRunUploadResponse(BaseModel):
+    """Response for temporary skill package/input upload."""
+    request_id: str
+    status: RunStatus
+    extracted_files: List[str] = []
 
 class RequestStatusResponse(BaseModel):
     """
@@ -299,6 +328,24 @@ class RunCleanupResponse(BaseModel):
 
     cache_entries_deleted: int
     """Number of cache entries deleted."""
+
+
+class SkillInstallCreateResponse(BaseModel):
+    """Response for creating a skill package install request."""
+    request_id: str
+    status: SkillInstallStatus
+
+
+class SkillInstallStatusResponse(BaseModel):
+    """Response payload for skill package install status."""
+    request_id: str
+    status: SkillInstallStatus
+    created_at: datetime
+    updated_at: datetime
+    skill_id: Optional[str] = None
+    version: Optional[str] = None
+    action: Optional[str] = None
+    error: Optional[str] = None
 
 class ErrorResponse(BaseModel):
     """

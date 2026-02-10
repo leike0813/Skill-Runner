@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 from ..config import config
-from ..models import RunCreateRequest, RunResponse, RunStatus
+from ..models import RunCreateRequest, RunResponse, RunStatus, SkillManifest
 
 import zipfile
 import io
@@ -20,17 +20,25 @@ class WorkspaceManager:
     """
     def create_run(self, request: RunCreateRequest) -> RunResponse:
         from .skill_registry import skill_registry
-
         skill = skill_registry.get_skill(request.skill_id)
         if not skill:
             raise ValueError(f"Skill '{request.skill_id}' not found")
+        self._validate_skill_engine(skill, request.engine)
+        return self._create_run_dir_and_metadata(request)
+
+    def create_run_for_skill(self, request: RunCreateRequest, skill: SkillManifest) -> RunResponse:
+        self._validate_skill_engine(skill, request.engine)
+        return self._create_run_dir_and_metadata(request)
+
+    def _validate_skill_engine(self, skill: SkillManifest, engine: str) -> None:
         if not skill.engines:
-            raise ValueError(f"Skill '{request.skill_id}' does not declare supported engines")
-        if request.engine not in skill.engines:
+            raise ValueError(f"Skill '{skill.id}' does not declare supported engines")
+        if engine not in skill.engines:
             raise ValueError(
-                f"Skill '{request.skill_id}' does not support engine '{request.engine}'"
+                f"Skill '{skill.id}' does not support engine '{engine}'"
             )
 
+    def _create_run_dir_and_metadata(self, request: RunCreateRequest) -> RunResponse:
         run_id = str(uuid.uuid4())
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         run_dir.mkdir(parents=True, exist_ok=True)

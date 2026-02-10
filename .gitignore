@@ -8,6 +8,7 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .vscode/
+.codex/
 data/*
 *.log
 *.egg-info/

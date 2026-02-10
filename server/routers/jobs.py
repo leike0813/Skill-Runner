@@ -30,6 +30,7 @@ from ..services.model_registry import model_registry
 from ..services.cache_key_builder import compute_skill_fingerprint, compute_input_manifest_hash, compute_cache_key
 from ..services.run_store import run_store
 from ..services.run_cleanup_manager import run_cleanup_manager
+from ..services.concurrency_manager import concurrency_manager
 import uuid
 import json
 from pathlib import Path
@@ -110,6 +111,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             run_store.create_run(run_status.run_id, cache_key, RunStatus.QUEUED)
             run_store.update_request_run_id(request_id, run_status.run_id)
             merged_options = {**engine_opts, **runtime_opts}
+            admitted = await concurrency_manager.admit_or_reject()
+            if not admitted:
+                raise HTTPException(status_code=429, detail="Job queue is full")
             background_tasks.add_task(
                 job_orchestrator.run_job,
                 run_id=run_status.run_id,
@@ -131,6 +135,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -370,6 +376,9 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         run_store.create_run(run_status.run_id, cache_key, RunStatus.QUEUED)
         run_store.update_request_run_id(request_id, run_status.run_id)
         merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
+        admitted = await concurrency_manager.admit_or_reject()
+        if not admitted:
+            raise HTTPException(status_code=429, detail="Job queue is full")
         background_tasks.add_task(
             job_orchestrator.run_job,
             run_id=run_status.run_id,
@@ -385,6 +394,8 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

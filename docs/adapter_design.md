@@ -1,5 +1,7 @@
 # Adapter Design & Specification
 
+> Note: This document is primarily a design reference. For production API/runtime behavior, follow `docs/api_reference.md` and actual adapter implementation.
+
 ## 1. Overview
 
 The **Standard Adapter Lifecycle** defines a rigorous 5-phase process for executing skills. All adapters (Gemini, Codex, etc.) **must** implement these phases to ensure consistent behavior regarding configuration layering, file handling, and output parsing.
@@ -119,7 +121,7 @@ async def _execute_process(self, cmd: List[str], run_dir: Path, env: Dict) -> Tu
 **Requirements**:
 1.  **Strategy**:
     - *Primary*: Attempt to parse entire stdout as JSON.
-    - *Secondary*: Look for `response` key in JSON envelope.
+    - *Secondary*: If stdout is a JSON envelope, extract the primary response payload.
     - *Tertiary*: Look for markdown code fences (```json ... ```).
 2.  **Normalization**: Ensure the returned dict matches the expected structure.
 
