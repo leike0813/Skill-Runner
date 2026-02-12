@@ -55,6 +55,18 @@ class MissingArtifactsAdapter:
         )
 
 
+@pytest.fixture(autouse=True)
+def _patch_trust_manager(monkeypatch):
+    class NoopTrustManager:
+        def register_run_folder(self, engine, run_dir):
+            return None
+
+        def remove_run_folder(self, engine, run_dir):
+            return None
+
+    monkeypatch.setattr("server.services.job_orchestrator.run_folder_trust_manager", NoopTrustManager())
+
+
 def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     req = RunCreateRequest(skill_id=skill.id, engine="codex", parameter={})
     with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill):
@@ -296,6 +308,61 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert "Missing required artifacts" in result_data["error"]["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json"
+        }
+    )
+
+    class Recorder:
+        def __init__(self):
+            self.events = []
+
+        def register_run_folder(self, engine, run_dir):
+            self.events.append(("register", engine, str(run_dir)))
+
+        def remove_run_folder(self, engine, run_dir):
+            self.events.append(("remove", engine, str(run_dir)))
+
+    recorder = Recorder()
+    monkeypatch.setattr("server.services.job_orchestrator.run_folder_trust_manager", recorder)
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": DummyAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        assert any(event[0] == "register" and event[1] == "codex" for event in recorder.events)
+        assert any(event[0] == "remove" and event[1] == "codex" for event in recorder.events)
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

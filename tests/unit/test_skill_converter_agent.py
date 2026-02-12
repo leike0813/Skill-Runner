@@ -291,7 +291,7 @@ def test_output_schema_not_convertible_rejects_package_fields() -> None:
     assert errors
 
 
-def test_output_schema_success_classes_require_directory_fields() -> None:
+def test_output_schema_success_classes_require_package_fields() -> None:
     schema = json.loads(OUTPUT_SCHEMA_PATH.read_text(encoding="utf-8"))
     validator = Draft7Validator(schema)
     missing_fields_payload = {
@@ -304,8 +304,7 @@ def test_output_schema_success_classes_require_directory_fields() -> None:
     valid_payload = {
         "status": "succeeded",
         "classification": "ready_for_auto",
-        "converted_skill_directory_path": "/tmp/converted_skill",
-        "conversion_report_path": "artifacts/conversion_report.json",
-        "converted_skill_id": "demo-converted",
+        "converted_skill_package_path": "artifacts/converted_skill.zip",
+        "conversion_report_path": "artifacts/conversion_report.md",
     }
     assert list(validator.iter_errors(valid_payload)) == []

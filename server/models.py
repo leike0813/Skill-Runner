@@ -283,6 +283,79 @@ class EngineModelsResponse(BaseModel):
 
     models: List[EngineModelInfo]
 
+
+class EngineUpgradeTaskStatus(str, Enum):
+    """Lifecycle state for engine upgrade tasks."""
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class EngineUpgradeCreateRequest(BaseModel):
+    """Request payload for creating an engine upgrade task."""
+    mode: str
+    engine: Optional[str] = None
+
+
+class EngineUpgradeCreateResponse(BaseModel):
+    """Response payload for created engine upgrade task."""
+    request_id: str
+    status: EngineUpgradeTaskStatus
+
+
+class EngineUpgradeEngineResult(BaseModel):
+    """Per-engine execution output for upgrade tasks."""
+    status: str
+    stdout: str = ""
+    stderr: str = ""
+    error: Optional[str] = None
+
+
+class EngineUpgradeStatusResponse(BaseModel):
+    """Response payload for engine upgrade task status."""
+    request_id: str
+    mode: str
+    requested_engine: Optional[str] = None
+    status: EngineUpgradeTaskStatus
+    results: Dict[str, EngineUpgradeEngineResult]
+    created_at: datetime
+    updated_at: datetime
+
+
+class EngineManifestModelInfo(BaseModel):
+    """Model entry in manifest management view."""
+    id: str
+    display_name: Optional[str] = None
+    deprecated: bool = False
+    notes: Optional[str] = None
+    supported_effort: Optional[List[str]] = None
+
+
+class EngineManifestViewResponse(BaseModel):
+    """Response payload for engine manifest view."""
+    engine: str
+    cli_version_detected: Optional[str] = None
+    manifest: Dict[str, Any]
+    resolved_snapshot_version: str
+    resolved_snapshot_file: str
+    fallback_reason: Optional[str] = None
+    models: List[EngineManifestModelInfo]
+
+
+class EngineSnapshotCreateModel(BaseModel):
+    """Payload item for creating a model snapshot."""
+    id: str
+    display_name: Optional[str] = None
+    deprecated: bool = False
+    notes: Optional[str] = None
+    supported_effort: Optional[List[str]] = None
+
+
+class EngineSnapshotCreateRequest(BaseModel):
+    """Request payload for creating a model snapshot for detected version."""
+    models: List[EngineSnapshotCreateModel] = Field(min_length=1)
+
 class RunResultResponse(BaseModel):
     """
     Response payload for run results.

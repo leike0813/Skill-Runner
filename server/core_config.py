@@ -15,6 +15,14 @@ import os
 from pathlib import Path
 from yacs.config import CfgNode as CN  # type: ignore[import-untyped]
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 _C = CN()
 
 # -----------------------------------------------------------------------------
@@ -52,6 +60,9 @@ _C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
 # Skill package install status database path
 _C.SYSTEM.SKILL_INSTALLS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs.db")
 
+# Engine upgrade task database path
+_C.SYSTEM.ENGINE_UPGRADES_DB = os.path.join(_C.SYSTEM.DATA_DIR, "engine_upgrades.db")
+
 # Skill package working directories
 _C.SYSTEM.SKILL_INSTALLS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs")
 _C.SYSTEM.SKILLS_ARCHIVE_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".archive")
@@ -80,6 +91,11 @@ _C.SYSTEM.RUN_CLEANUP_INTERVAL_HOURS = 12
 _C.SYSTEM.CONCURRENCY_POLICY = os.path.join(
     _C.SYSTEM.ROOT, "server", "assets", "configs", "concurrency_policy.json"
 )
+
+# UI basic auth
+_C.SYSTEM.UI_BASIC_AUTH_ENABLED = _env_bool("UI_BASIC_AUTH_ENABLED", False)
+_C.SYSTEM.UI_BASIC_AUTH_USERNAME = os.environ.get("UI_BASIC_AUTH_USERNAME", "")
+_C.SYSTEM.UI_BASIC_AUTH_PASSWORD = os.environ.get("UI_BASIC_AUTH_PASSWORD", "")
 
 # -----------------------------------------------------------------------------
 # Gemini Configuration

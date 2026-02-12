@@ -1,0 +1,36 @@
+<div
+    id="engine-upgrade-status-panel"
+    style="margin-top:10px; border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fafafa;"
+    {% if poll and request_id != "-" %}
+    hx-get="/ui/engines/upgrades/{{ request_id }}/status"
+    hx-trigger="every 1s"
+    hx-swap="outerHTML"
+    {% endif %}
+>
+    <div><strong>Request ID:</strong> {{ request_id }}</div>
+    <div><strong>Status:</strong> {{ status }}</div>
+    {% if error %}
+    <div style="margin-top:8px; color:#b91c1c;"><strong>Error:</strong> {{ error }}</div>
+    {% endif %}
+
+    {% if results %}
+    <div style="margin-top:10px;">
+        {% for engine, result in results.items() %}
+        <div style="border-top:1px solid #e5e7eb; padding-top:8px; margin-top:8px;">
+            <div><strong>{{ engine }}</strong> — {{ result.status }}</div>
+            {% if result.error %}
+            <div style="color:#b91c1c; margin-top:4px;"><strong>error:</strong> {{ result.error }}</div>
+            {% endif %}
+            <div style="margin-top:6px;">
+                <div><strong>stdout</strong></div>
+                <pre style="white-space: pre-wrap; background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:8px;">{{ result.stdout or "" }}</pre>
+            </div>
+            <div style="margin-top:6px;">
+                <div><strong>stderr</strong></div>
+                <pre style="white-space: pre-wrap; background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:8px;">{{ result.stderr or "" }}</pre>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>

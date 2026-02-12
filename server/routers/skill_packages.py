@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile  # type: ignore[import-not-found]
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile  # type: ignore[import-not-found]
 
 from ..models import (
     SkillInstallCreateResponse,
@@ -10,9 +10,14 @@ from ..models import (
 )
 from ..services.skill_install_store import skill_install_store
 from ..services.skill_package_manager import skill_package_manager
+from ..services.ui_auth import require_ui_basic_auth
 
 
-router = APIRouter(prefix="/skill-packages", tags=["skill-packages"])
+router = APIRouter(
+    prefix="/skill-packages",
+    tags=["skill-packages"],
+    dependencies=[Depends(require_ui_basic_auth)],
+)
 
 
 @router.post("/install", response_model=SkillInstallCreateResponse)

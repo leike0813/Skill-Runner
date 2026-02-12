@@ -13,6 +13,10 @@ artifact management.
 - Isolated runs with reproducible artifacts
 - Structured results: JSON + artifacts + bundle
 - Cache reuse for identical inputs and parameters
+- Web admin UI at `/ui` for skill overview and package install
+- Skill browser at `/ui/skills/{skill_id}` for read-only package/file inspection
+- Engine management at `/ui/engines` for status, upgrades, and upgrade logs
+- Model manifest management at `/ui/engines/{engine}/models` for snapshot view/add
 
 ## Container build & run
 
@@ -33,8 +37,14 @@ docker compose up --build
 ```
 
 Default API base: `http://localhost:8000/v1`
+Admin UI: `http://localhost:8000/ui`
 
 See `docs/containerization.md` for details.
+
+To protect the admin/install surfaces with Basic Auth:
+- `UI_BASIC_AUTH_ENABLED=true`
+- `UI_BASIC_AUTH_USERNAME=<username>`
+- `UI_BASIC_AUTH_PASSWORD=<password>`
 
 ## Local development (non-container)
 
@@ -49,6 +59,25 @@ uvicorn server.main:app --host 0.0.0.0 --port 8000
 Optional environment:
 - `SKILL_RUNNER_DATA_DIR`: run data directory (default `data/`)
 
+To quickly verify UI Basic Auth locally, use:
+```
+./scripts/start_ui_auth_server.sh
+```
+
+Override defaults when needed:
+```
+UI_BASIC_AUTH_USERNAME=admin \
+UI_BASIC_AUTH_PASSWORD=secret \
+PORT=8011 \
+./scripts/start_ui_auth_server.sh
+```
+
+Quick checks:
+```
+curl -i http://127.0.0.1:8000/ui
+curl -i -u admin:change-me http://127.0.0.1:8000/ui
+```
+
 ## API examples
 
 List skills:
@@ -60,6 +89,19 @@ List engines and models:
 ```
 curl -sS http://localhost:8000/v1/engines
 curl -sS http://localhost:8000/v1/engines/gemini/models
+```
+
+View engine manifest (with Basic Auth when enabled):
+```
+curl -sS -u admin:change-me http://localhost:8000/v1/engines/codex/models/manifest
+```
+
+Create and poll an engine upgrade task (with Basic Auth when enabled):
+```
+curl -sS -u admin:change-me -X POST http://localhost:8000/v1/engines/upgrades \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"single","engine":"gemini"}'
+curl -sS -u admin:change-me http://localhost:8000/v1/engines/upgrades/<request_id>
 ```
 
 Create a job:

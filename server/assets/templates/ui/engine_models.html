@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engine Models - {{ engine }}</title>
+    <style>
+        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
+        .layout { max-width: 1200px; margin: 0 auto; padding: 24px; display: grid; gap: 18px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; }
+        h1 { margin: 0 0 10px; font-size: 24px; }
+        h2 { margin: 0 0 10px; font-size: 18px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+        th { background: #f3f4f6; }
+        pre { white-space: pre-wrap; word-break: break-word; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; }
+        a { color: #0f766e; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 8px 12px; cursor: pointer; }
+        button:hover { background: #0b5f58; }
+        .muted { color: #6b7280; font-size: 13px; }
+        .error { color: #b91c1c; }
+        .ok { color: #166534; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .inline-input { border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+        .grid { display: grid; grid-template-columns: 2fr 2fr 1fr 2fr 2fr auto; gap: 8px; margin-bottom: 8px; }
+        .grid-head { font-weight: 600; color: #4b5563; font-size: 12px; }
+    </style>
+    <script>
+        function addModelRow() {
+            const container = document.getElementById("models-form-rows");
+            const row = document.createElement("div");
+            row.className = "grid";
+            row.innerHTML = `
+                <input class="inline-input" name="id" placeholder="id" required />
+                <input class="inline-input" name="display_name" placeholder="display_name" />
+                <select class="inline-input" name="deprecated">
+                    <option value="false">false</option>
+                    <option value="true">true</option>
+                </select>
+                <input class="inline-input" name="notes" placeholder="notes" />
+                <input class="inline-input" name="supported_effort" placeholder="low,medium,high" />
+                <button type="button" onclick="this.parentElement.remove()">删除</button>
+            `;
+            container.appendChild(row);
+        }
+    </script>
+</head>
+<body>
+<div class="layout">
+    <div class="card">
+        <a href="/ui/engines">← Back to Engines</a>
+        <h1>模型管理：{{ engine }}</h1>
+        <div class="muted">Detected Version: {{ view.cli_version_detected or "-" }}</div>
+        <div class="muted">Resolved Snapshot: {{ view.resolved_snapshot_version }} ({{ view.resolved_snapshot_file }})</div>
+        {% if view.fallback_reason %}
+        <div class="muted">Fallback: {{ view.fallback_reason }}</div>
+        {% endif %}
+        {% if error %}
+        <div class="error" style="margin-top:8px;">{{ error }}</div>
+        {% endif %}
+        {% if message %}
+        <div class="ok" style="margin-top:8px;">{{ message }}</div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>当前 Model Manifest（原始）</h2>
+        <pre>{{ view.manifest | tojson(indent=2) }}</pre>
+    </div>
+
+    <div class="card">
+        <h2>当前模型列表</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>id</th>
+                    <th>display_name</th>
+                    <th>deprecated</th>
+                    <th>notes</th>
+                    <th>supported_effort</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for model in view.models %}
+                <tr>
+                    <td>{{ model.id }}</td>
+                    <td>{{ model.display_name or "-" }}</td>
+                    <td>{{ model.deprecated }}</td>
+                    <td>{{ model.notes or "-" }}</td>
+                    <td>{{ ", ".join(model.supported_effort or []) }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>新增当前版本快照（add-only）</h2>
+        <form method="post" action="/ui/engines/{{ engine }}/models/snapshots">
+            <div class="grid grid-head">
+                <div>id *</div>
+                <div>display_name</div>
+                <div>deprecated</div>
+                <div>notes</div>
+                <div>supported_effort</div>
+                <div></div>
+            </div>
+            <div id="models-form-rows">
+                <div class="grid">
+                    <input class="inline-input" name="id" placeholder="id" required />
+                    <input class="inline-input" name="display_name" placeholder="display_name" />
+                    <select class="inline-input" name="deprecated">
+                        <option value="false">false</option>
+                        <option value="true">true</option>
+                    </select>
+                    <input class="inline-input" name="notes" placeholder="notes" />
+                    <input class="inline-input" name="supported_effort" placeholder="low,medium,high" />
+                    <button type="button" onclick="this.parentElement.remove()">删除</button>
+                </div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <button type="button" onclick="addModelRow()">新增一行</button>
+                <button type="submit">提交新增快照</button>
+            </div>
+        </form>
+    </div>
+</div>
+</body>
+</html>

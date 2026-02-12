@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 from ..config import config
 from ..services.run_store import run_store
 from ..services.workspace_manager import workspace_manager
+from ..services.run_folder_trust_manager import run_folder_trust_manager
 
 
 class RunCleanupManager:
@@ -50,6 +51,7 @@ class RunCleanupManager:
                 deleted_runs,
                 deleted_requests
             )
+        await self.cleanup_stale_trust_entries()
 
     def clear_all(self) -> dict:
         request_ids = run_store.list_request_ids()
@@ -59,6 +61,18 @@ class RunCleanupManager:
         workspace_manager.purge_runs_dir()
         workspace_manager.purge_requests_dir()
         return counts
+
+    async def cleanup_stale_trust_entries(self) -> None:
+        active_run_ids = run_store.list_active_run_ids()
+        active_run_dirs = []
+        for run_id in active_run_ids:
+            run_dir = workspace_manager.get_run_dir(run_id)
+            if run_dir:
+                active_run_dirs.append(run_dir)
+        try:
+            run_folder_trust_manager.cleanup_stale_entries(active_run_dirs)
+        except Exception:
+            logger.warning("Stale trust cleanup failed", exc_info=True)
 
 
 run_cleanup_manager = RunCleanupManager()

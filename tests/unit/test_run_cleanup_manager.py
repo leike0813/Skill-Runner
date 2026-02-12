@@ -23,6 +23,14 @@ def _allow_cleanup_skill(monkeypatch, tmp_path):
         "server.services.skill_registry.skill_registry.get_skill",
         lambda skill_id: skill if skill_id == "s" else None
     )
+    class NoopTrustManager:
+        def cleanup_stale_entries(self, _active_run_dirs):
+            return None
+
+    monkeypatch.setattr(
+        "server.services.run_cleanup_manager.run_folder_trust_manager",
+        NoopTrustManager()
+    )
 
 
 def _set_run_row(store: RunStore, run_id: str, status: str, created_at: str) -> None:
@@ -246,3 +254,29 @@ def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
     requests_dir = Path(config.SYSTEM.REQUESTS_DIR)
     assert not any(runs_dir.iterdir())
     assert not any(requests_dir.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+
+    run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.RUNNING)
+
+    class RecorderTrustManager:
+        def __init__(self):
+            self.active = None
+
+        def cleanup_stale_entries(self, active_run_dirs):
+            self.active = [str(path) for path in active_run_dirs]
+
+    recorder = RecorderTrustManager()
+    monkeypatch.setattr("server.services.run_cleanup_manager.run_folder_trust_manager", recorder)
+
+    manager = RunCleanupManager()
+    await manager.cleanup_stale_trust_entries()
+
+    assert recorder.active is not None
+    assert any(run_response.run_id in path for path in recorder.active)

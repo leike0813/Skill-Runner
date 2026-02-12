@@ -52,3 +52,12 @@ def test_update_run_status_with_result_path(tmp_path):
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT result_path FROM runs WHERE run_id = ?", ("run-1",)).fetchone()
     assert row["result_path"] == "/tmp/result.json"
+
+
+def test_list_active_run_ids(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    store.create_run("run-q", "k1", "queued")
+    store.create_run("run-r", "k2", "running")
+    store.create_run("run-s", "k3", "succeeded")
+    active = set(store.list_active_run_ids())
+    assert active == {"run-q", "run-r"}

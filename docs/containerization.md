@@ -75,11 +75,34 @@ The entrypoint runs an agent check on startup and writes a status file:
   - `SKILL_RUNNER_PID_RESERVE`
   - `SKILL_RUNNER_ESTIMATED_PID_PER_RUN`
   - `SKILL_RUNNER_FALLBACK_MAX_CONCURRENT`
+- UI Basic Auth (optional, recommended for exposed deployments):
+  - `UI_BASIC_AUTH_ENABLED` (`true` / `false`, default `false`)
+  - `UI_BASIC_AUTH_USERNAME`
+  - `UI_BASIC_AUTH_PASSWORD`
+  - When enabled, `/ui/*` and `/v1/skill-packages/*` require Basic Auth.
+  - If enabled but username/password are missing, app startup fails fast.
+  - UI includes read-only skill browser endpoints:
+    - `/ui/skills/{skill_id}`
+    - `/ui/skills/{skill_id}/view?path=<relative_path>`
 - Default config bootstrap:
   - If missing, the entrypoint writes `/opt/config/gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`
   - If missing, the entrypoint writes `/opt/config/iflow/settings.json` with:
     - `selectedAuthType = "iflow"`
+  - If missing, the entrypoint writes `/opt/config/codex/config.toml` with:
+    - `cli_auth_credentials_store = "file"`
+  - Entry-point trust bootstrap (idempotent):
+    - Creates/repairs `/opt/config/gemini/trustedFolders.json` as a JSON object.
+    - Adds runs parent trust to Gemini:
+      - `"<SKILL_RUNNER_DATA_DIR>/runs": "TRUST_FOLDER"`
+    - Adds runs parent trust to Codex:
+      - `projects."<SKILL_RUNNER_DATA_DIR>/runs".trust_level = "trusted"`
+
+### Run-folder trust lifecycle (runtime)
+
+- For each run on `codex`/`gemini`, orchestrator writes a per-run trust entry before CLI launch.
+- After execution (success/failure), orchestrator removes that per-run trust entry in `finally`.
+- If cleanup fails, run status is not changed; stale entries are retried by periodic cleanup.
 
 ### Codex sandbox compatibility
 

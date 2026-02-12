@@ -1,7 +1,27 @@
-from fastapi import APIRouter, HTTPException  # type: ignore[import-not-found]
+from datetime import datetime
 
-from ..models import EngineModelsResponse, EnginesResponse, EngineModelInfo
+from fastapi import APIRouter, Depends, HTTPException, status  # type: ignore[import-not-found]
+
+from ..models import (
+    EngineManifestModelInfo,
+    EngineManifestViewResponse,
+    EngineModelInfo,
+    EngineModelsResponse,
+    EngineSnapshotCreateRequest,
+    EngineUpgradeCreateRequest,
+    EngineUpgradeCreateResponse,
+    EngineUpgradeEngineResult,
+    EngineUpgradeStatusResponse,
+    EngineUpgradeTaskStatus,
+    EnginesResponse,
+)
+from ..services.engine_upgrade_manager import (
+    EngineUpgradeBusyError,
+    EngineUpgradeValidationError,
+    engine_upgrade_manager,
+)
 from ..services.model_registry import model_registry
+from ..services.ui_auth import require_ui_basic_auth
 
 router = APIRouter(prefix="/engines", tags=["engines"])
 
@@ -36,3 +56,137 @@ async def list_models(engine: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/{engine}/models/manifest",
+    response_model=EngineManifestViewResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_manifest_view(engine: str):
+    try:
+        view = model_registry.get_manifest_view(engine)
+        return EngineManifestViewResponse(
+            engine=view["engine"],
+            cli_version_detected=view["cli_version_detected"],
+            manifest=view["manifest"],
+            resolved_snapshot_version=view["resolved_snapshot_version"],
+            resolved_snapshot_file=view["resolved_snapshot_file"],
+            fallback_reason=view["fallback_reason"],
+            models=[
+                EngineManifestModelInfo(
+                    id=model["id"],
+                    display_name=model.get("display_name"),
+                    deprecated=bool(model.get("deprecated", False)),
+                    notes=model.get("notes"),
+                    supported_effort=model.get("supported_effort"),
+                )
+                for model in view["models"]
+            ],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/{engine}/models/snapshots",
+    response_model=EngineManifestViewResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def add_manifest_snapshot(engine: str, body: EngineSnapshotCreateRequest):
+    try:
+        view = model_registry.add_snapshot_for_detected_version(
+            engine,
+            [model.model_dump() for model in body.models],
+        )
+        return EngineManifestViewResponse(
+            engine=view["engine"],
+            cli_version_detected=view["cli_version_detected"],
+            manifest=view["manifest"],
+            resolved_snapshot_version=view["resolved_snapshot_version"],
+            resolved_snapshot_file=view["resolved_snapshot_file"],
+            fallback_reason=view["fallback_reason"],
+            models=[
+                EngineManifestModelInfo(
+                    id=model["id"],
+                    display_name=model.get("display_name"),
+                    deprecated=bool(model.get("deprecated", False)),
+                    notes=model.get("notes"),
+                    supported_effort=model.get("supported_effort"),
+                )
+                for model in view["models"]
+            ],
+        )
+    except ValueError as e:
+        detail = str(e)
+        if "Snapshot already exists" in detail:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        if "CLI version not detected" in detail:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/upgrades",
+    response_model=EngineUpgradeCreateResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def create_engine_upgrade(body: EngineUpgradeCreateRequest):
+    try:
+        request_id = engine_upgrade_manager.create_task(body.mode, body.engine)
+    except EngineUpgradeBusyError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except EngineUpgradeValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return EngineUpgradeCreateResponse(
+        request_id=request_id,
+        status=EngineUpgradeTaskStatus.QUEUED,
+    )
+
+
+@router.get(
+    "/upgrades/{request_id}",
+    response_model=EngineUpgradeStatusResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_engine_upgrade(request_id: str):
+    record = engine_upgrade_manager.get_task(request_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Upgrade request not found")
+
+    requested_engine_obj = record.get("requested_engine")
+    requested_engine = requested_engine_obj if isinstance(requested_engine_obj, str) else None
+
+    results_obj = record.get("results")
+    results_payload = results_obj if isinstance(results_obj, dict) else {}
+
+    created_at_obj = record.get("created_at")
+    updated_at_obj = record.get("updated_at")
+    if isinstance(created_at_obj, datetime):
+        created_at = created_at_obj
+    else:
+        created_at = datetime.fromisoformat(str(created_at_obj))
+    if isinstance(updated_at_obj, datetime):
+        updated_at = updated_at_obj
+    else:
+        updated_at = datetime.fromisoformat(str(updated_at_obj))
+
+    return EngineUpgradeStatusResponse(
+        request_id=str(record["request_id"]),
+        mode=str(record["mode"]),
+        requested_engine=requested_engine,
+        status=EngineUpgradeTaskStatus(str(record["status"])),
+        results={
+            engine: EngineUpgradeEngineResult(**result)
+            for engine, result in results_payload.items()
+        },
+        created_at=created_at,
+        updated_at=updated_at,
+    )

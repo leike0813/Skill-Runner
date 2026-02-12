@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 
 import pytest
 
@@ -116,6 +117,17 @@ def _manifest_hash_for_content(tmp_path: Path, filename: str, content: str) -> s
 class _RejectConcurrency:
     async def admit_or_reject(self) -> bool:
         return False
+
+
+def _build_upload_zip(filename: str, content: str) -> UploadFile:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr(filename, content)
+    buffer.seek(0)
+    file_obj = SpooledTemporaryFile()
+    file_obj.write(buffer.getvalue())
+    file_obj.seek(0)
+    return UploadFile(filename="input.zip", file=file_obj)
 
 
 @pytest.mark.asyncio
@@ -402,11 +414,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     )
     store.record_cache_entry(cache_key, "run-cached")
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("input.txt", "hello")
-    buffer.seek(0)
-    upload = UploadFile(filename="input.zip", file=buffer)
+    upload = _build_upload_zip("input.txt", "hello")
 
     upload_response = await jobs_router.upload_file(
         create_response.request_id,
@@ -449,11 +457,7 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
         background_tasks
     )
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("input.txt", "hello")
-    buffer.seek(0)
-    upload = UploadFile(filename="input.zip", file=buffer)
+    upload = _build_upload_zip("input.txt", "hello")
 
     upload_tasks = BackgroundTasks()
     upload_response = await jobs_router.upload_file(
@@ -499,11 +503,7 @@ async def test_upload_file_rejects_when_queue_full(monkeypatch, temp_config_dirs
         BackgroundTasks()
     )
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("input.txt", "hello")
-    buffer.seek(0)
-    upload = UploadFile(filename="input.zip", file=buffer)
+    upload = _build_upload_zip("input.txt", "hello")
 
     with pytest.raises(HTTPException) as excinfo:
         await jobs_router.upload_file(

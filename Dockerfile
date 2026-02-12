@@ -7,20 +7,25 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/opt/venv/bin:/opt/cache/npm/bin:/usr/local/bin:/usr/bin:/bin \
     UV_CACHE_DIR=/opt/cache/uv_cache \
     UV_PROJECT_ENVIRONMENT=/opt/cache/uv_venv \
-    SKILL_RUNNER_DATA_DIR=/data
+    SKILL_RUNNER_DATA_DIR=/data \
+    UI_BASIC_AUTH_ENABLED=false \
+    UI_BASIC_AUTH_USERNAME="" \
+    UI_BASIC_AUTH_PASSWORD=""
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
     python3-pip \
     ca-certificates \
+    git \
     ripgrep \
     fd-find \
     fzf \
     sqlite3 \
     procps \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /app /data /opt/cache
+    && mkdir -p /app /data /opt/cache \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
 WORKDIR /app
 COPY pyproject.toml ./

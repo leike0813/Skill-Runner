@@ -10,6 +10,10 @@ Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemi
 - 执行隔离：每次 run 独立工作目录
 - 结构化输出：JSON 结果 + artifacts + bundle
 - 缓存与复用：同输入同参数可复用结果
+- Web 管理界面：`/ui` 查看技能并上传安装 Skill 包
+- Skill 浏览：`/ui/skills/{skill_id}` 可查看包结构并只读预览文件
+- Engine 管理：`/ui/engines` 查看引擎状态、触发升级、查看升级日志
+- Model Manifest 管理：`/ui/engines/{engine}/models` 查看并补录当前版本快照
 
 ## 构建与启动（容器）
 
@@ -30,8 +34,14 @@ docker compose up --build
 ```
 
 默认端口：`http://localhost:8000/v1`
+管理界面：`http://localhost:8000/ui`
 
 > 详细容器化说明请见 `docs/containerization.md`。
+
+如需为管理界面开启基础鉴权，可设置：
+- `UI_BASIC_AUTH_ENABLED=true`
+- `UI_BASIC_AUTH_USERNAME=<用户名>`
+- `UI_BASIC_AUTH_PASSWORD=<密码>`
 
 ## 本地运行（非容器）
 
@@ -46,6 +56,25 @@ uvicorn server.main:app --host 0.0.0.0 --port 8000
 可选环境变量：
 - `SKILL_RUNNER_DATA_DIR`：运行数据目录（默认 `data/`）
 
+如需一键验证 UI Basic Auth，可直接使用脚本：
+```
+./scripts/start_ui_auth_server.sh
+```
+
+可覆盖默认凭据/端口：
+```
+UI_BASIC_AUTH_USERNAME=admin \
+UI_BASIC_AUTH_PASSWORD=secret \
+PORT=8011 \
+./scripts/start_ui_auth_server.sh
+```
+
+快速验证（未鉴权应返回 401）：
+```
+curl -i http://127.0.0.1:8000/ui
+curl -i -u admin:change-me http://127.0.0.1:8000/ui
+```
+
 ## API 示例（关键）
 
 列出技能：
@@ -57,6 +86,19 @@ curl -sS http://localhost:8000/v1/skills
 ```
 curl -sS http://localhost:8000/v1/engines
 curl -sS http://localhost:8000/v1/engines/gemini/models
+```
+
+查看 Engine Manifest（需 Basic Auth 开启后携带凭据）：
+```
+curl -sS -u admin:change-me http://localhost:8000/v1/engines/codex/models/manifest
+```
+
+创建升级任务并查询状态（需 Basic Auth 开启后携带凭据）：
+```
+curl -sS -u admin:change-me -X POST http://localhost:8000/v1/engines/upgrades \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"single","engine":"gemini"}'
+curl -sS -u admin:change-me http://localhost:8000/v1/engines/upgrades/<request_id>
 ```
 
 创建任务：

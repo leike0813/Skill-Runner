@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skill Browser - {{ skill.id }}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
+        .layout { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+        .row { display: grid; grid-template-columns: 38% 62%; gap: 16px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
+        .meta { color: #6b7280; font-size: 13px; margin-top: 6px; }
+        .tree-line { font-size: 13px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dir { color: #1d4ed8; }
+        .file { color: #111827; }
+        a { color: #0f766e; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="card">
+        <div><a href="/ui">← Back to UI</a></div>
+        <h2 style="margin:8px 0 4px;">{{ skill.id }}</h2>
+        <div class="meta">name: {{ skill.name or "-" }}</div>
+        <div class="meta">description: {{ skill.description or "-" }}</div>
+        <div class="meta">version: {{ skill.version or "-" }}</div>
+        <div class="meta">engines: {{ ", ".join(skill.engines or []) }}</div>
+    </div>
+    <div class="row">
+        <div class="card">
+            <h3 style="margin:0 0 8px;">Package Structure (Read-only)</h3>
+            {% for entry in entries %}
+            <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
+                {% if entry.is_dir %}
+                <span class="dir">📁 {{ entry.name }}/</span>
+                {% else %}
+                <span class="file">📄</span>
+                <a
+                    href="#"
+                    hx-get="/ui/skills/{{ skill.id }}/view?path={{ entry.rel_path }}"
+                    hx-target="#file-preview"
+                    hx-swap="innerHTML"
+                >{{ entry.name }}</a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">File Preview</h3>
+            <div id="file-preview" class="meta">Select a file from the left panel.</div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

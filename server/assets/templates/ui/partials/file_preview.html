@@ -1,0 +1,13 @@
+<div style="margin-bottom:8px; color:#374151; font-size:13px;">
+    <strong>{{ relative_path }}</strong>
+</div>
+{% if preview.mode == "text" %}
+<div style="margin-bottom:8px; color:#6b7280; font-size:12px;">{{ preview.meta }}</div>
+<pre>{{ preview.content }}</pre>
+{% elif preview.mode == "too_large" %}
+<div style="color:#b45309; font-size:13px;">文件过大不可预览</div>
+<div style="margin-top:6px; color:#6b7280; font-size:12px;">{{ preview.size }} bytes</div>
+{% else %}
+<div style="color:#991b1b; font-size:13px;">不可预览</div>
+<div style="margin-top:6px; color:#6b7280; font-size:12px;">无信息</div>
+{% endif %}

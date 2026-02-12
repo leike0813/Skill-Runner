@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,11 +16,12 @@ def _build_skill_zip(
     skill_name: str | None = None,
     runner_id: str | None = None,
     include_output: bool = True,
+    include_runner_artifacts: bool = True,
 ) -> bytes:
     top = top_level or skill_id
     name = skill_name or skill_id
     rid = runner_id or skill_id
-    runner = {
+    runner: dict[str, Any] = {
         "id": rid,
         "engines": ["gemini"],
         "schemas": {
@@ -27,8 +29,9 @@ def _build_skill_zip(
             "parameter": "assets/parameter.schema.json",
             "output": "assets/output.schema.json",
         },
-        "artifacts": [{"role": "result", "pattern": "out.txt", "required": True}],
     }
+    if include_runner_artifacts:
+        runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -79,6 +82,19 @@ def test_accepts_valid_temp_skill(tmp_path):
     validator.extract_zip_safe(zip_path, tmp_path / "stage")
     skill_id, version = validator.validate_skill_dir(
         tmp_path / "stage" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_no_artifacts.zip"
+    zip_path.write_bytes(_build_skill_zip(include_runner_artifacts=False))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_no_artifacts")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_no_artifacts" / top, top, require_version=False
     )
     assert skill_id == "demo-temp-skill"
     assert version is None

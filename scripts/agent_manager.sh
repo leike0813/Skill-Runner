@@ -2,6 +2,7 @@
 set -e
 
 MODE="${1:---check}"
+TARGET_ENGINE="${2:-}"
 DATA_DIR="${SKILL_RUNNER_DATA_DIR:-/data}"
 STATUS_FILE="${DATA_DIR}/agent_status.json"
 
@@ -73,6 +74,25 @@ upgrade_agents() {
   install_cli "@iflow-ai/iflow-cli" || log "WARN: Failed to upgrade @iflow-ai/iflow-cli"
 }
 
+upgrade_single_engine() {
+  engine="$1"
+  case "$engine" in
+    codex)
+      install_cli "@openai/codex"
+      ;;
+    gemini)
+      install_cli "@google/gemini-cli"
+      ;;
+    iflow)
+      install_cli "@iflow-ai/iflow-cli"
+      ;;
+    *)
+      log "Unsupported engine: ${engine}"
+      return 1
+      ;;
+  esac
+}
+
 ensure_dirs
 
 case "${MODE}" in
@@ -82,11 +102,18 @@ case "${MODE}" in
   --upgrade)
     upgrade_agents
     ;;
+  --upgrade-engine)
+    if [ -z "${TARGET_ENGINE}" ]; then
+      log "Usage: $0 --upgrade-engine <codex|gemini|iflow>"
+      exit 1
+    fi
+    upgrade_single_engine "${TARGET_ENGINE}"
+    ;;
   --check)
     ;;
   *)
     log "Unknown mode: ${MODE}"
-    log "Usage: $0 [--check|--ensure|--upgrade]"
+    log "Usage: $0 [--check|--ensure|--upgrade|--upgrade-engine <engine>]"
     exit 1
     ;;
 esac

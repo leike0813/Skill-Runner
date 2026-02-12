@@ -50,6 +50,42 @@ EOF
 cli_auth_credentials_store = "file"
 EOF
   fi
+
+  runs_parent="$(python3 -c "from pathlib import Path; import os; print(Path(os.environ.get('SKILL_RUNNER_DATA_DIR', '/data')).joinpath('runs').resolve())")"
+  mkdir -p "${runs_parent}"
+
+  codex_trust_line="projects.\"${runs_parent}\".trust_level = \"trusted\""
+  if ! grep -Fqx "${codex_trust_line}" /opt/config/codex/config.toml; then
+    printf "\n%s\n" "${codex_trust_line}" >> /opt/config/codex/config.toml
+  fi
+
+  python3 -c '
+import json
+import shutil
+import sys
+from pathlib import Path
+
+trusted_path = Path("/opt/config/gemini/trustedFolders.json")
+runs_parent = Path(sys.argv[1]).resolve().as_posix()
+
+payload = {}
+if trusted_path.exists():
+    try:
+        payload = json.loads(trusted_path.read_text(encoding="utf-8"))
+    except Exception:
+        backup = trusted_path.with_name(f"{trusted_path.name}.bak")
+        shutil.copy2(trusted_path, backup)
+        payload = {}
+if not isinstance(payload, dict):
+    if trusted_path.exists():
+        backup = trusted_path.with_name(f"{trusted_path.name}.bak")
+        shutil.copy2(trusted_path, backup)
+    payload = {}
+
+payload[runs_parent] = "TRUST_FOLDER"
+trusted_path.parent.mkdir(parents=True, exist_ok=True)
+trusted_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+' "${runs_parent}"
 fi
 
 if [ -x "/app/scripts/agent_manager.sh" ]; then

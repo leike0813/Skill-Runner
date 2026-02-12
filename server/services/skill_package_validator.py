@@ -124,8 +124,8 @@ class SkillPackageValidator:
             raise ValueError("runner.json must define a non-empty engines list")
 
         artifacts = runner.get("artifacts")
-        if not isinstance(artifacts, list) or not artifacts:
-            raise ValueError("runner.json must define a non-empty artifacts contract")
+        if artifacts is not None and not isinstance(artifacts, list):
+            raise ValueError("runner.json artifacts must be a list when provided")
 
         version = runner.get("version")
         if require_version:

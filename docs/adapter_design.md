@@ -14,8 +14,10 @@ Each `run()` execution flows through these five distinct phases:
 graph TD
     A[1. Configure] --> B[2. Setup Env]
     B --> C[3. Build Context]
-    C --> D[4. Execute]
-    D --> E[5. Parse Result]
+    C --> T[3.5 Trust Register]
+    T --> D[4. Execute]
+    D --> U[4.5 Trust Cleanup]
+    U --> E[5. Parse Result]
 ```
 
 ---
@@ -102,6 +104,23 @@ def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: Dict) -
     - If present, wrap command with `uv run --with ...`.
 3.  **IO Capture**:
     - Stream `stdout` and `stderr` to `run_dir/logs/`.
+
+---
+
+### Cross-Cutting: Run Folder Trust Lifecycle (Codex/Gemini)
+
+**Goal**: Keep Codex/Gemini execution stable while avoiding persistent trust-table growth.
+
+**Requirements**:
+1. **Register Before Execute**:
+   - Codex: write `projects."<run_dir>".trust_level = "trusted"` into `~/.codex/config.toml`.
+   - Gemini: write `"<run_dir>": "TRUST_FOLDER"` into `~/.gemini/trustedFolders.json`.
+2. **Cleanup In Finally**:
+   - Always remove the per-run trust entry after adapter execution (success/failure).
+3. **Best-Effort Error Policy**:
+   - Trust cleanup failure must not overwrite run terminal status; log warning and rely on periodic stale cleanup.
+4. **iFlow**:
+   - No trust mutation (current design keeps iFlow as no-op for trust manager).
 
 **Interface Definition**:
 ```python

@@ -11,6 +11,7 @@ from ..adapters.iflow_adapter import IFlowAdapter
 from ..services.schema_validator import schema_validator
 from ..services.run_store import run_store
 from ..services.concurrency_manager import concurrency_manager
+from ..services.run_folder_trust_manager import run_folder_trust_manager
 from ..config import config
 
 class JobOrchestrator:
@@ -66,6 +67,7 @@ class JobOrchestrator:
             return
         final_status: Optional[RunStatus] = None
         normalized_error_message: Optional[str] = None
+        trust_registered = False
 
         # 1. Update status to RUNNING
         self._update_status(run_dir, RunStatus.RUNNING)
@@ -106,9 +108,25 @@ class JobOrchestrator:
 
             if input_errors:
                 raise ValueError(f"Input validation failed: {str(input_errors)}")
+
+            run_folder_trust_manager.register_run_folder(engine_name, run_dir)
+            trust_registered = True
             
             # 5. Execute
-            result = await adapter.run(skill, input_data, run_dir, options)
+            try:
+                result = await adapter.run(skill, input_data, run_dir, options)
+            finally:
+                if trust_registered:
+                    try:
+                        run_folder_trust_manager.remove_run_folder(engine_name, run_dir)
+                    except Exception:
+                        logger.warning(
+                            "Failed to cleanup run folder trust for engine=%s run_id=%s",
+                            engine_name,
+                            run_id,
+                            exc_info=True,
+                        )
+                    trust_registered = False
 
             # 6. Verify Result and Normalize
             warnings: list[str] = []
@@ -194,6 +212,16 @@ class JobOrchestrator:
                 self._update_status(run_dir, RunStatus.FAILED, error={"message": str(e)})
             run_store.update_run_status(run_id, RunStatus.FAILED)
         finally:
+            if trust_registered and run_dir:
+                try:
+                    run_folder_trust_manager.remove_run_folder(engine_name, run_dir)
+                except Exception:
+                    logger.warning(
+                        "Failed to cleanup run folder trust in finalizer for engine=%s run_id=%s",
+                        engine_name,
+                        run_id,
+                        exc_info=True,
+                    )
             if temp_request_id and final_status:
                 try:
                     from .temp_skill_run_manager import temp_skill_run_manager

@@ -250,5 +250,13 @@ class RunStore:
             conn.execute("DELETE FROM requests")
         return {"runs": run_count, "requests": request_count, "cache_entries": cache_count}
 
+    def list_active_run_ids(self) -> List[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT run_id FROM runs WHERE status IN (?, ?)",
+                ("queued", "running")
+            ).fetchall()
+        return [row["run_id"] for row in rows if row["run_id"]]
+
 
 run_store = RunStore()

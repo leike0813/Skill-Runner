@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skill Runner UI</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
+        .layout { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; }
+        h1 { margin: 0 0 12px; font-size: 24px; }
+        h2 { margin: 0 0 10px; font-size: 18px; }
+        .muted { color: #6b7280; font-size: 14px; }
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        input[type="file"] { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; }
+        button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 9px 14px; cursor: pointer; }
+        button:hover { background: #0b5f58; }
+        #install-status-container { margin-top: 12px; }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="card">
+        <h1>Skill Runner 管理界面</h1>
+        <div class="muted">用于查看已安装 Skill，并通过网页上传 Skill 包进行安装。</div>
+        <div class="muted" style="margin-top:8px;"><a href="/ui/engines">进入 Engine 管理</a></div>
+    </div>
+
+    <div class="card">
+        <h2>安装 Skill 包</h2>
+        <form
+            hx-post="/ui/skill-packages/install"
+            hx-target="#install-status-container"
+            hx-swap="innerHTML"
+            hx-encoding="multipart/form-data"
+        >
+            <div class="row">
+                <input type="file" name="file" accept=".zip" required>
+                <button type="submit">上传并安装</button>
+            </div>
+        </form>
+        <div id="install-status-container"></div>
+    </div>
+
+    <div class="card">
+        <h2>已安装 Skills</h2>
+        <div
+            id="skills-table"
+            hx-get="/ui/skills/table"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+        ></div>
+    </div>
+</div>
+</body>
+</html>

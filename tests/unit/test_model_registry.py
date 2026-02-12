@@ -1,4 +1,6 @@
 import pytest
+import json
+from pathlib import Path
 
 from server.services.model_registry import ModelRegistry
 
@@ -31,7 +33,12 @@ def test_get_models_no_semver_match(monkeypatch):
 
     catalog = registry.get_models("iflow", refresh=True)
 
-    assert catalog.snapshot_version_used == "0.5.2"
+    manifest = registry._load_manifest("iflow")
+    expected = max(
+        (snap["version"] for snap in manifest["snapshots"]),
+        key=registry._semver_key
+    )
+    assert catalog.snapshot_version_used == expected
     assert catalog.fallback_reason == "no_semver_match"
 
 
@@ -64,3 +71,93 @@ def test_validate_model_unknown_engine():
     registry = ModelRegistry()
     with pytest.raises(ValueError, match="Unknown engine"):
         registry.get_models("unknown", refresh=True)
+
+
+def _build_models_fixture(tmp_path: Path, engine: str) -> Path:
+    engine_root = tmp_path / engine
+    engine_root.mkdir(parents=True, exist_ok=True)
+    with open(engine_root / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "engine": engine,
+                "snapshots": [{"version": "0.1.0", "file": "models_0.1.0.json"}],
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    with open(engine_root / "models_0.1.0.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "engine": engine,
+                "version": "0.1.0",
+                "models": [
+                    {"id": "model-a", "display_name": "Model A", "deprecated": False, "notes": "seed"}
+                ],
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    return engine_root
+
+
+def test_get_manifest_view(monkeypatch, tmp_path: Path):
+    registry = ModelRegistry()
+    _build_models_fixture(tmp_path, "gemini")
+    monkeypatch.setattr(registry, "_models_root", lambda _engine: tmp_path / "gemini")
+    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
+
+    view = registry.get_manifest_view("gemini")
+
+    assert view["engine"] == "gemini"
+    assert view["resolved_snapshot_version"] == "0.1.0"
+    assert view["resolved_snapshot_file"] == "models_0.1.0.json"
+    assert view["models"][0]["id"] == "model-a"
+
+
+def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
+    registry = ModelRegistry()
+    engine_root = _build_models_fixture(tmp_path, "gemini")
+    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
+
+    view = registry.add_snapshot_for_detected_version(
+        "gemini",
+        [
+            {
+                "id": "model-b",
+                "display_name": "Model B",
+                "deprecated": False,
+                "notes": "new",
+            }
+        ],
+    )
+
+    assert view["resolved_snapshot_version"] == "0.2.0"
+    assert (engine_root / "models_0.2.0.json").exists()
+    with open(engine_root / "manifest.json", "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert any(s["version"] == "0.2.0" for s in manifest["snapshots"])
+
+
+def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_path: Path):
+    registry = ModelRegistry()
+    engine_root = _build_models_fixture(tmp_path, "gemini")
+    with open(engine_root / "models_0.2.0.json", "w", encoding="utf-8") as f:
+        json.dump({"engine": "gemini", "version": "0.2.0", "models": []}, f)
+    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
+
+    with pytest.raises(ValueError, match="Snapshot already exists"):
+        registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])
+
+
+def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_path: Path):
+    registry = ModelRegistry()
+    engine_root = _build_models_fixture(tmp_path, "gemini")
+    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: None)
+
+    with pytest.raises(ValueError, match="CLI version not detected"):
+        registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])

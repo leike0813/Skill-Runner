@@ -9,6 +9,9 @@ services:
       UV_CACHE_DIR: /opt/cache/uv_cache
       UV_PROJECT_ENVIRONMENT: /opt/cache/uv_venv
       NPM_CONFIG_PREFIX: /opt/cache/npm
+      UI_BASIC_AUTH_ENABLED: "false"
+      # UI_BASIC_AUTH_USERNAME: "admin"
+      # UI_BASIC_AUTH_PASSWORD: "change-me"
     volumes:
       - ./skills:/app/skills
       - ./agent_config:/opt/config

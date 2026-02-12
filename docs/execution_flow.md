@@ -53,11 +53,22 @@
    - Gemini: `gemini --yolo <prompt>`
    - Codex: `codex exec --full-auto --skip-git-repo-check --json -p skill-runner <prompt>`（不支持 landlock 时回退 `--yolo`）
    - 设置工作目录为 `data/runs/<uuid>/`。
-2. **Subprocess**:
+2. **Run Folder Trust 生命周期（Codex/Gemini）**:
+   - 在真正调用 CLI 前，服务会将本次 `run_dir` 写入全局 trust 配置。
+     - Codex: `~/.codex/config.toml` -> `projects."<run_dir>".trust_level = "trusted"`
+     - Gemini: `~/.gemini/trustedFolders.json` -> `"<run_dir>": "TRUST_FOLDER"`
+   - CLI 执行结束后（无论成功/失败），在 `finally` 路径删除该 `run_dir` trust 记录。
+   - trust 回收失败只记录 warning，不会覆盖本次 run 的最终状态。
+3. **Subprocess**:
    - 启动异步子进程。
    - 实时流式读取 `stdout` 和 `stderr` 并写入 `logs/` 目录。
-3. **Completion**:
+4. **Completion**:
    - 等待进程结束。
    - 解析最终输出 (JSON)。
    - 更新 Run 状态为 `succeeded` / `failed`。
    - 生成 bundle（debug/非 debug）。
+
+## 阶段五：周期补偿清理 (Maintenance)
+
+- 定时清理任务会在清理历史 run 的同时，扫描活动 run 列表并执行 stale trust 清理。
+- 仅清理 `runs` 根目录下、且不在活动集合（`queued/running`）中的 Codex/Gemini trust 条目。

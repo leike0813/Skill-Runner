@@ -4,7 +4,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import config
 
@@ -65,6 +65,88 @@ class ModelRegistry:
         )
         self._cache[engine] = catalog
         return catalog
+
+    def refresh(self, engine: Optional[str] = None) -> None:
+        if engine is None:
+            self._cache.clear()
+            return
+        self._cache.pop(engine, None)
+
+    def get_manifest_view(self, engine: str) -> Dict[str, Any]:
+        if engine not in self._supported_engines():
+            raise ValueError(f"Unknown engine: {engine}")
+
+        cli_version = self._detect_cli_version(engine)
+        manifest = self._load_manifest(engine)
+        snapshots = self._extract_snapshots(manifest)
+        snapshot_version, fallback_reason = self._select_snapshot_version(
+            cli_version,
+            [snap["version"] for snap in snapshots]
+        )
+        snapshot_file = self._snapshot_file(manifest, snapshot_version)
+        models = self._load_models(snapshot_file)
+        return {
+            "engine": engine,
+            "cli_version_detected": cli_version,
+            "manifest": manifest,
+            "resolved_snapshot_version": snapshot_version,
+            "resolved_snapshot_file": snapshot_file.name,
+            "fallback_reason": fallback_reason,
+            "models": [
+                {
+                    "id": entry.id,
+                    "display_name": entry.display_name,
+                    "deprecated": entry.deprecated,
+                    "notes": entry.notes,
+                    "supported_effort": entry.supported_effort,
+                }
+                for entry in models
+            ],
+        }
+
+    def add_snapshot_for_detected_version(
+        self,
+        engine: str,
+        models: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if engine not in self._supported_engines():
+            raise ValueError(f"Unknown engine: {engine}")
+
+        cli_version = self._detect_cli_version(engine)
+        if not cli_version:
+            raise ValueError(f"CLI version not detected for engine '{engine}'")
+
+        normalized_models = self._normalize_snapshot_models(models)
+        snapshot_filename = f"models_{cli_version}.json"
+        models_root = self._models_root(engine)
+        snapshot_path = models_root / snapshot_filename
+        if snapshot_path.exists():
+            raise ValueError(f"Snapshot already exists for version {cli_version}")
+
+        manifest = self._load_manifest(engine)
+        snapshots = self._extract_snapshots(manifest)
+        snapshots.append({"version": cli_version, "file": snapshot_filename})
+        dedup: Dict[str, str] = {}
+        for snap in snapshots:
+            dedup[snap["version"]] = snap["file"]
+        merged = [{"version": version, "file": filename} for version, filename in dedup.items()]
+        merged.sort(key=lambda item: self._semver_key(item["version"]))
+        manifest["snapshots"] = merged
+
+        snapshot_payload = {
+            "engine": engine,
+            "version": cli_version,
+            "models": normalized_models,
+        }
+        with open(snapshot_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot_payload, f, ensure_ascii=False, indent=2)
+        with open(models_root / "manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+
+        self.refresh(engine)
+        self.get_models(engine, refresh=True)
+        return self.get_manifest_view(engine)
 
     def validate_model(self, engine: str, model_spec: str) -> Dict[str, str]:
         catalog = self.get_models(engine)
@@ -136,6 +218,50 @@ class ModelRegistry:
                 )
             )
         return models
+
+    def _normalize_snapshot_models(self, models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not models:
+            raise ValueError("models must not be empty")
+        normalized: List[Dict[str, Any]] = []
+        seen_ids = set()
+        for entry in models:
+            model_id = entry.get("id")
+            if not isinstance(model_id, str) or not model_id.strip():
+                raise ValueError("model.id must be a non-empty string")
+            model_id = model_id.strip()
+            if model_id in seen_ids:
+                raise ValueError(f"Duplicate model id: {model_id}")
+            seen_ids.add(model_id)
+
+            display_name = entry.get("display_name")
+            if display_name is not None and not isinstance(display_name, str):
+                raise ValueError("model.display_name must be a string or null")
+
+            deprecated = entry.get("deprecated", False)
+            if not isinstance(deprecated, bool):
+                raise ValueError("model.deprecated must be a boolean")
+
+            notes = entry.get("notes")
+            if notes is not None and not isinstance(notes, str):
+                raise ValueError("model.notes must be a string or null")
+
+            supported_effort = entry.get("supported_effort")
+            if supported_effort is not None:
+                if not isinstance(supported_effort, list) or not all(
+                    isinstance(item, str) and item for item in supported_effort
+                ):
+                    raise ValueError("model.supported_effort must be a list of non-empty strings")
+
+            normalized_entry: Dict[str, Any] = {
+                "id": model_id,
+                "display_name": display_name,
+                "deprecated": deprecated,
+                "notes": notes,
+            }
+            if supported_effort is not None:
+                normalized_entry["supported_effort"] = supported_effort
+            normalized.append(normalized_entry)
+        return normalized
 
     def _select_snapshot_version(
         self,

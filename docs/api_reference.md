@@ -89,7 +89,8 @@
   - `assets/output.schema.json`
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json` 必须包含非空 `engines` 列表。
-- `runner.json` 必须包含非空 `artifacts` 合同。
+- `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
+  若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
 - `runner.json` 必须包含可解析的 `version`。
 
 **更新规则**:
@@ -270,6 +271,91 @@
 
 ---
 
+## 5. Web 管理界面 (UI)
+
+### 打开管理界面
+`GET /ui`
+
+返回技能管理页面。页面提供：
+- 已安装 Skill 列表（含用途描述）
+- Skill 包上传与安装入口
+- 安装状态轮询与结果回显
+
+### 局部刷新技能列表
+`GET /ui/skills/table`
+
+用于页面局部刷新。可选参数：
+- `highlight_skill_id`：高亮显示某个 skill 行（安装成功后使用）
+
+### 页面上传安装 Skill 包
+`POST /ui/skill-packages/install`
+
+与 `POST /v1/skill-packages/install` 使用同一套后端安装逻辑，返回 HTML 片段用于前端状态轮询。
+
+### 页面查询安装状态
+`GET /ui/skill-packages/{request_id}/status`
+
+返回 HTML 片段（含当前状态与错误信息）。终态成功后会自动触发技能列表刷新并高亮新安装 skill。
+
+### 浏览单个 Skill 包结构（只读）
+`GET /ui/skills/{skill_id}`
+
+返回该 skill 的详情页面，包含：
+- 基本信息（id/name/description/version/engines）
+- 包结构树（目录与文件）
+- 文件预览区域（只读）
+
+### 预览 Skill 文件（只读）
+`GET /ui/skills/{skill_id}/view?path=<relative_path>`
+
+返回文件预览 HTML 片段。
+
+约束与行为：
+- `path` 必须是 skill 根目录内的相对路径。
+- 拒绝绝对路径、`..` 路径穿越和目录逃逸。
+- 文本文件可预览；二进制文件显示“不可预览（无信息）”。
+- 文本文件预览大小上限为 `256KB`，超限显示“文件过大不可预览”。
+
+### Engine 管理页面
+`GET /ui/engines`
+
+页面能力：
+- 查看 Engine 状态与检测到的 CLI 版本；
+- 触发“升级全部”与“按引擎升级”；
+- 跳转到 Engine 模型管理页。
+
+### Engine 升级状态轮询（HTML partial）
+`GET /ui/engines/upgrades/{request_id}/status`
+
+用于轮询展示升级任务状态，以及 per-engine 的 stdout/stderr/error。
+
+### Engine 模型管理页面
+`GET /ui/engines/{engine}/models`
+
+页面能力：
+- 查看当前 `manifest.json`、解析到的快照、模型列表；
+- 通过表单新增“当前检测版本”的模型快照（add-only）。
+
+### UI 基础鉴权
+
+可通过环境变量启用 Basic Auth：
+- `UI_BASIC_AUTH_ENABLED=true|false`（默认 `false`）
+- `UI_BASIC_AUTH_USERNAME`
+- `UI_BASIC_AUTH_PASSWORD`
+
+行为：
+- 开启后，`/ui/*`、`/v1/skill-packages/*`、`/v1/engines/upgrades*`、`/v1/engines/{engine}/models/manifest`、`/v1/engines/{engine}/models/snapshots` 需要 Basic Auth；
+- 若开启但用户名或密码缺失，服务启动失败（fail fast）。
+
+### 本地鉴权启动脚本
+
+项目提供 `scripts/start_ui_auth_server.sh`，用于注入 UI 鉴权环境变量并启动服务（默认开启 Basic Auth）。
+
+示例：
+```bash
+./scripts/start_ui_auth_server.sh
+```
+
 ## 3. 临时技能运行 (Temporary Skill Runs)
 
 该组接口用于“上传临时 skill 包并执行一次任务”，不会安装到持久 `skills/` 目录，也不会被 `/v1/skills` 发现。
@@ -343,7 +429,7 @@
   - `assets/runner.json`
   - `runner.json.schemas` 指向的 `input` / `parameter` / `output` 三个 schema 文件
 - 身份一致性：顶层目录名、`runner.json.id`、`SKILL.md` frontmatter `name` 必须一致。
-- 元数据约束：`runner.json.engines` 与 `runner.json.artifacts` 必须非空。
+- 元数据约束：`runner.json.engines` 必须非空；`runner.json.artifacts` 可选（若提供需为数组）。
 - 包大小限制：受 `TEMP_SKILL_PACKAGE_MAX_BYTES` 控制（默认 20MB）。
 
 ### 生命周期与清理
@@ -389,5 +475,96 @@
       "supported_effort": ["low", "medium", "high", "xhigh"]
     }
   ]
+}
+```
+
+### 获取引擎模型 Manifest 视图（受 Basic Auth 保护）
+`GET /v1/engines/{engine}/models/manifest`
+
+**Response** (`EngineManifestViewResponse`):
+```json
+{
+  "engine": "codex",
+  "cli_version_detected": "0.89.0",
+  "manifest": {
+    "engine": "codex",
+    "snapshots": [{"version": "0.89.0", "file": "models_0.89.0.json"}]
+  },
+  "resolved_snapshot_version": "0.89.0",
+  "resolved_snapshot_file": "models_0.89.0.json",
+  "fallback_reason": null,
+  "models": [
+    {
+      "id": "gpt-5.2-codex",
+      "display_name": "GPT-5.2 Codex",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high", "xhigh"]
+    }
+  ]
+}
+```
+
+### 新增当前版本模型快照（受 Basic Auth 保护）
+`POST /v1/engines/{engine}/models/snapshots`
+
+**Request** (`EngineSnapshotCreateRequest`):
+```json
+{
+  "models": [
+    {
+      "id": "gpt-5.3-codex",
+      "display_name": "GPT-5.3 Codex",
+      "deprecated": false,
+      "notes": "manual snapshot",
+      "supported_effort": ["low", "medium", "high", "xhigh"]
+    }
+  ]
+}
+```
+
+约束：
+- 版本号固定使用服务端当前检测到的 `cli_version_detected`；
+- 若目标 `models_<version>.json` 已存在，则拒绝（不覆盖）；
+- 成功后立即刷新内存模型注册表。
+
+### 创建引擎升级任务（受 Basic Auth 保护）
+`POST /v1/engines/upgrades`
+
+**Request** (`EngineUpgradeCreateRequest`):
+```json
+{
+  "mode": "single",
+  "engine": "gemini"
+}
+```
+
+说明：`mode=all` 时必须省略 `engine` 字段。
+
+**Response** (`EngineUpgradeCreateResponse`):
+```json
+{
+  "request_id": "ef5e7ff9-1f6a-4a4f-a317-b8daaa13f2cf",
+  "status": "queued"
+}
+```
+
+### 查询引擎升级任务状态（受 Basic Auth 保护）
+`GET /v1/engines/upgrades/{request_id}`
+
+**Response** (`EngineUpgradeStatusResponse`):
+```json
+{
+  "request_id": "ef5e7ff9-1f6a-4a4f-a317-b8daaa13f2cf",
+  "mode": "all",
+  "requested_engine": null,
+  "status": "failed",
+  "results": {
+    "codex": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null},
+    "gemini": {"status": "failed", "stdout": "...", "stderr": "...", "error": "Upgrade command exited with code 1"},
+    "iflow": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null}
+  },
+  "created_at": "2026-02-12T10:00:00.000000",
+  "updated_at": "2026-02-12T10:00:12.000000"
 }
 ```

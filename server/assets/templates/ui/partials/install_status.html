@@ -1,0 +1,23 @@
+<div
+    id="install-status-panel"
+    style="margin-top:10px; border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fafafa;"
+    {% if poll %}
+    hx-get="/ui/skill-packages/{{ request_id }}/status"
+    hx-trigger="every 1s"
+    hx-swap="outerHTML"
+    {% endif %}
+>
+    <div><strong>Request ID:</strong> {{ request_id }}</div>
+    <div><strong>Status:</strong> {{ status }}</div>
+    {% if error %}
+    <div style="margin-top:8px; color:#b91c1c;"><strong>Error:</strong> {{ error }}</div>
+    {% endif %}
+    {% if status == "succeeded" and skill_id %}
+    <div style="margin-top:8px; color:#166534;">安装成功：{{ skill_id }}</div>
+    <script>
+        htmx.ajax("GET", "/ui/skills/table?highlight_skill_id={{ skill_id }}", "#skills-table");
+    </script>
+    {% elif status == "failed" %}
+    <div style="margin-top:8px; color:#b91c1c;">安装失败。</div>
+    {% endif %}
+</div>
