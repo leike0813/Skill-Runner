@@ -87,7 +87,7 @@ class CodexAdapter(EngineAdapter):
         """
         # 1. Resolve Inputs (Strict Check) & Parameters
         from ..services.schema_validator import schema_validator
-        input_ctx, missing_required = schema_validator.build_input_context(skill, run_dir)
+        input_ctx, missing_required = schema_validator.build_input_context(skill, run_dir, input_data)
         if missing_required:
             raise ValueError(f"Missing required input files: {', '.join(missing_required)}")
 

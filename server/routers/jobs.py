@@ -27,7 +27,12 @@ from ..services.job_orchestrator import job_orchestrator
 from ..services.schema_validator import schema_validator
 from ..services.options_policy import options_policy
 from ..services.model_registry import model_registry
-from ..services.cache_key_builder import compute_skill_fingerprint, compute_input_manifest_hash, compute_cache_key
+from ..services.cache_key_builder import (
+    compute_skill_fingerprint,
+    compute_input_manifest_hash,
+    compute_inline_input_hash,
+    compute_cache_key,
+)
 from ..services.run_store import run_store
 from ..services.run_cleanup_manager import run_cleanup_manager
 from ..services.concurrency_manager import concurrency_manager
@@ -61,6 +66,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
 
         request_id = str(uuid.uuid4())
+        inline_input = request.input if isinstance(request.input, dict) else {}
+        inline_input_hash = compute_inline_input_hash(inline_input)
+        inline_input_errors = schema_validator.validate_inline_input_create(skill, inline_input)
+        if inline_input_errors:
+            raise HTTPException(status_code=400, detail=f"Input validation failed: {inline_input_errors}")
+
         request_payload = request.model_dump()
         request_payload["engine_options"] = engine_opts
         request_payload["runtime_options"] = runtime_opts
@@ -69,14 +80,16 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             request_id=request_id,
             skill_id=request.skill_id,
             engine=request.engine,
+            input_data=inline_input,
             parameter=request.parameter,
             engine_options=engine_opts,
             runtime_options=runtime_opts
         )
 
         has_input_schema = bool(skill.schemas and "input" in skill.schemas)
+        has_required_file_inputs = schema_validator.has_required_file_inputs(skill)
         no_cache = bool(runtime_opts.get("no_cache"))
-        if not has_input_schema:
+        if not has_input_schema or not has_required_file_inputs:
             manifest_path = workspace_manager.write_input_manifest(request_id)
             manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
             skill_fingerprint = compute_skill_fingerprint(skill, request.engine)
@@ -86,7 +99,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 skill_fingerprint=skill_fingerprint,
                 parameter=request.parameter,
                 engine_options=engine_opts,
-                input_manifest_hash=manifest_hash
+                input_manifest_hash=manifest_hash,
+                inline_input_hash=inline_input_hash
             )
             run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
             run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
@@ -103,6 +117,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             run_request = RunCreateRequest(
                 skill_id=request.skill_id,
                 engine=request.engine,
+                input=inline_input,
                 parameter=request.parameter,
                 model=request.model,
                 runtime_options=runtime_opts
@@ -348,7 +363,8 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
             skill_fingerprint=skill_fingerprint,
             parameter=request_record["parameter"],
             engine_options=request_record["engine_options"],
-            input_manifest_hash=manifest_hash
+            input_manifest_hash=manifest_hash,
+            inline_input_hash=compute_inline_input_hash(request_record.get("input", {}))
         )
         run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
         run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
@@ -367,6 +383,7 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
             RunCreateRequest(
                 skill_id=request_record["skill_id"],
                 engine=request_record["engine"],
+                input=request_record.get("input", {}),
                 parameter=request_record["parameter"],
                 model=request_record["engine_options"].get("model"),
                 runtime_options=request_record["runtime_options"]

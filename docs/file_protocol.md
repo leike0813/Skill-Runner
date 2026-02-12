@@ -1,10 +1,12 @@
 # 输入与文件协议 (Input & File Protocol)
 
-为了清晰区分“文件输入”与“配置参数”，系统采用了严格的命名和处理协议。
+为了清晰区分“业务输入”与“配置参数”，系统采用了严格的命名和处理协议。
 
 ## 1. 术语定义
 
-- **Input (输入/文件)**: 指代处理对象，通常是文件路径。例如：`input_file`、`source_image`。
+- **Input (输入)**: 指代处理对象，可来自两种来源：
+  - `file`: 上传文件并注入路径（例如：`input_file`、`source_image`）。
+  - `inline`: 请求体中直接给出的 JSON 值（例如：`query`、`items`）。
 - **Parameter (参数/配置)**: 指代控制逻辑的选项。例如：`temperature`、`retry_count`、`language`、`divisor`。
 
 ## 2. Schema 定义规范
@@ -23,19 +25,29 @@
 ```
 
 ### `input.schema.json`
-定义需要的文件。每一项都必须是文件路径。新增 `extensions` 字段用于限制文件类型。
+定义业务输入。每个字段可通过 `x-input-source` 指定来源：
+
+- `file`（默认）：从 `uploads/` 目录按键名匹配文件并注入绝对路径。
+- `inline`：从 `POST /v1/jobs` 请求体顶层 `input` 读取 JSON 值。
+
+对于 `file` 字段，可用 `extensions` 限制文件类型。
 
 ```json
 {
   "type": "object",
   "properties": {
-    "input_file": { 
+    "input_file": {
       "type": "string",
       "description": "Path to the data file",
+      "x-input-source": "file",
       "extensions": [".txt", ".md"] 
+    },
+    "query": {
+      "type": "string",
+      "x-input-source": "inline"
     }
   },
-  "required": ["input_file"]
+  "required": ["input_file", "query"]
 }
 ```
 
@@ -54,12 +66,12 @@
 }
 ```
 
-## 3. 严格键匹配机制 (Strict Key-Matching)
+## 3. 严格键匹配机制 (Strict Key-Matching, 仅 file 输入)
 
 这是为了解决文件上传不确定性而引入的核心机制。
 
 **规则**:
-当适配器处理 `input` Schema 中的字段（例如 `input_file`）时：
+当适配器处理 `x-input-source=file` 的 `input` 字段（例如 `input_file`）时：
 1. 它**仅**检查运行目录下的 `uploads/` 文件夹。
 2. 它查找是否存在文件名**完全等于**字段名（`input_file`）的文件。
 3. **如果找到**: 适配器会生成该文件的**绝对路径**，并将其作为该字段的值注入 `{{ input }}` 上下文。
@@ -67,7 +79,7 @@
 
 **示例**:
 - Schema 定义了 `input_file`。
-- API 请求 (`POST /v1/jobs`): `{ "parameter": { ... } }` (不包含 input字段)。
+- API 请求 (`POST /v1/jobs`): 可包含 inline 输入，例如 `{ "input": {"query": "hello"} }`。
 - 用户上传了 Zip，解压后包含文件 `uploads/input_file`。
 - **最终执行值**: `/abs/path/to/runs/xxx/uploads/input_file`。
 - **注意**: 如果 `uploads/input_file` 不存在，任务将直接失败。
@@ -88,11 +100,14 @@
 {% endfor %}
 ```
 
-- `{{ input }}`: 包含所有解析后的文件路径。
+- `{{ input }}`: 包含解析后的 mixed input：
+  - file 字段值是绝对路径字符串
+  - inline 字段值是原始 JSON 值
 - `{{ parameter }}`: 包含所有的配置值。
 
-在 `SKILL.md` 中，你也应该使用特定的命名空间来引用变量：
-- 引用文件: `{{ input.input_file }}`
+在 `SKILL.md` 中，你也应该使用特定命名空间引用变量：
+- 引用 file 输入: `{{ input.input_file }}`
+- 引用 inline 输入: `{{ input.query }}`
 - 引用参数: `{{ parameter.divisor }}`
 
 ## 5. 自定义 Prompt 模版 (Custom Prompt Templates)

@@ -26,6 +26,7 @@ class RunStore:
                     request_id TEXT PRIMARY KEY,
                     skill_id TEXT NOT NULL,
                     engine TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
                     parameter_json TEXT NOT NULL,
                     engine_options_json TEXT NOT NULL,
                     runtime_options_json TEXT NOT NULL,
@@ -42,6 +43,8 @@ class RunStore:
             existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(requests)").fetchall()}
             if "run_id" not in existing_cols:
                 conn.execute("ALTER TABLE requests ADD COLUMN run_id TEXT")
+            if "input_json" not in existing_cols:
+                conn.execute("ALTER TABLE requests ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}'")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
@@ -72,22 +75,24 @@ class RunStore:
         engine: str,
         parameter: Dict[str, Any],
         engine_options: Dict[str, Any],
-        runtime_options: Dict[str, Any]
+        runtime_options: Dict[str, Any],
+        input_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         created_at = datetime.utcnow().isoformat()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO requests (
-                    request_id, skill_id, engine, parameter_json,
+                    request_id, skill_id, engine, input_json, parameter_json,
                     engine_options_json, runtime_options_json, status, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
                     skill_id,
                     engine,
+                    json.dumps(input_data or {}, sort_keys=True),
                     json.dumps(parameter, sort_keys=True),
                     json.dumps(engine_options, sort_keys=True),
                     json.dumps(runtime_options, sort_keys=True),
@@ -138,6 +143,7 @@ class RunStore:
         if not row:
             return None
         data = dict(row)
+        data["input"] = json.loads(data["input_json"])
         data["parameter"] = json.loads(data["parameter_json"])
         data["engine_options"] = json.loads(data["engine_options_json"])
         data["runtime_options"] = json.loads(data["runtime_options_json"])

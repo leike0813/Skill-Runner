@@ -88,11 +88,7 @@ class JobOrchestrator:
             with open(run_dir / "input.json", 'r') as input_file:
                 input_data = json.load(input_file)
 
-            # 4.1 Validate Input
-            # Support both legacy "input" and new "files"/"parameters" schemas
-            # The input.json contains the full request (including skill_id, etc.)
             # 4.1 Validate Input & Parameters
-            # The input.json now contains "parameter" dict
             real_params = input_data.get("parameter", {})
             input_errors = []
             
@@ -102,37 +98,11 @@ class JobOrchestrator:
                  # strict validation of the parameter payload
                  input_errors.extend(schema_validator.validate_schema(skill, real_params, "parameter"))
 
-            # 2. Validate 'input' (Files) - Existence Check ONLY
+            # 2. Validate mixed 'input' (file + inline)
             if skill.schemas and "input" in skill.schemas:
-                 # We don't check JSON payload for files anymore.
-                 # We check if the required files exist in uploads/
-                 run_uploads_dir = run_dir / "uploads"
-                 input_keys = schema_validator.get_schema_keys(skill, "input")
-                 required_keys = schema_validator.get_schema_required(skill, "input")
-                 
-                 # We only check 'required' fields if we had access to required list, 
-                 # but schema_validator.validate_schema usually does structure check.
-                 # Here we just check existence for now as a pre-flight, 
-                 # OR we let the adapter explode.
-                 # Better to Validate here:
-                 # BUT schema_validator.validate_schema expects a JSON dict.
-                 # We can construct a "virtual" input dict based on existing files to validate against schema.
-                 
-                 virtual_file_input = {}
-                 existing_files = set()
-                 if run_uploads_dir.exists():
-                     for upload_path in run_uploads_dir.iterdir():
-                         if upload_path.name in input_keys:
-                             virtual_file_input[upload_path.name] = str(upload_path.absolute())
-                             existing_files.add(upload_path.name)
-                 
-                 missing_required = [key for key in required_keys if key not in existing_files]
-                 if missing_required:
-                     input_errors.append(f"Missing required input files: {', '.join(missing_required)}")
-                 
-                 # Validate this virtual dict against the input schema
-                 # This ensures required fields (files) are present
-                 input_errors.extend(schema_validator.validate_schema(skill, virtual_file_input, "input"))
+                 input_errors.extend(
+                     schema_validator.validate_input_for_execution(skill, run_dir, input_data)
+                 )
 
             if input_errors:
                 raise ValueError(f"Input validation failed: {str(input_errors)}")

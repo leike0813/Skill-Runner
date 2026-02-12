@@ -30,7 +30,6 @@ COPY skills ./skills
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install uv \
-    && /opt/venv/bin/uv pip install --python /opt/venv/bin/python "python-multipart" \
     && /opt/venv/bin/uv pip install --python /opt/venv/bin/python .
 
 COPY scripts/entrypoint.sh /entrypoint.sh

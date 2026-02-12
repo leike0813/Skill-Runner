@@ -1,5 +1,5 @@
 # Agent Skill Runner（REST）开发文档（给 Codex 用）
-Version: v0.1
+Version: v0.2.0
 目标读者：Codex（开发协作者）+ 项目开发者
 用途：为“从0实现一个服务化封装成熟CLI Agent工具的 Skill Runner”提供统一的顶层设计、约束、接口、数据结构、里程碑与待决问题。Codex 将基于本文档继续与用户敲定细节并落地实现。
 

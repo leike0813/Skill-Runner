@@ -56,4 +56,4 @@ Client  ->  [ REST API ]  ->  [ Job Orchestrator ]
 
 ## Status
 - **Milestones Completed**: 1-16
-- **Current Version**: Production Ready (v0.5)
+- **Current Version**: v0.2.0

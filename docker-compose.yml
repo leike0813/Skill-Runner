@@ -1,6 +1,7 @@
+name: skillrunner
 services:
-  skill-runner:
-    build: .
+  api:
+    image: leike0813/skill-runner:v0.2.0
     ports:
       - "8000:8000"
     environment:
@@ -11,8 +12,14 @@ services:
     volumes:
       - ./skills:/app/skills
       - ./agent_config:/opt/config
-      - skill-runner_cache:/opt/cache
+      - skillrunner_cache:/opt/cache
       # Optional: persist run/request data for debugging
       # - ./data:/data
+    networks:
+      - skillrunner_net
 volumes:
-  skill-runner_cache:
+  skillrunner_cache:
+    name: skillrunner-cache
+networks:
+  skillrunner_net:
+    name: skillrunner-net

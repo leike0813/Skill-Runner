@@ -106,3 +106,109 @@ def test_get_schema_required_missing_schema_file(tmp_path):
     )
     required_inputs = validator.get_schema_required(skill, "input")
     assert required_inputs == []
+
+
+def test_get_input_sources_defaults_to_file(tmp_path):
+    validator = SchemaValidator()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_file": {"type": "string"},
+            "query": {"type": "string", "x-input-source": "inline"},
+        },
+        "required": ["input_file", "query"],
+    }
+    (skill_dir / "input.schema.json").write_text(json.dumps(schema))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"input": "input.schema.json"}
+    )
+
+    sources = validator.get_input_sources(skill)
+    assert sources["input_file"] == "file"
+    assert sources["query"] == "inline"
+    assert validator.get_input_keys_by_source(skill, "file", required_only=True) == ["input_file"]
+    assert validator.get_input_keys_by_source(skill, "inline", required_only=True) == ["query"]
+
+
+def test_validate_inline_input_create_rejects_file_source_key(tmp_path):
+    validator = SchemaValidator()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_file": {"type": "string"},
+            "query": {"type": "string", "x-input-source": "inline"},
+        },
+        "required": ["query"],
+    }
+    (skill_dir / "input.schema.json").write_text(json.dumps(schema))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"input": "input.schema.json"}
+    )
+    errors = validator.validate_inline_input_create(skill, {"input_file": "abc"})
+    assert errors
+    assert "file-sourced" in errors[0]
+
+
+def test_build_input_context_mixed_file_and_inline(tmp_path):
+    validator = SchemaValidator()
+    run_dir = tmp_path / "run"
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir(parents=True)
+    (uploads_dir / "input_file").write_text("data")
+
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_file": {"type": "string"},
+            "query": {"type": "string", "x-input-source": "inline"},
+        },
+        "required": ["input_file", "query"],
+    }
+    (skill_dir / "input.schema.json").write_text(json.dumps(schema))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"input": "input.schema.json"}
+    )
+
+    ctx, missing = validator.build_input_context(skill, run_dir, {"input": {"query": "hello"}})
+    assert missing == []
+    assert "input_file" in ctx
+    assert ctx["query"] == "hello"
+
+
+def test_validate_input_for_execution_reports_missing_required_file(tmp_path):
+    validator = SchemaValidator()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_file": {"type": "string"},
+            "query": {"type": "string", "x-input-source": "inline"},
+        },
+        "required": ["input_file", "query"],
+    }
+    (skill_dir / "input.schema.json").write_text(json.dumps(schema))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"input": "input.schema.json"}
+    )
+
+    errors = validator.validate_input_for_execution(skill, run_dir, {"input": {"query": "hello"}})
+    assert errors
+    assert any("Missing required input files" in e for e in errors)

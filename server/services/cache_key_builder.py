@@ -41,6 +41,12 @@ def compute_input_manifest_hash(manifest: Dict[str, Any]) -> str:
     return _hash_text(_stable_json_dumps(manifest))
 
 
+def compute_inline_input_hash(input_payload: Dict[str, Any]) -> str:
+    if not input_payload:
+        return ""
+    return _hash_text(_stable_json_dumps(input_payload))
+
+
 def compute_skill_fingerprint(skill: SkillManifest, engine: str) -> str:
     if not skill.path:
         return ""
@@ -83,7 +89,8 @@ def compute_cache_key(
     skill_fingerprint: str,
     parameter: Dict[str, Any],
     engine_options: Dict[str, Any],
-    input_manifest_hash: str
+    input_manifest_hash: str,
+    inline_input_hash: str = "",
 ) -> str:
     payload = {
         "skill_id": skill_id,
@@ -91,6 +98,7 @@ def compute_cache_key(
         "skill_fingerprint": skill_fingerprint,
         "parameter": parameter,
         "engine_options": engine_options,
-        "input_manifest_hash": input_manifest_hash
+        "input_manifest_hash": input_manifest_hash,
+        "inline_input_hash": inline_input_hash,
     }
     return _hash_text(_stable_json_dumps(payload))

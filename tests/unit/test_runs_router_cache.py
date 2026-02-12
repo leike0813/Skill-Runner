@@ -52,10 +52,50 @@ def _create_skill(
     schemas = {}
     if with_input_schema:
         schema_path = assets_dir / "input.schema.json"
-        schema_path.write_text(json.dumps({"type": "object"}))
+        schema_path.write_text(
+            json.dumps(
+                {
+                    "type": "object",
+                    "properties": {
+                        "input.txt": {"type": "string"}
+                    },
+                    "required": ["input.txt"]
+                }
+            )
+        )
         schemas["input"] = "assets/input.schema.json"
 
     return SkillManifest(id=skill_id, path=skill_dir, schemas=schemas, engines=engines)
+
+
+def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
+    skill_dir = base_dir / skill_id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("skill")
+    (assets_dir / "runner.json").write_text(
+        json.dumps({"id": skill_id, "engines": ["gemini"]})
+    )
+    (assets_dir / "input.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "x-input-source": "inline"
+                    }
+                },
+                "required": ["query"]
+            }
+        )
+    )
+    return SkillManifest(
+        id=skill_id,
+        path=skill_dir,
+        schemas={"input": "assets/input.schema.json"},
+        engines=["gemini"],
+    )
 
 
 def _patch_skill_registry(monkeypatch: pytest.MonkeyPatch, skill: SkillManifest) -> None:
@@ -222,6 +262,64 @@ async def test_create_run_with_input_schema_requires_upload(monkeypatch, temp_co
     assert response.cache_hit is False
     assert response.status is None
     assert background_tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_create_run_with_inline_only_input_starts_immediately(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_inline_input_skill(temp_config_dirs, "demo-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            input={"query": "hello"},
+            parameter={},
+            model="gemini-2.5-pro",
+        ),
+        background_tasks
+    )
+
+    assert response.cache_hit is False
+    assert response.status == RunStatus.QUEUED
+    assert len(background_tasks.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_run_with_inline_required_missing_returns_400(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_inline_input_skill(temp_config_dirs, "demo-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="gemini",
+                input={},
+                parameter={},
+                model="gemini-2.5-pro",
+            ),
+            BackgroundTasks()
+        )
+
+    assert excinfo.value.status_code == 400
 
 
 @pytest.mark.asyncio

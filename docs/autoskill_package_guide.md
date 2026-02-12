@@ -73,7 +73,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 
 详细规则见 `docs/file_protocol.md`，这里给出关键约束：
 
-- `input.schema.json`：定义文件输入；字段名对应上传文件的严格键匹配。
+- `input.schema.json`：定义业务输入；支持 `file`（上传文件路径）与 `inline`（请求体 JSON 值）两类来源。
 - `parameter.schema.json`：定义标量配置参数（string/number/bool 等）。
 - `output.schema.json`：定义结构化输出与 artifact 字段。
 
@@ -110,7 +110,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
    将交互式模糊描述改为可自动执行的步骤，并显式要求返回结构化 JSON。
 
 4. 编写三类 schema  
-   - `input.schema.json`：只放文件输入
+   - `input.schema.json`：定义业务输入（可混合 file 与 inline）
    - `parameter.schema.json`：只放配置参数
    - `output.schema.json`：放结构化输出与 artifact 定义
 

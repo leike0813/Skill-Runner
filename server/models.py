@@ -109,6 +109,9 @@ class RunCreateRequest(BaseModel):
     
     engine: str = "codex"
     """Target execution engine (default: 'codex')."""
+
+    input: Dict[str, Any] = {}
+    """Business input payload (inline input values). File inputs still come from uploads/."""
     
     parameter: Dict[str, Any] = {}
     """Key-value pairs for template substitution (parameters)."""

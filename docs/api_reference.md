@@ -112,6 +112,9 @@
 {
   "skill_id": "demo-prime-number",
   "engine": "gemini",          // 可选: "gemini" / "codex" / "iflow" (默认: codex)
+  "input": {
+    "query": "some inline input payload"
+  },
   "parameter": {
     "divisor": 1                 // 仅包含配置参数
   },
@@ -121,6 +124,10 @@
 ```
 
 **关键说明**:
+- **输入分离（Mixed Input）**:
+  - 顶层 `input` 用于传递业务输入（可为 string/array/object）。
+  - 对 `input.schema.json` 中 `x-input-source=inline` 的字段，值直接来自请求体 `input`。
+  - 对 `x-input-source=file`（或未声明，默认 file）的字段，值来自后续 `/upload` 上传并注入为文件路径。
 - **参数分离**: API 请求体中的 `parameter` 字段仅用于传递 `parameter.schema.json` 中定义的数值或配置。
 - **模型字段**:
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
@@ -132,8 +139,8 @@
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
 - **引擎约束**: `engine` 必须包含在 skill 的 `engines` 列表中，否则直接返回 400。
-- **文件输入**: 不再在创建请求中传递文件路径占位符。文件输入完全由后续的 `/upload` 接口和文件系统状态决定。
-- **input.json**: 系统会将此请求保存下来（主要包含 parameter），用于审计。
+- **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
+- **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
 - **严格校验**: 缺少 required 的输入/参数/输出字段时会标记为 failed（不会仅给 warning）。
 - **并发保护**: 当执行队列已满时，`POST /v1/jobs` 或 `POST /v1/jobs/{request_id}/upload` 会返回 `429`。
 

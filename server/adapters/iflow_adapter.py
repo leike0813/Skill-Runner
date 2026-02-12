@@ -112,7 +112,7 @@ class IFlowAdapter(EngineAdapter):
         """
         # 1. Resolve Inputs & Parameters
         # (Similar logic to Codex/Gemini - extracting files and params)
-        input_ctx, missing_required = schema_validator.build_input_context(skill, run_dir)
+        input_ctx, missing_required = schema_validator.build_input_context(skill, run_dir, input_data)
         if missing_required:
             raise ValueError(f"Missing required input files: {', '.join(missing_required)}")
                     

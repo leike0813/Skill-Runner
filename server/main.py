@@ -19,7 +19,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Agent Skill Runner",
     description="A lightweight REST service to run CLI agent skills.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan
 )
 
