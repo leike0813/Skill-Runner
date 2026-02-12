@@ -1,0 +1,7 @@
+[submodule "skills/skill-converter-agent"]
+	path = skills/skill-converter-agent
+	url = https://github.com/leike0813/skill-converter-agent
+
+[submodule "skills/literature-digest"]
+	path = skills/literature-digest
+	url = https://github.com/leike0813/literature-digest
