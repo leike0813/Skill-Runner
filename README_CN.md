@@ -45,16 +45,29 @@ docker compose up --build
 
 ## 本地运行（非容器）
 
-推荐使用 `uv` 管理环境：
+推荐使用一键脚本（自动启用本地隔离运行时）：
+
+Linux/macOS:
 ```
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+./scripts/deploy_local.sh
 ```
+
+Windows (PowerShell):
+```powershell
+.\scripts\deploy_local.ps1
+```
+
+脚本会统一设置：
+- `SKILL_RUNNER_RUNTIME_MODE=local`
+- `SKILL_RUNNER_AGENT_CACHE_DIR`（独立于 `data/`）
+- `SKILL_RUNNER_AGENT_HOME`（隔离的 Agent 配置目录）
+- `SKILL_RUNNER_NPM_PREFIX`（managed prefix）
 
 可选环境变量：
 - `SKILL_RUNNER_DATA_DIR`：运行数据目录（默认 `data/`）
+- `SKILL_RUNNER_AGENT_CACHE_DIR`：Agent 缓存根目录
+- `SKILL_RUNNER_AGENT_HOME`：Agent 隔离配置目录
+- `SKILL_RUNNER_NPM_PREFIX`：Engine CLI 受管安装目录
 
 如需一键验证 UI Basic Auth，可直接使用脚本：
 ```
@@ -73,6 +86,12 @@ PORT=8011 \
 ```
 curl -i http://127.0.0.1:8000/ui
 curl -i -u admin:change-me http://127.0.0.1:8000/ui
+```
+
+快速诊断 Engine 鉴权/路径来源（本地/容器）：
+```bash
+./scripts/check_agent_auth.sh local
+./scripts/check_agent_auth.sh container
 ```
 
 ## API 示例（关键）
@@ -172,11 +191,23 @@ docker exec -it <container_id> /bin/bash
 - `agent_config/gemini/`
 - `agent_config/iflow/`
 
+> 启动时仅导入鉴权凭据文件，不导入 settings 配置文件（保证设置隔离）。
+
 ## 支持的 Agent 工具
 
 - Codex CLI (`@openai/codex`)
 - Gemini CLI (`@google/gemini-cli`)
 - iFlow CLI (`@iflow-ai/iflow-cli`)
+
+## 免责声明（关于 Agent CLI 快速迭代）
+
+Codex / Gemini CLI / iFlow CLI 目前迭代较快，配置格式、命令行为或接口细节可能在短时间内发生变化。
+
+如果你发现以下情况，请直接提交 Issue：
+- 项目中的配置与最新 Agent CLI 版本不一致
+- 升级后出现兼容性报错或行为变化
+
+这类问题属于预期风险，我们会按反馈尽快修复适配。
 
 ---
 

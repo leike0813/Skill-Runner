@@ -16,16 +16,18 @@ without bundling the agent CLIs into the image.
 - `Dockerfile`: runtime image (Node + Python 3.11).
 - `docker-compose.yml`: recommended volume layout.
 - `scripts/entrypoint.sh`: runtime checks + uvicorn start (baked into image).
-- `scripts/agent_manager.sh`: ensures CLIs and writes status (baked into image).
-- `scripts/upgrade_agents.sh`: upgrades CLIs via npm (baked into image).
+- `scripts/agent_manager.py`: cross-platform Engine manager (ensure/check/upgrade/import credentials).
+- `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
+- `scripts/upgrade_agents.sh`: upgrade wrapper (`local` / `container` mode).
+- `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
 
 ## Volumes
 
 The default compose file mounts:
 
 - `./skills:/app/skills` (skills registry)
-- `./agent_config:/opt/config` (CLI config root, symlinked to ~/.codex ~/.gemini ~/.iflow)
-- `agent_cache:/opt/cache` (uv cache, uv venv, npm prefix)
+- `./agent_config:/opt/config` (credential import source; optional)
+- `agent_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
 - *(optional)* `./data:/data` (runs.db, runs/, requests/, logs)
 
 ## Agent CLI installation
@@ -40,10 +42,11 @@ Install packages that provide `codex`, `gemini`, and `iflow` commands.
 
 ## Upgrading agent CLIs
 
-Use the upgrade script to refresh installed CLIs inside the container:
+Use the upgrade script to refresh installed CLIs:
 
 ```
-./scripts/upgrade_agents.sh
+./scripts/upgrade_agents.sh local
+./scripts/upgrade_agents.sh container
 ```
 
 ## Agent CLI status
@@ -53,17 +56,23 @@ The entrypoint runs an agent check on startup and writes a status file:
 - Path: `${SKILL_RUNNER_DATA_DIR:-/data}/agent_status.json`
 - Fields: `present` and `version` per CLI
 
-## Configuration & auth
+## Configuration, isolation & auth
 
-- CLI configs are stored under `/opt/config` and symlinked to:
-  - `/root/.codex`
-  - `/root/.gemini`
-  - `/root/.iflow`
-- Provide API keys as environment variables or via CLI config files (preferred).
-- Cache/package locations are centralized under `/opt/cache`:
-  - `UV_CACHE_DIR=/opt/cache/uv_cache`
-  - `UV_PROJECT_ENVIRONMENT=/opt/cache/uv_venv`
-  - `NPM_CONFIG_PREFIX=/opt/cache/npm`
+- Skill Runner now uses an **isolated Agent Home** by default:
+  - `SKILL_RUNNER_AGENT_HOME=/opt/cache/skill-runner/agent-home`
+  - CLIs read/write config under:
+    - `${SKILL_RUNNER_AGENT_HOME}/.codex`
+    - `${SKILL_RUNNER_AGENT_HOME}/.gemini`
+    - `${SKILL_RUNNER_AGENT_HOME}/.iflow`
+- Engine CLI install/upgrade/check always use managed prefix:
+  - `SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm`
+  - `NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm`
+- Cache locations are centralized under `/opt/cache/skill-runner`:
+  - `SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner`
+  - `UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache`
+  - `UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv`
+- Runtime data remains independent:
+  - `SKILL_RUNNER_DATA_DIR=/data`
 - Concurrency policy (optional env overrides):
   - `SKILL_RUNNER_MAX_CONCURRENT_HARD_CAP`
   - `SKILL_RUNNER_MAX_QUEUE_SIZE`
@@ -84,15 +93,16 @@ The entrypoint runs an agent check on startup and writes a status file:
   - UI includes read-only skill browser endpoints:
     - `/ui/skills/{skill_id}`
     - `/ui/skills/{skill_id}/view?path=<relative_path>`
-- Default config bootstrap:
-  - If missing, the entrypoint writes `/opt/config/gemini/settings.json` with:
+- Default config bootstrap (inside isolated Agent Home):
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`
-  - If missing, the entrypoint writes `/opt/config/iflow/settings.json` with:
-    - `selectedAuthType = "iflow"`
-  - If missing, the entrypoint writes `/opt/config/codex/config.toml` with:
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.iflow/settings.json` with:
+    - `selectedAuthType = "oauth-iflow"`
+    - `baseUrl = "https://apis.iflow.cn/v1"`
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.codex/config.toml` with:
     - `cli_auth_credentials_store = "file"`
   - Entry-point trust bootstrap (idempotent):
-    - Creates/repairs `/opt/config/gemini/trustedFolders.json` as a JSON object.
+    - Creates/repairs `${SKILL_RUNNER_AGENT_HOME}/.gemini/trustedFolders.json` as a JSON object.
     - Adds runs parent trust to Gemini:
       - `"<SKILL_RUNNER_DATA_DIR>/runs": "TRUST_FOLDER"`
     - Adds runs parent trust to Codex:
@@ -115,26 +125,26 @@ entrypoint detects the kernel version at startup and exports
 
 ### Agent CLI login workflows
 
-You can authenticate the CLI tools in two ways. Both methods populate the
-mounted `/opt/config` directory, which is symlinked to the expected `~/.codex`,
-`~/.gemini`, and `~/.iflow` locations inside the container.
+You can authenticate the CLI tools in two ways. The service runs in isolated
+Agent Home mode. If `/opt/config` is mounted, entrypoint imports **credentials only**
+from `/opt/config` into isolated Agent Home (settings are not imported).
 
 Method 1: Login inside the container (TUI)
 - Start the container, then exec into it:
   - `docker exec -it <container_id> /bin/bash`
-- Run the CLI login flow in TUI mode (per tool):
+- Run the CLI login flow in TUI mode (per tool, in isolated Agent Home):
   - `codex` (creates `auth.json`)
   - `gemini` (creates `google_accounts.json`, `oauth_creds.json`)
   - `iflow` (creates `iflow_accounts.json`, `oauth_creds.json`)
-- The files will appear under `/opt/config/<tool>/` via the mount.
+- The files are stored under `${SKILL_RUNNER_AGENT_HOME}/.<tool>/`.
 
 Method 2: Login on another machine and copy credentials
 - Login on any machine where the CLI works.
-- Copy the credential files into the host-mounted directories:
+- Copy credential files into host-mounted import source:
   - Codex → `agent_config/codex/auth.json`
   - Gemini → `agent_config/gemini/google_accounts.json`, `agent_config/gemini/oauth_creds.json`
   - iFlow → `agent_config/iflow/iflow_accounts.json`, `agent_config/iflow/oauth_creds.json`
-- Restart the container to pick up the new files (if needed).
+- Restart the container (or rerun `agent_manager.py --import-credentials /opt/config`) to import.
 
 ## Start the service
 
@@ -156,9 +166,12 @@ Run the container with the same mounts as compose (example):
 
 ```
 docker run --rm -p 8000:8000 \
-  -e UV_CACHE_DIR=/opt/cache/uv_cache \
-  -e UV_PROJECT_ENVIRONMENT=/opt/cache/uv_venv \
-  -e NPM_CONFIG_PREFIX=/opt/cache/npm \
+  -e UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache \
+  -e UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv \
+  -e SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner \
+  -e SKILL_RUNNER_AGENT_HOME=/opt/cache/skill-runner/agent-home \
+  -e SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm \
+  -e NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm \
   -e SKILL_RUNNER_DATA_DIR=/data \
   -v "$(pwd)/skills:/app/skills" \
   -v "$(pwd)/agent_config:/opt/config" \

@@ -284,6 +284,11 @@ class EngineModelsResponse(BaseModel):
     models: List[EngineModelInfo]
 
 
+class EngineAuthStatusResponse(BaseModel):
+    """Response payload for engine authentication observability."""
+    engines: Dict[str, Dict[str, Any]]
+
+
 class EngineUpgradeTaskStatus(str, Enum):
     """Lifecycle state for engine upgrade tasks."""
     QUEUED = "queued"

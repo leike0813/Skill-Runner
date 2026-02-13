@@ -55,6 +55,30 @@ class MissingArtifactsAdapter:
         )
 
 
+class AuthRequiredAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        return EngineRunResult(
+            exit_code=1,
+            raw_stdout="",
+            raw_stderr="SERVER_OAUTH2_REQUIRED",
+            output_file_path=None,
+            artifacts_created=[],
+            failure_reason="AUTH_REQUIRED",
+        )
+
+
+class TimeoutAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        return EngineRunResult(
+            exit_code=1,
+            raw_stdout="",
+            raw_stderr="",
+            output_file_path=None,
+            artifacts_created=[],
+            failure_reason="TIMEOUT",
+        )
+
+
 @pytest.fixture(autouse=True)
 def _patch_trust_manager(monkeypatch):
     class NoopTrustManager:
@@ -312,6 +336,90 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
         config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_marks_auth_required_error_code(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AuthRequiredAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] == "AUTH_REQUIRED"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_marks_timeout_error_code(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    old_timeout = config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = 600
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": TimeoutAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] == "TIMEOUT"
+        assert "600s" in result_data["error"]["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = old_timeout
         config.freeze()
 
 

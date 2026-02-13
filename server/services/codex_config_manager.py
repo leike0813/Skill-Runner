@@ -5,6 +5,7 @@ import jsonschema  # type: ignore[import-untyped]
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, cast
+from .runtime_profile import get_runtime_profile
 
 class CodexConfigManager:
     """
@@ -26,7 +27,8 @@ class CodexConfigManager:
     SCHEMA_PATH = Path(__file__).parent.parent / "assets" / "schemas" / "codex_profile_schema.json"
     
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or Path.home() / ".codex" / "config.toml"
+        profile = get_runtime_profile()
+        self.config_path = config_path or profile.agent_home / ".codex" / "config.toml"
         
     def ensure_config_exists(self) -> None:
         """Create empty config file if it doesn't exist."""

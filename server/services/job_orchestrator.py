@@ -171,9 +171,24 @@ class JobOrchestrator:
             normalized_status = "success" if result.exit_code == 0 and not has_output_error else "failed"
             normalized_error: dict[str, Any] | None = None
             if normalized_status != "success":
+                error_code: Optional[str] = None
+                if has_output_error:
+                    error_message = "; ".join(output_errors)
+                elif result.failure_reason == "AUTH_REQUIRED":
+                    error_code = "AUTH_REQUIRED"
+                    error_message = "AUTH_REQUIRED: engine authentication is required or expired"
+                elif result.failure_reason == "TIMEOUT":
+                    error_code = "TIMEOUT"
+                    error_message = (
+                        f"TIMEOUT: engine execution exceeded hard timeout "
+                        f"({config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS}s)"
+                    )
+                else:
+                    error_message = f"Exit code {result.exit_code}"
                 normalized_error = {
-                    "message": "; ".join(output_errors) if has_output_error else f"Exit code {result.exit_code}",
-                    "stderr": result.raw_stderr
+                    "code": error_code,
+                    "message": error_message,
+                    "stderr": result.raw_stderr,
                 }
             normalized_result = {
                 "status": normalized_status,

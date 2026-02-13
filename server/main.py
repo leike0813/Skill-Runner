@@ -6,11 +6,18 @@ from .routers import skills, jobs, engines, skill_packages, temp_skill_runs, ui
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     setup_logging()
+    from .services.agent_cli_manager import AgentCliManager
     from .services.cache_manager import cache_manager
     from .services.concurrency_manager import concurrency_manager
     from .services.run_cleanup_manager import run_cleanup_manager
+    from .services.runtime_profile import get_runtime_profile
     from .services.temp_skill_cleanup_manager import temp_skill_cleanup_manager
     from .services.ui_auth import validate_ui_basic_auth_config
+
+    runtime_profile = get_runtime_profile()
+    runtime_profile.ensure_directories()
+    AgentCliManager(runtime_profile).ensure_layout()
+
     validate_ui_basic_auth_config()
     concurrency_manager.start()
     cache_manager.start()

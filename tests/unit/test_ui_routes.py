@@ -67,6 +67,21 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
             "models": [],
         },
     )
+    monkeypatch.setattr(
+        "server.routers.engines.agent_cli_manager.collect_auth_status",
+        lambda: {
+            "codex": {
+                "managed_present": True,
+                "managed_cli_path": "/tmp/codex",
+                "global_available": False,
+                "global_cli_path": None,
+                "effective_cli_path": "/tmp/codex",
+                "effective_path_source": "managed",
+                "credential_files": {"auth.json": True},
+                "auth_ready": True,
+            }
+        },
+    )
 
     response = await _request("GET", "/ui")
     assert response.status_code == 401
@@ -102,6 +117,10 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     response = await _request("GET", "/v1/engines/codex/models/manifest")
     assert response.status_code == 401
     response = await _request("GET", "/v1/engines/codex/models/manifest", auth=("admin", "secret"))
+    assert response.status_code == 200
+    response = await _request("GET", "/v1/engines/auth-status")
+    assert response.status_code == 401
+    response = await _request("GET", "/v1/engines/auth-status", auth=("admin", "secret"))
     assert response.status_code == 200
 
 
@@ -236,11 +255,28 @@ async def test_ui_engines_table_partial(monkeypatch):
         "server.routers.ui.model_registry.list_engines",
         lambda: [{"engine": "codex", "cli_version_detected": "0.89.0"}],
     )
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.collect_auth_status",
+        lambda: {
+            "codex": {
+                "managed_present": True,
+                "managed_cli_path": "/tmp/codex",
+                "global_available": False,
+                "global_cli_path": None,
+                "effective_cli_path": "/tmp/codex",
+                "effective_path_source": "managed",
+                "credential_files": {"auth.json": True},
+                "auth_ready": True,
+            }
+        },
+    )
 
     response = await _request("GET", "/ui/engines/table")
     assert response.status_code == 200
     assert "codex" in response.text
     assert "/ui/engines/codex/models" in response.text
+    assert "managed" in response.text
+    assert "auth.json: ok" in response.text
 
 
 @pytest.mark.asyncio
@@ -309,3 +345,82 @@ async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
     )
     assert response.status_code == 303
     assert "/ui/engines/codex/models?message=Snapshot+created" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_ui_runs_page_and_table(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.run_observability_service.list_runs",
+        lambda limit=200: [
+            {
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "skill_id": "demo-skill",
+                "engine": "gemini",
+                "status": "running",
+                "updated_at": "2026-01-01T00:00:00",
+                "file_state": {},
+            }
+        ],
+    )
+
+    response = await _request("GET", "/ui/runs")
+    assert response.status_code == 200
+    assert "Run 观测" in response.text
+
+    table_res = await _request("GET", "/ui/runs/table")
+    assert table_res.status_code == 200
+    assert "req-1" in table_res.text
+    assert "/ui/runs/req-1" in table_res.text
+
+
+@pytest.mark.asyncio
+async def test_ui_run_detail_preview_and_logs(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.run_observability_service.get_run_detail",
+        lambda _request_id: {
+            "request_id": "req-1",
+            "run_id": "run-1",
+            "run_dir": "/tmp/run-1",
+            "skill_id": "demo-skill",
+            "engine": "gemini",
+            "status": "running",
+            "updated_at": "2026-01-01T00:00:00",
+            "entries": [{"rel_path": "logs/stdout.txt", "name": "stdout.txt", "is_dir": False, "depth": 1}],
+            "file_state": {"stdout": {"exists": True, "is_dir": False, "size": 3, "mtime": "2026-01-01T00:00:00"}},
+            "poll_logs": True,
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.run_observability_service.build_run_file_preview",
+        lambda _request_id, _path: {"mode": "text", "content": "ok", "size": 2, "meta": "2 bytes"},
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.run_observability_service.get_logs_tail",
+        lambda _request_id: {
+            "request_id": "req-1",
+            "run_id": "run-1",
+            "status": "running",
+            "poll": True,
+            "stdout": "stream-out",
+            "stderr": "stream-err",
+        },
+    )
+
+    detail_res = await _request("GET", "/ui/runs/req-1")
+    assert detail_res.status_code == 200
+    assert "Request: req-1" in detail_res.text
+    assert "Run File Tree (Read-only)" in detail_res.text
+
+    preview_res = await _request("GET", "/ui/runs/req-1/view?path=logs/stdout.txt")
+    assert preview_res.status_code == 200
+    assert "ok" in preview_res.text
+
+    logs_res = await _request("GET", "/ui/runs/req-1/logs/tail")
+    assert logs_res.status_code == 200
+    assert "stream-out" in logs_res.text
+    assert "every 2s" in logs_res.text

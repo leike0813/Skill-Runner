@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import config
+from .agent_cli_manager import AgentCliManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class ModelCatalog:
 class ModelRegistry:
     def __init__(self) -> None:
         self._cache: Dict[str, ModelCatalog] = {}
+        self._agent_manager = AgentCliManager()
 
     def list_engines(self) -> List[Dict[str, Optional[str]]]:
         return [
@@ -301,16 +303,20 @@ class ModelRegistry:
         return parsed if parsed is not None else (0,)
 
     def _detect_cli_version(self, engine: str) -> Optional[str]:
-        command_map = {
-            "codex": ["codex", "--version"],
-            "gemini": ["gemini", "--version"],
-            "iflow": ["iflow", "--version"]
-        }
-        cmd = command_map.get(engine)
-        if not cmd:
+        cmd_path = self._agent_manager.resolve_engine_command(engine)
+        if cmd_path is None:
+            logger.warning("CLI not found for engine %s", engine)
             return None
+        cmd = [str(cmd_path), "--version"]
+        env = self._agent_manager.profile.build_subprocess_env()
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
         except FileNotFoundError:
             logger.warning("CLI not found for engine %s", engine)
             return None

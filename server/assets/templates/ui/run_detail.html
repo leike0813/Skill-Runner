@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run Detail - {{ detail.request_id }}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
+        .layout { max-width: 1280px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+        .row { display: grid; grid-template-columns: 38% 62%; gap: 16px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
+        .meta { color: #6b7280; font-size: 13px; margin-top: 6px; }
+        .tree-line { font-size: 13px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dir { color: #1d4ed8; }
+        .file { color: #111827; }
+        a { color: #0f766e; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { text-align: left; padding: 6px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+        th { background: #f3f4f6; }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="card">
+        <div><a href="/ui/runs">← Back to Runs</a></div>
+        <h2 style="margin:8px 0 4px;">Request: {{ detail.request_id }}</h2>
+        <div class="meta">run_id: {{ detail.run_id }}</div>
+        <div class="meta">skill: {{ detail.skill_id or "-" }}</div>
+        <div class="meta">engine: {{ detail.engine or "-" }}</div>
+        <div class="meta">status: {{ detail.status }}</div>
+        <div class="meta">updated_at: {{ detail.updated_at or "-" }}</div>
+        <div class="meta">run_dir: {{ detail.run_dir }}</div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 8px;">文件状态</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Path Key</th>
+                    <th>Exists</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>MTime</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for key, item in detail.file_state.items() %}
+                <tr>
+                    <td>{{ key }}</td>
+                    <td>{{ "yes" if item.exists else "no" }}</td>
+                    <td>{{ "dir" if item.get("is_dir") else "file" }}</td>
+                    <td>{{ item.get("size", "-") }}</td>
+                    <td>{{ item.get("mtime", "-") }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="row">
+        <div class="card">
+            <h3 style="margin:0 0 8px;">Run File Tree (Read-only)</h3>
+            {% for entry in detail.entries %}
+            <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
+                {% if entry.is_dir %}
+                <span class="dir">📁 {{ entry.name }}/</span>
+                {% else %}
+                <span class="file">📄</span>
+                <a
+                    href="#"
+                    hx-get="/ui/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
+                    hx-target="#run-file-preview"
+                    hx-swap="innerHTML"
+                >{{ entry.name }}</a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">File Preview</h3>
+            <div id="run-file-preview" class="meta">从左侧选择文件。</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 8px;">实时日志（Tail）</h3>
+        <div
+            id="run-logs-panel"
+            hx-get="/ui/runs/{{ detail.request_id }}/logs/tail"
+            hx-trigger="load"
+            hx-swap="outerHTML"
+        ></div>
+    </div>
+</div>
+</body>
+</html>
+

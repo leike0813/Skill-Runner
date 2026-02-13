@@ -53,6 +53,29 @@ async def test_v1_engines_route_available(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_v1_engine_auth_status_route(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.agent_cli_manager.collect_auth_status",
+        lambda: {
+            "codex": {
+                "managed_present": True,
+                "managed_cli_path": "/tmp/codex",
+                "global_available": False,
+                "global_cli_path": None,
+                "effective_cli_path": "/tmp/codex",
+                "effective_path_source": "managed",
+                "credential_files": {"auth.json": True},
+                "auth_ready": True,
+            }
+        },
+    )
+    response = await _request("GET", "/v1/engines/auth-status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["engines"]["codex"]["effective_path_source"] == "managed"
+
+
+@pytest.mark.asyncio
 async def test_v1_engine_models_route_available(monkeypatch):
     monkeypatch.setattr(
         "server.routers.engines.model_registry.get_models",

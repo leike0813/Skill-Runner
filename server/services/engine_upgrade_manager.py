@@ -1,13 +1,16 @@
 import asyncio
 import logging
+import os
 import threading
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
+import sys
 
 from ..config import config
 from ..models import EngineUpgradeTaskStatus
 from .engine_upgrade_store import engine_upgrade_store
+from .runtime_profile import get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ class EngineUpgradeManager:
         self._store = engine_upgrade_store
         self._state_lock = threading.Lock()
         self._running_request_id: Optional[str] = None
-        self._script_path = Path(config.SYSTEM.ROOT) / "scripts" / "agent_manager.sh"
+        self._script_path = Path(config.SYSTEM.ROOT) / "scripts" / "agent_manager.py"
 
     def create_task(self, mode: str, requested_engine: Optional[str]) -> str:
         normalized_mode = mode.strip().lower()
@@ -100,13 +103,16 @@ class EngineUpgradeManager:
         return list(self.SUPPORTED_ENGINES)
 
     async def _run_single_engine_upgrade(self, engine: str) -> Dict[str, Optional[str]]:
-        cmd = ["sh", str(self._script_path), "--upgrade-engine", engine]
+        profile = get_runtime_profile()
+        cmd = [sys.executable, str(self._script_path), "--upgrade-engine", engine]
+        env = profile.build_subprocess_env(os.environ.copy())
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(Path(config.SYSTEM.ROOT)),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout_bytes, stderr_bytes = await proc.communicate()
             stdout = (stdout_bytes or b"").decode("utf-8", errors="replace")

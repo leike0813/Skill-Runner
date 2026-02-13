@@ -1,16 +1,15 @@
 import os
 import json
-import subprocess
 import logging
 from pathlib import Path
-from .base import EngineAdapter, EngineRunResult
 from typing import Dict, Any, Optional
 from server.services.codex_config_manager import CodexConfigManager
+from server.services.agent_cli_manager import AgentCliManager
 
 logger = logging.getLogger(__name__)
 
 import asyncio
-from .base import EngineAdapter, EngineRunResult
+from .base import EngineAdapter, ProcessExecutionResult
 from ..models import SkillManifest
 
 class CodexAdapter(EngineAdapter):
@@ -18,6 +17,7 @@ class CodexAdapter(EngineAdapter):
 
     def __init__(self, config_manager: Optional[CodexConfigManager] = None):
         self.config_manager = config_manager or CodexConfigManager()
+        self.agent_manager = AgentCliManager()
 
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: Dict[str, Any]) -> Path:
         """
@@ -134,7 +134,13 @@ class CodexAdapter(EngineAdapter):
             
         return prompt
 
-    async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options: Dict[str, Any]) -> tuple[int, str, str]:
+    async def _execute_process(
+        self,
+        prompt: str,
+        run_dir: Path,
+        skill: SkillManifest,
+        options: Dict[str, Any],
+    ) -> ProcessExecutionResult:
         """
         Phase 4: Execution (With optional streaming)
         """
@@ -143,7 +149,7 @@ class CodexAdapter(EngineAdapter):
         if os.environ.get("LANDLOCK_ENABLED") == "0":
             sandbox_flag = "--yolo"
         cmd = [
-            "codex",
+            str(self._resolve_codex_command()),
             "exec",
             sandbox_flag,
             "--skip-git-repo-check",
@@ -155,7 +161,7 @@ class CodexAdapter(EngineAdapter):
         logger.info("Executing Codex command: %s", " ".join(cmd))
         
         # Execute
-        env = os.environ.copy()
+        env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -165,6 +171,12 @@ class CodexAdapter(EngineAdapter):
             env=env
         )
         return await self._capture_process_output(proc, run_dir, options, "Codex")
+
+    def _resolve_codex_command(self) -> Path:
+        cmd = self.agent_manager.resolve_engine_command("codex")
+        if cmd is None:
+            raise RuntimeError("Codex CLI not found in managed prefix")
+        return cmd
 
     def _parse_output(self, raw_stdout: str) -> Optional[Dict[str, Any]]:
         """

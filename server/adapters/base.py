@@ -6,6 +6,33 @@ import re
 import logging
 from pathlib import Path
 from ..models import SkillManifest
+from ..config import config
+
+
+AUTH_REQUIRED_PATTERNS = (
+    re.compile(r"enter authorization code", re.IGNORECASE),
+    re.compile(r"visit this url", re.IGNORECASE),
+    re.compile(r"401\\s+unauthorized", re.IGNORECASE),
+    re.compile(r"missing\\s+bearer", re.IGNORECASE),
+    re.compile(r"server_oauth2_required", re.IGNORECASE),
+    re.compile(r"需要使用服务器oauth2流程", re.IGNORECASE),
+)
+
+
+class ProcessExecutionResult:
+    """Normalized process execution result from adapter subprocess."""
+
+    def __init__(
+        self,
+        exit_code: int,
+        raw_stdout: str,
+        raw_stderr: str,
+        failure_reason: Optional[str] = None,
+    ):
+        self.exit_code = exit_code
+        self.raw_stdout = raw_stdout
+        self.raw_stderr = raw_stderr
+        self.failure_reason = failure_reason
 
 class EngineRunResult:
     """
@@ -18,13 +45,15 @@ class EngineRunResult:
         raw_stdout: str,
         raw_stderr: str,
         output_file_path: Optional[Path] = None,
-        artifacts_created: List[Path] = []
+        artifacts_created: List[Path] = [],
+        failure_reason: Optional[str] = None,
     ):
         self.exit_code = exit_code
         self.raw_stdout = raw_stdout
         self.raw_stderr = raw_stderr
         self.output_file_path = output_file_path
         self.artifacts_created = artifacts_created
+        self.failure_reason = failure_reason
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +92,10 @@ class EngineAdapter(ABC):
         
         # 4. Execution
         # We assume command construction + execution happens here
-        exit_code, stdout, stderr = await self._execute_process(prompt, run_dir, skill, options)
+        process_result = await self._execute_process(prompt, run_dir, skill, options)
+        exit_code = process_result.exit_code
+        stdout = process_result.raw_stdout
+        stderr = process_result.raw_stderr
         
         # 5. Result Parsing
         result_payload = self._parse_output(stdout)
@@ -85,10 +117,17 @@ class EngineAdapter(ABC):
             raw_stdout=stdout,
             raw_stderr=stderr,
             output_file_path=result_path if result_path.exists() else None,
-            artifacts_created=artifacts
+            artifacts_created=artifacts,
+            failure_reason=process_result.failure_reason,
         )
 
-    async def _capture_process_output(self, proc, run_dir: Path, options: Dict[str, Any], prefix: str) -> tuple[int, str, str]:
+    async def _capture_process_output(
+        self,
+        proc,
+        run_dir: Path,
+        options: Dict[str, Any],
+        prefix: str,
+    ) -> ProcessExecutionResult:
         """Read subprocess stdout/stderr streams, log them, and return outputs."""
         verbose_opt = options.get("verbose", 0)
         if isinstance(verbose_opt, bool):
@@ -98,36 +137,93 @@ class EngineAdapter(ABC):
 
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
+        logs_dir = run_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log = logs_dir / "stdout.txt"
+        stderr_log = logs_dir / "stderr.txt"
+        # Truncate old logs before streaming new output.
+        stdout_log.write_text("", encoding="utf-8")
+        stderr_log.write_text("", encoding="utf-8")
 
-        async def read_stream(stream, chunks, tag, color_code, should_print):
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                decoded_line = line.decode('utf-8', errors='replace')
-                chunks.append(decoded_line)
-                if should_print:
-                    logger.info("[%s]%s", tag, decoded_line.rstrip())
+        async def read_stream(stream, chunks, log_path: Path, tag, color_code, should_print):
+            with open(log_path, "a", encoding="utf-8") as log_file:
+                while True:
+                    chunk = await stream.read(1024)
+                    if not chunk:
+                        break
+                    decoded_chunk = chunk.decode("utf-8", errors="replace")
+                    chunks.append(decoded_chunk)
+                    log_file.write(decoded_chunk)
+                    log_file.flush()
+                    if should_print:
+                        logger.info("[%s]%s", tag, decoded_chunk.rstrip())
 
-        await asyncio.gather(
-            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", '\033[94m', verbose_level >= 1),
-            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", '\033[93m', verbose_level >= 2)
+        stdout_task = asyncio.create_task(
+            read_stream(
+                proc.stdout,
+                stdout_chunks,
+                stdout_log,
+                f"{prefix} OUT ",
+                '\033[94m',
+                verbose_level >= 1,
+            )
         )
-
-        await proc.wait()
+        stderr_task = asyncio.create_task(
+            read_stream(
+                proc.stderr,
+                stderr_chunks,
+                stderr_log,
+                f"{prefix} ERR ",
+                '\033[93m',
+                verbose_level >= 2,
+            )
+        )
+        timeout_sec = self._resolve_hard_timeout(options)
+        timed_out = False
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
+        except asyncio.TimeoutError:
+            timed_out = True
+            logger.error("[%s] hard timeout reached (%ss), terminating process", prefix, timeout_sec)
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except Exception:
+                proc.kill()
+                await proc.wait()
+        finally:
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
 
         raw_stdout = "".join(stdout_chunks)
         raw_stderr = "".join(stderr_chunks)
 
-        logs_dir = run_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        with open(logs_dir / "stdout.txt", "w") as f:
-            f.write(raw_stdout)
-        with open(logs_dir / "stderr.txt", "w") as f:
-            f.write(raw_stderr)
-
         returncode = proc.returncode if proc.returncode is not None else 1
-        return returncode, raw_stdout, raw_stderr
+        failure_reason: Optional[str] = None
+        if self._looks_like_auth_required(raw_stdout, raw_stderr) and (timed_out or returncode != 0):
+            failure_reason = "AUTH_REQUIRED"
+        elif timed_out:
+            failure_reason = "TIMEOUT"
+        return ProcessExecutionResult(
+            exit_code=returncode,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+            failure_reason=failure_reason,
+        )
+
+    def _resolve_hard_timeout(self, options: Dict[str, Any]) -> int:
+        default_timeout = int(config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS)
+        candidate = options.get("hard_timeout_seconds", default_timeout)
+        try:
+            parsed = int(candidate)
+            if parsed > 0:
+                return parsed
+        except Exception:
+            pass
+        return default_timeout
+
+    def _looks_like_auth_required(self, stdout: str, stderr: str) -> bool:
+        combined = f"{stdout}\n{stderr}"
+        return any(pattern.search(combined) for pattern in AUTH_REQUIRED_PATTERNS)
 
     def _extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
         """Parse JSON from a code fence or a loose JSON object in text."""
@@ -165,8 +261,14 @@ class EngineAdapter(ABC):
         pass
 
     @abstractmethod
-    async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options: Dict[str, Any]) -> tuple[int, str, str]:
-        """Phase 4: Execute subprocess. Returns (exit_code, stdout, stderr)."""
+    async def _execute_process(
+        self,
+        prompt: str,
+        run_dir: Path,
+        skill: SkillManifest,
+        options: Dict[str, Any],
+    ) -> ProcessExecutionResult:
+        """Phase 4: Execute subprocess."""
         pass
 
     @abstractmethod

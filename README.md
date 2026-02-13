@@ -48,16 +48,29 @@ To protect the admin/install surfaces with Basic Auth:
 
 ## Local development (non-container)
 
-Recommended environment setup with `uv`:
+Recommended one-click local bootstrap (isolated runtime):
+
+Linux/macOS:
 ```
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+./scripts/deploy_local.sh
 ```
+
+Windows (PowerShell):
+```powershell
+.\scripts\deploy_local.ps1
+```
+
+These scripts configure:
+- `SKILL_RUNNER_RUNTIME_MODE=local`
+- `SKILL_RUNNER_AGENT_CACHE_DIR` (separate from `data/`)
+- `SKILL_RUNNER_AGENT_HOME` (isolated agent config home)
+- `SKILL_RUNNER_NPM_PREFIX` (managed CLI prefix)
 
 Optional environment:
 - `SKILL_RUNNER_DATA_DIR`: run data directory (default `data/`)
+- `SKILL_RUNNER_AGENT_CACHE_DIR`: agent cache root
+- `SKILL_RUNNER_AGENT_HOME`: isolated config home
+- `SKILL_RUNNER_NPM_PREFIX`: managed CLI install prefix
 
 To quickly verify UI Basic Auth locally, use:
 ```
@@ -76,6 +89,12 @@ Quick checks:
 ```
 curl -i http://127.0.0.1:8000/ui
 curl -i -u admin:change-me http://127.0.0.1:8000/ui
+```
+
+Quick auth/path diagnostics for managed engines (local/container):
+```bash
+./scripts/check_agent_auth.sh local
+./scripts/check_agent_auth.sh container
 ```
 
 ## API examples
@@ -174,11 +193,21 @@ Copy to:
 - `agent_config/gemini/`
 - `agent_config/iflow/`
 
+> Startup imports **credentials only** from `agent_config/*`; settings files are not imported.
+
 ## Supported engines
 
 - Codex CLI (`@openai/codex`)
 - Gemini CLI (`@google/gemini-cli`)
 - iFlow CLI (`@iflow-ai/iflow-cli`)
+
+## Disclaimer (Fast-moving Agent CLIs)
+
+Codex, Gemini CLI, and iFlow CLI are evolving quickly. Their config formats,
+CLI behavior, and API details can change in short cycles.
+
+If you hit mismatched config expectations or compatibility errors with newer
+CLI versions, please open an issue directly.
 
 ---
 

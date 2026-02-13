@@ -1,14 +1,18 @@
 name: skillrunner
 services:
   api:
-    image: leike0813/skill-runner:v0.3.0
+    image: leike0813/skill-runner:v0.3.2
     ports:
       - "8000:8000"
     environment:
+      SKILL_RUNNER_RUNTIME_MODE: container
       SKILL_RUNNER_DATA_DIR: /data
-      UV_CACHE_DIR: /opt/cache/uv_cache
-      UV_PROJECT_ENVIRONMENT: /opt/cache/uv_venv
-      NPM_CONFIG_PREFIX: /opt/cache/npm
+      SKILL_RUNNER_AGENT_CACHE_DIR: /opt/cache/skill-runner
+      SKILL_RUNNER_AGENT_HOME: /opt/cache/skill-runner/agent-home
+      SKILL_RUNNER_NPM_PREFIX: /opt/cache/skill-runner/npm
+      UV_CACHE_DIR: /opt/cache/skill-runner/uv_cache
+      UV_PROJECT_ENVIRONMENT: /opt/cache/skill-runner/uv_venv
+      NPM_CONFIG_PREFIX: /opt/cache/skill-runner/npm
       UI_BASIC_AUTH_ENABLED: "false"
       # UI_BASIC_AUTH_USERNAME: "admin"
       # UI_BASIC_AUTH_PASSWORD: "change-me"

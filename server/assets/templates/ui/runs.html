@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run Observability</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
+        .layout { max-width: 1200px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; }
+        h1 { margin: 0 0 12px; font-size: 24px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+        th { background: #f3f4f6; }
+        a { color: #0f766e; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .loading-wrap { display: flex; align-items: center; gap: 10px; color: #374151; }
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #d1d5db;
+            border-top-color: #0f766e;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="card">
+        <a href="/ui">← Back to UI</a>
+        <h1>Run 观测</h1>
+        <div>按 Request ID 管理运行记录，并关联查看对应 Run 目录内容。</div>
+    </div>
+    <div class="card">
+        <div
+            id="runs-table-container"
+            hx-get="/ui/runs/table"
+            hx-trigger="load, every 5s"
+            hx-swap="innerHTML"
+        >
+            <div class="loading-wrap">
+                <div class="spinner"></div>
+                <div>正在加载 Run 列表...</div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+

@@ -6,11 +6,12 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .base import EngineAdapter, EngineRunResult
+from .base import EngineAdapter, ProcessExecutionResult
 from ..models import SkillManifest
 from ..services.config_generator import config_generator
 from ..services.skill_patcher import skill_patcher
 from ..services.schema_validator import schema_validator
+from ..services.agent_cli_manager import AgentCliManager
 from jinja2 import Template
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ class IFlowAdapter(EngineAdapter):
     2. Executes `iflow` in the run directory.
     3. Uses `--yolo` and `-p` flags for headless operation.
     """
+    def __init__(self) -> None:
+        self.agent_manager = AgentCliManager()
     
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: Dict[str, Any]) -> Path:
         """
@@ -154,11 +157,17 @@ class IFlowAdapter(EngineAdapter):
             
         return prompt
 
-    async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options: Dict[str, Any]) -> tuple[int, str, str]:
+    async def _execute_process(
+        self,
+        prompt: str,
+        run_dir: Path,
+        skill: SkillManifest,
+        options: Dict[str, Any],
+    ) -> ProcessExecutionResult:
         """
         Phase 4: Execution
         """
-        env = os.environ.copy()
+        env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
         cmd_parts = []
 
         # UV Wrapping
@@ -168,8 +177,11 @@ class IFlowAdapter(EngineAdapter):
                 cmd_parts.append(f"--with={dep}")
 
         # Base Command
+        iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
+        if iflow_cmd is None:
+            raise RuntimeError("iFlow CLI not found in managed prefix")
         cmd_parts.extend([
-            "iflow",
+            str(iflow_cmd),
             "--yolo",
             "-p", prompt
         ])

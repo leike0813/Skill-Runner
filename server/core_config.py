@@ -14,6 +14,7 @@ Configuration is organized into sections:
 import os
 from pathlib import Path
 from yacs.config import CfgNode as CN  # type: ignore[import-untyped]
+import platform
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -21,6 +22,34 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_container_runtime() -> bool:
+    if os.path.exists("/.dockerenv"):
+        return True
+    cgroup = Path("/proc/1/cgroup")
+    if cgroup.exists():
+        try:
+            lowered = cgroup.read_text(encoding="utf-8", errors="ignore").lower()
+            return "docker" in lowered or "containerd" in lowered or "kubepods" in lowered
+        except Exception:
+            return False
+    return False
+
+
+def _default_local_base_dir() -> Path:
+    system = platform.system().lower()
+    if system == "windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "SkillRunner"
+        return Path.home() / "AppData" / "Local" / "SkillRunner"
+    if system == "darwin":
+        return Path.home() / "Library" / "Application Support" / "SkillRunner"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "skill-runner"
+    return Path.home() / ".local" / "share" / "skill-runner"
 
 
 _C = CN()
@@ -34,7 +63,26 @@ _C.SYSTEM.ROOT = str(Path(__file__).parent.parent)
 
 # Data directory for storing runs, artifacts, etc.
 # Check env SKILL_RUNNER_DATA_DIR first, then default to PROJECT_ROOT/data
-_C.SYSTEM.DATA_DIR = os.environ.get("SKILL_RUNNER_DATA_DIR", os.path.join(_C.SYSTEM.ROOT, "data"))
+_default_data_dir = "/data" if _is_container_runtime() else os.path.join(_C.SYSTEM.ROOT, "data")
+_C.SYSTEM.DATA_DIR = os.environ.get("SKILL_RUNNER_DATA_DIR", _default_data_dir)
+
+# Agent managed cache root (independent from data dir)
+_default_agent_cache = (
+    "/opt/cache/skill-runner" if _is_container_runtime() else str(_default_local_base_dir() / "agent-cache")
+)
+_C.SYSTEM.AGENT_CACHE_DIR = os.environ.get("SKILL_RUNNER_AGENT_CACHE_DIR", _default_agent_cache)
+
+# Agent isolated home/config root
+_C.SYSTEM.AGENT_HOME = os.environ.get(
+    "SKILL_RUNNER_AGENT_HOME",
+    os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "agent-home"),
+)
+
+# Managed npm prefix for engine CLIs
+_C.SYSTEM.NPM_PREFIX = os.environ.get(
+    "SKILL_RUNNER_NPM_PREFIX",
+    os.environ.get("NPM_CONFIG_PREFIX", os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "npm")),
+)
 
 # Skills directory
 _C.SYSTEM.SKILLS_DIR = os.path.join(_C.SYSTEM.ROOT, "skills")
@@ -46,12 +94,12 @@ _C.SYSTEM.RUNS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "runs")
 _C.SYSTEM.REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "requests")
 
 # uv cache directory (can be overridden via UV_CACHE_DIR)
-_C.SYSTEM.UV_CACHE_DIR = os.environ.get("UV_CACHE_DIR", os.path.join(_C.SYSTEM.DATA_DIR, "uv_cache"))
+_C.SYSTEM.UV_CACHE_DIR = os.environ.get("UV_CACHE_DIR", os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "uv_cache"))
 
 # uv venv directory (can be overridden via UV_PROJECT_ENVIRONMENT)
 _C.SYSTEM.UV_PROJECT_ENVIRONMENT = os.environ.get(
     "UV_PROJECT_ENVIRONMENT",
-    os.path.join(_C.SYSTEM.DATA_DIR, "uv_venv")
+    os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "uv_venv")
 )
 
 # Run database path
@@ -97,6 +145,11 @@ _C.SYSTEM.CONCURRENCY_POLICY = os.path.join(
 _C.SYSTEM.UI_BASIC_AUTH_ENABLED = _env_bool("UI_BASIC_AUTH_ENABLED", False)
 _C.SYSTEM.UI_BASIC_AUTH_USERNAME = os.environ.get("UI_BASIC_AUTH_USERNAME", "")
 _C.SYSTEM.UI_BASIC_AUTH_PASSWORD = os.environ.get("UI_BASIC_AUTH_PASSWORD", "")
+
+# Hard timeout for engine subprocess execution (seconds)
+_C.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = int(
+    os.environ.get("SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS", "1200")
+)
 
 # -----------------------------------------------------------------------------
 # Gemini Configuration

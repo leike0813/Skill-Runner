@@ -137,8 +137,13 @@
 - **模型字段**:
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
   - **Codex** 使用 `model_name@reasoning_effort` 格式（例如 `gpt-5.2-codex@high`）。
+  - **iFlow 运行时默认配置（托管环境）**：若未提供 `~/.iflow/settings.json`，服务会写入最小可用默认值：
+    - `selectedAuthType = "oauth-iflow"`
+    - `baseUrl = "https://apis.iflow.cn/v1"`
 - **运行时选项**:
   - `runtime_options` 不影响输出结果（例如 `verbose`）。
+  - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
+  - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。
 - **禁用缓存**: 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查，但成功执行仍会更新缓存。
 - **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
@@ -340,6 +345,34 @@
 - 查看当前 `manifest.json`、解析到的快照、模型列表；
 - 通过表单新增“当前检测版本”的模型快照（add-only）。
 
+### Run 观测页面
+`GET /ui/runs`
+
+页面能力：
+- 按 `request_id` 展示 run 列表（关联 `run_id`）；
+- 展示当前状态、基础文件状态与更新时间；
+- 支持自动刷新列表。
+
+### Run 详情页面（只读）
+`GET /ui/runs/{request_id}`
+
+页面能力：
+- 展示 request/run 基本信息与 `run_dir` 文件状态摘要；
+- 展示 run 文件树（只读）与文件预览；
+- 实时查看 stdout/stderr tail。
+
+### 预览 Run 文件（只读）
+`GET /ui/runs/{request_id}/view?path=<relative_path>`
+
+行为与约束与 Skill 预览一致：
+- 禁止绝对路径、`..` 路径穿越与目录逃逸；
+- 文本可预览；二进制显示不可预览；超大文件不预览。
+
+### Run 日志 tail（HTML partial）
+`GET /ui/runs/{request_id}/logs/tail`
+
+返回 stdout/stderr 的 tail 内容（默认尾部窗口），当 run 状态为 `queued/running` 时前端会自动轮询刷新。
+
 ### UI 基础鉴权
 
 可通过环境变量启用 Basic Auth：
@@ -456,6 +489,34 @@
     {"engine": "gemini", "cli_version_detected": "0.25.2"},
     {"engine": "iflow", "cli_version_detected": "0.5.2"}
   ]
+}
+```
+
+### 获取引擎鉴权与路径状态（受 Basic Auth 保护）
+`GET /v1/engines/auth-status`
+
+说明：
+- 用于诊断服务当前实际使用的 CLI 路径来源（managed/global）及鉴权文件就绪情况。
+- 该接口返回静态就绪判断（不触发真实模型调用，不消耗 token）。
+
+**Response** (`EngineAuthStatusResponse`):
+```json
+{
+  "engines": {
+    "iflow": {
+      "managed_present": true,
+      "managed_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/iflow",
+      "global_available": true,
+      "global_cli_path": "/usr/local/bin/iflow",
+      "effective_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/iflow",
+      "effective_path_source": "managed",
+      "credential_files": {
+        "iflow_accounts.json": true,
+        "oauth_creds.json": false
+      },
+      "auth_ready": false
+    }
+  }
 }
 ```
 

@@ -149,6 +149,51 @@ class RunStore:
         data["runtime_options"] = json.loads(data["runtime_options_json"])
         return data
 
+    def get_request_with_run(self, request_id: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    req.request_id AS request_id,
+                    req.skill_id AS skill_id,
+                    req.engine AS engine,
+                    req.run_id AS run_id,
+                    req.created_at AS request_created_at,
+                    run.status AS run_status,
+                    run.created_at AS run_created_at
+                FROM requests req
+                LEFT JOIN runs run ON req.run_id = run.run_id
+                WHERE req.request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def list_requests_with_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 1000))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    req.request_id AS request_id,
+                    req.skill_id AS skill_id,
+                    req.engine AS engine,
+                    req.run_id AS run_id,
+                    req.created_at AS request_created_at,
+                    run.status AS run_status,
+                    run.created_at AS run_created_at
+                FROM requests req
+                LEFT JOIN runs run ON req.run_id = run.run_id
+                WHERE req.run_id IS NOT NULL
+                ORDER BY req.created_at DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def create_run(self, run_id: str, cache_key: str, status: str, result_path: str = "", artifacts_manifest_path: str = "") -> None:
         created_at = datetime.utcnow().isoformat()
         with self._connect() as conn:

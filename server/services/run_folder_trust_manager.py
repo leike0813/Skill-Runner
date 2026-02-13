@@ -10,6 +10,7 @@ from typing import Dict, Iterable
 import tomlkit
 
 from ..config import config
+from .runtime_profile import get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,11 @@ class RunFolderTrustManager:
         gemini_trusted_path: Path | None = None,
         runs_root: Path | None = None,
     ) -> None:
-        self.codex_config_path = codex_config_path or (Path.home() / ".codex" / "config.toml")
-        self.gemini_trusted_path = gemini_trusted_path or (Path.home() / ".gemini" / "trustedFolders.json")
+        profile = get_runtime_profile()
+        self.codex_config_path = codex_config_path or (profile.agent_home / ".codex" / "config.toml")
+        self.gemini_trusted_path = gemini_trusted_path or (
+            profile.agent_home / ".gemini" / "trustedFolders.json"
+        )
         self.runs_root = (runs_root or Path(config.SYSTEM.RUNS_DIR)).resolve()
         self._thread_locks: Dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()

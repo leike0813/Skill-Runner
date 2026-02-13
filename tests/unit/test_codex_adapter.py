@@ -28,7 +28,7 @@ async def test_execute_constructs_correct_command(tmp_path):
         await adapter._execute_process(prompt, run_dir, skill, options={})
 
         args, _ = mock_exec.call_args
-        assert args[0] == "codex"
+        assert Path(args[0]).name.startswith("codex")
         assert args[1] == "exec"
         assert "--full-auto" in args
         assert "--json" in args

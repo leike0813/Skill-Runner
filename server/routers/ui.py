@@ -22,11 +22,13 @@ from ..services.engine_upgrade_manager import (
     engine_upgrade_manager,
 )
 from ..services.model_registry import model_registry
+from ..services.agent_cli_manager import AgentCliManager
 from ..services.skill_browser import (
     build_preview_payload,
     list_skill_entries,
     resolve_skill_file_path,
 )
+from ..services.run_observability import run_observability_service
 from ..services.skill_install_store import skill_install_store
 from ..services.skill_package_manager import skill_package_manager
 from ..services.skill_registry import skill_registry
@@ -42,6 +44,7 @@ router = APIRouter(
     tags=["ui"],
     dependencies=[Depends(require_ui_basic_auth)],
 )
+agent_cli_manager = AgentCliManager()
 
 
 def _render_skills_table(request: Request, highlight_skill_id: str | None = None) -> HTMLResponse:
@@ -141,6 +144,75 @@ async def ui_skill_view_file(request: Request, skill_id: str, path: str):
     )
 
 
+@router.get("/runs", response_class=HTMLResponse)
+async def ui_runs(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/runs.html",
+        context={},
+    )
+
+
+@router.get("/runs/table", response_class=HTMLResponse)
+async def ui_runs_table(request: Request):
+    runs = run_observability_service.list_runs(limit=200)
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/partials/runs_table.html",
+        context={"runs": runs},
+    )
+
+
+@router.get("/runs/{request_id}", response_class=HTMLResponse)
+async def ui_run_detail(request: Request, request_id: str):
+    try:
+        detail = run_observability_service.get_run_detail(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/run_detail.html",
+        context={"detail": detail},
+    )
+
+
+@router.get("/runs/{request_id}/view", response_class=HTMLResponse)
+async def ui_run_view_file(request: Request, request_id: str, path: str):
+    try:
+        preview = run_observability_service.build_run_file_preview(request_id, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/partials/file_preview.html",
+        context={
+            "relative_path": Path(path).as_posix(),
+            "preview": preview,
+        },
+    )
+
+
+@router.get("/runs/{request_id}/logs/tail", response_class=HTMLResponse)
+async def ui_run_logs_tail(request: Request, request_id: str):
+    try:
+        payload = run_observability_service.get_logs_tail(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/partials/run_logs_tail.html",
+        context={"payload": payload},
+    )
+
+
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
     return templates.TemplateResponse(
@@ -153,10 +225,45 @@ async def ui_engines(request: Request):
 @router.get("/engines/table", response_class=HTMLResponse)
 async def ui_engines_table(request: Request):
     engines = model_registry.list_engines()
+    auth_status = agent_cli_manager.collect_auth_status()
+    rows = []
+    seen_engines = set()
+    for item in engines:
+        engine_name_obj = item.get("engine")
+        if not isinstance(engine_name_obj, str):
+            continue
+        engine_name = engine_name_obj
+        seen_engines.add(engine_name)
+        rows.append(
+            {
+                "engine": engine_name,
+                "cli_version_detected": item.get("cli_version_detected"),
+                "auth": auth_status.get(
+                    engine_name,
+                    {
+                        "managed_present": False,
+                        "effective_path_source": "missing",
+                        "effective_cli_path": None,
+                        "auth_ready": False,
+                        "credential_files": {},
+                    },
+                ),
+            }
+        )
+    for engine_name, auth_payload in auth_status.items():
+        if engine_name in seen_engines:
+            continue
+        rows.append(
+            {
+                "engine": engine_name,
+                "cli_version_detected": None,
+                "auth": auth_payload,
+            }
+        )
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/engines_table.html",
-        context={"engines": engines},
+        context={"rows": rows},
     )
 
 

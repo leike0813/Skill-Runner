@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Treat invalid existing skill directory as fresh install candidate
 The install workflow MUST determine whether an existing skill directory is a valid installed skill by reading `assets/runner.json` and parsing a valid version.

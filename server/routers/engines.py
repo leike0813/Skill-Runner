@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status  # type: ignore[import-not-found]
 
 from ..models import (
+    EngineAuthStatusResponse,
     EngineManifestModelInfo,
     EngineManifestViewResponse,
     EngineModelInfo,
@@ -21,9 +22,11 @@ from ..services.engine_upgrade_manager import (
     engine_upgrade_manager,
 )
 from ..services.model_registry import model_registry
+from ..services.agent_cli_manager import AgentCliManager
 from ..services.ui_auth import require_ui_basic_auth
 
 router = APIRouter(prefix="/engines", tags=["engines"])
+agent_cli_manager = AgentCliManager()
 
 
 @router.get("", response_model=EnginesResponse)
@@ -56,6 +59,15 @@ async def list_models(engine: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/auth-status",
+    response_model=EngineAuthStatusResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_engine_auth_status():
+    return EngineAuthStatusResponse(engines=agent_cli_manager.collect_auth_status())
 
 
 @router.get(

@@ -6,15 +6,18 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 from ..models import SkillManifest
-from .base import EngineAdapter, EngineRunResult
+from .base import EngineAdapter, ProcessExecutionResult
 from ..config import config
 from ..services.config_generator import config_generator
 from ..services.skill_patcher import skill_patcher
 from ..services.schema_validator import schema_validator
+from ..services.agent_cli_manager import AgentCliManager
 from jinja2 import Template
 import shutil
 
 class GeminiAdapter(EngineAdapter):
+    def __init__(self) -> None:
+        self.agent_manager = AgentCliManager()
     
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: Dict[str, Any]) -> Path:
         """
@@ -148,11 +151,17 @@ class GeminiAdapter(EngineAdapter):
             
         return prompt
 
-    async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options: Dict[str, Any]) -> tuple[int, str, str]:
+    async def _execute_process(
+        self,
+        prompt: str,
+        run_dir: Path,
+        skill: SkillManifest,
+        options: Dict[str, Any],
+    ) -> ProcessExecutionResult:
         """
         Phase 4: Execution (With optional streaming)
         """
-        env = os.environ.copy()
+        env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
         cmd_parts = []
         
         # UV Wrapping
@@ -162,8 +171,11 @@ class GeminiAdapter(EngineAdapter):
                 cmd_parts.append(f"--with={dep}")
                 
         # Base Command
+        gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
+        if gemini_cmd is None:
+            raise RuntimeError("Gemini CLI not found in managed prefix")
         cmd_parts.extend([
-            "gemini",
+            str(gemini_cmd),
             "--yolo",
             prompt
         ])

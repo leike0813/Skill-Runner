@@ -1,19 +1,13 @@
 ## Purpose
 定义 Engine 升级任务与 Model Manifest 管理的服务端接口与约束，确保升级流程可追踪、可观测，并确保模型快照以 add-only 方式安全维护。
-
 ## Requirements
-
 ### Requirement: 系统 MUST 提供引擎升级任务创建接口
-系统 MUST 提供创建引擎升级任务的接口，支持单引擎与全引擎升级两种模式。
+系统 MUST 在创建升级任务前基于 managed prefix 判定引擎安装状态，不得被全局 PATH 可执行项误判短路。
 
-#### Scenario: 创建单引擎升级任务
-- **WHEN** 客户端提交 `mode=single` 且 `engine=gemini`
-- **THEN** 系统创建任务并返回 `request_id`
-- **AND** 初始状态为 `queued`
-
-#### Scenario: 创建全引擎升级任务
-- **WHEN** 客户端提交 `mode=all`
-- **THEN** 系统创建任务并返回 `request_id`
+#### Scenario: global 可执行但 managed 缺失
+- **WHEN** 某 engine 在全局 PATH 可执行但 managed prefix 下缺失
+- **THEN** `ensure/upgrade` 逻辑仍按 managed 缺失处理
+- **AND** 安装目标为 managed prefix
 
 ### Requirement: 系统 MUST 提供升级任务状态查询接口
 系统 MUST 提供按 `request_id` 查询升级任务状态的接口。
@@ -24,12 +18,12 @@
 - **AND** 返回当前可用的 per-engine 执行结果片段
 
 ### Requirement: 升级结果 MUST 包含 per-engine stdout/stderr
-系统 MUST 为每个引擎记录并返回升级执行结果，包括 stdout 和 stderr。
+系统 MUST 在路径跑偏或安装失败时输出可诊断信息，帮助定位 managed/global 冲突。
 
-#### Scenario: 单引擎升级失败
-- **WHEN** 某引擎升级命令执行失败
-- **THEN** 该引擎结果包含 `status=failed`
-- **AND** 返回该引擎对应的 `stdout` 与 `stderr`
+#### Scenario: managed 安装失败
+- **WHEN** 某 engine 安装到 managed prefix 失败
+- **THEN** 返回该 engine 的 `status=failed`
+- **AND** `stderr` 中包含安装失败上下文
 
 ### Requirement: 系统 MUST 限制同一时刻仅一个升级任务
 系统 MUST 保证同一时刻只有一个升级任务处于 running 状态。
@@ -39,12 +33,12 @@
 - **THEN** 新建升级请求被拒绝（冲突状态码）
 
 ### Requirement: 系统 MUST 提供 Engine Model Manifest 查询接口
-系统 MUST 支持按 Engine 查询当前模型清单视图，返回 manifest 原文、检测版本、解析快照与模型列表。
+系统 MUST 在容器模式与本地模式下使用同一运行时环境解析策略完成版本检测与 manifest 查询。
 
-#### Scenario: 查询 manifest 视图成功
+#### Scenario: 本地模式查询 manifest
 - **WHEN** 客户端请求 `GET /v1/engines/{engine}/models/manifest`
-- **THEN** 返回 `manifest`、`cli_version_detected`、`resolved_snapshot_version`、`resolved_snapshot_file`
-- **AND** 返回解析后的 `models` 列表
+- **THEN** 返回 `cli_version_detected` 与 manifest 视图
+- **AND** 检测路径来自受管运行时配置（非硬编码容器路径）
 
 ### Requirement: 系统 MUST 仅允许为当前检测版本新增快照
 系统 MUST 将新增快照版本绑定到当前 `cli_version_detected`，且不允许请求方覆盖版本来源。
@@ -72,3 +66,4 @@
 #### Scenario: 新增后立即可见
 - **WHEN** 新增快照请求成功
 - **THEN** 后续 `GET /v1/engines` 能读取到更新后的模型列表
+
