@@ -34,6 +34,8 @@ tests/
 
 ```yaml
 skill_id: "demo-prime-number"
+skill_source: "temp"          # 可选: installed|temp，默认 installed
+skill_fixture: "demo-prime-number"  # skill_source=temp 时使用
 cases:
   - name: "Basic Primality Test"
     description: "Verify standard prime number filtering works"
@@ -61,6 +63,10 @@ cases:
         # 它可以是具体的值，也可以是一些特殊标记 (设计中考虑)
         # 目前简单起见，仅支持值相等或 Key 存在检查
 ```
+
+字段说明：
+- `skill_source=installed`: 使用 `skills/` 目录中已安装 skill。
+- `skill_source=temp`: 从 `tests/fixtures/skills/<skill_fixture>/` 打包后走临时 skill 执行路径。
 
 ## 4. 核心组件：Test Runner (`tests/integration/run_integration_tests.py`)
 

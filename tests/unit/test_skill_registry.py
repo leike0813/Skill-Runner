@@ -1,9 +1,7 @@
 import json
-from pathlib import Path
-import pytest
 
-from server.services.skill_registry import SkillRegistry
 from server.config import config
+from server.services.skill_registry import SkillRegistry
 
 
 def test_scan_artifacts_from_output_schema(tmp_path):
@@ -21,20 +19,20 @@ def test_scan_artifacts_from_output_schema(tmp_path):
                 "type": "string",
                 "x-type": "artifact",
                 "x-role": "text",
-                "x-filename": "text.md"
+                "x-filename": "text.md",
             },
             "info_path": {
                 "type": "string",
-                "x-type": "file"
+                "x-type": "file",
             },
-            "meta": {"type": "object"}
+            "meta": {"type": "object"},
         },
-        "required": ["text_path"]
+        "required": ["text_path"],
     }
     (assets_dir / "output.schema.json").write_text(json.dumps(output_schema))
     runner = {
         "id": "demo-skill",
-        "schemas": {"output": "assets/output.schema.json"}
+        "schemas": {"output": "assets/output.schema.json"},
     }
     (assets_dir / "runner.json").write_text(json.dumps(runner))
 
@@ -42,6 +40,7 @@ def test_scan_artifacts_from_output_schema(tmp_path):
     config.defrost()
     config.SYSTEM.SKILLS_DIR = str(skills_dir)
     config.freeze()
+
     try:
         registry = SkillRegistry()
         registry.scan_skills()
@@ -54,6 +53,54 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_skills_dir
+        config.freeze()
+
+
+def test_scan_skips_excluded_and_invalid_dirs(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    invalid_dir = skills_dir / "broken-skill"
+    invalid_dir.mkdir()
+    (invalid_dir / "SKILL.md").write_text("# Broken")
+
+    valid_dir = skills_dir / "valid-skill"
+    valid_assets = valid_dir / "assets"
+    valid_assets.mkdir(parents=True)
+    (valid_dir / "SKILL.md").write_text("# Valid")
+    (valid_assets / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "valid-skill",
+                "version": "1.0.0",
+                "engines": ["gemini"],
+                "schemas": {
+                    "input": "assets/input.schema.json",
+                    "parameter": "assets/parameter.schema.json",
+                    "output": "assets/output.schema.json",
+                },
+                "artifacts": [],
+            }
+        )
+    )
+    (valid_assets / "input.schema.json").write_text(json.dumps({"type": "object"}))
+    (valid_assets / "parameter.schema.json").write_text(json.dumps({"type": "object"}))
+    (valid_assets / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    old_skills_dir = config.SYSTEM.SKILLS_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(skills_dir)
+    config.freeze()
+
+    try:
+        registry = SkillRegistry()
+        skills = registry.list_skills()
+        ids = {skill.id for skill in skills}
+        assert "valid-skill" in ids
+        assert "broken-skill" not in ids
     finally:
         config.defrost()
         config.SYSTEM.SKILLS_DIR = old_skills_dir

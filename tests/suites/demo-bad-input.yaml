@@ -1,4 +1,6 @@
 skill_id: "demo-bad-input"
+skill_source: "temp"
+skill_fixture: "demo-bad-input"
 cases:
   - name: "Missing Required Input File"
     description: "Should fail when required input file is not provided"

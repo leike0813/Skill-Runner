@@ -76,11 +76,13 @@ def isolated_skill_paths(tmp_path):
     old_staging_dir = config.SYSTEM.SKILLS_STAGING_DIR
     old_install_dir = config.SYSTEM.SKILL_INSTALLS_DIR
     old_install_db = config.SYSTEM.SKILL_INSTALLS_DB
+    old_invalid_dir = config.SYSTEM.SKILLS_INVALID_DIR
 
     config.defrost()
     config.SYSTEM.SKILLS_DIR = str(tmp_path / "skills")
     config.SYSTEM.SKILLS_ARCHIVE_DIR = str(tmp_path / "skills" / ".archive")
     config.SYSTEM.SKILLS_STAGING_DIR = str(tmp_path / "skills" / ".staging")
+    config.SYSTEM.SKILLS_INVALID_DIR = str(tmp_path / "skills" / ".invalid")
     config.SYSTEM.SKILL_INSTALLS_DIR = str(tmp_path / "skill_installs")
     config.SYSTEM.SKILL_INSTALLS_DB = str(tmp_path / "skill_installs.db")
     config.freeze()
@@ -91,6 +93,7 @@ def isolated_skill_paths(tmp_path):
         config.SYSTEM.SKILLS_DIR = old_skills_dir
         config.SYSTEM.SKILLS_ARCHIVE_DIR = old_archive_dir
         config.SYSTEM.SKILLS_STAGING_DIR = old_staging_dir
+        config.SYSTEM.SKILLS_INVALID_DIR = old_invalid_dir
         config.SYSTEM.SKILL_INSTALLS_DIR = old_install_dir
         config.SYSTEM.SKILL_INSTALLS_DB = old_install_db
         config.freeze()
@@ -238,3 +241,31 @@ def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
     assert row["status"] == "failed"
     live_runner = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json"
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.0.0"
+
+
+def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, isolated_skill_paths):
+    store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
+    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    manager = SkillPackageManager()
+
+    broken_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"
+    broken_dir.mkdir(parents=True, exist_ok=True)
+    (broken_dir / "SKILL.md").write_text("# Broken skill", encoding="utf-8")
+
+    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    manager.run_install("req-1")
+
+    row = store.get_install("req-1")
+    assert row is not None
+    assert row["status"] == "succeeded"
+    assert row["action"] == "install"
+
+    invalid_root = Path(config.SYSTEM.SKILLS_INVALID_DIR)
+    quarantined = list(invalid_root.glob("demo-upload-*"))
+    assert quarantined, "expected invalid existing directory to be quarantined"
+
+    live_runner = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json"
+    assert live_runner.exists()
+    assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.0.0"
+

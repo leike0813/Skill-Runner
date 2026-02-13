@@ -19,6 +19,11 @@ sys.path.append(str(PROJECT_ROOT))
 from server.main import app
 from server.services.model_registry import model_registry
 from server.services.skill_registry import skill_registry
+from tests.common.skill_fixture_loader import (
+    build_fixture_skill_zip,
+    fixture_skill_engines,
+    fixture_skill_needs_input,
+)
 
 SUITES_DIR = PROJECT_ROOT / "tests" / "suites"
 FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
@@ -79,10 +84,15 @@ def _pick_model(engine: str) -> str:
     return entry.id
 
 
-def _wait_for_status(client: TestClient, request_id: str, timeout_sec: int = 120) -> Dict[str, Any]:
+def _wait_for_status(
+    client: TestClient,
+    request_id: str,
+    timeout_sec: int = 120,
+    endpoint_prefix: str = "/v1/jobs",
+) -> Dict[str, Any]:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
-        res = client.get(f"/v1/jobs/{request_id}")
+        res = client.get(f"{endpoint_prefix}/{request_id}")
         if res.status_code != 200:
             raise RuntimeError(f"Status check failed: {res.status_code}")
         payload = res.json()
@@ -112,62 +122,117 @@ async def run_suite_case(
     case: Dict[str, Any],
     verbose: int,
     no_cache: bool,
-    debug: bool
+    debug: bool,
+    skill_source: str = "installed",
+    skill_fixture: str | None = None,
 ) -> bool:
     name = case.get("name", "unnamed")
     inputs = case.get("inputs", {})
     parameters = case.get("parameters", {})
     expectations = case.get("expectations", {})
+    fixture_id = skill_fixture or skill_id
 
-    skill = skill_registry.get_skill(skill_id)
-    if not skill:
-        raise RuntimeError(f"Skill not found: {skill_id}")
-    engine_allowed = bool(skill.engines) and engine in skill.engines
+    if skill_source == "temp":
+        engines = fixture_skill_engines(PROJECT_ROOT, fixture_id)
+        engine_allowed = bool(engines) and engine in engines
+        needs_upload = bool(inputs) or fixture_skill_needs_input(PROJECT_ROOT, fixture_id)
+    else:
+        skill = skill_registry.get_skill(skill_id)
+        if not skill:
+            raise RuntimeError(f"Skill not found: {skill_id}")
+        engine_allowed = bool(skill.engines) and engine in skill.engines
+        needs_upload = bool(inputs) or bool(skill.schemas and "input" in skill.schemas)
 
     model = _pick_model(engine)
-    create_payload = {
-        "skill_id": skill_id,
-        "engine": engine,
-        "parameter": parameters,
-        "model": model,
-        "runtime_options": {"no_cache": no_cache, "verbose": verbose, "debug": debug}
-    }
-    logger.info("Case: %s (engine=%s, no_cache=%s, debug=%s)", name, engine, no_cache, debug)
-    logger.info("Create payload: %s", create_payload)
-    create_res = client.post("/v1/jobs", json=create_payload)
-    if not engine_allowed:
-        if create_res.status_code == 400:
-            logger.info("Engine mismatch rejected as expected.")
-            return True
-        raise AssertionError(
-            f"{name} expected engine mismatch failure but got {create_res.status_code}"
-        )
-    if create_res.status_code != 200:
-        raise RuntimeError(f"Create run failed for {name}: {create_res.status_code}")
+    if skill_source == "temp":
+        create_payload = {
+            "engine": engine,
+            "parameter": parameters,
+            "model": model,
+            "runtime_options": {"no_cache": True, "verbose": verbose, "debug": debug},
+        }
+        logger.info("Case: %s (source=temp, engine=%s, debug=%s)", name, engine, debug)
+        logger.info("Create payload: %s", create_payload)
+        create_res = client.post("/v1/temp-skill-runs", json=create_payload)
+        if create_res.status_code != 200:
+            raise RuntimeError(f"Create temp run failed for {name}: {create_res.status_code}")
+        create_body = create_res.json()
+        request_id = create_body["request_id"]
+        logger.info("Create response: request_id=%s", request_id)
 
-    create_body = create_res.json()
-    request_id = create_body["request_id"]
-    logger.info("Create response: request_id=%s cache_hit=%s", request_id, create_body.get("cache_hit"))
-
-    needs_upload = bool(inputs)
-    if not inputs:
-        needs_upload = bool(skill.schemas and "input" in skill.schemas)
-
-    if needs_upload:
+        skill_zip = build_fixture_skill_zip(PROJECT_ROOT, fixture_id)
         if not inputs:
             logger.info("No inputs provided; uploading empty zip to trigger input validation.")
-        zip_bytes = _build_zip(inputs)
+        input_zip = _build_zip(inputs)
         upload_res = client.post(
-            f"/v1/jobs/{request_id}/upload",
-            files={"file": ("inputs.zip", zip_bytes, "application/zip")}
+            f"/v1/temp-skill-runs/{request_id}/upload",
+            files={
+                "skill_package": (f"{fixture_id}.zip", skill_zip, "application/zip"),
+                "file": ("inputs.zip", input_zip, "application/zip"),
+            },
         )
+        if not engine_allowed:
+            if upload_res.status_code == 400:
+                logger.info("Engine mismatch rejected as expected.")
+                return True
+            raise AssertionError(
+                f"{name} expected engine mismatch failure but got {upload_res.status_code}"
+            )
         if upload_res.status_code != 200:
             raise RuntimeError(f"Upload failed for {name}: {upload_res.status_code}")
-
         upload_body = upload_res.json()
-        logger.info("Upload response: cache_hit=%s extracted=%s", upload_body.get("cache_hit"), upload_body.get("extracted_files"))
+        logger.info("Upload response: extracted=%s", upload_body.get("extracted_files"))
+        status_payload = _wait_for_status(client, request_id, endpoint_prefix="/v1/temp-skill-runs")
+        result_path = f"/v1/temp-skill-runs/{request_id}/result"
+        artifacts_path = f"/v1/temp-skill-runs/{request_id}/artifacts"
+        bundle_path = f"/v1/temp-skill-runs/{request_id}/bundle"
+    else:
+        create_payload = {
+            "skill_id": skill_id,
+            "engine": engine,
+            "parameter": parameters,
+            "model": model,
+            "runtime_options": {"no_cache": no_cache, "verbose": verbose, "debug": debug},
+        }
+        logger.info("Case: %s (source=installed, engine=%s, no_cache=%s, debug=%s)", name, engine, no_cache, debug)
+        logger.info("Create payload: %s", create_payload)
+        create_res = client.post("/v1/jobs", json=create_payload)
+        if not engine_allowed:
+            if create_res.status_code == 400:
+                logger.info("Engine mismatch rejected as expected.")
+                return True
+            raise AssertionError(
+                f"{name} expected engine mismatch failure but got {create_res.status_code}"
+            )
+        if create_res.status_code != 200:
+            raise RuntimeError(f"Create run failed for {name}: {create_res.status_code}")
 
-    status_payload = _wait_for_status(client, request_id)
+        create_body = create_res.json()
+        request_id = create_body["request_id"]
+        logger.info("Create response: request_id=%s cache_hit=%s", request_id, create_body.get("cache_hit"))
+
+        if needs_upload:
+            if not inputs:
+                logger.info("No inputs provided; uploading empty zip to trigger input validation.")
+            zip_bytes = _build_zip(inputs)
+            upload_res = client.post(
+                f"/v1/jobs/{request_id}/upload",
+                files={"file": ("inputs.zip", zip_bytes, "application/zip")}
+            )
+            if upload_res.status_code != 200:
+                raise RuntimeError(f"Upload failed for {name}: {upload_res.status_code}")
+            upload_body = upload_res.json()
+            logger.info(
+                "Upload response: cache_hit=%s extracted=%s",
+                upload_body.get("cache_hit"),
+                upload_body.get("extracted_files"),
+            )
+
+        status_payload = _wait_for_status(client, request_id)
+        result_path = f"/v1/jobs/{request_id}/result"
+        artifacts_path = f"/v1/jobs/{request_id}/artifacts"
+        bundle_path = f"/v1/jobs/{request_id}/bundle"
+
     logger.info("Final status: %s", status_payload["status"])
     expected_status = expectations.get("status")
     if expected_status and expected_status != "any":
@@ -175,7 +240,7 @@ async def run_suite_case(
         if status_payload["status"] not in expected_set:
             raise AssertionError(f"{name} status mismatch: {status_payload['status']} != {expected_status}")
 
-    result_res = client.get(f"/v1/jobs/{request_id}/result")
+    result_res = client.get(result_path)
     result_body = None
     if result_res.status_code == 404 and status_payload["status"] in ("failed", "canceled"):
         logger.info("Result not available for failed run; skipping result assertions.")
@@ -189,13 +254,13 @@ async def run_suite_case(
     if expected_output is not None and result_body is not None:
         _assert_json_matches(expected_output, result_body["result"]["data"])
 
-    artifacts_res = client.get(f"/v1/jobs/{request_id}/artifacts")
+    artifacts_res = client.get(artifacts_path)
     if artifacts_res.status_code != 200:
         raise RuntimeError(f"Artifacts fetch failed for {name}: {artifacts_res.status_code}")
     artifacts_body = artifacts_res.json()
     logger.info("Artifacts response: %s", artifacts_body)
 
-    download_res = client.get(f"/v1/jobs/{request_id}/bundle")
+    download_res = client.get(bundle_path)
     if download_res.status_code != 200 or not download_res.content:
         raise AssertionError(f"{name} bundle download failed")
 
@@ -246,6 +311,8 @@ async def main() -> int:
         cases = suite.get("cases", [])
         if not skill_id:
             continue
+        skill_source = str(suite.get("skill_source", "installed")).strip().lower()
+        skill_fixture = suite.get("skill_fixture")
 
         suite_engine = engine_override or suite.get("engine", "gemini")
         _ensure_cli_available(suite_engine)
@@ -260,7 +327,9 @@ async def main() -> int:
                 case,
                 verbose=args.verbose,
                 no_cache=args.no_cache,
-                debug=args.debug
+                debug=args.debug,
+                skill_source=skill_source,
+                skill_fixture=skill_fixture,
             )
             results.append(success)
 

@@ -67,6 +67,7 @@ _C.SYSTEM.ENGINE_UPGRADES_DB = os.path.join(_C.SYSTEM.DATA_DIR, "engine_upgrades
 _C.SYSTEM.SKILL_INSTALLS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs")
 _C.SYSTEM.SKILLS_ARCHIVE_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".archive")
 _C.SYSTEM.SKILLS_STAGING_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".staging")
+_C.SYSTEM.SKILLS_INVALID_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".invalid")
 
 # Temporary skill run working area
 _C.SYSTEM.TEMP_SKILL_RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "temp_skill_runs.db")

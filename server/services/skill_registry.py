@@ -1,10 +1,12 @@
 import json
-import yaml # type: ignore
 import logging
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from ..config import config
 from ..models import SkillManifest
+
+logger = logging.getLogger(__name__)
+
 
 class SkillRegistry:
     """
@@ -12,7 +14,7 @@ class SkillRegistry:
     
     Capabilities:
     - Scans `skills/` directory for valid skill packages.
-    - Loads definitions from `assets/runner.json` or infers from directory structure.
+    - Loads definitions from `assets/runner.json`.
     - Provides lookup by ID.
     """
     def __init__(self):
@@ -28,43 +30,43 @@ class SkillRegistry:
         if not skills_dir.exists():
             return
 
+        invalid_dirs: List[str] = []
+
         for skill_dir in skills_dir.iterdir():
             if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("."):
                 continue
             
             # Check for SKILL.md and assets/runner.json
             skill_md = skill_dir / "SKILL.md"
             runner_json = skill_dir / "assets" / "runner.json"
             
-            if not skill_md.exists():
+            if not skill_md.exists() or not runner_json.exists():
+                invalid_dirs.append(skill_dir.name)
                 continue
                 
             manifest = self._load_skill_manifest(skill_dir, runner_json)
             if manifest:
                 self._skills[manifest.id] = manifest
+            else:
+                invalid_dirs.append(skill_dir.name)
+
+        if invalid_dirs:
+            logger.warning("Ignored invalid skill directories: %s", ", ".join(sorted(set(invalid_dirs))))
 
     def _load_skill_manifest(self, skill_dir: Path, runner_json_path: Path) -> Optional[SkillManifest]:
         """Loads a skill manifest from disk."""
         try:
-            if runner_json_path.exists():
-                with open(runner_json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # If artifacts are NOT explicitly defined, try to scan them from output schema
-                    if ("artifacts" not in data or not data["artifacts"]) and "schemas" in data and "output" in data["schemas"]:
-                         output_schema_path = skill_dir / data["schemas"]["output"]
-                         data["artifacts"] = self._scan_artifacts(output_schema_path)
+            with open(runner_json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # If artifacts are NOT explicitly defined, try to scan them from output schema
+                if ("artifacts" not in data or not data["artifacts"]) and "schemas" in data and "output" in data["schemas"]:
+                     output_schema_path = skill_dir / data["schemas"]["output"]
+                     data["artifacts"] = self._scan_artifacts(output_schema_path)
 
-                    return SkillManifest(**data, path=skill_dir)
-            
-            # Fallback
-            return SkillManifest(
-                id=skill_dir.name,
-                name=skill_dir.name,
-                description="Loaded from directory",
-                engines=["codex"],
-                path=skill_dir
-            )
-        except Exception as e:
+                return SkillManifest(**data, path=skill_dir)
+        except Exception:
             logger.exception("Error loading skill %s", skill_dir.name)
             return None
 
@@ -96,9 +98,8 @@ class SkillRegistry:
                         "pattern": pattern,
                         "required": key in required_keys
                     })
-        except Exception as e:
+        except Exception:
             logger.exception("Error scanning artifacts")
-            pass
             
         return artifacts
 
@@ -111,5 +112,3 @@ class SkillRegistry:
         return self._skills.get(skill_id)
 
 skill_registry = SkillRegistry()
-
-logger = logging.getLogger(__name__)

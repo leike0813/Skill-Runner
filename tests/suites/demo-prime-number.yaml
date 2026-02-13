@@ -1,4 +1,6 @@
 skill_id: "demo-prime-number"
+skill_source: "temp"
+skill_fixture: "demo-prime-number"
 cases:
   - name: "Basic Primality Test"
     description: "Verify standard prime number filtering works"

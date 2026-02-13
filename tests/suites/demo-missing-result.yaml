@@ -1,4 +1,6 @@
 skill_id: "demo-missing-result"
+skill_source: "temp"
+skill_fixture: "demo-missing-result"
 cases:
   - name: "Missing Required Result"
     description: "Output succeeds but no JSON output"

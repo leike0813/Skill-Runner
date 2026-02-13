@@ -1,0 +1,15 @@
+{
+    "type": "object",
+    "properties": {
+        "csv_file": {
+            "type": "string",
+            "description": "Path to the CSV file",
+            "extensions": [
+                ".csv"
+            ]
+        }
+    },
+    "required": [
+        "csv_file"
+    ]
+}

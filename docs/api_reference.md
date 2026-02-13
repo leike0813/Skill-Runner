@@ -18,6 +18,9 @@
 
 返回当前系统已加载的所有技能定义。
 
+说明：
+- 仅返回“有效安装结构”的技能目录（至少包含 `SKILL.md` 与 `assets/runner.json`）。
+
 **Response** (`List[SkillManifest]`):
 ```json
 [
@@ -98,6 +101,7 @@
 - 不允许降级或同版本覆盖。
 - 更新时旧版本会归档到 `skills/.archive/{skill_id}/{old_version}/`。
 - 若目标归档路径已存在，则更新失败并保持现有技能不变。
+- 若目录已存在但不是有效已安装结构（例如缺失 `assets/runner.json`），会被视为“无已安装版本”，并先移动到 `skills/.invalid/` 后按全新安装处理。
 
 ---
 

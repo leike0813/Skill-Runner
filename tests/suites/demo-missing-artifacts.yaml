@@ -1,4 +1,6 @@
 skill_id: "demo-missing-artifacts"
+skill_source: "temp"
+skill_fixture: "demo-missing-artifacts"
 cases:
   - name: "Missing Required Artifact"
     description: "Output succeeds but required artifact is missing"

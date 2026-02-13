@@ -1,4 +1,6 @@
 skill_id: "demo-prime-number"
+skill_source: "temp"
+skill_fixture: "demo-prime-number"
 cases:
   - name: "CSV Input Mismatch"
     description: "Provide CSV input file where markdown is expected"

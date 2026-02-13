@@ -60,6 +60,14 @@ pytest tests/unit/
 ./tests/integration/run_integration_tests.sh
 ```
 
+**Suite 扩展字段**:
+- `skill_source`: `installed`（默认）或 `temp`
+- `skill_fixture`: 当 `skill_source=temp` 时，从 `tests/fixtures/skills/<skill_fixture>/` 读取并打包临时上传
+
+**说明**:
+- `installed`：沿用现有内部编排流程（不经过 HTTP 路由）。
+- `temp`：通过内部服务调用临时 skill 执行链路（`TempSkillRunManager` + `create_run_for_skill`）。
+
 ### 2.3 Skill 包安装接口集成测试
 
 针对 `POST /v1/skill-packages/install` 与 `GET /v1/skill-packages/{request_id}` 的接口集成测试，使用 pytest 在进程内执行完整 API 流程。
@@ -104,6 +112,7 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 **规则**:
 - 若 `engine` 不在 skill 的 `engines` 列表中，测试应预期失败（以 `workspace_manager` 抛错为判定）。
 - E2E 与集成测试共用 `tests/suites/*.yaml` 输入格式。
+- 当 suite 配置 `skill_source=temp` 时，E2E 走 `/v1/temp-skill-runs` 两步接口。
 
 ### 2.5 日志配置 (Logging)
 

@@ -1,4 +1,6 @@
 skill_id: "demo-bible-verse"
+skill_source: "temp"
+skill_fixture: "demo-bible-verse"
 cases:
   - name: "Missing Required Parameter"
     description: "Verify run fails when required 'language' parameter is missing"

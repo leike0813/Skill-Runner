@@ -1,0 +1,14 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "divisor": {
+            "type": "integer",
+            "description": "A positive integer to divide numbers by before checking primality.",
+            "minimum": 1
+        }
+    },
+    "required": [
+        "divisor"
+    ]
+}

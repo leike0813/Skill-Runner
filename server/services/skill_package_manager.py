@@ -1,11 +1,11 @@
-import io
 import json
 import logging
 import shutil
 import threading
+from datetime import datetime
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 from ..config import config
 from .skill_install_store import skill_install_store
@@ -71,8 +71,8 @@ class SkillPackageManager:
         live_skill_dir = skills_dir / skill_id
 
         with self._apply_lock:
-            if live_skill_dir.exists():
-                old_version = self._read_installed_version(live_skill_dir)
+            old_version = self._get_installed_version_if_valid(live_skill_dir)
+            if old_version:
                 self._ensure_version_upgrade(old_version, version)
                 self._archive_and_swap(
                     live_skill_dir=live_skill_dir,
@@ -81,6 +81,8 @@ class SkillPackageManager:
                 )
                 action = "update"
             else:
+                if live_skill_dir.exists():
+                    self._quarantine_invalid_existing_skill(live_skill_dir)
                 shutil.move(str(staged_skill_dir), str(live_skill_dir))
                 action = "install"
 
@@ -112,6 +114,30 @@ class SkillPackageManager:
         version = version.strip()
         self.validator.parse_version(version)
         return version
+
+    def _get_installed_version_if_valid(self, live_skill_dir: Path) -> Optional[str]:
+        if not live_skill_dir.exists() or not live_skill_dir.is_dir():
+            return None
+        try:
+            return self._read_installed_version(live_skill_dir)
+        except Exception:
+            logger.warning(
+                "Found invalid existing skill directory; will treat as fresh install: %s",
+                live_skill_dir,
+                exc_info=True,
+            )
+            return None
+
+    def _quarantine_invalid_existing_skill(self, live_skill_dir: Path) -> None:
+        invalid_root = Path(config.SYSTEM.SKILLS_INVALID_DIR)
+        invalid_root.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        target = invalid_root / f"{live_skill_dir.name}-{timestamp}"
+        suffix = 1
+        while target.exists():
+            target = invalid_root / f"{live_skill_dir.name}-{timestamp}-{suffix}"
+            suffix += 1
+        shutil.move(str(live_skill_dir), str(target))
 
     def _ensure_version_upgrade(self, old_version: str, new_version: str) -> None:
         self.validator.ensure_version_upgrade(old_version, new_version)

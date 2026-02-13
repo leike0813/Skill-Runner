@@ -32,6 +32,8 @@ from server.services.skill_registry import skill_registry
 from server.services.schema_validator import schema_validator
 from server.services.options_policy import options_policy
 from server.services.model_registry import model_registry
+from server.services.temp_skill_run_manager import temp_skill_run_manager
+from server.services.temp_skill_run_store import temp_skill_run_store
 from server.services.cache_key_builder import (
     compute_skill_fingerprint,
     compute_input_manifest_hash,
@@ -39,6 +41,11 @@ from server.services.cache_key_builder import (
 )
 from server.services.run_store import run_store
 import uuid
+from tests.common.skill_fixture_loader import (
+    build_fixture_skill_zip,
+    fixture_skill_engines,
+    fixture_skill_needs_input,
+)
 
 TEST_ROOT = PROJECT_ROOT / "tests"
 SUITES_DIR = TEST_ROOT / "suites"
@@ -105,11 +112,29 @@ def setup_logging():
 
 logger = logging.getLogger(__name__)
 
-async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini", verbose: int = 0, no_cache: bool = False):
+def _build_input_zip(input_map: Dict[str, str]) -> bytes:
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for key, filename in input_map.items():
+            fixture_path = FIXTURES_DIR / filename
+            if not fixture_path.exists():
+                raise FileNotFoundError(filename)
+            zf.writestr(key, fixture_path.read_bytes())
+    return zip_buffer.getvalue()
+
+
+async def run_test_case(
+    skill_id: str,
+    case: Dict,
+    default_engine: str = "gemini",
+    verbose: int = 0,
+    no_cache: bool = False,
+    skill_source: str = "installed",
+    skill_fixture: str | None = None,
+):
     logger.info("Running Case: %s", case["name"])
     logger.info("  Description: %s", case.get("description", ""))
 
-    # 1. Create Request
     engine = case.get("engine", default_engine)
     model = None
     try:
@@ -123,12 +148,13 @@ async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini
     except Exception:
         logger.warning("Failed to load model catalog for engine %s", engine)
 
+    effective_no_cache = True if skill_source == "temp" else no_cache
     req = RunCreateRequest(
         skill_id=skill_id,
         engine=engine,
         parameter=case.get("parameters", {}),
         model=model,
-        runtime_options={"verbose": verbose, "no_cache": no_cache}
+        runtime_options={"verbose": verbose, "no_cache": effective_no_cache}
     )
     runtime_opts = options_policy.validate_runtime_options(req.runtime_options)
     engine_opts = {}
@@ -143,85 +169,92 @@ async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini
     request_payload["engine_options"] = engine_opts
     request_payload["runtime_options"] = runtime_opts
     workspace_manager.create_request(request_id, request_payload)
-    run_store.create_request(
-        request_id=request_id,
-        skill_id=req.skill_id,
-        engine=req.engine,
-        parameter=req.parameter,
-        engine_options=engine_opts,
-        runtime_options=runtime_opts
-    )
-
-    run_id = None
-    skill = skill_registry.get_skill(skill_id)
-    if not skill:
-        logger.error("Skill %s not found", skill_id)
-        return False
-    engine_allowed = bool(skill.engines) and engine in skill.engines
-    if not engine_allowed:
-        try:
-            workspace_manager.create_run(req)
-        except ValueError:
-            logger.info("  [Pass] Engine mismatch rejected by workspace_manager.")
-            return True
-        logger.error("  [Fail] Engine mismatch was not rejected by workspace_manager.")
-        return False
-
-    has_input_schema = bool(skill.schemas and "input" in skill.schemas)
-
-    # 2. Upload Files
     input_map = case.get("inputs", {})
-    if input_map:
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for key, filename in input_map.items():
-                fixture_path = FIXTURES_DIR / filename
-                if not fixture_path.exists():
-                     logger.error("  [Error] Fixture not found: %s", filename)
-                     return False
-                zf.writestr(key, fixture_path.read_bytes())
-        
-        workspace_manager.handle_upload(request_id, zip_buffer.getvalue())
-        logger.info("  [Upload] Uploaded %s files", len(input_map))
+    run_id = None
 
-    # 3. Cache check + Execute
-    if input_map or has_input_schema:
-        manifest_path = workspace_manager.write_input_manifest(request_id)
-        manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
-        skill_fingerprint = compute_skill_fingerprint(skill, req.engine)
-        cache_key = compute_cache_key(
-            skill_id=req.skill_id,
+    if skill_source == "temp":
+        fixture_id = skill_fixture or skill_id
+        fixture_engines = fixture_skill_engines(PROJECT_ROOT, fixture_id)
+        engine_allowed = bool(fixture_engines) and engine in fixture_engines
+
+        temp_skill_run_store.create_request(
+            request_id=request_id,
             engine=req.engine,
-            skill_fingerprint=skill_fingerprint,
             parameter=req.parameter,
+            model=req.model,
             engine_options=engine_opts,
-            input_manifest_hash=manifest_hash
+            runtime_options=runtime_opts,
         )
-        run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
-        run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-        if not no_cache:
-            cached_run = run_store.get_cached_run(cache_key)
-            if cached_run:
-                run_id = cached_run
-                logger.info("  [Cache] Hit: %s", run_id)
-        if run_id is None:
-            run_status = workspace_manager.create_run(req)
-            run_id = run_status.run_id
-            workspace_manager.promote_request_uploads(request_id, run_id)
-            run_store.create_run(run_id, cache_key, RunStatus.QUEUED)
-            merged_options = {**engine_opts, **runtime_opts}
-            logger.info("  [Exec] Starting Job...")
-            await job_orchestrator.run_job(
-                run_id=run_id,
-                skill_id=req.skill_id,
-                engine_name=req.engine,
-                options=merged_options,
-                cache_key=cache_key
-            )
+        skill_package_bytes = build_fixture_skill_zip(PROJECT_ROOT, fixture_id)
+        skill = temp_skill_run_manager.stage_skill_package(request_id, skill_package_bytes)
+        req.skill_id = skill.id
+
+        if not engine_allowed:
+            try:
+                workspace_manager.create_run_for_skill(req, skill)
+            except ValueError:
+                logger.info("  [Pass] Engine mismatch rejected by workspace_manager.")
+                return True
+            logger.error("  [Fail] Engine mismatch was not rejected by workspace_manager.")
+            return False
+
+        if input_map:
+            try:
+                workspace_manager.handle_upload(request_id, _build_input_zip(input_map))
+            except FileNotFoundError as exc:
+                logger.error("  [Error] Fixture not found: %s", str(exc))
+                return False
+            logger.info("  [Upload] Uploaded %s files", len(input_map))
+
+        run_status = workspace_manager.create_run_for_skill(req, skill)
+        run_id = run_status.run_id
+        workspace_manager.promote_request_uploads(request_id, run_id)
+        merged_options = {**engine_opts, **runtime_opts}
+        logger.info("  [Exec] Starting Job (temp skill)...")
+        await job_orchestrator.run_job(
+            run_id=run_id,
+            skill_id=req.skill_id,
+            engine_name=req.engine,
+            options=merged_options,
+            cache_key=None,
+            skill_override=skill,
+            temp_request_id=request_id,
+        )
     else:
+        run_store.create_request(
+            request_id=request_id,
+            skill_id=req.skill_id,
+            engine=req.engine,
+            parameter=req.parameter,
+            engine_options=engine_opts,
+            runtime_options=runtime_opts
+        )
+        installed_skill = skill_registry.get_skill(skill_id)
+        if not installed_skill:
+            logger.error("Skill %s not found", skill_id)
+            return False
+        engine_allowed = bool(installed_skill.engines) and engine in installed_skill.engines
+        if not engine_allowed:
+            try:
+                workspace_manager.create_run(req)
+            except ValueError:
+                logger.info("  [Pass] Engine mismatch rejected by workspace_manager.")
+                return True
+            logger.error("  [Fail] Engine mismatch was not rejected by workspace_manager.")
+            return False
+
+        has_input_schema = bool(installed_skill.schemas and "input" in installed_skill.schemas)
+        if input_map:
+            try:
+                workspace_manager.handle_upload(request_id, _build_input_zip(input_map))
+            except FileNotFoundError as exc:
+                logger.error("  [Error] Fixture not found: %s", str(exc))
+                return False
+            logger.info("  [Upload] Uploaded %s files", len(input_map))
+
         manifest_path = workspace_manager.write_input_manifest(request_id)
         manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
-        skill_fingerprint = compute_skill_fingerprint(skill, req.engine)
+        skill_fingerprint = compute_skill_fingerprint(installed_skill, req.engine)
         cache_key = compute_cache_key(
             skill_id=req.skill_id,
             engine=req.engine,
@@ -232,7 +265,7 @@ async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini
         )
         run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
         run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-        if not no_cache:
+        if not effective_no_cache:
             cached_run = run_store.get_cached_run(cache_key)
             if cached_run:
                 run_id = cached_run
@@ -240,6 +273,8 @@ async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini
         if run_id is None:
             run_status = workspace_manager.create_run(req)
             run_id = run_status.run_id
+            if input_map or has_input_schema:
+                workspace_manager.promote_request_uploads(request_id, run_id)
             run_store.create_run(run_id, cache_key, RunStatus.QUEUED)
             merged_options = {**engine_opts, **runtime_opts}
             logger.info("  [Exec] Starting Job...")
@@ -359,6 +394,9 @@ async def run_test_case(skill_id: str, case: Dict, default_engine: str = "gemini
         if stderr.exists():
             logger.warning(stderr.read_text())
 
+    if skill_source == "temp":
+        temp_skill_run_manager.cleanup_temp_assets(request_id)
+
     return success
 
 async def main():
@@ -397,10 +435,17 @@ async def main():
         if not skill_id:
              logger.error("Suite %s missing 'skill_id'", suite_file.name)
              continue
+        skill_source = str(suite.get("skill_source", "installed")).strip().lower()
+        skill_fixture = suite.get("skill_fixture")
              
         suite_engine = args.engine if args.engine else suite.get("engine", "gemini")
 
-        logger.info("=== Suite: %s (Engine: %s) ===", skill_id, suite_engine)
+        logger.info(
+            "=== Suite: %s (Engine: %s, Source: %s) ===",
+            skill_id,
+            suite_engine,
+            skill_source,
+        )
         
         cases = suite.get("cases", [])
         if not cases:
@@ -412,7 +457,9 @@ async def main():
                 case,
                 default_engine=suite_engine,
                 verbose=args.verbose,
-                no_cache=args.no_cache
+                no_cache=args.no_cache,
+                skill_source=skill_source,
+                skill_fixture=skill_fixture,
             )
             results.append(res)
             

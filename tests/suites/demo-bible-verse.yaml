@@ -1,4 +1,6 @@
 skill_id: "demo-bible-verse"
+skill_source: "temp"
+skill_fixture: "demo-bible-verse"
 cases:
   - name: "English Verse Test"
     description: "Verify Bible verse generation in English"
@@ -14,4 +16,3 @@ cases:
       #   status: "success"
         # Check specific data returned by skill
         # Nested check not supported by runner yet, but main keys are checked.
-
