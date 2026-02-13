@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="assets/icon.png" alt="Skill-Runner Icon" width="160" />
+</p>
+
 # Skill Runner
 
-For the Chinese version, see `README_CN.md`.
+For the Chinese version, see [README_CN.md](README_CN.md).
 
 Skill Runner is a lightweight REST service that wraps Codex, Gemini CLI, and
 iFlow CLI behind a unified Skill protocol for deterministic execution and

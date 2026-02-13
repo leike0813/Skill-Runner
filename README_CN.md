@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" alt="Skill-Runner Icon" width="160" />
+</p>
+
 # Skill Runner
 
 Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemini CLI、iFlow CLI 等成熟 Agent 工具，
