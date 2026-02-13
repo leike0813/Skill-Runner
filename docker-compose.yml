@@ -1,7 +1,7 @@
 name: skillrunner
 services:
   api:
-    image: leike0813/skill-runner:v0.2.0
+    image: leike0813/skill-runner:v0.3.0
     ports:
       - "8000:8000"
     environment:
