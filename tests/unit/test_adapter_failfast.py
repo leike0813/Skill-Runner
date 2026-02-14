@@ -1,4 +1,6 @@
 import asyncio
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -18,16 +20,15 @@ class _TestAdapter(EngineAdapter):
         return "noop"
 
     async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options) -> ProcessExecutionResult:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await self._create_subprocess(
             *options["command"],
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(run_dir),
+            cwd=run_dir,
+            env=os.environ.copy(),
         )
         return await self._capture_process_output(proc, run_dir, options, "Test")
 
     def _parse_output(self, raw_stdout: str):
-        return None
+        return None, "none"
 
 
 @pytest.mark.asyncio
@@ -86,3 +87,30 @@ async def test_capture_process_output_stream_writes_logs_during_run(tmp_path: Pa
     assert "tick" in partial
     result = await task
     assert "done" in result.raw_stdout
+
+
+@pytest.mark.asyncio
+async def test_timeout_terminates_process_group_and_returns_promptly(tmp_path: Path):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    start = time.monotonic()
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        SkillManifest(id="x"),
+        {
+            "command": [
+                "python",
+                "-c",
+                "import subprocess,sys,time;"
+                "subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']);"
+                "print('parent-start', flush=True);"
+                "time.sleep(120)",
+            ],
+            "hard_timeout_seconds": 1,
+        },
+    )
+    elapsed = time.monotonic() - start
+    assert result.failure_reason == "TIMEOUT"
+    assert elapsed < 20

@@ -1,10 +1,8 @@
-import asyncio
 import os
 import json
-import re
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from ..models import SkillManifest
 from .base import EngineAdapter, ProcessExecutionResult
 from ..config import config
@@ -182,31 +180,40 @@ class GeminiAdapter(EngineAdapter):
         
         logger.info("Executing Gemini CLI: %s in %s", " ".join(cmd_parts), run_dir)
         
-        proc = await asyncio.create_subprocess_exec(
+        proc = await self._create_subprocess(
             *cmd_parts,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(run_dir),
-            env=env
+            cwd=run_dir,
+            env=env,
         )
         return await self._capture_process_output(proc, run_dir, options, "Gemini")
 
-    def _parse_output(self, raw_stdout: str) -> Optional[Dict[str, Any]]:
+    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """
         Phase 5: Result Parsing
         """
         response_text = raw_stdout
+        used_envelope_response = False
         try:
             envelope = json.loads(raw_stdout)
             if isinstance(envelope, dict) and "response" in envelope:
-                response_text = envelope["response"]
+                used_envelope_response = True
+                response = envelope["response"]
+                if isinstance(response, str):
+                    response_text = response
+                else:
+                    response_text = json.dumps(response, ensure_ascii=False)
             elif isinstance(envelope, dict) and "response" not in envelope and "error" in envelope:
                  logger.error("Gemini CLI Error: %s", envelope["error"])
-                 return None
+                 return None, "none"
         except json.JSONDecodeError:
             pass
-            
-        return self._extract_json_from_text(response_text)
+
+        result, repair_level = self._parse_json_with_deterministic_repair(response_text)
+        if result is None:
+            return None, "none"
+        if used_envelope_response and repair_level == "none":
+            repair_level = "deterministic_generic"
+        return result, repair_level
 
 
 logger = logging.getLogger(__name__)

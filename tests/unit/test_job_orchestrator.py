@@ -79,6 +79,54 @@ class TimeoutAdapter:
         )
 
 
+class TimeoutSuccessLikeAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        artifacts_dir = run_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (artifacts_dir / "partial.txt").write_text("partial")
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "ok"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"value":"ok"}',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[artifacts_dir / "partial.txt"],
+            failure_reason="TIMEOUT",
+        )
+
+
+class RepairSuccessAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "ok"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="fenced output",
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+            repair_level="deterministic_generic",
+        )
+
+
+class RepairSchemaFailAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "not-an-integer"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="fenced output",
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+            repair_level="deterministic_generic",
+        )
+
+
 @pytest.fixture(autouse=True)
 def _patch_trust_manager(monkeypatch):
     class NoopTrustManager:
@@ -424,6 +472,59 @@ async def test_run_job_marks_timeout_error_code(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, "cache-key-1", "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": TimeoutSuccessLikeAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                "test-skill",
+                "codex",
+                options={"hard_timeout_seconds": 15},
+                cache_key="cache-key-1",
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] == "TIMEOUT"
+        assert "15s" in result_data["error"]["message"]
+        assert "artifacts/partial.txt" in result_data["artifacts"]
+        assert local_store.get_cached_run("cache-key-1") is None
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
 async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
@@ -471,6 +572,114 @@ async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
 
         assert any(event[0] == "register" and event[1] == "codex" for event in recorder.events)
         assert any(event[0] == "remove" and event[1] == "codex" for event in recorder.events)
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, "cache-key-repair", "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": RepairSuccessAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                "test-skill",
+                "codex",
+                options={},
+                cache_key="cache-key-repair",
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert "OUTPUT_REPAIRED_GENERIC" in result_data["validation_warnings"]
+        assert "OUTPUT_REPAIRED_GENERIC" in status_data["warnings"]
+        assert result_data["repair_level"] == "deterministic_generic"
+        assert local_store.get_cached_run("cache-key-repair") == run_id
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, "cache-key-repair-fail", "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": RepairSchemaFailAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                "test-skill",
+                "codex",
+                options={},
+                cache_key="cache-key-repair-fail",
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert result_data["repair_level"] == "deterministic_generic"
+        assert "Output validation error" in result_data["error"]["message"]
+        assert "OUTPUT_REPAIRED_GENERIC" not in result_data["validation_warnings"]
+        assert local_store.get_cached_run("cache-key-repair-fail") is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

@@ -2,13 +2,12 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from server.services.codex_config_manager import CodexConfigManager
 from server.services.agent_cli_manager import AgentCliManager
 
 logger = logging.getLogger(__name__)
 
-import asyncio
 from .base import EngineAdapter, ProcessExecutionResult
 from ..models import SkillManifest
 
@@ -163,12 +162,10 @@ class CodexAdapter(EngineAdapter):
         # Execute
         env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
         
-        proc = await asyncio.create_subprocess_exec(
+        proc = await self._create_subprocess(
             *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(run_dir),
-            env=env
+            cwd=run_dir,
+            env=env,
         )
         return await self._capture_process_output(proc, run_dir, options, "Codex")
 
@@ -178,12 +175,10 @@ class CodexAdapter(EngineAdapter):
             raise RuntimeError("Codex CLI not found in managed prefix")
         return cmd
 
-    def _parse_output(self, raw_stdout: str) -> Optional[Dict[str, Any]]:
+    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """
         Phase 5: Result Parsing (NDJSON Stream Support)
         """
-        import re
-        
         last_message_text = ""
         
         # 1. Parse Stream
@@ -208,8 +203,8 @@ class CodexAdapter(EngineAdapter):
 
         # 2. Extract JSON from Message Text
         # Same regex logic as Gemini
-        result = self._extract_json_from_text(last_message_text)
+        result, repair_level = self._parse_json_with_deterministic_repair(last_message_text)
         if result is not None:
-            return result
+            return result, repair_level
         logger.warning(f"Failed to parse Codex result. Last message: {last_message_text[:100]}...")
-        return None
+        return None, "none"

@@ -1,10 +1,9 @@
 import os
 import json
 import logging
-import asyncio
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 from .base import EngineAdapter, ProcessExecutionResult
 from ..models import SkillManifest
@@ -188,26 +187,21 @@ class IFlowAdapter(EngineAdapter):
         
         logger.info("Executing iFlow command: %s in %s", " ".join(cmd_parts), run_dir)
         
-        proc = await asyncio.create_subprocess_exec(
+        proc = await self._create_subprocess(
             *cmd_parts,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(run_dir),
-            env=env
+            cwd=run_dir,
+            env=env,
         )
         return await self._capture_process_output(proc, run_dir, options, "iFlow")
 
-    def _parse_output(self, raw_stdout: str) -> Optional[Dict[str, Any]]:
+    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """
         Phase 5: Result Parsing
         Extracts JSON from the output.
         """
-        import re
-        
-        # 1. Regex search for JSON block
-        result = self._extract_json_from_text(raw_stdout)
+        result, repair_level = self._parse_json_with_deterministic_repair(raw_stdout)
         if result is not None:
-            return result
+            return result, repair_level
             
         logger.warning("Failed to parse JSON result from iFlow output")
-        return None
+        return None, "none"

@@ -8,15 +8,17 @@ from server.adapters.iflow_adapter import IFlowAdapter
 def test_gemini_parse_output_from_envelope():
     adapter = GeminiAdapter()
     raw = json.dumps({"response": "```json\n{\"a\": 1}\n```"})
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"a": 1}
+    assert repair_level == "deterministic_generic"
 
 
 def test_gemini_parse_output_from_text():
     adapter = GeminiAdapter()
     raw = "prefix {\"x\": 2} suffix"
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"x": 2}
+    assert repair_level == "deterministic_generic"
 
 
 def test_codex_parse_output_from_stream_event():
@@ -26,26 +28,38 @@ def test_codex_parse_output_from_stream_event():
         "item": {"type": "agent_message", "text": "```json\n{\"ok\": true}\n```"}
     }
     raw = json.dumps(event)
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"ok": True}
+    assert repair_level == "deterministic_generic"
 
 
 def test_codex_parse_output_from_raw_text():
     adapter = CodexAdapter()
     raw = "noise {\"done\": true} tail"
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"done": True}
+    assert repair_level == "deterministic_generic"
 
 
 def test_iflow_parse_output_from_code_fence():
     adapter = IFlowAdapter()
     raw = "```json\n{\"value\": 2}\n```"
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"value": 2}
+    assert repair_level == "deterministic_generic"
 
 
 def test_iflow_parse_output_from_raw_text():
     adapter = IFlowAdapter()
     raw = "start {\"v\": 3} end"
-    result = adapter._parse_output(raw)
+    result, repair_level = adapter._parse_output(raw)
     assert result == {"v": 3}
+    assert repair_level == "deterministic_generic"
+
+
+def test_gemini_parse_output_strict_json_without_repair():
+    adapter = GeminiAdapter()
+    raw = "{\"ok\": true}"
+    result, repair_level = adapter._parse_output(raw)
+    assert result == {"ok": True}
+    assert repair_level == "none"

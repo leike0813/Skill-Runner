@@ -132,12 +132,15 @@ class JobOrchestrator:
             warnings: list[str] = []
             output_data = {}
             output_errors: list[str] = []
+            repair_level = result.repair_level or "none"
             if result.exit_code == 0:
                 if result.output_file_path and result.output_file_path.exists():
                     try:
                         with open(result.output_file_path, "r") as f:
                             output_data = json.load(f)
                         output_errors = schema_validator.validate_output(skill, output_data)
+                        if not output_errors and repair_level == "deterministic_generic":
+                            warnings.append("OUTPUT_REPAIRED_GENERIC")
                     except Exception as e:
                         output_errors = [f"Failed to validate output schema: {str(e)}"]
                         output_data = {}
@@ -168,21 +171,25 @@ class JobOrchestrator:
                     f"Missing required artifacts: {', '.join(missing_artifacts)}"
                 )
             has_output_error = bool(output_errors)
-            normalized_status = "success" if result.exit_code == 0 and not has_output_error else "failed"
+            forced_failure_reason = result.failure_reason if result.failure_reason in {"AUTH_REQUIRED", "TIMEOUT"} else None
+            normalized_status = "success"
+            if forced_failure_reason or result.exit_code != 0 or has_output_error:
+                normalized_status = "failed"
             normalized_error: dict[str, Any] | None = None
             if normalized_status != "success":
                 error_code: Optional[str] = None
-                if has_output_error:
-                    error_message = "; ".join(output_errors)
-                elif result.failure_reason == "AUTH_REQUIRED":
+                if forced_failure_reason == "AUTH_REQUIRED":
                     error_code = "AUTH_REQUIRED"
                     error_message = "AUTH_REQUIRED: engine authentication is required or expired"
-                elif result.failure_reason == "TIMEOUT":
+                elif forced_failure_reason == "TIMEOUT":
                     error_code = "TIMEOUT"
+                    effective_timeout = self._resolve_hard_timeout_seconds(options)
                     error_message = (
                         f"TIMEOUT: engine execution exceeded hard timeout "
-                        f"({config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS}s)"
+                        f"({effective_timeout}s)"
                     )
+                elif has_output_error:
+                    error_message = "; ".join(output_errors)
                 else:
                     error_message = f"Exit code {result.exit_code}"
                 normalized_error = {
@@ -194,6 +201,7 @@ class JobOrchestrator:
                 "status": normalized_status,
                 "data": output_data if normalized_status == "success" else None,
                 "artifacts": artifacts,
+                "repair_level": repair_level,
                 "validation_warnings": warnings,
                 "error": normalized_error
             }
@@ -344,6 +352,17 @@ class JobOrchestrator:
             for chunk in iter(lambda: f.read(8192), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
+    def _resolve_hard_timeout_seconds(self, options: Dict[str, Any]) -> int:
+        default_timeout = int(config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS)
+        candidate = options.get("hard_timeout_seconds", default_timeout)
+        try:
+            parsed = int(candidate)
+            if parsed > 0:
+                return parsed
+        except Exception:
+            pass
+        return default_timeout
 
 job_orchestrator = JobOrchestrator()
 

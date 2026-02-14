@@ -1,8 +1,5 @@
-# engine-execution-failfast Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change engine-auth-observability-and-failfast. Update Purpose after archive.
-## Requirements
 ### Requirement: 任务执行 MUST 启用硬超时并终止阻塞子进程
 系统 MUST 对 Agent 子进程执行施加硬超时，超时后必须终止整个相关进程树并结束任务。
 
@@ -36,6 +33,8 @@ TBD - created by archiving change engine-auth-observability-and-failfast. Update
 - **THEN** 轮询接口必须返回 `status=failed`
 - **AND** 客户端不会无限轮询 `running`
 
+## ADDED Requirements
+
 ### Requirement: Timeout 失败任务 MUST 保留调试产物但不得入缓存
 系统在 timeout 失败后 MUST 保留已生成的日志与 artifacts 用于排障，但 MUST NOT 记录为可命中的 cache。
 
@@ -47,4 +46,3 @@ TBD - created by archiving change engine-auth-observability-and-failfast. Update
 #### Scenario: Timeout 后调试文件保留
 - **WHEN** timeout 发生前已产生部分日志或 artifacts
 - **THEN** 这些文件应保留在 run 目录中供调试查看
-

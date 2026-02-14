@@ -1,8 +1,5 @@
-# engine-hard-timeout-policy Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change run-observability-streaming-and-timeout. Update Purpose after archive.
-## Requirements
 ### Requirement: 系统 MUST 提供可配置的引擎硬超时策略
 系统 MUST 为引擎执行提供硬超时，并允许通过环境变量或运行时参数覆盖默认值；超时错误信息必须反映本次实际生效值。
 
@@ -15,4 +12,3 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 - **WHEN** 某 run 因 hard timeout 失败
 - **THEN** 错误信息中的秒数应为本次实际生效值
 - **AND** 不得固定为全局默认值
-
