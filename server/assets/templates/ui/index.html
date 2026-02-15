@@ -17,6 +17,19 @@
         button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 9px 14px; cursor: pointer; }
         button:hover { background: #0b5f58; }
         #install-status-container { margin-top: 12px; }
+        .nav-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+        .nav-card {
+            border: 1px solid #d1fae5;
+            border-radius: 10px;
+            padding: 14px;
+            background: linear-gradient(180deg, #f0fdfa 0%, #ecfeff 100%);
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        .nav-card:hover { border-color: #5eead4; box-shadow: 0 1px 8px rgba(15, 118, 110, 0.08); }
+        .nav-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+        .nav-desc { color: #6b7280; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -24,8 +37,16 @@
     <div class="card">
         <h1>Skill Runner 管理界面</h1>
         <div class="muted">用于查看已安装 Skill，并通过网页上传 Skill 包进行安装。</div>
-        <div class="muted" style="margin-top:8px;"><a href="/ui/engines">进入 Engine 管理</a></div>
-        <div class="muted" style="margin-top:6px;"><a href="/ui/runs">进入 Run 观测</a></div>
+        <div class="nav-grid">
+            <a class="nav-card" href="/ui/engines">
+                <div class="nav-title">Engine 管理</div>
+                <div class="nav-desc">查看引擎状态、鉴权状态、升级与模型快照管理。</div>
+            </a>
+            <a class="nav-card" href="/ui/runs">
+                <div class="nav-title">Run 观测</div>
+                <div class="nav-desc">按 request_id 查看 run 文件树、状态与日志输出。</div>
+            </a>
+        </div>
     </div>
 
     <div class="card">

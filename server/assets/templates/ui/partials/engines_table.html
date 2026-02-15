@@ -39,6 +39,7 @@
                     <input type="hidden" name="engine" value="{{ row.engine }}">
                     <button type="submit">升级该引擎</button>
                 </form>
+                <button type="button" data-engine-start="{{ row.engine }}">在内嵌终端中启动 TUI</button>
                 <a href="/ui/engines/{{ row.engine }}/models">模型管理</a>
             </td>
         </tr>

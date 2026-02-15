@@ -18,6 +18,7 @@ Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemi
 - Skill 浏览：`/ui/skills/{skill_id}` 可查看包结构并只读预览文件
 - Engine 管理：`/ui/engines` 查看引擎状态、触发升级、查看升级日志
 - Model Manifest 管理：`/ui/engines/{engine}/models` 查看并补录当前版本快照
+- 内嵌 TUI 终端：`/ui/engines` 页面内直接启动引擎 TUI（受控单会话）
 
 ## 构建与启动（容器）
 
@@ -47,6 +48,19 @@ docker compose up --build
 - `UI_BASIC_AUTH_USERNAME=<用户名>`
 - `UI_BASIC_AUTH_PASSWORD=<密码>`
 
+说明：
+- 这些变量仅在运行时注入，不会固化在镜像 `ENV` 中。
+- 可在 `docker-compose.yml` 的 `services.api.environment` 中设置，或通过 `docker run -e` 传入。
+
+示例（`docker run`）：
+```bash
+docker run --rm -p 8000:8000 -p 7681:7681 \
+  -e UI_BASIC_AUTH_ENABLED=true \
+  -e UI_BASIC_AUTH_USERNAME=admin \
+  -e UI_BASIC_AUTH_PASSWORD=change-me \
+  leike0813/skill-runner:v0.3.3
+```
+
 ## 本地运行（非容器）
 
 推荐使用一键脚本（自动启用本地隔离运行时）：
@@ -60,6 +74,8 @@ Windows (PowerShell):
 ```powershell
 .\scripts\deploy_local.ps1
 ```
+
+> Windows 本地若使用内嵌 TUI 终端，请确保安装 `pywinpty`（项目依赖已声明）。
 
 脚本会统一设置：
 - `SKILL_RUNNER_RUNTIME_MODE=local`
@@ -97,6 +113,21 @@ curl -i -u admin:change-me http://127.0.0.1:8000/ui
 ./scripts/check_agent_auth.sh local
 ./scripts/check_agent_auth.sh container
 ```
+
+网页内嵌终端入口（需开启 UI 并通过 Basic Auth）：
+```
+http://127.0.0.1:8000/ui/engines
+```
+说明：
+- 仅支持预置引擎 TUI（不支持任意 shell 命令）
+- 全局同一时刻仅允许一个内嵌终端会话
+- 依赖 `ttyd`（本地部署需已安装；容器镜像内已预装）
+- 容器部署请映射 `7681:7681`（默认 ttyd 端口）
+- UI 会展示 `sandbox_status` 作为可观测信息；默认不阻断 TUI 启动
+- 内嵌 TUI 会话中，Gemini 在容器沙箱运行时可用时会显式追加 `--sandbox`
+- iFlow 内嵌 TUI 当前固定为非沙箱运行；UI 会显示告警（其沙箱依赖 Docker 镜像执行，不符合本内嵌 TUI 设计）
+- 内嵌 TUI 使用最小权限策略：Codex/Gemini/iFlow 的 shell 工具均被禁用
+- 内嵌 TUI 安全配置与 RUN 执行路径（`/v1/jobs`）隔离
 
 ## API 示例（关键）
 

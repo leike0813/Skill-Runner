@@ -1,7 +1,13 @@
 [submodule "skills/skill-converter-agent"]
 	path = skills/skill-converter-agent
-	url = https://github.com/leike0813/skill-converter-agent
+	url = https://github.com/leike0813/agent-skills
+	branch = skill/skill-converter-agent
 
 [submodule "skills/literature-digest"]
 	path = skills/literature-digest
-	url = https://github.com/leike0813/literature-digest
+	url = https://github.com/leike0813/agent-skills
+	branch = skill/literature-digest
+[submodule "skills/tag-regulator"]
+	path = skills/tag-regulator
+	url = https://github.com/leike0813/agent-skills
+	branch = skill/tag-regulator

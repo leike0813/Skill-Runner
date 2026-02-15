@@ -19,7 +19,8 @@ def _build_skill_zip(
     include_input_schema: bool = True,
     include_output_schema: bool = True,
     engines: list[str] | None = None,
-    artifacts: list[dict] | None = None
+    artifacts: list[dict] | None = None,
+    extra_entries: dict[str, str | bytes] | None = None,
 ) -> bytes:
     if skill_name is None:
         skill_name = skill_id
@@ -66,6 +67,8 @@ def _build_skill_zip(
             zf.writestr(f"{skill_id}/assets/parameter.schema.json", json.dumps(parameter_schema))
         if include_output_schema:
             zf.writestr(f"{skill_id}/assets/output.schema.json", json.dumps(output_schema))
+        for rel_path, content in (extra_entries or {}).items():
+            zf.writestr(rel_path, content)
     return bio.getvalue()
 
 
@@ -116,6 +119,33 @@ def test_install_new_skill(monkeypatch, isolated_skill_paths):
     assert (Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json").exists()
 
 
+def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monkeypatch, isolated_skill_paths):
+    store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
+    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+
+    manager = SkillPackageManager()
+    payload = _build_skill_zip(
+        "demo-upload",
+        "1.0.0",
+        extra_entries={
+            "demo-upload/.git/config": "[core]\n\trepositoryformatversion = 0\n",
+            "demo-upload/.github/workflows/ci.yml": "name: ci\n",
+            "demo-upload/.gitignore": "*.pyc\n",
+        },
+    )
+    manager.create_install_request("req-1", payload)
+    manager.run_install("req-1")
+
+    row = store.get_install("req-1")
+    assert row is not None
+    assert row["status"] == "succeeded"
+    live_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"
+    assert not (live_dir / ".git").exists()
+    assert (live_dir / ".github" / "workflows" / "ci.yml").exists()
+    assert (live_dir / ".gitignore").exists()
+
+
 def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
@@ -135,6 +165,33 @@ def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
     archive_runner = Path(config.SYSTEM.SKILLS_ARCHIVE_DIR) / "demo-upload" / "1.0.0" / "assets" / "runner.json"
     assert archive_runner.exists()
     live_runner = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json"
+    assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.1.0"
+
+
+def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_paths):
+    store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
+    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    manager = SkillPackageManager()
+
+    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    manager.run_install("req-1")
+    manager.create_install_request(
+        "req-2",
+        _build_skill_zip(
+            "demo-upload",
+            "1.1.0",
+            extra_entries={"demo-upload/.git": "gitdir: /tmp/external-repo\n"},
+        ),
+    )
+    manager.run_install("req-2")
+
+    row = store.get_install("req-2")
+    assert row is not None
+    assert row["status"] == "succeeded"
+    live_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"
+    assert not (live_dir / ".git").exists()
+    live_runner = live_dir / "assets" / "runner.json"
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.1.0"
 
 
@@ -268,4 +325,3 @@ def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, 
     live_runner = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json"
     assert live_runner.exists()
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.0.0"
-

@@ -66,6 +66,7 @@ class SkillPackageManager:
             raise ValueError("Skill package extraction failed")
 
         skill_id, version = self._validate_staged_skill(staged_skill_dir, top_level)
+        self._strip_git_metadata(staged_skill_dir)
         skills_dir = Path(config.SYSTEM.SKILLS_DIR)
         skills_dir.mkdir(parents=True, exist_ok=True)
         live_skill_dir = skills_dir / skill_id
@@ -88,6 +89,32 @@ class SkillPackageManager:
 
         skill_registry.scan_skills()
         return skill_id, version, action
+
+    def _strip_git_metadata(self, staged_skill_dir: Path) -> None:
+        git_nodes = sorted(
+            {path for path in staged_skill_dir.rglob(".git")},
+            key=lambda p: len(p.parts),
+            reverse=True,
+        )
+        for git_path in git_nodes:
+            if not git_path.exists():
+                continue
+            try:
+                if git_path.is_symlink() or git_path.is_file():
+                    git_path.unlink()
+                elif git_path.is_dir():
+                    shutil.rmtree(git_path, ignore_errors=False)
+                else:
+                    git_path.unlink(missing_ok=True)
+                logger.info("Removed git metadata from staged skill package: %s", git_path)
+            except Exception as exc:
+                logger.exception(
+                    "Failed to remove git metadata from staged skill package: %s",
+                    git_path,
+                )
+                raise ValueError(
+                    f"Failed to strip git metadata from staged skill package: {git_path}"
+                ) from exc
 
     def _inspect_zip_top_level(self, package_path: Path) -> str:
         return self.validator.inspect_zip_top_level_from_path(package_path)

@@ -19,6 +19,12 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v ttyd >/dev/null 2>&1; then
+  echo "ttyd not found. Please install ttyd first for /ui inline terminal."
+  echo "Ubuntu/Debian: sudo apt-get install -y ttyd"
+  exit 1
+fi
+
 LOCAL_ROOT="${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}"
 export SKILL_RUNNER_RUNTIME_MODE="${SKILL_RUNNER_RUNTIME_MODE:-local}"
 export SKILL_RUNNER_DATA_DIR="${SKILL_RUNNER_DATA_DIR:-$PROJECT_ROOT/data}"

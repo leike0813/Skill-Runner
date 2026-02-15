@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter  # type: ignore[import-not-found]
+from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .routers import skills, jobs, engines, skill_packages, temp_skill_runs, ui
+from .services.runtime_profile import get_runtime_profile
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -10,13 +12,13 @@ async def lifespan(_app: FastAPI):
     from .services.cache_manager import cache_manager
     from .services.concurrency_manager import concurrency_manager
     from .services.run_cleanup_manager import run_cleanup_manager
-    from .services.runtime_profile import get_runtime_profile
     from .services.temp_skill_cleanup_manager import temp_skill_cleanup_manager
     from .services.ui_auth import validate_ui_basic_auth_config
 
     runtime_profile = get_runtime_profile()
     runtime_profile.ensure_directories()
-    AgentCliManager(runtime_profile).ensure_layout()
+    cli_manager = AgentCliManager(runtime_profile)
+    cli_manager.ensure_layout()
 
     validate_ui_basic_auth_config()
     concurrency_manager.start()
@@ -31,6 +33,11 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan
 )
+
+runtime_profile = get_runtime_profile()
+ui_static_dir = runtime_profile.data_dir / "ui_static"
+ui_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/ui-static", StaticFiles(directory=str(ui_static_dir)), name="ui-static")
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(skills.router)

@@ -11,7 +11,7 @@
 
 ## 2. Schema 定义规范
 
-在 `skills/<skill_id>/assets/runner.json` 中，必须明确区分这两类 Schema，并显式声明支持的 `engines`：
+在 `skills/<skill_id>/assets/runner.json` 中，必须声明 `input`、`parameter` 和 `output` 的 Schema，并显式声明支持的 `engines`：
 
 ```json
 {
@@ -28,7 +28,7 @@
 定义业务输入。每个字段可通过 `x-input-source` 指定来源：
 
 - `file`（默认）：从 `uploads/` 目录按键名匹配文件并注入绝对路径。
-- `inline`：从 `POST /v1/jobs` 请求体顶层 `input` 读取 JSON 值。
+- `inline`：从 `POST /v1/jobs` 请求体顶层 `input` 直接读取 JSON 值。
 
 对于 `file` 字段，可用 `extensions` 限制文件类型。
 

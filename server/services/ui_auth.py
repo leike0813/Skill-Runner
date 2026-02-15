@@ -1,13 +1,14 @@
+import base64
+import binascii
 import secrets
 import logging
 
-from fastapi import Depends, HTTPException, status  # type: ignore[import-not-found]
-from fastapi.security import HTTPBasic, HTTPBasicCredentials  # type: ignore[import-not-found]
+from fastapi import HTTPException, WebSocket, status  # type: ignore[import-not-found]
+from starlette.requests import HTTPConnection  # type: ignore[import-not-found]
 
 from ..config import config
 
 
-_security = HTTPBasic(auto_error=False)
 logger = logging.getLogger(__name__)
 
 
@@ -41,25 +42,65 @@ def validate_ui_basic_auth_config() -> None:
         )
 
 
-def require_ui_basic_auth(
-    credentials: HTTPBasicCredentials | None = Depends(_security),
+async def require_ui_basic_auth(
+    connection: HTTPConnection,
 ) -> None:
     if not is_ui_basic_auth_enabled():
         return
-    username, password = get_ui_basic_auth_credentials()
-    if credentials is None:
+    # WebSocket routes use dedicated websocket auth check; skip here to avoid
+    # FastAPI dependency mismatch between HTTPBasic and websocket scope.
+    if connection.scope.get("type") == "websocket":
+        return
+
+    authorization = connection.headers.get("authorization")
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
             headers={"WWW-Authenticate": "Basic"},
         )
 
-    valid = secrets.compare_digest(credentials.username, username) and secrets.compare_digest(
-        credentials.password, password
-    )
-    if not valid:
+    if not verify_ui_basic_auth_header(authorization):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
+
+
+def _decode_basic_header(authorization: str) -> tuple[str, str] | None:
+    if not authorization or not authorization.lower().startswith("basic "):
+        return None
+    token = authorization[6:].strip()
+    if not token:
+        return None
+    try:
+        decoded = base64.b64decode(token).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    if ":" not in decoded:
+        return None
+    username, password = decoded.split(":", 1)
+    return username, password
+
+
+def verify_ui_basic_auth_header(authorization: str | None) -> bool:
+    if not is_ui_basic_auth_enabled():
+        return True
+    if not authorization:
+        return False
+    decoded = _decode_basic_header(authorization)
+    if decoded is None:
+        return False
+    expected_user, expected_password = get_ui_basic_auth_credentials()
+    username, password = decoded
+    return secrets.compare_digest(username, expected_user) and secrets.compare_digest(
+        password, expected_password
+    )
+
+
+async def require_ui_basic_auth_websocket(websocket: WebSocket) -> bool:
+    if verify_ui_basic_auth_header(websocket.headers.get("authorization")):
+        return True
+    await websocket.close(code=1008)
+    return False

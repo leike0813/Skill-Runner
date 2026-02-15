@@ -88,11 +88,40 @@ The entrypoint runs an agent check on startup and writes a status file:
   - `UI_BASIC_AUTH_ENABLED` (`true` / `false`, default `false`)
   - `UI_BASIC_AUTH_USERNAME`
   - `UI_BASIC_AUTH_PASSWORD`
+  - These are runtime environment variables and are not baked into image `ENV`.
+  - Set them in `docker-compose.yml` (`services.api.environment`) or via `docker run -e`.
   - When enabled, `/ui/*` and `/v1/skill-packages/*` require Basic Auth.
   - If enabled but username/password are missing, app startup fails fast.
-  - UI includes read-only skill browser endpoints:
+
+Example compose config:
+```yaml
+services:
+  api:
+    environment:
+      UI_BASIC_AUTH_ENABLED: "true"
+      UI_BASIC_AUTH_USERNAME: "admin"
+      UI_BASIC_AUTH_PASSWORD: "change-me"
+```
+
+Example docker run:
+```bash
+docker run --rm -p 8000:8000 -p 7681:7681 \
+  -e UI_BASIC_AUTH_ENABLED=true \
+  -e UI_BASIC_AUTH_USERNAME=admin \
+  -e UI_BASIC_AUTH_PASSWORD=change-me \
+  leike0813/skill-runner:v0.3.3
+```
+- UI includes read-only skill browser endpoints:
     - `/ui/skills/{skill_id}`
     - `/ui/skills/{skill_id}/view?path=<relative_path>`
+  - UI also provides inline managed TUI on `/ui/engines`:
+    - per-engine “start TUI” buttons (predefined commands only)
+    - single active session globally
+    - powered by `ttyd` gateway (default port `7681`)
+    - compose example exposes `7681:7681` for browser access
+  - Optional ttyd runtime options:
+    - `UI_SHELL_TTYD_BIND_HOST` (default `0.0.0.0`)
+    - `UI_SHELL_TTYD_PORT` (default `7681`)
 - Default config bootstrap (inside isolated Agent Home):
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`
@@ -145,6 +174,11 @@ Method 2: Login on another machine and copy credentials
   - Gemini → `agent_config/gemini/google_accounts.json`, `agent_config/gemini/oauth_creds.json`
   - iFlow → `agent_config/iflow/iflow_accounts.json`, `agent_config/iflow/oauth_creds.json`
 - Restart the container (or rerun `agent_manager.py --import-credentials /opt/config`) to import.
+
+### Web inline terminal notes
+
+- In container deployments, `/ui/engines` inline terminal runs commands in managed runtime env.
+- In local Windows deployments, this feature relies on `pywinpty`; if missing, the UI returns a clear dependency error.
 
 ## Start the service
 

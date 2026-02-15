@@ -102,6 +102,7 @@
 - 更新时旧版本会归档到 `skills/.archive/{skill_id}/{old_version}/`。
 - 若目标归档路径已存在，则更新失败并保持现有技能不变。
 - 若目录已存在但不是有效已安装结构（例如缺失 `assets/runner.json`），会被视为“无已安装版本”，并先移动到 `skills/.invalid/` 后按全新安装处理。
+- 安装/更新落地前，系统会清理技能包内名称精确为 `.git` 的文件或目录；非 `.git` 的隐藏文件（如 `.gitignore`、`.github/`）不会被该规则删除。
 
 ---
 
@@ -332,6 +333,27 @@
 - 查看 Engine 状态与检测到的 CLI 版本；
 - 触发“升级全部”与“按引擎升级”；
 - 跳转到 Engine 模型管理页。
+- 在页面下方内嵌 TUI 终端（ttyd 网关）。
+- 每个引擎提供“在内嵌终端中启动 TUI”按钮（同一时刻仅允许一个活跃会话）。
+- 启动返回包含 `sandbox_status`/`sandbox_message`（观测信息，默认不阻断启动）。
+- Gemini 内嵌 TUI 在容器沙箱运行时可用时会显式追加 `--sandbox`（不可用时降级启动并保留状态提示）。
+- iFlow 内嵌 TUI 当前固定非沙箱运行，并返回告警状态（其沙箱依赖 Docker 镜像执行，不符合当前内嵌 TUI 设计）。
+- 内嵌 TUI 路径默认禁用三引擎 shell 工具能力（最小权限策略）。
+- 内嵌 TUI 安全配置与 RUN 路径（`/v1/jobs`）配置隔离，不复用 RUN 的权限融合策略。
+
+终端相关接口（JSON）：
+- `GET /ui/engines/tui/session`
+- `POST /ui/engines/tui/session/start`（`engine`，返回会话与 sandbox 探测状态）
+- `POST /ui/engines/tui/session/stop`
+- `POST /ui/engines/tui/session/input`（已废弃，返回 `410`）
+- `POST /ui/engines/tui/session/resize`（已废弃，返回 `410`）
+
+运行说明：
+- 终端实际由 `ttyd` 提供，前端会按会话返回的端口嵌入 `http://<host>:<ttyd_port>/`。
+- 容器部署时需显式映射 ttyd 端口（默认 `7681:7681`）。
+
+兼容性说明：
+- 旧页面 `GET /ui/engines/auth-shell` 已下线，返回 `404`。
 
 ### Engine 升级状态轮询（HTML partial）
 `GET /ui/engines/upgrades/{request_id}/status`

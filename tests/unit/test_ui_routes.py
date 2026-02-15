@@ -1,5 +1,6 @@
-from types import SimpleNamespace
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,9 +11,18 @@ from server.main import app
 
 
 async def _request(method: str, path: str, **kwargs):
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        return await client.request(method, path, **kwargs)
+    @asynccontextmanager
+    async def _noop_lifespan(_app):
+        yield
+
+    original_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _noop_lifespan
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.request(method, path, **kwargs)
+    finally:
+        app.router.lifespan_context = original_lifespan
 
 
 def _build_skill_dir(base: Path) -> Path:
@@ -42,14 +52,6 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     monkeypatch.setattr(
         "server.services.ui_auth.get_ui_basic_auth_credentials",
         lambda: ("admin", "secret"),
-    )
-    monkeypatch.setattr(
-        "server.routers.skill_packages.skill_package_manager.create_install_request",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "server.routers.skill_packages.skill_package_manager.run_install",
-        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         "server.routers.engines.engine_upgrade_manager.create_task",
@@ -90,19 +92,17 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     assert response.status_code == 200
 
     response = await _request(
-        "POST",
-        "/v1/skill-packages/install",
-        files={"file": ("skill.zip", b"zip-bytes", "application/zip")},
+        "GET",
+        "/v1/skill-packages/req-missing",
     )
     assert response.status_code == 401
 
     response = await _request(
-        "POST",
-        "/v1/skill-packages/install",
+        "GET",
+        "/v1/skill-packages/req-missing",
         auth=("admin", "secret"),
-        files={"file": ("skill.zip", b"zip-bytes", "application/zip")},
     )
-    assert response.status_code == 200
+    assert response.status_code == 404
 
     response = await _request("POST", "/v1/engines/upgrades", json={"mode": "all"})
     assert response.status_code == 401
@@ -236,8 +236,8 @@ async def test_ui_engines_page(monkeypatch):
     monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
-        "server.routers.ui.model_registry.list_engines",
-        lambda: [{"engine": "codex", "cli_version_detected": "0.89.0"}],
+        "server.routers.ui.agent_cli_manager.profile",
+        SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
     )
 
     response = await _request("GET", "/ui/engines")
@@ -245,6 +245,92 @@ async def test_ui_engines_page(monkeypatch):
     assert "Engine 管理" in response.text
     assert "正在检测 Engine 版本与状态，请稍候..." in response.text
     assert 'hx-get="/ui/engines/table"' in response.text
+    assert "内嵌终端（ttyd）" in response.text
+    assert "ttyd" in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_auth_shell_route_is_removed(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+
+    response = await _request("GET", "/ui/engines/auth-shell")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_tui_session_endpoints(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.ui_shell_manager.get_session_snapshot",
+        lambda: {"active": True, "status": "running", "session_id": "s-1"},
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.ui_shell_manager.start_session",
+        lambda engine: {"active": True, "status": "running", "session_id": "s-1", "engine": engine},
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.ui_shell_manager.stop_session",
+        lambda: {"active": True, "status": "terminated", "session_id": "s-1"},
+    )
+
+    status_res = await _request("GET", "/ui/engines/tui/session")
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] == "running"
+
+    start_res = await _request("POST", "/ui/engines/tui/session/start", data={"engine": "codex"})
+    assert start_res.status_code == 200
+    assert start_res.json()["engine"] == "codex"
+
+    input_res = await _request("POST", "/ui/engines/tui/session/input", data={"text": "hello"})
+    assert input_res.status_code == 410
+
+    resize_res = await _request("POST", "/ui/engines/tui/session/resize", data={"cols": "120", "rows": "40"})
+    assert resize_res.status_code == 410
+
+    stop_res = await _request("POST", "/ui/engines/tui/session/stop")
+    assert stop_res.status_code == 200
+    assert stop_res.json()["status"] == "terminated"
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+
+    from server.services.ui_shell_manager import UiShellBusyError
+
+    def _raise_busy(_engine: str):
+        raise UiShellBusyError("busy")
+
+    monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _raise_busy)
+
+    response = await _request("POST", "/ui/engines/tui/session/start", data={"engine": "codex"})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "busy"
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.ui_shell_manager.start_session",
+        lambda engine: {
+            "active": True,
+            "status": "running",
+            "session_id": "s-2",
+            "engine": engine,
+            "sandbox_status": "unknown",
+            "sandbox_message": "probe only",
+        },
+    )
+    response = await _request("POST", "/ui/engines/tui/session/start", data={"engine": "gemini"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sandbox_status"] == "unknown"
+    assert payload["engine"] == "gemini"
 
 
 @pytest.mark.asyncio
@@ -277,6 +363,7 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "/ui/engines/codex/models" in response.text
     assert "managed" in response.text
     assert "auth.json: ok" in response.text
+    assert 'data-engine-start="codex"' in response.text
 
 
 @pytest.mark.asyncio

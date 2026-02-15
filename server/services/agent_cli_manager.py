@@ -23,6 +23,7 @@ ENGINE_BINARY_CANDIDATES = {
     "gemini": ["gemini", "gemini.cmd", "gemini.exe"],
     "iflow": ["iflow", "iflow.cmd", "iflow.exe"],
 }
+TTYD_BINARY_CANDIDATES = ["ttyd", "ttyd.exe", "ttyd.cmd"]
 
 CREDENTIAL_IMPORT_RULES = {
     "codex": ["auth.json"],
@@ -44,6 +45,8 @@ DEFAULT_IFLOW_SETTINGS = {
 }
 
 DEFAULT_CODEX_CONFIG = 'cli_auth_credentials_store = "file"\n'
+UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
+UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,56 @@ class AgentCliManager:
         codex_config = profile.agent_home / ".codex" / "config.toml"
         if not codex_config.exists():
             codex_config.write_text(DEFAULT_CODEX_CONFIG, encoding="utf-8")
+
+    def ensure_ui_terminal_assets(self) -> Path:
+        """
+        Ensure xterm static assets are available under data/ui_static/xterm.
+        Returns the mounted static root directory.
+        """
+        static_root = self.profile.data_dir / "ui_static"
+        target_dir = static_root / "xterm"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_js = target_dir / "xterm.js"
+        target_css = target_dir / "xterm.css"
+        target_fit = target_dir / "addon-fit.js"
+        if target_js.exists() and target_css.exists():
+            return static_root
+
+        source_js, source_css = self._resolve_xterm_asset_sources()
+        if source_js is None or source_css is None:
+            install_result = self.install_package(UI_XTERM_PACKAGE)
+            if install_result.returncode != 0:
+                logger.warning(
+                    "Failed to install xterm package for UI terminal: exit=%s stderr=%s",
+                    install_result.returncode,
+                    install_result.stderr.strip(),
+                )
+                return static_root
+            source_js, source_css = self._resolve_xterm_asset_sources()
+
+        if source_js and source_css:
+            shutil.copy2(source_js, target_js)
+            shutil.copy2(source_css, target_css)
+        else:
+            logger.warning("xterm static assets are missing after install attempt")
+
+        # Optional addon: keep UI usable even when fit addon is unavailable.
+        source_fit = self._resolve_xterm_fit_asset_source()
+        if source_fit is None:
+            fit_install = self.install_package(UI_XTERM_FIT_PACKAGE)
+            if fit_install.returncode == 0:
+                source_fit = self._resolve_xterm_fit_asset_source()
+            else:
+                logger.warning(
+                    "Failed to install xterm fit addon: exit=%s stderr=%s",
+                    fit_install.returncode,
+                    fit_install.stderr.strip(),
+                )
+        if source_fit is not None:
+            shutil.copy2(source_fit, target_fit)
+        else:
+            logger.info("xterm fit addon not available; UI terminal will run without auto-fit addon")
+        return static_root
 
     def collect_status(self) -> Dict[str, EngineStatus]:
         result: Dict[str, EngineStatus] = {}
@@ -200,6 +253,24 @@ class AgentCliManager:
                 return Path(resolved)
         return None
 
+    def resolve_ttyd_command(self) -> Optional[Path]:
+        explicit = os.environ.get("SKILL_RUNNER_TTYD_PATH", "").strip()
+        if explicit:
+            candidate = Path(explicit)
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                return candidate
+            return None
+        managed_path = os.pathsep.join(str(path) for path in self.profile.managed_bin_dirs)
+        for name in TTYD_BINARY_CANDIDATES:
+            resolved = shutil.which(name, path=managed_path)
+            if resolved:
+                return Path(resolved)
+        for name in TTYD_BINARY_CANDIDATES:
+            resolved = shutil.which(name, path=os.environ.get("PATH", ""))
+            if resolved:
+                return Path(resolved)
+        return None
+
     def collect_auth_status(self) -> Dict[str, Dict[str, Any]]:
         status: Dict[str, Dict[str, Any]] = {}
         for engine in ENGINE_PACKAGES:
@@ -295,6 +366,30 @@ class AgentCliManager:
                 continue
             kept.append(chunk)
         return os.pathsep.join(kept)
+
+    def _resolve_xterm_asset_sources(self) -> tuple[Path | None, Path | None]:
+        candidates = [
+            self.profile.npm_prefix / "lib" / "node_modules" / "@xterm" / "xterm",
+            self.profile.npm_prefix / "node_modules" / "@xterm" / "xterm",
+        ]
+        for base in candidates:
+            source_js = base / "lib" / "xterm.js"
+            source_css = base / "css" / "xterm.css"
+            if source_js.exists() and source_css.exists():
+                return source_js, source_css
+        return None, None
+
+    def _resolve_xterm_fit_asset_source(self) -> Path | None:
+        candidates = [
+            self.profile.npm_prefix / "lib" / "node_modules" / "@xterm" / "addon-fit",
+            self.profile.npm_prefix / "node_modules" / "@xterm" / "addon-fit",
+        ]
+        for base in candidates:
+            for rel in ("lib/addon-fit.js", "dist/addon-fit.js"):
+                path = base / rel
+                if path.exists():
+                    return path
+        return None
 
 
 def format_status_payload(status: Dict[str, EngineStatus]) -> Dict[str, Dict[str, object]]:

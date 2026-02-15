@@ -21,6 +21,7 @@ artifact management.
 - Skill browser at `/ui/skills/{skill_id}` for read-only package/file inspection
 - Engine management at `/ui/engines` for status, upgrades, and upgrade logs
 - Model manifest management at `/ui/engines/{engine}/models` for snapshot view/add
+- Inline TUI terminal in `/ui/engines` (single session, managed runtime)
 
 ## Container build & run
 
@@ -50,6 +51,19 @@ To protect the admin/install surfaces with Basic Auth:
 - `UI_BASIC_AUTH_USERNAME=<username>`
 - `UI_BASIC_AUTH_PASSWORD=<password>`
 
+Note:
+- These variables are runtime-only and are not baked into the image.
+- Set them in `docker-compose.yml` under `services.api.environment`, or pass with `docker run -e`.
+
+Example (`docker run`):
+```bash
+docker run --rm -p 8000:8000 -p 7681:7681 \
+  -e UI_BASIC_AUTH_ENABLED=true \
+  -e UI_BASIC_AUTH_USERNAME=admin \
+  -e UI_BASIC_AUTH_PASSWORD=change-me \
+  leike0813/skill-runner:v0.3.3
+```
+
 ## Local development (non-container)
 
 Recommended one-click local bootstrap (isolated runtime):
@@ -63,6 +77,9 @@ Windows (PowerShell):
 ```powershell
 .\scripts\deploy_local.ps1
 ```
+
+> For Windows local usage of the inline TUI terminal, ensure `pywinpty` is installed
+> (declared in project dependencies).
 
 These scripts configure:
 - `SKILL_RUNNER_RUNTIME_MODE=local`
@@ -100,6 +117,21 @@ Quick auth/path diagnostics for managed engines (local/container):
 ./scripts/check_agent_auth.sh local
 ./scripts/check_agent_auth.sh container
 ```
+
+Inline TUI entry (requires UI Basic Auth when enabled):
+```
+http://127.0.0.1:8000/ui/engines
+```
+Notes:
+- Predefined engine TUI only (no arbitrary shell command execution)
+- Only one active inline terminal session is allowed globally
+- Requires `ttyd` (preinstalled in container image; install locally for non-container mode)
+- For container deployment, expose `7681:7681` (default ttyd port)
+- UI shows `sandbox_status` as observability signal; by default it does not block TUI startup
+- For inline TUI sessions, Gemini is launched with `--sandbox` when container sandbox runtime is available
+- iFlow inline TUI currently runs without sandbox; UI will show a warning because iFlow sandbox requires Docker-image execution (outside this TUI design)
+- Inline TUI enforces a minimal-permission profile: shell tools are disabled for Codex/Gemini/iFlow
+- Inline TUI security settings are isolated from run execution settings (`/v1/jobs`)
 
 ## API examples
 

@@ -12,7 +12,7 @@ from fastapi import (  # type: ignore[import-not-found]
     Request,
     UploadFile,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse  # type: ignore[import-not-found]
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from ..models import EngineUpgradeTaskStatus, SkillInstallStatus
@@ -33,6 +33,12 @@ from ..services.skill_install_store import skill_install_store
 from ..services.skill_package_manager import skill_package_manager
 from ..services.skill_registry import skill_registry
 from ..services.ui_auth import require_ui_basic_auth
+from ..services.ui_shell_manager import (
+    UiShellBusyError,
+    UiShellRuntimeError,
+    UiShellValidationError,
+    ui_shell_manager,
+)
 
 
 TEMPLATE_ROOT = Path(__file__).parent.parent / "assets" / "templates"
@@ -218,8 +224,44 @@ async def ui_engines(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="ui/engines.html",
-        context={},
+        context={
+            "session": ui_shell_manager.get_session_snapshot(),
+            "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
+        },
     )
+
+
+@router.get("/engines/tui/session")
+async def ui_engine_tui_session_status():
+    return JSONResponse(ui_shell_manager.get_session_snapshot())
+
+
+@router.post("/engines/tui/session/start")
+async def ui_engine_tui_start(engine: str = Form(...)):
+    try:
+        data = ui_shell_manager.start_session(engine)
+        return JSONResponse(data)
+    except UiShellBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except UiShellValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except UiShellRuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/tui/session/input")
+async def ui_engine_tui_input(text: str = Form(...)):
+    raise HTTPException(status_code=410, detail="Direct input endpoint is removed; use ttyd gateway")
+
+
+@router.post("/engines/tui/session/resize")
+async def ui_engine_tui_resize(cols: int = Form(...), rows: int = Form(...)):
+    raise HTTPException(status_code=410, detail="Resize endpoint is removed; use ttyd gateway")
+
+
+@router.post("/engines/tui/session/stop")
+async def ui_engine_tui_stop():
+    return JSONResponse(ui_shell_manager.stop_session())
 
 
 @router.get("/engines/table", response_class=HTMLResponse)

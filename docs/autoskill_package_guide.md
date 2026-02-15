@@ -62,7 +62,6 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 - `version`（建议单调递增，如 `1.0.0`）
 - `engines`（非空列表）
 - `schemas.input` / `schemas.parameter` / `schemas.output`
-- `artifacts`（非空列表，描述产物模式）
 
 说明：
 
@@ -115,7 +114,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
    - `output.schema.json`：放结构化输出与 artifact 定义
 
 5. 编写 `runner.json`  
-   声明 `engines`、schema 路径、artifact 合同、版本等。
+   声明 `engines`、schema 路径、版本等。
 
 6. 做本地校验  
    检查身份一致性、schema 文件存在性、字段 required 合理性、artifact 是否可实际产出。
@@ -180,7 +179,6 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 - [ ] `SKILL.md`、`runner.json`、三类 schema 均存在
 - [ ] `runner.json.engines` 非空
 - [ ] `runner.json.schemas` 路径有效
-- [ ] `runner.json.artifacts` 非空且与输出一致
 - [ ] `output.schema.json` 对 artifact 字段已标注 `x-type: "artifact"`
 - [ ] 必填字段可被真实执行路径产出
 - [ ] 在目标引擎下完成至少一次试跑
