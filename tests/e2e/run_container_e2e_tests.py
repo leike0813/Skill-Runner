@@ -2,6 +2,7 @@ import argparse
 import io
 import logging
 import os
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -9,18 +10,19 @@ from typing import Any, Dict, Iterable, List
 
 import httpx
 import yaml  # type: ignore[import-untyped]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(PROJECT_ROOT))
+
 from tests.common.skill_fixture_loader import (
     build_fixture_skill_zip,
     fixture_skill_engines,
+    fixture_skill_dir,
     fixture_skill_needs_input,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
 SUITES_DIR = PROJECT_ROOT / "tests" / "suites"
 FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
-
-DEFAULT_DOWNLOAD_DIR = "/home/joshua/Workspace/Code/Skill-Runner/e2e-test-download"
 
 logger = logging.getLogger("e2e")
 
@@ -117,9 +119,18 @@ def _assert_json_matches(expected: Dict[str, Any], actual: Dict[str, Any]) -> No
                 raise AssertionError(f"Mismatch for {key}: expected {value}, got {actual[key]}")
 
 
+def _resolve_download_root() -> Path:
+    configured = os.environ.get("E2E_DOWNLOAD_DIR", "").strip()
+    if configured:
+        return Path(configured)
+    # Keep a safe fallback for direct python invocation (without wrapper).
+    return PROJECT_ROOT / "e2e-test-download"
+
+
 def run_suite_case(
     client: httpx.Client,
     base_url: str,
+    download_root: Path,
     engine: str,
     skill_id: str,
     case: Dict[str, Any],
@@ -136,6 +147,14 @@ def run_suite_case(
     fixture_id = skill_fixture or skill_id
 
     if skill_source == "temp":
+        fixture_dir = fixture_skill_dir(PROJECT_ROOT, fixture_id)
+        logger.info(
+            "Case: %s (source=temp, fixture=%s, engine=%s, debug=%s)",
+            name,
+            fixture_dir,
+            engine,
+            debug,
+        )
         engines = fixture_skill_engines(PROJECT_ROOT, fixture_id)
         engine_allowed = bool(engines) and engine in engines
         needs_upload = bool(inputs) or fixture_skill_needs_input(PROJECT_ROOT, fixture_id)
@@ -152,7 +171,6 @@ def run_suite_case(
             "model": model,
             "runtime_options": {"no_cache": True, "verbose": verbose, "debug": debug},
         }
-        logger.info("Case: %s (source=temp, engine=%s, debug=%s)", name, engine, debug)
         logger.info("Create payload: %s", create_payload)
         create_res = client.post(f"{base_url}/v1/temp-skill-runs", json=create_payload)
         if create_res.status_code != 200:
@@ -271,7 +289,7 @@ def run_suite_case(
         raise AssertionError(f"{name} bundle download failed")
 
     bundle_name = "run_bundle_debug.zip" if debug else "run_bundle.zip"
-    downloads_dir = Path(os.environ.get("E2E_DOWNLOAD_DIR", DEFAULT_DOWNLOAD_DIR)) / request_id
+    downloads_dir = download_root / request_id
     downloads_dir.mkdir(parents=True, exist_ok=True)
     bundle_file = downloads_dir / bundle_name
     bundle_file.write_bytes(download_res.content)
@@ -301,11 +319,9 @@ def main() -> int:
     args = parser.parse_args()
 
     _setup_logging(args.verbose)
-    if "E2E_DOWNLOAD_DIR" not in os.environ:
-        os.environ["E2E_DOWNLOAD_DIR"] = DEFAULT_DOWNLOAD_DIR
-        logger.info("Enforced E2E_DOWNLOAD_DIR=%s", DEFAULT_DOWNLOAD_DIR)
-
     base_url = args.base_url.rstrip("/")
+    download_root = _resolve_download_root()
+    logger.info("Using E2E_DOWNLOAD_DIR=%s", download_root)
     client = httpx.Client(timeout=120.0)
 
     results = []
@@ -325,6 +341,7 @@ def main() -> int:
             success = run_suite_case(
                 client,
                 base_url,
+                download_root,
                 suite_engine,
                 skill_id,
                 case,

@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from ..config import config
 from ..models import SkillManifest
+from .manifest_artifact_inference import infer_manifest_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -60,48 +61,12 @@ class SkillRegistry:
         try:
             with open(runner_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # If artifacts are NOT explicitly defined, try to scan them from output schema
-                if ("artifacts" not in data or not data["artifacts"]) and "schemas" in data and "output" in data["schemas"]:
-                     output_schema_path = skill_dir / data["schemas"]["output"]
-                     data["artifacts"] = self._scan_artifacts(output_schema_path)
+                data = infer_manifest_artifacts(data, skill_dir)
 
                 return SkillManifest(**data, path=skill_dir)
         except Exception:
             logger.exception("Error loading skill %s", skill_dir.name)
             return None
-
-    def _scan_artifacts(self, schema_path: Path) -> List[Dict[str, Any]]:
-        """
-        Scans output.schema.json for properties marked with x-type: artifact.
-        Returns list of dicts compatible with ManifestArtifact.
-        """
-        artifacts: List[Dict[str, Any]] = []
-        if not schema_path.exists():
-            return artifacts
-            
-        try:
-            with open(schema_path, "r") as f:
-                schema = json.load(f)
-                
-            props = schema.get("properties", {})
-            required_keys = set(schema.get("required", []))
-            for key, val in props.items():
-                x_type = val.get("x-type")
-                if x_type in ["artifact", "file"]:
-                    # Create artifact definition
-                    # Prefer x-filename for pattern, fallback to key
-                    pattern = val.get("x-filename", key)
-                    role = val.get("x-role", "output")
-                    
-                    artifacts.append({
-                        "role": role, 
-                        "pattern": pattern,
-                        "required": key in required_keys
-                    })
-        except Exception:
-            logger.exception("Error scanning artifacts")
-            
-        return artifacts
 
     def list_skills(self) -> List[SkillManifest]:
         self.scan_skills() # Rescan for simplicity in v0
