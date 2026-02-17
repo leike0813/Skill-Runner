@@ -2,8 +2,8 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
-from ..models import SkillManifest
+from typing import Dict, Any, Optional
+from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from .base import EngineAdapter, ProcessExecutionResult
 from ..config import config
 from ..services.config_generator import config_generator
@@ -72,7 +72,13 @@ class GeminiAdapter(EngineAdapter):
         config_generator.generate_config("gemini_settings_schema.json", layers, settings_path)
         return settings_path
 
-    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path) -> Path:
+    def _setup_environment(
+        self,
+        skill: SkillManifest,
+        run_dir: Path,
+        config_path: Path,
+        options: Dict[str, Any],
+    ) -> Path:
         """
         Phase 2: Environment Setup (Install & Patch)
         """
@@ -93,7 +99,11 @@ class GeminiAdapter(EngineAdapter):
 
             # Patching
             if skill.artifacts:
-                skill_patcher.patch_skill_md(skills_target_dir, skill.artifacts)
+                skill_patcher.patch_skill_md(
+                    skills_target_dir,
+                    skill.artifacts,
+                    execution_mode=self._resolve_execution_mode(options),
+                )
                 
             return skills_target_dir
         return Path(gemini_config_dir / "skills" / "unknown") # Should verify earlier
@@ -168,15 +178,23 @@ class GeminiAdapter(EngineAdapter):
             for dep in skill.runtime.dependencies:
                 cmd_parts.append(f"--with={dep}")
                 
-        # Base Command
         gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
         if gemini_cmd is None:
             raise RuntimeError("Gemini CLI not found in managed prefix")
-        cmd_parts.extend([
-            str(gemini_cmd),
-            "--yolo",
-            prompt
-        ])
+        resume_handle = options.get("__resume_session_handle")
+        if isinstance(resume_handle, dict):
+            cmd_parts.extend(
+                self.build_resume_command(
+                    prompt=prompt,
+                    options=options,
+                    session_handle=EngineSessionHandle.model_validate(resume_handle),
+                )
+            )
+        else:
+            cmd_parts.extend([str(gemini_cmd)])
+            if self._resolve_execution_mode(options) == "auto":
+                cmd_parts.append("--yolo")
+            cmd_parts.append(prompt)
         
         logger.info("Executing Gemini CLI: %s in %s", " ".join(cmd_parts), run_dir)
         
@@ -187,7 +205,7 @@ class GeminiAdapter(EngineAdapter):
         )
         return await self._capture_process_output(proc, run_dir, options, "Gemini")
 
-    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
         Phase 5: Result Parsing
         """
@@ -204,16 +222,70 @@ class GeminiAdapter(EngineAdapter):
                     response_text = json.dumps(response, ensure_ascii=False)
             elif isinstance(envelope, dict) and "response" not in envelope and "error" in envelope:
                  logger.error("Gemini CLI Error: %s", envelope["error"])
-                 return None, "none"
+                 return self._turn_error(message="gemini cli error envelope")
         except json.JSONDecodeError:
             pass
 
         result, repair_level = self._parse_json_with_deterministic_repair(response_text)
         if result is None:
-            return None, "none"
+            return self._turn_error(message="failed to parse gemini output")
         if used_envelope_response and repair_level == "none":
             repair_level = "deterministic_generic"
-        return result, repair_level
+        return self._build_turn_result_from_payload(result, repair_level)
+
+    def extract_session_handle(self, raw_stdout: str, turn_index: int) -> EngineSessionHandle:
+        session_id = self._extract_session_id(raw_stdout)
+        if not session_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: missing gemini session_id")
+        return EngineSessionHandle(
+            engine="gemini",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value=session_id,
+            created_at_turn=turn_index,
+        )
+
+    def build_resume_command(
+        self,
+        prompt: str,
+        options: Dict[str, Any],
+        session_handle: EngineSessionHandle,
+    ) -> list[str]:
+        session_id = session_handle.handle_value.strip()
+        if not session_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: empty gemini session_id")
+        gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
+        if gemini_cmd is None:
+            raise RuntimeError("Gemini CLI not found in managed prefix")
+        return [
+            str(gemini_cmd),
+            "--resume",
+            session_id,
+            prompt,
+        ]
+
+    def _extract_session_id(self, raw_stdout: str) -> Optional[str]:
+        try:
+            payload = json.loads(raw_stdout)
+        except json.JSONDecodeError:
+            return None
+        return self._find_session_id(payload)
+
+    def _find_session_id(self, payload: Any) -> Optional[str]:
+        if isinstance(payload, dict):
+            value = payload.get("session_id")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            for child in payload.values():
+                found = self._find_session_id(child)
+                if found:
+                    return found
+            return None
+        if isinstance(payload, list):
+            for item in payload:
+                found = self._find_session_id(item)
+                if found:
+                    return found
+        return None
 
 
 logger = logging.getLogger(__name__)

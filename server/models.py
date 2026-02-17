@@ -20,9 +20,73 @@ class RunStatus(str, Enum):
     """
     QUEUED = "queued"       # Request received, waiting for orchestrator
     RUNNING = "running"     # Active execution in progress
+    WAITING_USER = "waiting_user"  # Waiting for user interaction reply
     SUCCEEDED = "succeeded" # Finished successfully (exit code 0)
     FAILED = "failed"       # Finished with error or non-zero exit code
     CANCELED = "canceled"   # Terminated by user or timeout
+
+
+class ExecutionMode(str, Enum):
+    """Execution strategy for run orchestration."""
+    AUTO = "auto"
+    INTERACTIVE = "interactive"
+
+
+class EngineSessionHandleType(str, Enum):
+    """Normalized engine session handle type."""
+    SESSION_ID = "session_id"
+    SESSION_FILE = "session_file"
+    OPAQUE = "opaque"
+
+
+class EngineInteractiveProfileKind(str, Enum):
+    """Interactive execution tier chosen by capability probe."""
+    RESUMABLE = "resumable"
+    STICKY_PROCESS = "sticky_process"
+
+
+class InteractiveErrorCode(str, Enum):
+    """Stable error codes for interactive execution."""
+    SESSION_RESUME_FAILED = "SESSION_RESUME_FAILED"
+    INTERACTION_WAIT_TIMEOUT = "INTERACTION_WAIT_TIMEOUT"
+    INTERACTION_PROCESS_LOST = "INTERACTION_PROCESS_LOST"
+    ORCHESTRATOR_RESTART_INTERRUPTED = "ORCHESTRATOR_RESTART_INTERRUPTED"
+
+
+class RecoveryState(str, Enum):
+    """Run recovery state after orchestrator startup reconciliation."""
+    NONE = "none"
+    RECOVERED_WAITING = "recovered_waiting"
+    FAILED_RECONCILED = "failed_reconciled"
+
+
+class AdapterTurnOutcome(str, Enum):
+    """Normalized engine turn outcome for orchestrator consumption."""
+    FINAL = "final"
+    ASK_USER = "ask_user"
+    ERROR = "error"
+
+
+class EngineSessionHandle(BaseModel):
+    """Opaque session handle persisted for resumable engines."""
+    engine: str
+    handle_type: EngineSessionHandleType
+    handle_value: str
+    created_at_turn: int = 1
+
+
+class EngineResumeCapability(BaseModel):
+    """Result of engine resume capability probing."""
+    supported: bool
+    probe_method: str = "command"
+    detail: str = ""
+
+
+class EngineInteractiveProfile(BaseModel):
+    """Resolved execution profile for interactive runs."""
+    kind: EngineInteractiveProfileKind
+    reason: str = ""
+    session_timeout_sec: int = Field(default=1200, ge=1)
 
 
 class SkillInstallStatus(str, Enum):
@@ -84,6 +148,9 @@ class SkillManifest(BaseModel):
     
     engines: List[str] = []
     """List of supported engines (e.g., ['gemini', 'codex'])."""
+
+    execution_modes: List[ExecutionMode] = Field(default_factory=lambda: [ExecutionMode.AUTO])
+    """Allowed execution modes for this skill."""
     
     entrypoint: Optional[Dict[str, Any]] = {} 
     """
@@ -198,6 +265,27 @@ class RequestStatusResponse(BaseModel):
 
     error: Optional[Any] = None
     """Error details if status is FAILED."""
+
+    auto_decision_count: int = 0
+    """Number of timeout-triggered automatic interaction decisions."""
+
+    last_auto_decision_at: Optional[datetime] = None
+    """Timestamp of the latest timeout-triggered automatic interaction decision."""
+
+    pending_interaction_id: Optional[int] = None
+    """Current pending interaction id when status is waiting_user."""
+
+    interaction_count: int = 0
+    """Total interaction rounds already recorded for this request."""
+
+    recovery_state: RecoveryState = RecoveryState.NONE
+    """Startup recovery outcome for this run."""
+
+    recovered_at: Optional[datetime] = None
+    """Timestamp when startup reconciliation was applied."""
+
+    recovery_reason: Optional[str] = None
+    """Human-readable reason for startup reconciliation decision."""
 
 class RunResponse(BaseModel):
     """
@@ -396,6 +484,169 @@ class RunLogsResponse(BaseModel):
 
     stderr: Optional[str] = None
     """Captured stderr output."""
+
+
+class InteractionKind(str, Enum):
+    """Classifies why agent asks user input."""
+    CHOOSE_ONE = "choose_one"
+    CONFIRM = "confirm"
+    FILL_FIELDS = "fill_fields"
+    OPEN_TEXT = "open_text"
+    RISK_ACK = "risk_ack"
+
+
+class InteractionOption(BaseModel):
+    """Selectable choice in pending interaction."""
+    label: str
+    value: Any
+
+
+class AdapterTurnInteraction(BaseModel):
+    """Structured interaction payload returned by adapters."""
+    interaction_id: int = Field(ge=1)
+    kind: InteractionKind = InteractionKind.OPEN_TEXT
+    prompt: str
+    options: List[InteractionOption] = Field(default_factory=list)
+    ui_hints: Dict[str, Any] = Field(default_factory=dict)
+    default_decision_policy: str = "engine_judgement"
+    required_fields: List[str] = Field(default_factory=list)
+    context: Optional[Dict[str, Any]] = None
+
+
+class AdapterTurnResult(BaseModel):
+    """Unified turn protocol returned by adapters."""
+    outcome: AdapterTurnOutcome
+    final_data: Optional[Dict[str, Any]] = None
+    interaction: Optional[AdapterTurnInteraction] = None
+    stderr: Optional[str] = None
+    repair_level: str = "none"
+    failure_reason: Optional[str] = None
+
+
+class PendingInteraction(BaseModel):
+    """Pending interaction payload returned to clients."""
+    interaction_id: int
+    kind: InteractionKind
+    prompt: str
+    options: List[InteractionOption] = Field(default_factory=list)
+    ui_hints: Dict[str, Any] = Field(default_factory=dict)
+    default_decision_policy: str = "engine_judgement"
+    required_fields: List[str] = Field(default_factory=list)
+    context: Optional[Dict[str, Any]] = None
+
+
+class InteractionPendingResponse(BaseModel):
+    """Response payload for pending interaction query."""
+    request_id: str
+    status: RunStatus
+    pending: Optional[PendingInteraction] = None
+
+
+class InteractionReplyRequest(BaseModel):
+    """Request payload for interaction reply submission."""
+    interaction_id: int
+    response: Any
+    idempotency_key: Optional[str] = None
+
+
+class InteractionReplyResponse(BaseModel):
+    """Response payload for interaction reply acceptance."""
+    request_id: str
+    status: RunStatus
+    accepted: bool
+
+
+class CancelResponse(BaseModel):
+    """Response payload for run cancellation requests."""
+    request_id: str
+    run_id: str
+    status: RunStatus
+    accepted: bool
+    message: str
+
+
+class ManagementSkillSummary(BaseModel):
+    """Frontend-friendly skill summary used by management API."""
+    id: str
+    name: str
+    version: str
+    engines: List[str] = []
+    installed_at: Optional[datetime] = None
+    health: str = "healthy"
+    health_error: Optional[str] = None
+
+
+class ManagementSkillDetail(ManagementSkillSummary):
+    """Skill detail payload used by management API."""
+    schemas: Dict[str, str] = {}
+    entrypoints: Dict[str, Any] = {}
+    files: List[Dict[str, Any]] = []
+
+
+class ManagementSkillListResponse(BaseModel):
+    """Response payload for management skill list."""
+    skills: List[ManagementSkillSummary] = []
+
+
+class ManagementEngineSummary(BaseModel):
+    """Frontend-friendly engine summary used by management API."""
+    engine: str
+    cli_version: Optional[str] = None
+    auth_ready: bool = False
+    sandbox_status: str = "unknown"
+    models_count: int = 0
+
+
+class ManagementEngineDetail(ManagementEngineSummary):
+    """Engine detail payload used by management API."""
+    models: List[EngineModelInfo] = []
+    upgrade_status: Dict[str, Any] = {}
+    last_error: Optional[str] = None
+
+
+class ManagementEngineListResponse(BaseModel):
+    """Response payload for management engine list."""
+    engines: List[ManagementEngineSummary] = []
+
+
+class ManagementRunConversationState(BaseModel):
+    """Run conversation state for management API."""
+    request_id: str
+    run_id: str
+    status: RunStatus
+    engine: str
+    skill_id: str
+    updated_at: datetime
+    pending_interaction_id: Optional[int] = None
+    interaction_count: int = 0
+    auto_decision_count: int = 0
+    last_auto_decision_at: Optional[datetime] = None
+    recovery_state: RecoveryState = RecoveryState.NONE
+    recovered_at: Optional[datetime] = None
+    recovery_reason: Optional[str] = None
+    poll_logs: bool = False
+    error: Optional[Any] = None
+
+
+class ManagementRunListResponse(BaseModel):
+    """Response payload for management run list."""
+    runs: List[ManagementRunConversationState] = []
+
+
+class ManagementRunFilesResponse(BaseModel):
+    """Response payload for run file tree in management API."""
+    request_id: str
+    run_id: str
+    entries: List[Dict[str, Any]] = []
+
+
+class ManagementRunFilePreviewResponse(BaseModel):
+    """Response payload for run file preview in management API."""
+    request_id: str
+    run_id: str
+    path: str
+    preview: Dict[str, Any]
+
 
 class RunCleanupResponse(BaseModel):
     """

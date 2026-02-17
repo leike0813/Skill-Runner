@@ -4,10 +4,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile  # type: ignore[import-not-found]
-from fastapi.responses import FileResponse  # type: ignore[import-not-found]
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Request, UploadFile  # type: ignore[import-not-found]
+from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 
 from ..models import (
+    CancelResponse,
+    ExecutionMode,
+    RecoveryState,
     RequestStatusResponse,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -22,12 +25,17 @@ from ..services.concurrency_manager import concurrency_manager
 from ..services.job_orchestrator import job_orchestrator
 from ..services.model_registry import model_registry
 from ..services.options_policy import options_policy
+from ..services.run_observability import run_observability_service
+from ..services.run_store import run_store
 from ..services.temp_skill_run_manager import temp_skill_run_manager
 from ..services.temp_skill_run_store import temp_skill_run_store
 from ..services.workspace_manager import workspace_manager
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
+
+TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
+ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER}
 
 
 @router.post("", response_model=TempSkillRunCreateResponse)
@@ -93,6 +101,23 @@ async def upload_temp_skill_and_start(
             raise ValueError(
                 f"Skill '{skill.id}' does not support engine '{record['engine']}'"
             )
+        requested_mode = record.get("runtime_options", {}).get(
+            "execution_mode", ExecutionMode.AUTO.value
+        )
+        declared_modes = _declared_execution_modes(skill)
+        if requested_mode not in declared_modes:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "SKILL_EXECUTION_MODE_UNSUPPORTED",
+                    "message": (
+                        f"Skill '{skill.id}' does not support execution_mode "
+                        f"'{requested_mode}'"
+                    ),
+                    "declared_execution_modes": sorted(declared_modes),
+                    "requested_execution_mode": requested_mode,
+                },
+            )
 
         if file is not None:
             input_bytes = await file.read()
@@ -129,11 +154,16 @@ async def upload_temp_skill_and_start(
             status=run_status.status,
             extracted_files=extracted_files,
         )
-    except HTTPException:
+    except HTTPException as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            error_message = detail.get("message") or detail.get("code") or str(detail)
+        else:
+            error_message = str(detail)
         if run_status is not None:
-            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error="Job queue is full")
+            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
         elif record.get("run_id") is None:
-            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error="Job queue is full")
+            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
         raise
     except ValueError as exc:
         temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=str(exc))
@@ -163,6 +193,9 @@ async def get_temp_skill_run_status(request_id: str):
             updated_at=updated_at,
             warnings=[],
             error={"message": rec["error"]} if rec.get("error") else None,
+            recovery_state=RecoveryState.NONE,
+            recovered_at=None,
+            recovery_reason=None,
         )
 
     run_dir = workspace_manager.get_run_dir(run_id)
@@ -179,6 +212,9 @@ async def get_temp_skill_run_status(request_id: str):
         warnings = payload.get("warnings", [])
         error = payload.get("error")
         updated_at = _parse_dt(payload.get("updated_at"))
+    recovery_info = run_store.get_recovery_info(run_id)
+    recovered_at_raw = recovery_info.get("recovered_at")
+    recovered_at = _parse_dt(recovered_at_raw) if recovered_at_raw else None
 
     return RequestStatusResponse(
         request_id=request_id,
@@ -189,6 +225,9 @@ async def get_temp_skill_run_status(request_id: str):
         updated_at=updated_at,
         warnings=warnings,
         error=error,
+        recovery_state=_parse_recovery_state(recovery_info.get("recovery_state")),
+        recovered_at=recovered_at,
+        recovery_reason=_coerce_str_or_none(recovery_info.get("recovery_reason")),
     )
 
 
@@ -263,6 +302,89 @@ async def get_temp_skill_run_logs(request_id: str):
     )
 
 
+@router.post("/{request_id}/cancel", response_model=CancelResponse)
+async def cancel_temp_skill_run(request_id: str):
+    rec = temp_skill_run_store.get_request(request_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Request not found")
+    run_id_obj = rec.get("run_id")
+    if not isinstance(run_id_obj, str) or not run_id_obj:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_id = run_id_obj
+    run_dir = _get_run_dir_from_temp_request(request_id)
+
+    status = RunStatus(rec.get("status", RunStatus.QUEUED.value))
+    status_file = run_dir / "status.json"
+    if status_file.exists():
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+        status = RunStatus(payload.get("status", status.value))
+
+    if status in TERMINAL_STATUSES:
+        return CancelResponse(
+            request_id=request_id,
+            run_id=run_id,
+            status=status,
+            accepted=False,
+            message="Run already in terminal state",
+        )
+    if status not in ACTIVE_CANCELABLE_STATUSES:
+        return CancelResponse(
+            request_id=request_id,
+            run_id=run_id,
+            status=status,
+            accepted=False,
+            message="Run is not cancelable",
+        )
+
+    accepted = await job_orchestrator.cancel_run(
+        run_id=run_id,
+        engine_name=str(rec.get("engine", "")),
+        run_dir=run_dir,
+        status=status,
+        temp_request_id=request_id,
+    )
+    return CancelResponse(
+        request_id=request_id,
+        run_id=run_id,
+        status=RunStatus.CANCELED,
+        accepted=accepted,
+        message="Cancel request accepted" if accepted else "Cancel already requested",
+    )
+
+
+@router.get("/{request_id}/events")
+async def stream_temp_skill_run_events(
+    request_id: str,
+    request: Request,
+    stdout_from: int = Query(default=0, ge=0),
+    stderr_from: int = Query(default=0, ge=0),
+):
+    run_dir = _get_run_dir_from_temp_request(request_id)
+
+    async def _event_stream():
+        async for item in run_observability_service.iter_sse_events(
+            run_dir=run_dir,
+            request_id=None,
+            stdout_from=stdout_from,
+            stderr_from=stderr_from,
+            is_disconnected=request.is_disconnected,
+        ):
+            yield run_observability_service.format_sse_frame(
+                item["event"],
+                item["data"],
+            )
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def _get_run_dir_from_temp_request(request_id: str) -> Path:
     rec = temp_skill_run_store.get_request(request_id)
     if not rec:
@@ -274,6 +396,19 @@ def _get_run_dir_from_temp_request(request_id: str) -> Path:
     if not run_dir:
         raise HTTPException(status_code=404, detail="Run not found")
     return run_dir
+
+
+def _declared_execution_modes(skill: Any) -> set[str]:
+    raw_modes = getattr(skill, "execution_modes", [ExecutionMode.AUTO.value]) or [
+        ExecutionMode.AUTO.value
+    ]
+    modes: set[str] = set()
+    for mode in raw_modes:
+        if isinstance(mode, ExecutionMode):
+            modes.add(mode.value)
+        else:
+            modes.add(str(mode))
+    return modes
 
 
 def _read_log(path: Path) -> str | None:
@@ -289,3 +424,23 @@ def _parse_dt(raw: str | None) -> datetime:
         return datetime.fromisoformat(raw)
     except ValueError:
         return datetime.utcnow()
+
+
+def _coerce_str_or_none(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        value = raw.strip()
+        return value or None
+    return str(raw)
+
+
+def _parse_recovery_state(raw: Any) -> RecoveryState:
+    if isinstance(raw, RecoveryState):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return RecoveryState(raw)
+        except ValueError:
+            return RecoveryState.NONE
+    return RecoveryState.NONE

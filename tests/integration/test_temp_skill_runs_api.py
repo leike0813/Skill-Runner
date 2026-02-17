@@ -18,6 +18,7 @@ def _build_skill_zip(skill_id: str = "demo-temp-api") -> bytes:
     runner = {
         "id": skill_id,
         "engines": ["gemini"],
+        "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",

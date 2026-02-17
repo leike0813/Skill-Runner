@@ -3,6 +3,12 @@
     "verbose",
     "no_cache",
     "debug",
-    "debug_keep_temp"
+    "debug_keep_temp",
+    "execution_mode",
+    "interactive_require_user_reply",
+    "session_timeout_sec",
+    "interactive_wait_timeout_sec",
+    "hard_wait_timeout_sec",
+    "wait_timeout_sec"
   ]
 }

@@ -151,6 +151,11 @@ _C.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = int(
     os.environ.get("SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS", "1200")
 )
 
+# Interactive session timeout (seconds)
+_C.SYSTEM.SESSION_TIMEOUT_SEC = int(
+    os.environ.get("SKILL_RUNNER_SESSION_TIMEOUT_SEC", "1200")
+)
+
 # -----------------------------------------------------------------------------
 # Gemini Configuration
 # -----------------------------------------------------------------------------

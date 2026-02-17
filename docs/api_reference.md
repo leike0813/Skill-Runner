@@ -11,6 +11,35 @@
 
 ---
 
+## 0. 管理 API（Management，推荐）
+<a id="management-api-recommended"></a>
+
+`/v1/management/*` 提供前端无关的统一管理契约，适用于内置 UI 与外部前端（如插件 WebView）复用。
+
+### Skill 管理
+- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/health`）
+- `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files`）
+
+### Engine 管理
+- `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/auth_ready/sandbox_status/models_count`）
+- `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`）
+
+### Run 管理（对话窗口）
+- `GET /v1/management/runs`：运行摘要列表（支持 `limit`）
+- `GET /v1/management/runs/{request_id}`：会话状态（含 `pending_interaction_id`、`interaction_count`、`recovery_state/recovered_at/recovery_reason`）
+- `GET /v1/management/runs/{request_id}/files`：文件树
+- `GET /v1/management/runs/{request_id}/file?path=...`：文件预览
+- `GET /v1/management/runs/{request_id}/events`：SSE 实时输出（复用 jobs 事件语义）
+- `GET /v1/management/runs/{request_id}/pending`：查询待决交互
+- `POST /v1/management/runs/{request_id}/reply`：提交交互回复
+- `POST /v1/management/runs/{request_id}/cancel`：取消运行
+
+说明：
+- 管理 API 是推荐的前端消费面。
+- 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*`、`/v1/temp-skill-runs*` 保持兼容，用于执行链路与存量调用。
+
+---
+
 ## 1. 技能 (Skills)
 
 ### 获取技能列表
@@ -20,6 +49,7 @@
 
 说明：
 - 仅返回“有效安装结构”的技能目录（至少包含 `SKILL.md` 与 `assets/runner.json`）。
+- 新接入前端建议优先使用 `GET /v1/management/skills`（该接口保留执行域原始语义）。
 
 **Response** (`List[SkillManifest]`):
 ```json
@@ -92,6 +122,7 @@
   - `assets/output.schema.json`
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json` 必须包含非空 `engines` 列表。
+- `runner.json` 必须包含非空 `execution_modes` 列表，且值仅允许 `auto` / `interactive`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
 - `runner.json` 必须包含可解析的 `version`。
@@ -107,6 +138,10 @@
 ---
 
 ## 2. 任务 (Jobs)
+
+说明：
+- `/v1/jobs*` 继续作为执行域 API 保持兼容。
+- 前端管理/对话窗口场景建议迁移到 `/v1/management/runs*`。
 
 ### 创建任务 (Create Job)
 `POST /v1/jobs`
@@ -143,13 +178,24 @@
     - `baseUrl = "https://apis.iflow.cn/v1"`
 - **运行时选项**:
   - `runtime_options` 不影响输出结果（例如 `verbose`）。
+  - `runtime_options.execution_mode` 支持 `auto`（默认）与 `interactive`。
+  - 会话超时统一键：`runtime_options.session_timeout_sec`（默认 `1200`）。
+  - `interactive` 下可设置 `runtime_options.interactive_require_user_reply`：
+    - `true`（默认）：严格等待用户回复。
+    - `false`：等待超时后自动决策并继续执行。
+  - `interactive` 模式下会先进行引擎恢复能力探测，并写入 `interactive_profile.kind`：
+    - `resumable`: 等待阶段使用持久化会话句柄恢复。
+    - `sticky_process`: 进入驻留等待路径，按 `session_timeout_sec` 计算 `wait_deadline_at`。
   - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
   - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。
-- **禁用缓存**: 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查，但成功执行仍会更新缓存。
+- **缓存策略**:
+  - 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查。
+  - `runtime_options.execution_mode=interactive` 时，系统会跳过缓存命中，且不会写入 `cache_entries`。
 - **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
 - **引擎约束**: `engine` 必须包含在 skill 的 `engines` 列表中，否则直接返回 400。
+- **模式准入约束**: 请求的 `runtime_options.execution_mode` 必须包含在 skill 的 `execution_modes` 声明中，否则返回 400（`SKILL_EXECUTION_MODE_UNSUPPORTED`）。
 - **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
 - **严格校验**: 缺少 required 的输入/参数/输出字段时会标记为 failed（不会仅给 warning）。
@@ -166,6 +212,7 @@
 
 **错误码补充**:
 - `429`: 全局执行队列已满，请稍后重试。
+- `SKILL_EXECUTION_MODE_UNSUPPORTED`（HTTP 400）: Skill 未声明支持请求的 `execution_mode`。
 
 ### 查询状态 (Get Status)
 `GET /v1/jobs/{request_id}`
@@ -174,15 +221,87 @@
 ```json
 {
   "request_id": "d290f1ee-6c54-4b01-90e6-...",
-  "status": "succeeded",
+  "status": "waiting_user",
   "skill_id": "demo-prime-number",
   "engine": "gemini",
   "created_at": "2024-01-01T12:00:00Z",
   "updated_at": "2024-01-01T12:01:00Z",
+  "pending_interaction_id": 12,
+  "interaction_count": 3,
+  "recovery_state": "recovered_waiting",
+  "recovered_at": "2026-02-16T00:05:00Z",
+  "recovery_reason": "resumable_waiting_preserved",
+  "auto_decision_count": 0,
+  "last_auto_decision_at": null,
   "warnings": [],
   "error": null
 }
 ```
+
+说明：
+- `waiting_user` 为非终态，客户端应按 pending/reply 流程推进，而不是直接结束。
+- `pending_interaction_id` 为空表示当前没有待决交互。
+- `interaction_count` 为当前 request 已记录的交互轮次计数。
+- `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
+- `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`INTERACTION_PROCESS_LOST`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
+
+### 查询待决交互 (Get Pending Interaction)
+`GET /v1/jobs/{request_id}/interaction/pending`
+
+返回当前待用户答复的问题（若存在）。
+
+**Response** (`InteractionPendingResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "status": "waiting_user",
+  "pending": {
+    "interaction_id": 12,
+    "kind": "choose_one",
+    "prompt": "请选择执行策略",
+    "options": [{"label": "继续", "value": "continue"}],
+    "ui_hints": {"widget": "radio"},
+    "default_decision_policy": "engine_judgement"
+  }
+}
+```
+
+无待决问题时返回 `pending: null`，并保留当前状态。
+`kind` 当前支持：`choose_one`、`confirm`、`fill_fields`、`open_text`、`risk_ack`。
+
+### 提交交互回复 (Reply Interaction)
+`POST /v1/jobs/{request_id}/interaction/reply`
+
+**Request Body** (`InteractionReplyRequest`):
+```json
+{
+  "interaction_id": 12,
+  "response": "继续执行",
+  "idempotency_key": "req-12-reply-1"
+}
+```
+
+**Response** (`InteractionReplyResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "status": "queued",
+  "accepted": true
+}
+```
+
+说明：
+- `status` 可能为 `queued` 或 `running`：
+  - `resumable` 路径通常回到 `queued` 等待恢复执行；
+  - `sticky_process` 路径维持进程槽位并回到 `running`。
+
+**错误语义**:
+- `400`: 当前请求不是 interactive 模式（`runtime_options.execution_mode != interactive`）。
+- `404`: `request_id` 或 `run` 不存在。
+- `409`: 非 `waiting_user` 状态提交、`interaction_id` 过期/不匹配、或 `idempotency_key` 冲突。
+- `SESSION_RESUME_FAILED`: `resumable` 路径下无法提取/使用会话句柄（Codex `thread_id`、Gemini `session_id`、iFlow `session-id`）。
+- `INTERACTION_WAIT_TIMEOUT`: `interactive_require_user_reply=true` 且 `sticky_process` 等待超时（超过 `wait_deadline_at`）。
+- `INTERACTION_PROCESS_LOST`: `sticky_process` 等待期检测到进程绑定丢失。
 
 ### 上传文件 (Upload File)
 `POST /v1/jobs/{request_id}/upload`
@@ -267,6 +386,50 @@
 }
 ```
 
+### 获取日志事件流 (SSE)
+`GET /v1/jobs/{request_id}/events`
+
+返回 `text/event-stream`，用于实时增量消费 stdout/stderr 与状态变化。
+
+**Query 参数**:
+- `stdout_from`（可选，默认 `0`）：stdout 起始 offset。
+- `stderr_from`（可选，默认 `0`）：stderr 起始 offset。
+
+**事件类型**:
+- `snapshot`：首帧快照，字段：`status`, `stdout_offset`, `stderr_offset`, `pending_interaction_id?`
+- `stdout`：stdout 增量，字段：`from`, `to`, `chunk`
+- `stderr`：stderr 增量，字段：`from`, `to`, `chunk`
+- `status`：状态变化，字段：`status`, `updated_at?`, `pending_interaction_id?`
+- `heartbeat`：保活事件，字段：`ts`
+- `end`：连接结束，字段：`reason`（`waiting_user` 或 `terminal`）
+
+**重连约定**:
+- 客户端记录最近一条 `stdout/stderr` 事件的 `to`。
+- 重连时将该值带回 `stdout_from/stderr_from`，服务端仅推送未消费区间。
+
+### 取消运行 (Cancel Run)
+`POST /v1/jobs/{request_id}/cancel`
+
+**Response** (`CancelResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "run_id": "run-123",
+  "status": "canceled",
+  "accepted": true,
+  "message": "Cancel request accepted"
+}
+```
+
+**语义**:
+- run 不存在：`404`
+- run 已终态（`succeeded/failed/canceled`）：`200`，`accepted=false`（幂等）
+- run 活跃态（`queued/running/waiting_user`）：`200`，`accepted=true`
+- 取消成功后：
+  - `status = canceled`
+  - `error.code = CANCELED_BY_USER`
+  - SSE 会推送 `status=canceled` 与 `end(reason=terminal)`
+
 ### 清理运行记录 (Cleanup Runs)
 `POST /v1/jobs/cleanup`
 
@@ -290,12 +453,16 @@
 - 已安装 Skill 列表（含用途描述）
 - Skill 包上传与安装入口
 - 安装状态轮询与结果回显
+- Skill/Engine/Run 页面主数据源统一迁移到 management API 语义。
 
-### 局部刷新技能列表
-`GET /ui/skills/table`
+### 局部刷新技能列表（Management Adapter）
+`GET /ui/management/skills/table`
 
 用于页面局部刷新。可选参数：
 - `highlight_skill_id`：高亮显示某个 skill 行（安装成功后使用）
+
+兼容旧接口（已弃用）：
+- `GET /ui/skills/table`
 
 ### 页面上传安装 Skill 包
 `POST /ui/skill-packages/install`
@@ -355,6 +522,12 @@
 兼容性说明：
 - 旧页面 `GET /ui/engines/auth-shell` 已下线，返回 `404`。
 
+### Engine 列表数据（Management Adapter）
+`GET /ui/management/engines/table`
+
+兼容旧接口（已弃用）：
+- `GET /ui/engines/table`
+
 ### Engine 升级状态轮询（HTML partial）
 `GET /ui/engines/upgrades/{request_id}/status`
 
@@ -372,28 +545,44 @@
 
 页面能力：
 - 按 `request_id` 展示 run 列表（关联 `run_id`）；
-- 展示当前状态、基础文件状态与更新时间；
+- 展示当前状态、`pending_interaction_id`、`interaction_count`、`recovery_state` 与更新时间；
+- 轮询建议遵循 `poll_logs`：`queued/running=true`，`waiting_user=false`；
 - 支持自动刷新列表。
 
-### Run 详情页面（只读）
+### Run 列表数据（Management Adapter）
+`GET /ui/management/runs/table`
+
+兼容旧接口（已弃用）：
+- `GET /ui/runs/table`
+
+### Run 详情页面（对话窗口）
 `GET /ui/runs/{request_id}`
 
 页面能力：
-- 展示 request/run 基本信息与 `run_dir` 文件状态摘要；
+- 展示 request/run 基本信息；
 - 展示 run 文件树（只读）与文件预览；
-- 实时查看 stdout/stderr tail。
+- 通过 SSE 实时查看 stdout/stderr；
+- `waiting_user` 下展示 pending 并提交 reply；
+- 支持 cancel 动作并收敛到终态。
+- 外部前端与内建 UI 均应遵循同一管理契约（`/v1/management/*`），避免分叉语义。
 
-### 预览 Run 文件（只读）
-`GET /ui/runs/{request_id}/view?path=<relative_path>`
+### 预览 Run 文件（Management Adapter）
+`GET /ui/management/runs/{request_id}/view?path=<relative_path>`
 
 行为与约束与 Skill 预览一致：
 - 禁止绝对路径、`..` 路径穿越与目录逃逸；
 - 文本可预览；二进制显示不可预览；超大文件不预览。
 
-### Run 日志 tail（HTML partial）
+兼容旧接口（已弃用）：
+- `GET /ui/runs/{request_id}/view?path=<relative_path>`
+
+### Run 日志 tail（HTML partial，已弃用）
 `GET /ui/runs/{request_id}/logs/tail`
 
 返回 stdout/stderr 的 tail 内容（默认尾部窗口），当 run 状态为 `queued/running` 时前端会自动轮询刷新。
+
+替代路径：
+- `GET /v1/management/runs/{request_id}/events`
 
 ### UI 基础鉴权
 
@@ -414,6 +603,12 @@
 ```bash
 ./scripts/start_ui_auth_server.sh
 ```
+
+### 旧 UI 数据接口弃用与移除窗口
+
+- 当前默认策略：`warn`（返回旧行为 + 响应头 `Deprecation/Sunset/Link`）。
+- 可切换移除策略：`SKILL_RUNNER_UI_LEGACY_API_MODE=gone`（返回 `410 Gone`）。
+- Sunset 默认日期：`2026-06-30`（可通过 `SKILL_RUNNER_UI_LEGACY_API_SUNSET` 调整）。
 
 ## 3. 临时技能运行 (Temporary Skill Runs)
 
@@ -476,6 +671,8 @@
 - `GET /v1/temp-skill-runs/{request_id}/bundle`
 - `GET /v1/temp-skill-runs/{request_id}/artifacts/{artifact_path}`
 - `GET /v1/temp-skill-runs/{request_id}/logs`
+- `GET /v1/temp-skill-runs/{request_id}/events`
+- `POST /v1/temp-skill-runs/{request_id}/cancel`
 
 语义与 `/v1/jobs/*` 对齐，但作用范围仅限临时 skill 的这次请求。
 另外，临时 skill 运行固定绕过缓存（不读 cache，也不回写 cache）。
@@ -499,6 +696,10 @@
 ---
 
 ## 4. 引擎 (Engines)
+
+说明：
+- `/v1/engines*` 保留执行域/运维能力与兼容语义。
+- 管理页展示建议优先使用 `/v1/management/engines*`（字段稳定、前端友好）。
 
 ### 获取引擎列表
 `GET /v1/engines`

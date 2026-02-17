@@ -2,10 +2,10 @@
     <thead>
         <tr>
             <th>Engine</th>
-            <th>Detected Version</th>
-            <th>Path Source</th>
+            <th>CLI Version</th>
             <th>Auth Ready</th>
-            <th>Credential Files</th>
+            <th>Sandbox</th>
+            <th>Models</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -13,21 +13,10 @@
     {% for row in rows %}
         <tr>
             <td>{{ row.engine }}</td>
-            <td>{{ row.cli_version_detected or "-" }}</td>
-            <td>
-                <div>{{ row.auth.effective_path_source }}</div>
-                <div style="font-size:12px; color:#6b7280;">{{ row.auth.effective_cli_path or "-" }}</div>
-            </td>
-            <td>{{ "yes" if row.auth.auth_ready else "no" }}</td>
-            <td>
-                {% if row.auth.credential_files %}
-                    {% for name, exists in row.auth.credential_files.items() %}
-                        <div style="font-size:12px;">{{ name }}: {{ "ok" if exists else "missing" }}</div>
-                    {% endfor %}
-                {% else %}
-                    <span style="font-size:12px; color:#6b7280;">-</span>
-                {% endif %}
-            </td>
+            <td>{{ row.cli_version or "-" }}</td>
+            <td>{{ "yes" if row.auth_ready else "no" }}</td>
+            <td>{{ row.sandbox_status or "-" }}</td>
+            <td>{{ row.models_count }}</td>
             <td>
                 <form
                     style="display:inline-block; margin-right: 12px;"

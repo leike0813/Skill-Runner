@@ -1,8 +1,6 @@
 ## Purpose
 定义 Web UI 中 Engine 管理与 Model Manifest 管理的行为，确保用户可查看状态、执行升级并可视化查看/补录模型快照。
-
 ## Requirements
-
 ### Requirement: UI MUST 提供 Engine 状态总览页面
 系统 MUST 在 UI 提供 Engine 管理页面，显示引擎可用性与版本号。
 
@@ -63,3 +61,27 @@
 #### Scenario: 未认证访问模型管理页
 - **WHEN** 未认证访问 `/ui/engines/{engine}/models`
 - **THEN** 系统返回 `401`
+
+### Requirement: Engine 管理 UI MUST 基于通用管理 API 字段渲染
+系统 MUST 让 Engine 管理相关核心信息可通过通用管理 API 获取，UI 不应依赖私有拼装字段。
+
+#### Scenario: 获取 Engine 概览信息
+- **WHEN** 客户端请求 Engine 管理概览
+- **THEN** 响应包含版本、认证状态、沙箱状态等稳定字段
+
+#### Scenario: 获取 Engine 详情信息
+- **WHEN** 客户端请求 Engine 管理详情
+- **THEN** 响应包含模型列表与升级状态信息
+- **AND** 字段可被非内置 UI 前端直接消费
+
+### Requirement: Engine 管理页面字段 MUST 对齐 management API
+系统 MUST 保证内建 Engine 管理页面使用 management API 稳定字段，不依赖 UI 私有拼装。
+
+#### Scenario: 引擎概览渲染
+- **WHEN** 页面渲染引擎概览
+- **THEN** 版本、认证状态、沙箱状态来源于 management API 标准字段
+
+#### Scenario: 升级状态渲染
+- **WHEN** 页面渲染升级状态与结果
+- **THEN** 数据来源与外部前端可消费的管理接口语义一致
+

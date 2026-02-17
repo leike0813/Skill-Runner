@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from server.adapters.base import EngineAdapter, ProcessExecutionResult
-from server.models import SkillManifest
+from server.models import AdapterTurnOutcome, AdapterTurnResult, SkillManifest
 
 
 class _TestAdapter(EngineAdapter):
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options):
         return run_dir / "dummy.json"
 
-    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path):
+    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path, options):
         return run_dir
 
     def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data):
@@ -28,7 +28,7 @@ class _TestAdapter(EngineAdapter):
         return await self._capture_process_output(proc, run_dir, options, "Test")
 
     def _parse_output(self, raw_stdout: str):
-        return None, "none"
+        return AdapterTurnResult(outcome=AdapterTurnOutcome.FINAL, final_data={})
 
 
 @pytest.mark.asyncio

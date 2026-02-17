@@ -17,9 +17,12 @@
         a { color: #0f766e; text-decoration: none; }
         a:hover { text-decoration: underline; }
         pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th, td { text-align: left; padding: 6px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-        th { background: #f3f4f6; }
+        button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 8px 12px; cursor: pointer; }
+        button:hover { background: #0b5f58; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .danger { background: #b91c1c; }
+        .danger:hover { background: #991b1b; }
+        .logs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     </style>
 </head>
 <body>
@@ -30,35 +33,13 @@
         <div class="meta">run_id: {{ detail.run_id }}</div>
         <div class="meta">skill: {{ detail.skill_id or "-" }}</div>
         <div class="meta">engine: {{ detail.engine or "-" }}</div>
-        <div class="meta">status: {{ detail.status }}</div>
-        <div class="meta">updated_at: {{ detail.updated_at or "-" }}</div>
-        <div class="meta">run_dir: {{ detail.run_dir }}</div>
-    </div>
-
-    <div class="card">
-        <h3 style="margin:0 0 8px;">文件状态</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Path Key</th>
-                    <th>Exists</th>
-                    <th>Type</th>
-                    <th>Size</th>
-                    <th>MTime</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for key, item in detail.file_state.items() %}
-                <tr>
-                    <td>{{ key }}</td>
-                    <td>{{ "yes" if item.exists else "no" }}</td>
-                    <td>{{ "dir" if item.get("is_dir") else "file" }}</td>
-                    <td>{{ item.get("size", "-") }}</td>
-                    <td>{{ item.get("mtime", "-") }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+        <div class="meta">status: <span id="run-status">{{ detail.status }}</span></div>
+        <div class="meta">updated_at: <span id="run-updated-at">{{ detail.updated_at or "-" }}</span></div>
+        <div class="meta">pending_interaction_id: <span id="run-pending-id">{{ detail.pending_interaction_id if detail.pending_interaction_id is not none else "-" }}</span></div>
+        <div class="meta">interaction_count: <span id="run-interaction-count">{{ detail.interaction_count }}</span></div>
+        <div style="margin-top: 10px;">
+            <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
+        </div>
     </div>
 
     <div class="row">
@@ -72,7 +53,7 @@
                 <span class="file">📄</span>
                 <a
                     href="#"
-                    hx-get="/ui/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
+                    hx-get="/ui/management/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
                     hx-target="#run-file-preview"
                     hx-swap="innerHTML"
                 >{{ entry.name }}</a>
@@ -86,16 +67,206 @@
         </div>
     </div>
 
+    <div class="card" id="pending-panel" style="display:none;">
+        <h3 style="margin:0 0 8px;">Pending Interaction</h3>
+        <div id="pending-prompt" class="meta"></div>
+        <form id="pending-reply-form" style="margin-top: 10px;">
+            <input id="pending-interaction-id" type="hidden" value="">
+            <textarea id="pending-reply-input" rows="3" style="width:100%; border:1px solid #d1d5db; border-radius:8px; padding:8px;" placeholder="输入回复内容"></textarea>
+            <div style="margin-top:8px;">
+                <button type="submit">Submit Reply</button>
+            </div>
+        </form>
+    </div>
+
     <div class="card">
-        <h3 style="margin:0 0 8px;">实时日志（Tail）</h3>
-        <div
-            id="run-logs-panel"
-            hx-get="/ui/runs/{{ detail.request_id }}/logs/tail"
-            hx-trigger="load"
-            hx-swap="outerHTML"
-        ></div>
+        <h3 style="margin:0 0 8px;">实时日志（SSE）</h3>
+        <div class="logs">
+            <div>
+                <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stdout</div>
+                <pre id="stdout-log" style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;"></pre>
+            </div>
+            <div>
+                <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stderr</div>
+                <pre id="stderr-log" style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;"></pre>
+            </div>
+        </div>
     </div>
 </div>
+
+<script>
+(function () {
+    const requestId = {{ detail.request_id | tojson }};
+    const statusEl = document.getElementById("run-status");
+    const updatedAtEl = document.getElementById("run-updated-at");
+    const pendingIdEl = document.getElementById("run-pending-id");
+    const interactionCountEl = document.getElementById("run-interaction-count");
+    const stdoutEl = document.getElementById("stdout-log");
+    const stderrEl = document.getElementById("stderr-log");
+    const pendingPanel = document.getElementById("pending-panel");
+    const pendingPromptEl = document.getElementById("pending-prompt");
+    const pendingInteractionIdEl = document.getElementById("pending-interaction-id");
+    const pendingReplyForm = document.getElementById("pending-reply-form");
+    const pendingReplyInput = document.getElementById("pending-reply-input");
+    const cancelBtn = document.getElementById("cancel-run-btn");
+
+    let stdoutOffset = 0;
+    let stderrOffset = 0;
+    let source = null;
+    let reconnectTimer = null;
+    let terminal = ["succeeded", "failed", "canceled"].includes(statusEl.textContent || "");
+
+    function appendLog(target, chunk) {
+        if (!chunk) return;
+        target.textContent += chunk;
+        target.scrollTop = target.scrollHeight;
+    }
+
+    function closeStream() {
+        if (source) {
+            source.close();
+            source = null;
+        }
+    }
+
+    function updateStatus(payload) {
+        if (!payload) return;
+        if (payload.status) {
+            statusEl.textContent = payload.status;
+            terminal = ["succeeded", "failed", "canceled"].includes(payload.status);
+            if (terminal) {
+                closeStream();
+                pendingPanel.style.display = "none";
+            }
+            if (payload.status === "running") {
+                pendingPanel.style.display = "none";
+            }
+        }
+        if (payload.updated_at) {
+            updatedAtEl.textContent = payload.updated_at;
+        }
+        if (payload.pending_interaction_id !== undefined) {
+            pendingIdEl.textContent = payload.pending_interaction_id === null ? "-" : String(payload.pending_interaction_id);
+        }
+        if (payload.interaction_count !== undefined && payload.interaction_count !== null) {
+            interactionCountEl.textContent = String(payload.interaction_count);
+        }
+    }
+
+    async function refreshState() {
+        const res = await fetch(`/v1/management/runs/${requestId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        updateStatus(data);
+    }
+
+    async function loadPending() {
+        const res = await fetch(`/v1/management/runs/${requestId}/pending`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.pending) {
+            pendingPanel.style.display = "none";
+            return;
+        }
+        pendingPromptEl.textContent = data.pending.prompt || "";
+        pendingInteractionIdEl.value = String(data.pending.interaction_id || "");
+        pendingPanel.style.display = "block";
+    }
+
+    function scheduleReconnect() {
+        if (terminal) return;
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+        }
+        reconnectTimer = setTimeout(() => connectEvents(), 1000);
+    }
+
+    function connectEvents() {
+        if (terminal) return;
+        closeStream();
+        const url = `/v1/management/runs/${requestId}/events?stdout_from=${stdoutOffset}&stderr_from=${stderrOffset}`;
+        source = new EventSource(url);
+
+        source.addEventListener("snapshot", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.stdout_offset === "number") stdoutOffset = data.stdout_offset;
+            if (typeof data.stderr_offset === "number") stderrOffset = data.stderr_offset;
+            updateStatus(data);
+        });
+
+        source.addEventListener("stdout", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.to === "number") stdoutOffset = data.to;
+            appendLog(stdoutEl, data.chunk || "");
+        });
+
+        source.addEventListener("stderr", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.to === "number") stderrOffset = data.to;
+            appendLog(stderrEl, data.chunk || "");
+        });
+
+        source.addEventListener("status", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            updateStatus(data);
+        });
+
+        source.addEventListener("end", async (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            closeStream();
+            await refreshState();
+            if (data.reason === "waiting_user") {
+                await loadPending();
+                return;
+            }
+            if (!terminal) {
+                scheduleReconnect();
+            }
+        });
+
+        source.onerror = () => {
+            closeStream();
+            scheduleReconnect();
+        };
+    }
+
+    pendingReplyForm.addEventListener("submit", async (evt) => {
+        evt.preventDefault();
+        const interactionId = Number(pendingInteractionIdEl.value);
+        if (!interactionId) return;
+        const payload = {
+            interaction_id: interactionId,
+            response: {
+                text: pendingReplyInput.value || "",
+            },
+        };
+        const res = await fetch(`/v1/management/runs/${requestId}/reply`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) return;
+        pendingReplyInput.value = "";
+        pendingPanel.style.display = "none";
+        pendingIdEl.textContent = "-";
+        terminal = false;
+        await refreshState();
+        connectEvents();
+    });
+
+    cancelBtn.addEventListener("click", async () => {
+        cancelBtn.disabled = true;
+        await fetch(`/v1/management/runs/${requestId}/cancel`, {method: "POST"});
+        await refreshState();
+        closeStream();
+    });
+
+    if (statusEl.textContent === "waiting_user") {
+        loadPending().catch(() => {});
+    } else if (!terminal) {
+        connectEvents();
+    }
+})();
+</script>
 </body>
 </html>
-

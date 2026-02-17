@@ -156,7 +156,7 @@ SKILL.md 的格式：
       └── REFERENCE.md
 
 【Runner 对 skill 的强约束（AutoSkill Profile）】
-- 必须可全自动化执行（non-interactive），不得等待人工确认/交互。
+- 必须声明执行模式：`execution_modes`（至少包含 `auto`；若支持交互再显式加入 `interactive`）。
 - 必须提供：
   - assets/input.schema.json
   - assets/parameter.schema.json
@@ -174,6 +174,7 @@ SKILL.md 的格式：
   "id": "skill-name",                 // 必须等于 SKILL.md frontmatter.name 且等于目录名（标准要求 name 匹配目录）:contentReference[oaicite:14]{index=14}
   "version": "1.0.0",
   "engines": ["codex", "gemini", "iflow"],
+  "execution_modes": ["auto", "interactive"], // 必填：允许的执行模式（仅 auto|interactive）
   "entrypoint": {
     "type": "prompt|script|hybrid",
     "prompt": {
@@ -216,6 +217,7 @@ SKILL.md 的格式：
 
 说明：
 - runner.json 是 Runner 私有合同：不会影响标准 skills-compatible agent 读取 SKILL.md。
+- `execution_modes` 必须为非空数组，值仅允许 `auto` / `interactive`。新上传或更新包缺失该字段会被拒绝；存量已安装且缺失的 skill 在兼容期按 `["auto"]` 解释并记录 deprecation 警告。
 - entrypoint.type=prompt 时，SKILL.md 正文仍应写清“执行步骤/输出格式/产物位置”，以便引擎（如 Codex）在激活 skill 时能按指令生成结果；同时 Runner 以 runner.json 作为“机器可执行合同”来编排与校验。
 - entrypoint.type=script/hybrid 时，scripts/ 中的脚本作为更确定的执行路径（建议用于 normalize/fallback 或关键产物生成）。
 
@@ -263,6 +265,33 @@ EngineRunResult 字段建议：
 - output_file_path: str|null      # 若引擎直接写 result.json
 - artifacts_created: [str]        # 初步扫描得到的产物相对路径列表
 - events: [dict] or events.jsonl  # 可选
+
+Interactive 会话恢复约定（v0.2）：
+- Orchestrator 在 interactive 首回合前做 capability probe，并落地 `interactive_profile.kind`：
+  - `resumable`: 进入 `waiting_user` 前必须持久化 `EngineSessionHandle`。
+  - `sticky_process`: 持久化 `wait_deadline_at` 与进程绑定信息。
+- strict 开关：`runtime_options.interactive_require_user_reply`（默认 `true`）：
+  - `true`：保持人工回复门禁；`resumable` 停留 waiting_user，`sticky_process` 超时失败。
+  - `false`：等待超时触发自动决策并继续执行（`resumable` 自动 resume，`sticky_process` 自动注入继续）。
+- 服务启动期恢复（startup reconciliation）：
+  - 扫描非终态 run：`queued/running/waiting_user`。
+  - `waiting_user + resumable`：校验 `pending_interaction_id + session handle`，有效则保持 waiting；无效则 `SESSION_RESUME_FAILED`。
+  - `waiting_user + sticky_process`：重启后统一收敛为 `failed`，错误码 `INTERACTION_PROCESS_LOST`。
+  - `queued/running`：默认收敛为 `failed`，错误码 `ORCHESTRATOR_RESTART_INTERRUPTED`。
+  - 清理孤儿进程与 stale trust/session/slot 绑定，且清理逻辑必须幂等。
+- 恢复观测字段：
+  - `recovery_state`: `none | recovered_waiting | failed_reconciled`
+  - `recovered_at`: 恢复决策写入时间（ISO）
+  - `recovery_reason`: 恢复或失败收敛原因（用于运维排障）
+- 三引擎句柄来源：
+  - Codex: `exec --json` 首条 `thread.started.thread_id`
+  - Gemini: JSON 返回体 `session_id`
+  - iFlow: `<Execution Info>` 中 `session-id`
+- 标准错误码：
+  - `SESSION_RESUME_FAILED`
+  - `INTERACTION_WAIT_TIMEOUT`
+  - `INTERACTION_PROCESS_LOST`
+  - `ORCHESTRATOR_RESTART_INTERRUPTED`
 
 CodexAdapter(v0) 策略（建议）：
 - 使用 codex 的非交互模式执行；
@@ -350,6 +379,54 @@ Artifact 索引规则：
 - 所有请求/响应 JSON，UTF-8
 - 响应按接口各自的 Response Model 返回（见 API Reference）
 
+分层约定（Domain API vs UI Adapter）：
+- Domain API（推荐）：`/v1/management/*`，面向任意前端，返回稳定 JSON 语义。
+- Execution API（兼容）：`/v1/jobs*`、`/v1/temp-skill-runs*`、`/v1/skills*`、`/v1/engines*`，保留执行链路与历史契约。
+- UI Adapter：`/ui/*` 只负责页面渲染与交互，不引入仅 UI 可见的私有业务字段。
+- 外部前端优先对接 Domain API；内建 UI 必须同步遵循同一契约，不得定义分叉语义。
+- 新增管理页能力优先落在 Domain API，再由 `/ui/*` 复用该语义。
+
+Management API（推荐前端入口）：
+1) GET /v1/management/skills
+- 返回 `SkillSummary` 列表（`id/name/version/engines/health`）
+
+2) GET /v1/management/skills/{skill_id}
+- 返回 `SkillDetail`（补充 `schemas/entrypoints/files`）
+
+3) GET /v1/management/engines
+- 返回 `EngineSummary` 列表（`engine/cli_version/auth_ready/sandbox_status/models_count`）
+
+4) GET /v1/management/engines/{engine}
+- 返回 `EngineDetail`（补充 `models/upgrade_status/last_error`）
+
+5) GET /v1/management/runs/{request_id}
+- 返回 `RunConversationState`（包含 `pending_interaction_id`、`interaction_count`、`auto_decision_count`、`last_auto_decision_at`、`recovery_state`、`recovered_at`、`recovery_reason`、`poll_logs`）
+
+6) GET /v1/management/runs/{request_id}/files
+- 返回对话窗口文件树
+
+7) GET /v1/management/runs/{request_id}/file?path=...
+- 返回文件预览（带路径越界保护）
+
+8) GET /v1/management/runs/{request_id}/events
+- SSE 增量日志流（复用 jobs 事件语义）
+
+9) GET /v1/management/runs/{request_id}/pending
+- 查询当前待决交互
+
+10) POST /v1/management/runs/{request_id}/reply
+- 提交交互回复（语义与 jobs 保持一致）
+
+11) POST /v1/management/runs/{request_id}/cancel
+- 取消运行（语义与 jobs 保持一致）
+
+旧 UI 数据接口弃用策略（Web 客户端迁移后）：
+- `warn`（默认）：旧接口继续返回，但附带 `Deprecation/Sunset/Link` 响应头，并记录调用日志。
+- `gone`：旧接口直接返回 `410 Gone`。
+- 环境变量：
+  - `SKILL_RUNNER_UI_LEGACY_API_MODE=warn|gone`
+  - `SKILL_RUNNER_UI_LEGACY_API_SUNSET`（默认 `2026-06-30`）
+
 Endpoints：
 1) GET /v1/skills
 - 返回技能列表（id, version, name, description, engines）
@@ -367,7 +444,8 @@ Request:
   },
   "model": "gpt-5.2-codex@high",
   "runtime_options": {
-    "debug": false
+    "debug": false,
+    "session_timeout_sec": 1200
   }
 }
 Response:
@@ -381,20 +459,32 @@ Response:
 - Input 文件（对应 input.schema.json）需通过 `POST /v1/jobs/{request_id}/upload` 单独上传。
 - `engine` 必须在 skill 的 `engines` 列表内，否则返回 400。
 - `model` 需从 `GET /v1/engines/{engine}/models` 中选择；Codex 使用 `name@reasoning_effort` 格式。
+- interactive 会话超时统一使用 `runtime_options.session_timeout_sec`（默认 1200 秒）。
 
 4) GET /v1/jobs/{request_id}
 - 查询状态与摘要
 Response:
 {
   "request_id": "...",
-  "status": "queued|running|succeeded|failed|canceled",
+  "status": "queued|running|waiting_user|succeeded|failed|canceled",
   "skill_id": "...",
   "engine": "...",
   "created_at": "...",
   "updated_at": "...",
+  "pending_interaction_id": 12 | null,
+  "interaction_count": 3,
+  "recovery_state": "none|recovered_waiting|failed_reconciled",
+  "recovered_at": "2026-02-16T00:05:00Z | null",
+  "recovery_reason": "resumable_waiting_preserved|session_handle_invalid|orchestrator_restart_interrupted|...|null",
+  "auto_decision_count": 0,
+  "last_auto_decision_at": null,
   "warnings": [...],
   "error": {...} | null
 }
+
+注：
+- `waiting_user` 为非终态；若 `pending_interaction_id` 非空，客户端应优先走 pending/reply，而非继续轮询日志。
+- 当 `recovery_state=failed_reconciled` 时，优先结合 `error.code` 与 `recovery_reason` 判定重启影响。
 
 5) GET /v1/jobs/{request_id}/result
 - 返回最终结构化结果（必须满足 output_schema）
@@ -416,7 +506,28 @@ Response:
 7) GET /v1/jobs/{request_id}/bundle
 - 下载 bundle zip（包含 manifest.json 与产物文件）
 
-8) POST /v1/jobs/cleanup
+8) GET /v1/jobs/{request_id}/logs
+- 返回 prompt/stdout/stderr 的全量快照（适合低频排查）
+
+9) GET /v1/jobs/{request_id}/events
+- 返回 `text/event-stream` 增量事件流（适合实时监控与断线续传）
+- query: `stdout_from` / `stderr_from`
+- 事件: `snapshot/stdout/stderr/status/heartbeat/end`
+- `waiting_user` 为非终态，推荐停止日志轮询并改走 pending/reply 流程。
+
+9a) GET /v1/jobs/{request_id}/interaction/pending
+- 读取当前待决交互问题；仅 `runtime_options.execution_mode=interactive` 可用。
+
+9b) POST /v1/jobs/{request_id}/interaction/reply
+- 提交交互回复；仅 `runtime_options.execution_mode=interactive` 可用。
+- 当请求为非 interactive 时，返回 `400`（而非按 run 状态推断）。
+
+10) POST /v1/jobs/{request_id}/cancel
+- 主动终止活跃 run（`queued/running/waiting_user`）
+- 终态幂等：若已是 `succeeded/failed/canceled`，返回 `accepted=false`
+- 成功取消后统一落 `status=canceled` 且 `error.code=CANCELED_BY_USER`
+
+11) POST /v1/jobs/cleanup
 - 清理 runs.db 以及 data/runs 与 data/requests 中的历史记录
 
 错误响应规范（统一）：

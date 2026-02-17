@@ -105,3 +105,40 @@ def test_scan_skips_excluded_and_invalid_dirs(tmp_path):
         config.defrost()
         config.SYSTEM.SKILLS_DIR = old_skills_dir
         config.freeze()
+
+
+def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    skill_dir = skills_dir / "legacy-skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Legacy")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "legacy-skill",
+                "engines": ["gemini"],
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    old_skills_dir = config.SYSTEM.SKILLS_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(skills_dir)
+    config.freeze()
+
+    try:
+        registry = SkillRegistry()
+        caplog.set_level("WARNING")
+        registry.scan_skills()
+        skill = registry.get_skill("legacy-skill")
+        assert skill is not None
+        assert [mode.value for mode in skill.execution_modes] == ["auto"]
+        assert "missing runner.json.execution_modes" in caplog.text
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_skills_dir
+        config.freeze()

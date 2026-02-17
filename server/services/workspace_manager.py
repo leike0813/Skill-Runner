@@ -48,6 +48,7 @@ class WorkspaceManager:
         (run_dir / "artifacts").mkdir()
         (run_dir / "raw").mkdir()
         (run_dir / "result").mkdir()
+        (run_dir / "interactions").mkdir()
         # uploads directory is created only when inputs are promoted
 
         # Save input

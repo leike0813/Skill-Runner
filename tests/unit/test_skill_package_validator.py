@@ -17,6 +17,7 @@ def _build_skill_zip(
     runner_id: str | None = None,
     include_output: bool = True,
     include_runner_artifacts: bool = True,
+    include_execution_modes: bool = True,
 ) -> bytes:
     top = top_level or skill_id
     name = skill_name or skill_id
@@ -32,6 +33,8 @@ def _build_skill_zip(
     }
     if include_runner_artifacts:
         runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
+    if include_execution_modes:
+        runner["execution_modes"] = ["auto", "interactive"]
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -98,3 +101,17 @@ def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
     )
     assert skill_id == "demo-temp-skill"
     assert version is None
+
+
+def test_rejects_missing_execution_modes(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "missing_modes.zip"
+    zip_path.write_bytes(_build_skill_zip(include_execution_modes=False))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_missing_modes")
+    with pytest.raises(ValueError, match="execution_modes"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_missing_modes" / top,
+            top,
+            require_version=False,
+        )

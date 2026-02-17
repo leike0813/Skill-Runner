@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from ..config import config
-from ..models import SkillManifest
+from ..models import ExecutionMode, SkillManifest
 from .manifest_artifact_inference import infer_manifest_artifacts
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ class SkillRegistry:
     """
     def __init__(self):
         self._skills: Dict[str, SkillManifest] = {}
+        self._missing_execution_modes_warned: set[str] = set()
 
     def scan_skills(self):
         """
@@ -62,6 +63,15 @@ class SkillRegistry:
             with open(runner_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 data = infer_manifest_artifacts(data, skill_dir)
+                if "execution_modes" not in data:
+                    data["execution_modes"] = [ExecutionMode.AUTO.value]
+                    if skill_dir.name not in self._missing_execution_modes_warned:
+                        logger.warning(
+                            "Skill '%s' is missing runner.json.execution_modes; "
+                            "defaulting to ['auto'] (deprecated, please migrate).",
+                            skill_dir.name,
+                        )
+                        self._missing_execution_modes_warned.add(skill_dir.name)
 
                 return SkillManifest(**data, path=skill_dir)
         except Exception:

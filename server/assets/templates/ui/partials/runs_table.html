@@ -6,6 +6,8 @@
             <th>Skill</th>
             <th>Engine</th>
             <th>Status</th>
+            <th>Pending</th>
+            <th>Interactions</th>
             <th>Updated At</th>
             <th>Actions</th>
         </tr>
@@ -18,15 +20,16 @@
             <td>{{ row.skill_id or "-" }}</td>
             <td>{{ row.engine or "-" }}</td>
             <td>{{ row.status }}</td>
+            <td>{{ row.pending_interaction_id if row.pending_interaction_id is not none else "-" }}</td>
+            <td>{{ row.interaction_count }}</td>
             <td>{{ row.updated_at or "-" }}</td>
             <td><a href="/ui/runs/{{ row.request_id }}">查看详情</a></td>
         </tr>
     {% endfor %}
     {% if not runs %}
         <tr>
-            <td colspan="7" style="color:#6b7280;">暂无可观测 runs</td>
+            <td colspan="9" style="color:#6b7280;">暂无可观测 runs</td>
         </tr>
     {% endif %}
     </tbody>
 </table>
-

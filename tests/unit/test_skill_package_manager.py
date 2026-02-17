@@ -35,6 +35,7 @@ def _build_skill_zip(
         "id": runner_id,
         "version": version,
         "engines": engines,
+        "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",

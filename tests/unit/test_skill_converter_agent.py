@@ -79,6 +79,7 @@ def _build_valid_skill_dir(base_dir: Path, skill_id: str = "demo-skill") -> Path
                 "id": skill_id,
                 "version": "1.0.0",
                 "engines": ["gemini"],
+                "execution_modes": ["auto", "interactive"],
                 "schemas": {
                     "input": "assets/input.schema.json",
                     "parameter": "assets/parameter.schema.json",

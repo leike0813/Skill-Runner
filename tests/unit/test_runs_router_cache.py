@@ -40,7 +40,8 @@ def _create_skill(
     base_dir: Path,
     skill_id: str,
     with_input_schema: bool,
-    engines: list[str] | None = None
+    engines: list[str] | None = None,
+    execution_modes: list[str] | None = None,
 ) -> SkillManifest:
     skill_dir = base_dir / skill_id
     assets_dir = skill_dir / "assets"
@@ -48,7 +49,17 @@ def _create_skill(
     (skill_dir / "SKILL.md").write_text("skill")
     if engines is None:
         engines = ["gemini"]
-    (assets_dir / "runner.json").write_text(json.dumps({"id": skill_id, "engines": engines}))
+    if execution_modes is None:
+        execution_modes = ["auto", "interactive"]
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": skill_id,
+                "engines": engines,
+                "execution_modes": execution_modes,
+            }
+        )
+    )
 
     schemas = {}
     if with_input_schema:
@@ -66,7 +77,13 @@ def _create_skill(
         )
         schemas["input"] = "assets/input.schema.json"
 
-    return SkillManifest(id=skill_id, path=skill_dir, schemas=schemas, engines=engines)
+    return SkillManifest(
+        id=skill_id,
+        path=skill_dir,
+        schemas=schemas,
+        engines=engines,
+        execution_modes=execution_modes,
+    )
 
 
 def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
@@ -75,7 +92,13 @@ def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
     assets_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text("skill")
     (assets_dir / "runner.json").write_text(
-        json.dumps({"id": skill_id, "engines": ["gemini"]})
+        json.dumps(
+            {
+                "id": skill_id,
+                "engines": ["gemini"],
+                "execution_modes": ["auto", "interactive"],
+            }
+        )
     )
     (assets_dir / "input.schema.json").write_text(
         json.dumps(
@@ -96,6 +119,7 @@ def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
         path=skill_dir,
         schemas={"input": "assets/input.schema.json"},
         engines=["gemini"],
+        execution_modes=["auto", "interactive"],
     )
 
 
@@ -434,6 +458,56 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
 
 
 @pytest.mark.asyncio
+async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    background_tasks = BackgroundTasks()
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"execution_mode": "interactive"}
+        ),
+        background_tasks
+    )
+
+    manifest_hash = _manifest_hash_for_content(temp_config_dirs, "input.txt", "hello")
+    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    cache_key = compute_cache_key(
+        skill_id=skill.id,
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "gemini-2.5-pro"},
+        input_manifest_hash=manifest_hash
+    )
+    store.record_cache_entry(cache_key, "run-cached")
+
+    upload = _build_upload_zip("input.txt", "hello")
+    upload_response = await jobs_router.upload_file(
+        create_response.request_id,
+        upload,
+        BackgroundTasks()
+    )
+
+    assert upload_response.cache_hit is False
+    request_record = store.get_request(create_response.request_id)
+    assert request_record is not None
+    assert request_record["run_id"] != "run-cached"
+
+
+@pytest.mark.asyncio
 async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
@@ -556,6 +630,85 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     request_record = store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
+
+
+@pytest.mark.asyncio
+async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    manifest_hash = compute_input_manifest_hash({"files": []})
+    cache_key = compute_cache_key(
+        skill_id=skill.id,
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "gemini-2.5-pro"},
+        input_manifest_hash=manifest_hash
+    )
+    store.record_cache_entry(cache_key, "run-cached")
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"execution_mode": "interactive"}
+        ),
+        background_tasks
+    )
+
+    assert response.cache_hit is False
+    request_record = store.get_request(response.request_id)
+    assert request_record is not None
+    assert request_record["run_id"] != "run-cached"
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_interactive_when_skill_declares_auto_only(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        execution_modes=["auto"],
+    )
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="gemini",
+                parameter={"a": 1},
+                model="gemini-2.5-pro",
+                runtime_options={"execution_mode": "interactive"},
+            ),
+            BackgroundTasks(),
+        )
+
+    assert excinfo.value.status_code == 400
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "SKILL_EXECUTION_MODE_UNSUPPORTED"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,8 @@
+import logging
+import os
 import uuid
+import inspect
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -15,7 +19,7 @@ from fastapi import (  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
-from ..models import EngineUpgradeTaskStatus, SkillInstallStatus
+from ..models import EngineUpgradeTaskStatus, RunStatus, SkillInstallStatus
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
@@ -39,6 +43,7 @@ from ..services.ui_shell_manager import (
     UiShellValidationError,
     ui_shell_manager,
 )
+from . import management as management_router
 
 
 TEMPLATE_ROOT = Path(__file__).parent.parent / "assets" / "templates"
@@ -51,10 +56,75 @@ router = APIRouter(
     dependencies=[Depends(require_ui_basic_auth)],
 )
 agent_cli_manager = AgentCliManager()
+logger = logging.getLogger(__name__)
+
+LEGACY_UI_DATA_API_MODE = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_MODE", "warn").strip().lower()
+LEGACY_UI_DATA_API_SUNSET = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_SUNSET", "2026-06-30")
+LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
+    "SKILL_RUNNER_UI_LEGACY_API_REPLACEMENT_DOC",
+    "/docs/api_reference.md#management-api-recommended",
+)
 
 
-def _render_skills_table(request: Request, highlight_skill_id: str | None = None) -> HTMLResponse:
-    skills = skill_registry.list_skills()
+def _legacy_data_headers(replacement_path: str) -> dict[str, str]:
+    return {
+        "Deprecation": "true",
+        "Sunset": LEGACY_UI_DATA_API_SUNSET,
+        "Link": f'<{replacement_path}>; rel="successor-version", <{LEGACY_UI_DATA_API_REPLACEMENT_DOC}>; rel="deprecation"',
+    }
+
+
+def _handle_legacy_data_endpoint(endpoint: str, replacement_path: str) -> None:
+    logger.warning(
+        "Deprecated UI data endpoint called: endpoint=%s replacement=%s mode=%s",
+        endpoint,
+        replacement_path,
+        LEGACY_UI_DATA_API_MODE,
+    )
+    if LEGACY_UI_DATA_API_MODE == "gone":
+        raise HTTPException(
+            status_code=410,
+            detail=f"Deprecated endpoint removed. Use '{replacement_path}'",
+        )
+
+
+async def _resolve_async(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _payload_get(payload: object, key: str, default=None):
+    if isinstance(payload, Mapping):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
+def _serialize_payload_item(item: object) -> dict[str, object]:
+    model_dump = getattr(item, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return dict(dumped)
+    if isinstance(item, Mapping):
+        return dict(item)
+    if hasattr(item, "__dict__"):
+        return dict(vars(item))
+    raise TypeError(f"Unsupported payload item type: {type(item)!r}")
+
+
+def _serialize_payload_list(payload: object, key: str) -> list[dict[str, object]]:
+    raw_items = _payload_get(payload, key, [])
+    if raw_items is None:
+        return []
+    return [_serialize_payload_item(item) for item in raw_items]
+
+
+def _render_skills_table(
+    request: Request,
+    skills: list,
+    highlight_skill_id: str | None = None,
+) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/skills_table.html",
@@ -88,35 +158,42 @@ def _render_engine_upgrade_status(
 
 @router.get("", response_class=HTMLResponse)
 async def ui_index(request: Request):
+    skills_payload = await _resolve_async(management_router.list_management_skills())
     return templates.TemplateResponse(
         request=request,
         name="ui/index.html",
-        context={},
+        context={"skills": _payload_get(skills_payload, "skills", [])},
+    )
+
+
+@router.get("/management/skills/table", response_class=HTMLResponse)
+async def ui_management_skills_table(request: Request, highlight_skill_id: str | None = None):
+    skills_payload = await _resolve_async(management_router.list_management_skills())
+    return _render_skills_table(
+        request=request,
+        skills=list(_payload_get(skills_payload, "skills", [])),
+        highlight_skill_id=highlight_skill_id,
     )
 
 
 @router.get("/skills/table", response_class=HTMLResponse)
 async def ui_skills_table(request: Request, highlight_skill_id: str | None = None):
-    return _render_skills_table(request, highlight_skill_id)
+    replacement = f"/ui/management/skills/table?highlight_skill_id={highlight_skill_id or ''}"
+    _handle_legacy_data_endpoint("/ui/skills/table", replacement)
+    response = await ui_management_skills_table(request, highlight_skill_id)
+    response.headers.update(_legacy_data_headers("/ui/management/skills/table"))
+    return response
 
 
 @router.get("/skills/{skill_id}", response_class=HTMLResponse)
 async def ui_skill_detail(request: Request, skill_id: str):
-    skill = skill_registry.get_skill(skill_id)
-    if not skill or not skill.path:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    skill_root = Path(skill.path)
-    if not skill_root.exists() or not skill_root.is_dir():
-        raise HTTPException(status_code=404, detail="Skill path not found")
-
-    entries = list_skill_entries(skill_root)
+    detail = await _resolve_async(management_router.get_management_skill(skill_id))
     return templates.TemplateResponse(
         request=request,
         name="ui/skill_detail.html",
         context={
-            "skill": skill,
-            "entries": entries,
+            "skill": detail,
+            "entries": detail.files,
         },
     )
 
@@ -159,9 +236,10 @@ async def ui_runs(request: Request):
     )
 
 
-@router.get("/runs/table", response_class=HTMLResponse)
-async def ui_runs_table(request: Request):
-    runs = run_observability_service.list_runs(limit=200)
+@router.get("/management/runs/table", response_class=HTMLResponse)
+async def ui_management_runs_table(request: Request):
+    runs_payload = await _resolve_async(management_router.list_management_runs(limit=200))
+    runs = _serialize_payload_list(runs_payload, "runs")
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/runs_table.html",
@@ -169,14 +247,38 @@ async def ui_runs_table(request: Request):
     )
 
 
+@router.get("/runs/table", response_class=HTMLResponse)
+async def ui_runs_table(request: Request):
+    _handle_legacy_data_endpoint("/ui/runs/table", "/ui/management/runs/table")
+    response = await ui_management_runs_table(request)
+    response.headers.update(_legacy_data_headers("/ui/management/runs/table"))
+    return response
+
+
 @router.get("/runs/{request_id}", response_class=HTMLResponse)
 async def ui_run_detail(request: Request, request_id: str):
-    try:
-        detail = run_observability_service.get_run_detail(request_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    state = await _resolve_async(management_router.get_management_run(request_id))
+    files = await _resolve_async(management_router.get_management_run_files(request_id))
+    status = _payload_get(state, "status")
+    updated_at = _payload_get(state, "updated_at")
+    if hasattr(updated_at, "isoformat"):
+        updated_at_value = updated_at.isoformat()
+    elif updated_at is None:
+        updated_at_value = ""
+    else:
+        updated_at_value = str(updated_at)
+    detail = {
+        "request_id": _payload_get(state, "request_id"),
+        "run_id": _payload_get(state, "run_id"),
+        "skill_id": _payload_get(state, "skill_id"),
+        "engine": _payload_get(state, "engine"),
+        "status": status.value if isinstance(status, RunStatus) else str(status),
+        "updated_at": updated_at_value,
+        "pending_interaction_id": _payload_get(state, "pending_interaction_id"),
+        "interaction_count": _payload_get(state, "interaction_count"),
+        "entries": _payload_get(files, "entries", []),
+        "error": _payload_get(state, "error"),
+    }
 
     return templates.TemplateResponse(
         request=request,
@@ -185,46 +287,63 @@ async def ui_run_detail(request: Request, request_id: str):
     )
 
 
-@router.get("/runs/{request_id}/view", response_class=HTMLResponse)
-async def ui_run_view_file(request: Request, request_id: str, path: str):
-    try:
-        preview = run_observability_service.build_run_file_preview(request_id, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
+@router.get("/management/runs/{request_id}/view", response_class=HTMLResponse)
+async def ui_management_run_view_file(request: Request, request_id: str, path: str):
+    payload = await _resolve_async(management_router.get_management_run_file(request_id, path))
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/file_preview.html",
         context={
-            "relative_path": Path(path).as_posix(),
-            "preview": preview,
+            "relative_path": _payload_get(payload, "path"),
+            "preview": _payload_get(payload, "preview"),
         },
     )
 
 
+@router.get("/runs/{request_id}/view", response_class=HTMLResponse)
+async def ui_run_view_file(request: Request, request_id: str, path: str):
+    _handle_legacy_data_endpoint(
+        "/ui/runs/{request_id}/view",
+        "/ui/management/runs/{request_id}/view",
+    )
+    response = await ui_management_run_view_file(request, request_id, path)
+    response.headers.update(
+        _legacy_data_headers(f"/ui/management/runs/{request_id}/view")
+    )
+    return response
+
+
 @router.get("/runs/{request_id}/logs/tail", response_class=HTMLResponse)
 async def ui_run_logs_tail(request: Request, request_id: str):
+    _handle_legacy_data_endpoint(
+        "/ui/runs/{request_id}/logs/tail",
+        f"/v1/management/runs/{request_id}/events",
+    )
     try:
         payload = run_observability_service.get_logs_tail(request_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request=request,
         name="ui/partials/run_logs_tail.html",
         context={"payload": payload},
     )
+    response.headers.update(
+        _legacy_data_headers(f"/v1/management/runs/{request_id}/events")
+    )
+    return response
 
 
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
+    engines_payload = await _resolve_async(management_router.list_management_engines())
     return templates.TemplateResponse(
         request=request,
         name="ui/engines.html",
         context={
+            "engines": _serialize_payload_list(engines_payload, "engines"),
             "session": ui_shell_manager.get_session_snapshot(),
             "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
         },
@@ -266,42 +385,16 @@ async def ui_engine_tui_stop():
 
 @router.get("/engines/table", response_class=HTMLResponse)
 async def ui_engines_table(request: Request):
-    engines = model_registry.list_engines()
-    auth_status = agent_cli_manager.collect_auth_status()
-    rows = []
-    seen_engines = set()
-    for item in engines:
-        engine_name_obj = item.get("engine")
-        if not isinstance(engine_name_obj, str):
-            continue
-        engine_name = engine_name_obj
-        seen_engines.add(engine_name)
-        rows.append(
-            {
-                "engine": engine_name,
-                "cli_version_detected": item.get("cli_version_detected"),
-                "auth": auth_status.get(
-                    engine_name,
-                    {
-                        "managed_present": False,
-                        "effective_path_source": "missing",
-                        "effective_cli_path": None,
-                        "auth_ready": False,
-                        "credential_files": {},
-                    },
-                ),
-            }
-        )
-    for engine_name, auth_payload in auth_status.items():
-        if engine_name in seen_engines:
-            continue
-        rows.append(
-            {
-                "engine": engine_name,
-                "cli_version_detected": None,
-                "auth": auth_payload,
-            }
-        )
+    _handle_legacy_data_endpoint("/ui/engines/table", "/ui/management/engines/table")
+    response = await ui_management_engines_table(request)
+    response.headers.update(_legacy_data_headers("/ui/management/engines/table"))
+    return response
+
+
+@router.get("/management/engines/table", response_class=HTMLResponse)
+async def ui_management_engines_table(request: Request):
+    engines_payload = await _resolve_async(management_router.list_management_engines())
+    rows = _serialize_payload_list(engines_payload, "engines")
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/engines_table.html",

@@ -4,6 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,10 +15,15 @@ from server.models import RunStatus, TempSkillRunCreateRequest
 from server.routers import temp_skill_runs as temp_skill_runs_router
 
 
-def _build_skill_zip(skill_id: str = "temp-router-skill", engines: list[str] | None = None) -> bytes:
+def _build_skill_zip(
+    skill_id: str = "temp-router-skill",
+    engines: list[str] | None = None,
+    execution_modes: list[str] | None = None,
+) -> bytes:
     runner = {
         "id": skill_id,
         "engines": engines or ["gemini"],
+        "execution_modes": execution_modes or ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
@@ -114,6 +120,34 @@ async def test_upload_queue_full_returns_429_and_marks_failed(temp_config_dirs, 
 
 
 @pytest.mark.asyncio
+async def test_upload_rejects_interactive_when_skill_declares_auto_only(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "interactive"},
+        )
+    )
+    with pytest.raises(HTTPException) as exc:
+        await temp_skill_runs_router.upload_temp_skill_and_start(
+            create.request_id,
+            BackgroundTasks(),
+            skill_package=_build_upload_file(
+                "skill.zip", _build_skill_zip(execution_modes=["auto"])
+            ),
+            file=None,
+        )
+    assert exc.value.status_code == 400
+    assert isinstance(exc.value.detail, dict)
+    assert exc.value.detail["code"] == "SKILL_EXECUTION_MODE_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
 async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, monkeypatch):
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.model_registry.validate_model",
@@ -189,3 +223,74 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
     temp_root = Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / create.request_id
     assert (temp_root / "skill_package.zip").exists() is False
     assert (temp_root / "staged").exists() is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_temp_skill_run_active_accepts(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={},
+        )
+    )
+    temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-1")
+    run_dir = Path(temp_config_dirs / "runs" / "run-temp-1")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        temp_skill_runs_router.workspace_manager,
+        "get_run_dir",
+        lambda run_id: run_dir if run_id == "run-temp-1" else None,
+    )
+    cancel_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(temp_skill_runs_router.job_orchestrator, "cancel_run", cancel_mock)
+
+    response = await temp_skill_runs_router.cancel_temp_skill_run(create.request_id)
+    assert response.request_id == create.request_id
+    assert response.run_id == "run-temp-1"
+    assert response.status == RunStatus.CANCELED
+    assert response.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_temp_skill_run_terminal_idempotent(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={},
+        )
+    )
+    temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-2")
+    run_dir = Path(temp_config_dirs / "runs" / "run-temp-2")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        temp_skill_runs_router.workspace_manager,
+        "get_run_dir",
+        lambda run_id: run_dir if run_id == "run-temp-2" else None,
+    )
+    cancel_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(temp_skill_runs_router.job_orchestrator, "cancel_run", cancel_mock)
+
+    response = await temp_skill_runs_router.cancel_temp_skill_run(create.request_id)
+    assert response.accepted is False
+    assert response.status == RunStatus.SUCCEEDED
+    cancel_mock.assert_not_called()

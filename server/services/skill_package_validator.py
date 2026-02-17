@@ -122,6 +122,7 @@ class SkillPackageValidator:
         engines = runner.get("engines")
         if not isinstance(engines, list) or not engines:
             raise ValueError("runner.json must define a non-empty engines list")
+        self._validate_execution_modes(runner)
 
         artifacts = runner.get("artifacts")
         if artifacts is not None and not isinstance(artifacts, list):
@@ -140,6 +141,20 @@ class SkillPackageValidator:
             version = None
 
         return skill_id, version
+
+    def _validate_execution_modes(self, runner: dict[str, Any]) -> None:
+        execution_modes = runner.get("execution_modes")
+        if not isinstance(execution_modes, list) or not execution_modes:
+            raise ValueError("runner.json must define a non-empty execution_modes list")
+        allowed = {"auto", "interactive"}
+        normalized: list[str] = []
+        for mode in execution_modes:
+            if not isinstance(mode, str) or mode not in allowed:
+                raise ValueError(
+                    "runner.json execution_modes must contain only: auto, interactive"
+                )
+            normalized.append(mode)
+        runner["execution_modes"] = normalized
 
     def parse_version(self, raw: str) -> Any:
         if _packaging_version is not None:

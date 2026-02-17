@@ -1,12 +1,13 @@
 import os
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 from .base import EngineAdapter, ProcessExecutionResult
-from ..models import SkillManifest
+from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from ..services.config_generator import config_generator
 from ..services.skill_patcher import skill_patcher
 from ..services.schema_validator import schema_validator
@@ -83,7 +84,13 @@ class IFlowAdapter(EngineAdapter):
         except Exception as e:
             raise RuntimeError(f"Failed to generate iFlow configuration: {e}")
 
-    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path) -> Path:
+    def _setup_environment(
+        self,
+        skill: SkillManifest,
+        run_dir: Path,
+        config_path: Path,
+        options: Dict[str, Any],
+    ) -> Path:
         """
         Phase 2: Environment Setup
         Copies skill to .iflow/skills/{id} and patches SKILL.md.
@@ -104,7 +111,11 @@ class IFlowAdapter(EngineAdapter):
                  
         # Patching
         if skill.artifacts:
-            skill_patcher.patch_skill_md(skills_target_dir, skill.artifacts)
+            skill_patcher.patch_skill_md(
+                skills_target_dir,
+                skill.artifacts,
+                execution_mode=self._resolve_execution_mode(options),
+            )
             
         return skills_target_dir
 
@@ -175,15 +186,23 @@ class IFlowAdapter(EngineAdapter):
             for dep in skill.runtime.dependencies:
                 cmd_parts.append(f"--with={dep}")
 
-        # Base Command
         iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
         if iflow_cmd is None:
             raise RuntimeError("iFlow CLI not found in managed prefix")
-        cmd_parts.extend([
-            str(iflow_cmd),
-            "--yolo",
-            "-p", prompt
-        ])
+        resume_handle = options.get("__resume_session_handle")
+        if isinstance(resume_handle, dict):
+            cmd_parts.extend(
+                self.build_resume_command(
+                    prompt=prompt,
+                    options=options,
+                    session_handle=EngineSessionHandle.model_validate(resume_handle),
+                )
+            )
+        else:
+            cmd_parts.extend([str(iflow_cmd)])
+            if self._resolve_execution_mode(options) == "auto":
+                cmd_parts.append("--yolo")
+            cmd_parts.extend(["-p", prompt])
         
         logger.info("Executing iFlow command: %s in %s", " ".join(cmd_parts), run_dir)
         
@@ -194,14 +213,48 @@ class IFlowAdapter(EngineAdapter):
         )
         return await self._capture_process_output(proc, run_dir, options, "iFlow")
 
-    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
         Phase 5: Result Parsing
         Extracts JSON from the output.
         """
         result, repair_level = self._parse_json_with_deterministic_repair(raw_stdout)
         if result is not None:
-            return result, repair_level
+            return self._build_turn_result_from_payload(result, repair_level)
             
         logger.warning("Failed to parse JSON result from iFlow output")
-        return None, "none"
+        return self._turn_error(message="failed to parse iflow output")
+
+    def extract_session_handle(self, raw_stdout: str, turn_index: int) -> EngineSessionHandle:
+        match = re.search(r'"session-id"\s*:\s*"([^"]+)"', raw_stdout)
+        if not match:
+            raise RuntimeError("SESSION_RESUME_FAILED: missing iflow session-id")
+        session_id = match.group(1).strip()
+        if not session_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: empty iflow session-id")
+        return EngineSessionHandle(
+            engine="iflow",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value=session_id,
+            created_at_turn=turn_index,
+        )
+
+    def build_resume_command(
+        self,
+        prompt: str,
+        options: Dict[str, Any],
+        session_handle: EngineSessionHandle,
+    ) -> list[str]:
+        session_id = session_handle.handle_value.strip()
+        if not session_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: empty iflow session-id")
+        iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
+        if iflow_cmd is None:
+            raise RuntimeError("iFlow CLI not found in managed prefix")
+        return [
+            str(iflow_cmd),
+            "--resume",
+            session_id,
+            "-p",
+            prompt,
+        ]

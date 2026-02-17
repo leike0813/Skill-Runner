@@ -1,4 +1,5 @@
 import pytest
+import json
 
 fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
@@ -20,8 +21,10 @@ async def _request(method: str, path: str, **kwargs):
         "/skills",
         "/runs",
         "/engines",
+        "/management/runs/does-not-exist",
         "/runs/does-not-exist",
         "/engines/codex/models",
+        "/jobs/does-not-exist/interaction/pending",
     ],
 )
 async def test_legacy_routes_return_404(path):
@@ -134,6 +137,195 @@ async def test_v1_engine_models_error(monkeypatch):
 async def test_v1_runs_route_available():
     response = await _request("GET", "/v1/jobs/does-not-exist")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_interaction_routes_available():
+    pending = await _request("GET", "/v1/jobs/does-not-exist/interaction/pending")
+    assert pending.status_code == 404
+    reply = await _request(
+        "POST",
+        "/v1/jobs/does-not-exist/interaction/reply",
+        json={"interaction_id": 1, "response": {"answer": "x"}},
+    )
+    assert reply.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_cancel_route_available():
+    response = await _request("POST", "/v1/jobs/does-not-exist/cancel")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_temp_skill_runs_cancel_route_available():
+    response = await _request("POST", "/v1/temp-skill-runs/does-not-exist/cancel")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_management_routes_available():
+    run_res = await _request("GET", "/v1/management/runs/does-not-exist")
+    assert run_res.status_code == 404
+    skill_res = await _request("GET", "/v1/management/skills/does-not-exist")
+    assert skill_res.status_code == 404
+    pending_res = await _request("GET", "/v1/management/runs/does-not-exist/pending")
+    assert pending_res.status_code == 404
+    cancel_res = await _request("POST", "/v1/management/runs/does-not-exist/cancel")
+    assert cancel_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-1"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("hello", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("err", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        lambda request_id: {"request_id": request_id, "run_id": "run-1"},
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_pending_interaction",
+        lambda _request_id: None,
+    )
+
+    response = await _request("GET", "/v1/jobs/req-1/events")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: snapshot" in response.text
+    assert "event: stdout" in response.text
+    assert "event: stderr" in response.text
+    assert "event: end" in response.text
+    assert "\"reason\": \"terminal\"" in response.text
+
+
+@pytest.mark.asyncio
+async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-temp"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.temp_skill_run_store.get_request",
+        lambda request_id: {"request_id": request_id, "run_id": "run-temp"},
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+
+    response = await _request("GET", "/v1/temp-skill-runs/temp-1/events")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: snapshot" in response.text
+    assert "event: status" in response.text
+    assert "event: end" in response.text
+    assert "\"reason\": \"waiting_user\"" in response.text
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_events_reconnect_with_offsets_keeps_log_continuity(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-2"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = logs_dir / "stdout.txt"
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    stdout_path.write_text("part-1\n", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        lambda request_id: {
+            "request_id": request_id,
+            "run_id": "run-2",
+            "runtime_options": {"execution_mode": "interactive"},
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_pending_interaction",
+        lambda _request_id: {"interaction_id": 1},
+    )
+
+    first = await _request("GET", "/v1/jobs/req-2/events?stdout_from=0&stderr_from=0")
+    assert first.status_code == 200
+    assert "part-1\\n" in first.text
+    assert "\"reason\": \"waiting_user\"" in first.text
+
+    resume_offset = len("part-1\n")
+    stdout_path.write_text("part-1\npart-2\n", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:01"}),
+        encoding="utf-8",
+    )
+
+    second = await _request(
+        "GET",
+        f"/v1/jobs/req-2/events?stdout_from={resume_offset}&stderr_from=0",
+    )
+    assert second.status_code == 200
+    assert "part-1\\n" not in second.text
+    assert "part-2\\n" in second.text
+    assert "\"reason\": \"terminal\"" in second.text
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-canceled"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("before-cancel\n", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "status": "canceled",
+                "updated_at": "2026-01-01T00:00:00",
+                "error": {"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        lambda request_id: {"request_id": request_id, "run_id": "run-canceled"},
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_pending_interaction",
+        lambda _request_id: None,
+    )
+
+    response = await _request("GET", "/v1/jobs/req-canceled/events")
+    assert response.status_code == 200
+    assert "\"status\": \"canceled\"" in response.text
+    assert "\"error_code\": \"CANCELED_BY_USER\"" in response.text
 
 
 @pytest.mark.asyncio

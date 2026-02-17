@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
+from server.models import EngineInteractiveProfileKind
 from server.services.agent_cli_manager import AgentCliManager
+from server.services.agent_cli_manager import CommandResult
 from server.services.runtime_profile import RuntimeProfile
 
 
@@ -129,3 +131,39 @@ def test_collect_auth_status_reports_global_fallback(tmp_path, monkeypatch):
     assert payload["codex"]["effective_path_source"] == "global"
     assert payload["codex"]["global_available"] is True
     assert payload["codex"]["managed_present"] is False
+
+
+def test_probe_resume_capability_success_and_profile_mapping(tmp_path, monkeypatch):
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+    monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
+
+    def _fake_run(argv: list[str], timeout_sec: int = 5) -> CommandResult:
+        if argv[-1] == "--help":
+            return CommandResult(returncode=0, stdout="supports --resume", stderr="")
+        return CommandResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(manager, "_run_command", _fake_run)
+    capability = manager.probe_resume_capability("gemini")
+    assert capability.supported is True
+    profile = manager.resolve_interactive_profile("gemini", 1200)
+    assert profile.kind == EngineInteractiveProfileKind.RESUMABLE
+    assert profile.session_timeout_sec == 1200
+
+
+def test_probe_resume_capability_failure_maps_to_sticky_profile(tmp_path, monkeypatch):
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+    monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
+
+    def _fake_run(argv: list[str], timeout_sec: int = 5) -> CommandResult:
+        if argv[-1] == "--help":
+            return CommandResult(returncode=0, stdout="resume missing", stderr="")
+        return CommandResult(returncode=1, stdout="", stderr="bad flag")
+
+    monkeypatch.setattr(manager, "_run_command", _fake_run)
+    capability = manager.probe_resume_capability("iflow")
+    assert capability.supported is False
+    profile = manager.resolve_interactive_profile("iflow", 900)
+    assert profile.kind == EngineInteractiveProfileKind.STICKY_PROCESS
+    assert profile.session_timeout_sec == 900

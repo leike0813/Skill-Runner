@@ -2,14 +2,14 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from server.services.codex_config_manager import CodexConfigManager
 from server.services.agent_cli_manager import AgentCliManager
 
 logger = logging.getLogger(__name__)
 
 from .base import EngineAdapter, ProcessExecutionResult
-from ..models import SkillManifest
+from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 
 class CodexAdapter(EngineAdapter):
     """Adapter for executing tasks via the Codex CLI in non-interactive mode."""
@@ -52,7 +52,13 @@ class CodexAdapter(EngineAdapter):
         except ValueError as e:
             raise RuntimeError(f"Configuration Error: {e}")
 
-    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path) -> Path:
+    def _setup_environment(
+        self,
+        skill: SkillManifest,
+        run_dir: Path,
+        config_path: Path,
+        options: Dict[str, Any],
+    ) -> Path:
         """
         Phase 2: Environment Setup
         """
@@ -76,7 +82,11 @@ class CodexAdapter(EngineAdapter):
         # Patching
         if skill.artifacts:
             from ..services.skill_patcher import skill_patcher
-            skill_patcher.patch_skill_md(skills_target_dir, skill.artifacts)
+            skill_patcher.patch_skill_md(
+                skills_target_dir,
+                skill.artifacts,
+                execution_mode=self._resolve_execution_mode(options),
+            )
                 
         return skills_target_dir
 
@@ -143,19 +153,27 @@ class CodexAdapter(EngineAdapter):
         """
         Phase 4: Execution (With optional streaming)
         """
-        # Construct Command
-        sandbox_flag = "--full-auto"
-        if os.environ.get("LANDLOCK_ENABLED") == "0":
-            sandbox_flag = "--yolo"
-        cmd = [
-            str(self._resolve_codex_command()),
-            "exec",
-            sandbox_flag,
-            "--skip-git-repo-check",
-            "--json",
-            "-p", CodexConfigManager.PROFILE_NAME,
-            prompt
-        ]
+        resume_handle = options.get("__resume_session_handle")
+        if isinstance(resume_handle, dict):
+            cmd = self.build_resume_command(
+                prompt=prompt,
+                options=options,
+                session_handle=EngineSessionHandle.model_validate(resume_handle),
+            )
+        else:
+            cmd = [
+                str(self._resolve_codex_command()),
+                "exec",
+                "--skip-git-repo-check",
+                "--json",
+                "-p", CodexConfigManager.PROFILE_NAME,
+                prompt
+            ]
+            if self._resolve_execution_mode(options) == "auto":
+                sandbox_flag = "--full-auto"
+                if os.environ.get("LANDLOCK_ENABLED") == "0":
+                    sandbox_flag = "--yolo"
+                cmd.insert(2, sandbox_flag)
         
         logger.info("Executing Codex command: %s", " ".join(cmd))
         
@@ -175,7 +193,7 @@ class CodexAdapter(EngineAdapter):
             raise RuntimeError("Codex CLI not found in managed prefix")
         return cmd
 
-    def _parse_output(self, raw_stdout: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
         Phase 5: Result Parsing (NDJSON Stream Support)
         """
@@ -202,9 +220,54 @@ class CodexAdapter(EngineAdapter):
             last_message_text = raw_stdout
 
         # 2. Extract JSON from Message Text
-        # Same regex logic as Gemini
         result, repair_level = self._parse_json_with_deterministic_repair(last_message_text)
         if result is not None:
-            return result, repair_level
+            return self._build_turn_result_from_payload(result, repair_level)
         logger.warning(f"Failed to parse Codex result. Last message: {last_message_text[:100]}...")
-        return None, "none"
+        return self._turn_error(message="failed to parse codex output")
+
+    def extract_session_handle(self, raw_stdout: str, turn_index: int) -> EngineSessionHandle:
+        first_event: Optional[dict[str, Any]] = None
+        for line in raw_stdout.splitlines():
+            candidate = line.strip()
+            if not candidate:
+                continue
+            try:
+                first_event = json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("SESSION_RESUME_FAILED: invalid codex json stream") from exc
+            break
+        if not first_event:
+            raise RuntimeError("SESSION_RESUME_FAILED: codex output is empty")
+        if first_event.get("type") != "thread.started":
+            raise RuntimeError("SESSION_RESUME_FAILED: missing thread.started event")
+        thread_id = first_event.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise RuntimeError("SESSION_RESUME_FAILED: missing thread_id")
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value=thread_id.strip(),
+            created_at_turn=turn_index,
+        )
+
+    def build_resume_command(
+        self,
+        prompt: str,
+        options: Dict[str, Any],
+        session_handle: EngineSessionHandle,
+    ) -> list[str]:
+        thread_id = session_handle.handle_value.strip()
+        if not thread_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: empty codex thread id")
+        return [
+            str(self._resolve_codex_command()),
+            "exec",
+            "resume",
+            "--skip-git-repo-check",
+            "--json",
+            "-p",
+            CodexConfigManager.PROFILE_NAME,
+            thread_id,
+            prompt,
+        ]

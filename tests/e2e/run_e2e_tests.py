@@ -89,7 +89,10 @@ def _wait_for_status(
     request_id: str,
     timeout_sec: int = 120,
     endpoint_prefix: str = "/v1/jobs",
+    interactive_replies: list[Any] | None = None,
 ) -> Dict[str, Any]:
+    replies = list(interactive_replies or [])
+    reply_index = 0
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         res = client.get(f"{endpoint_prefix}/{request_id}")
@@ -98,6 +101,42 @@ def _wait_for_status(
         payload = res.json()
         if payload["status"] in ("succeeded", "failed", "canceled"):
             return payload
+        if payload["status"] == "waiting_user":
+            if reply_index >= len(replies):
+                raise RuntimeError(
+                    "Request entered waiting_user but no interactive_replies remain in case config"
+                )
+            pending_res = client.get(f"{endpoint_prefix}/{request_id}/interaction/pending")
+            if pending_res.status_code != 200:
+                raise RuntimeError(f"Pending check failed: {pending_res.status_code}")
+            pending = pending_res.json().get("pending")
+            if not isinstance(pending, dict):
+                raise RuntimeError("waiting_user without pending interaction payload")
+
+            step = replies[reply_index]
+            reply_index += 1
+            if isinstance(step, dict):
+                response_payload = step.get("response")
+                idempotency_key = step.get("idempotency_key")
+            else:
+                response_payload = step
+                idempotency_key = None
+            if response_payload is None:
+                raise RuntimeError("interactive_replies entry must provide response payload")
+
+            reply_body: dict[str, Any] = {
+                "interaction_id": pending["interaction_id"],
+                "response": response_payload,
+            }
+            if isinstance(idempotency_key, str) and idempotency_key:
+                reply_body["idempotency_key"] = idempotency_key
+            reply_res = client.post(
+                f"{endpoint_prefix}/{request_id}/interaction/reply",
+                json=reply_body,
+            )
+            if reply_res.status_code != 200:
+                raise RuntimeError(f"Reply failed: {reply_res.status_code} {reply_res.text}")
+            continue
         time.sleep(1)
     raise RuntimeError(f"Request {request_id} did not finish within {timeout_sec}s")
 
@@ -130,6 +169,7 @@ async def run_suite_case(
     inputs = case.get("inputs", {})
     parameters = case.get("parameters", {})
     expectations = case.get("expectations", {})
+    interactive_replies = case.get("interactive_replies")
     fixture_id = skill_fixture or skill_id
 
     if skill_source == "temp":
@@ -182,7 +222,12 @@ async def run_suite_case(
             raise RuntimeError(f"Upload failed for {name}: {upload_res.status_code}")
         upload_body = upload_res.json()
         logger.info("Upload response: extracted=%s", upload_body.get("extracted_files"))
-        status_payload = _wait_for_status(client, request_id, endpoint_prefix="/v1/temp-skill-runs")
+        status_payload = _wait_for_status(
+            client,
+            request_id,
+            endpoint_prefix="/v1/temp-skill-runs",
+            interactive_replies=interactive_replies,
+        )
         result_path = f"/v1/temp-skill-runs/{request_id}/result"
         artifacts_path = f"/v1/temp-skill-runs/{request_id}/artifacts"
         bundle_path = f"/v1/temp-skill-runs/{request_id}/bundle"
@@ -228,7 +273,11 @@ async def run_suite_case(
                 upload_body.get("extracted_files"),
             )
 
-        status_payload = _wait_for_status(client, request_id)
+        status_payload = _wait_for_status(
+            client,
+            request_id,
+            interactive_replies=interactive_replies,
+        )
         result_path = f"/v1/jobs/{request_id}/result"
         artifacts_path = f"/v1/jobs/{request_id}/artifacts"
         bundle_path = f"/v1/jobs/{request_id}/bundle"

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from ..models import (
+    EngineInteractiveProfile,
+    EngineInteractiveProfileKind,
+    EngineResumeCapability,
+)
 from .runtime_profile import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
@@ -47,6 +52,12 @@ DEFAULT_IFLOW_SETTINGS = {
 DEFAULT_CODEX_CONFIG = 'cli_auth_credentials_store = "file"\n'
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
+
+RESUME_HELP_HINTS: Dict[str, tuple[str, ...]] = {
+    "codex": ("resume",),
+    "gemini": ("--resume",),
+    "iflow": ("--resume", "--continue"),
+}
 
 
 @dataclass(frozen=True)
@@ -146,6 +157,54 @@ class AgentCliManager:
             result[engine] = self.check_engine(engine)
         return result
 
+    def probe_resume_capability(self, engine: str) -> EngineResumeCapability:
+        static = self._detect_resume_static(engine)
+        if not static.supported:
+            return static
+
+        command = self.resolve_engine_command(engine)
+        if command is None:
+            return EngineResumeCapability(
+                supported=False,
+                probe_method="command",
+                detail="cli_missing",
+            )
+
+        dynamic_args = self._resume_dynamic_probe_args(engine)
+        if not dynamic_args:
+            return static
+
+        result = self._run_command([str(command), *dynamic_args], timeout_sec=5)
+        if result.returncode == 0:
+            return EngineResumeCapability(
+                supported=True,
+                probe_method="command",
+                detail="resume_probe_ok",
+            )
+        return EngineResumeCapability(
+            supported=False,
+            probe_method="command",
+            detail=f"resume_probe_failed:{result.returncode}",
+        )
+
+    def resolve_interactive_profile(
+        self,
+        engine: str,
+        session_timeout_sec: int,
+    ) -> EngineInteractiveProfile:
+        capability = self.probe_resume_capability(engine)
+        if capability.supported:
+            return EngineInteractiveProfile(
+                kind=EngineInteractiveProfileKind.RESUMABLE,
+                reason=capability.detail,
+                session_timeout_sec=session_timeout_sec,
+            )
+        return EngineInteractiveProfile(
+            kind=EngineInteractiveProfileKind.STICKY_PROCESS,
+            reason=capability.detail or "resume_probe_failed",
+            session_timeout_sec=session_timeout_sec,
+        )
+
     def check_engine(self, engine: str) -> EngineStatus:
         cmd = self.resolve_engine_command(engine)
         if cmd is None:
@@ -206,6 +265,35 @@ class AgentCliManager:
             stdout=result.stdout or "",
             stderr=result.stderr or "",
         )
+
+    def _run_command(self, argv: list[str], timeout_sec: int = 5) -> CommandResult:
+        env = self.profile.build_subprocess_env()
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+                timeout=timeout_sec,
+            )
+            return CommandResult(
+                returncode=result.returncode,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or "timeout"
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            return CommandResult(
+                returncode=124,
+                stdout=stdout,
+                stderr=stderr,
+            )
 
     def import_credentials(self, source_root: Path) -> Dict[str, list[str]]:
         source_root = source_root.resolve()
@@ -333,6 +421,44 @@ class AgentCliManager:
 
         if changed:
             path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+
+    def _detect_resume_static(self, engine: str) -> EngineResumeCapability:
+        command = self.resolve_engine_command(engine)
+        if command is None:
+            return EngineResumeCapability(
+                supported=False,
+                probe_method="command",
+                detail="cli_missing",
+            )
+        hints = RESUME_HELP_HINTS.get(engine, ())
+        if not hints:
+            return EngineResumeCapability(
+                supported=False,
+                probe_method="command",
+                detail="unknown_engine",
+            )
+        result = self._run_command([str(command), "--help"], timeout_sec=5)
+        combined = f"{result.stdout}\n{result.stderr}".lower()
+        if any(hint.lower() in combined for hint in hints):
+            return EngineResumeCapability(
+                supported=True,
+                probe_method="command",
+                detail="resume_flag_detected",
+            )
+        return EngineResumeCapability(
+            supported=False,
+            probe_method="command",
+            detail="resume_flag_missing",
+        )
+
+    def _resume_dynamic_probe_args(self, engine: str) -> list[str]:
+        if engine == "codex":
+            return ["exec", "resume", "--help"]
+        if engine == "gemini":
+            return ["--resume", "probe-session", "--help"]
+        if engine == "iflow":
+            return ["--resume", "probe-session", "--help"]
+        return []
 
     def _is_iflow_settings_valid(self, path: Path) -> bool:
         try:

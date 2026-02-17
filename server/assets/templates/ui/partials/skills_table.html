@@ -4,9 +4,9 @@
         <tr style="background:#f3f4f6;">
             <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">ID</th>
             <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Name</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Description</th>
             <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Version</th>
             <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Engines</th>
+            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Health</th>
             <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Actions</th>
         </tr>
     </thead>
@@ -15,9 +15,9 @@
         <tr style="{% if highlight_skill_id and skill.id == highlight_skill_id %}background:#ecfdf5;{% endif %}">
             <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.id }}</td>
             <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.name or "-" }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.description or "-" }}</td>
             <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.version or "-" }}</td>
             <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ ", ".join(skill.engines or []) }}</td>
+            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.health or "-" }}</td>
             <td style="padding:8px; border-bottom:1px solid #f1f5f9;">
                 <a href="/ui/skills/{{ skill.id }}">Browse</a>
             </td>

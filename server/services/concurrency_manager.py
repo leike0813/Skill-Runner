@@ -93,6 +93,14 @@ class ConcurrencyManager:
                 "max_queue_size": self._max_queue_size,
             }
 
+    def reset_runtime_state(self) -> None:
+        self.start()
+        with self._state_lock:
+            self._running = 0
+            self._queued = 0
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+            self._loop_id = None
+
     def _ensure_loop(self) -> None:
         """
         Recreate semaphore when running on a different event loop.
