@@ -17,7 +17,7 @@
 `/v1/management/*` 提供前端无关的统一管理契约，适用于内置 UI 与外部前端（如插件 WebView）复用。
 
 ### Skill 管理
-- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupport_engine/effective_engines/health`）
+- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupported_engines/effective_engines/health`）
 - `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files/execution_modes`）
 - `GET /v1/management/skills/{skill_id}/schemas`：返回 `input/parameter/output` schema 内容（用于动态表单构建）
 
@@ -127,8 +127,8 @@
   - 三个 schema 需满足对象型 JSON Schema 基本结构约束。
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json.engines` 为可选字段；缺失时默认按系统支持的全部引擎处理。
-- `runner.json.unsupport_engine` 为可选字段；用于声明显式不支持引擎。
-- 若 `engines` 与 `unsupport_engine` 同时存在，二者不允许重复；计算后的有效引擎集合必须非空。
+- `runner.json.unsupported_engines` 为可选字段；用于声明显式不支持引擎。
+- 若 `engines` 与 `unsupported_engines` 同时存在，二者不允许重复；计算后的有效引擎集合必须非空。
 - `runner.json` 必须包含非空 `execution_modes` 列表，且值仅允许 `auto` / `interactive`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
@@ -201,7 +201,7 @@
 - **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
-- **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupport_engine`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
+- **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - **模式准入约束**: 请求的 `runtime_options.execution_mode` 必须包含在 skill 的 `execution_modes` 声明中，否则返回 400（`SKILL_EXECUTION_MODE_UNSUPPORTED`）。
 - **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
@@ -714,7 +714,7 @@
   - `assets/runner.json`
   - `runner.json.schemas` 指向的 `input` / `parameter` / `output` 三个 schema 文件
 - 身份一致性：顶层目录名、`runner.json.id`、`SKILL.md` frontmatter `name` 必须一致。
-- 元数据约束：`runner.json.engines` 可选、`runner.json.unsupport_engine` 可选；若同时声明则不允许重复且计算后的有效引擎集合必须非空。`runner.json.artifacts` 可选（若提供需为数组）。
+- 元数据约束：`runner.json.engines` 可选、`runner.json.unsupported_engines` 可选；若同时声明则不允许重复且计算后的有效引擎集合必须非空。`runner.json.artifacts` 可选（若提供需为数组）。
 - 包大小限制：受 `TEMP_SKILL_PACKAGE_MAX_BYTES` 控制（默认 20MB）。
 
 ### 生命周期与清理

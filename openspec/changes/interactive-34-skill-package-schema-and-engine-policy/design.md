@@ -25,7 +25,7 @@
 ## Decisions
 
 ### Decision 1: 新增独立 runner/skill package schema，并由校验器加载
-在 `server/assets/schemas/` 下新增 manifest 合同 schema（含 `engines`、`unsupport_engine`、`execution_modes`、`schemas`、`artifacts` 等字段规则），由 `SkillPackageValidator` 统一加载执行。
+在 `server/assets/schemas/` 下新增 manifest 合同 schema（含 `engines`、`unsupported_engines`、`execution_modes`、`schemas`、`artifacts` 等字段规则），由 `SkillPackageValidator` 统一加载执行。
 
 Rationale:
 - 规则“外置化”后更利于审查与版本演进。
@@ -55,8 +55,8 @@ Rejected: 错误反馈滞后且定位成本高。
 ### Decision 2: 引入统一的 engine policy 解析函数
 新增统一解析逻辑（可位于 validator 或 manifest service）：
 - `declared_engines = engines if provided else ALL_SUPPORTED_ENGINES`
-- `effective_engines = declared_engines - unsupport_engine`
-- 校验 `engines ∩ unsupport_engine = ∅`
+- `effective_engines = declared_engines - unsupported_engines`
+- 校验 `engines ∩ unsupported_engines = ∅`
 - 校验 `effective_engines` 非空
 
 并将结果写入运行时 manifest/DTO，供 jobs 与 management API 直接消费。
@@ -86,7 +86,7 @@ Rejected: 失败路径不可预测，影响错误定位与客户端体验。
 管理侧 skill 响应新增或稳定化以下字段：
 - `effective_engines`（供前端枚举）
 - `engines`（原始声明，可空）
-- `unsupport_engine`（原始声明，可空）
+- `unsupported_engines`（原始声明，可空）
 
 Rationale:
 - 前端无需推导默认值或做额外策略判断。

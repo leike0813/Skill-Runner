@@ -293,7 +293,7 @@ def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
         name=str(getattr(skill, "name", None) or getattr(skill, "id", "")),
         version=str(getattr(skill, "version", "")),
         engines=engine_policy.declared_engines,
-        unsupport_engine=engine_policy.unsupport_engine,
+        unsupported_engines=engine_policy.unsupported_engines,
         effective_engines=engine_policy.effective_engines,
         execution_modes=_normalize_execution_modes(getattr(skill, "execution_modes", [])),
         installed_at=installed_at,

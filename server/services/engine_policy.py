@@ -7,30 +7,30 @@ from .model_registry import supported_engines
 @dataclass(frozen=True)
 class SkillEnginePolicy:
     declared_engines: list[str]
-    unsupport_engine: list[str]
+    unsupported_engines: list[str]
     effective_engines: list[str]
 
 
 def resolve_engine_policy(
     declared_engines: Any,
-    unsupport_engine: Any,
+    unsupported_engines: Any,
 ) -> SkillEnginePolicy:
     allowed = supported_engines()
     allowed_set = set(allowed)
     declared = _normalize_engine_list(declared_engines, "engines")
-    unsupported = _normalize_engine_list(unsupport_engine, "unsupport_engine")
+    unsupported = _normalize_engine_list(unsupported_engines, "unsupported_engines")
 
     unknown = sorted((set(declared) | set(unsupported)) - allowed_set)
     if unknown:
         raise ValueError(
-            "runner.json engines/unsupport_engine must contain only: "
+            "runner.json engines/unsupported_engines must contain only: "
             + ", ".join(allowed)
         )
 
     overlap = sorted(set(declared) & set(unsupported))
     if overlap:
         raise ValueError(
-            "runner.json engines and unsupport_engine must not overlap: "
+            "runner.json engines and unsupported_engines must not overlap: "
             + ", ".join(overlap)
         )
 
@@ -43,18 +43,23 @@ def resolve_engine_policy(
 
     return SkillEnginePolicy(
         declared_engines=declared,
-        unsupport_engine=unsupported,
+        unsupported_engines=unsupported,
         effective_engines=effective,
     )
 
 
 def apply_engine_policy_to_manifest(manifest: dict[str, Any]) -> SkillEnginePolicy:
+    if "unsupport_engine" in manifest:
+        raise ValueError(
+            "runner.json field 'unsupport_engine' has been renamed to "
+            "'unsupported_engines'"
+        )
     policy = resolve_engine_policy(
         manifest.get("engines"),
-        manifest.get("unsupport_engine"),
+        manifest.get("unsupported_engines"),
     )
     manifest["engines"] = policy.declared_engines
-    manifest["unsupport_engine"] = policy.unsupport_engine
+    manifest["unsupported_engines"] = policy.unsupported_engines
     manifest["effective_engines"] = policy.effective_engines
     return policy
 
@@ -66,13 +71,13 @@ def resolve_skill_engine_policy(skill: Any) -> SkillEnginePolicy:
     )
     declared = _normalize_engine_list(getattr(skill, "engines", None), "engines")
     unsupported = _normalize_engine_list(
-        getattr(skill, "unsupport_engine", None),
-        "unsupport_engine",
+        getattr(skill, "unsupported_engines", None),
+        "unsupported_engines",
     )
     if effective_existing and declared:
         return SkillEnginePolicy(
             declared_engines=declared,
-            unsupport_engine=unsupported,
+            unsupported_engines=unsupported,
             effective_engines=effective_existing,
         )
     return resolve_engine_policy(declared, unsupported)

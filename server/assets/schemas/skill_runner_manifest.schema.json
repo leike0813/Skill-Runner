@@ -24,7 +24,7 @@
       "minItems": 1,
       "uniqueItems": true
     },
-    "unsupport_engine": {
+    "unsupported_engines": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/engine"

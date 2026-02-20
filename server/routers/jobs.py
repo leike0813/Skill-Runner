@@ -758,7 +758,7 @@ def _ensure_skill_engine_supported(
             "code": "SKILL_ENGINE_UNSUPPORTED",
             "message": f"Skill '{skill_id}' does not support engine '{requested_engine}'",
             "declared_engines": policy.declared_engines,
-            "unsupport_engine": policy.unsupport_engine,
+            "unsupported_engines": policy.unsupported_engines,
             "effective_engines": policy.effective_engines,
             "requested_engine": requested_engine,
         },

@@ -15,7 +15,7 @@ def _build_skill_zip(
     skill_id: str = "demo-temp-skill",
     *,
     include_engines: bool = True,
-    unsupport_engine: list[str] | None = None,
+    unsupported_engines: list[str] | None = None,
 ) -> bytes:
     runner: dict[str, object] = {
         "id": skill_id,
@@ -29,8 +29,8 @@ def _build_skill_zip(
     }
     if include_engines:
         runner["engines"] = ["gemini"]
-    if unsupport_engine:
-        runner["unsupport_engine"] = unsupport_engine
+    if unsupported_engines:
+        runner["unsupported_engines"] = unsupported_engines
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")

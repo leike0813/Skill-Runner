@@ -41,7 +41,7 @@ def _create_skill(
     skill_id: str,
     with_input_schema: bool,
     engines: list[str] | None = None,
-    unsupport_engine: list[str] | None = None,
+    unsupported_engines: list[str] | None = None,
     include_engines: bool = True,
     execution_modes: list[str] | None = None,
 ) -> SkillManifest:
@@ -51,8 +51,8 @@ def _create_skill(
     (skill_dir / "SKILL.md").write_text("skill")
     if engines is None:
         engines = ["gemini"]
-    if unsupport_engine is None:
-        unsupport_engine = []
+    if unsupported_engines is None:
+        unsupported_engines = []
     if execution_modes is None:
         execution_modes = ["auto", "interactive"]
     runner_payload = {
@@ -61,8 +61,8 @@ def _create_skill(
     }
     if include_engines:
         runner_payload["engines"] = engines
-    if unsupport_engine:
-        runner_payload["unsupport_engine"] = unsupport_engine
+    if unsupported_engines:
+        runner_payload["unsupported_engines"] = unsupported_engines
     (assets_dir / "runner.json").write_text(
         json.dumps(runner_payload)
     )
@@ -88,7 +88,7 @@ def _create_skill(
         path=skill_dir,
         schemas=schemas,
         engines=engines if include_engines else [],
-        unsupport_engine=unsupport_engine,
+        unsupported_engines=unsupported_engines,
         execution_modes=execution_modes,
     )
 
@@ -422,7 +422,7 @@ async def test_create_run_rejects_engine_not_allowed(monkeypatch, temp_config_di
 
 
 @pytest.mark.asyncio
-async def test_create_run_rejects_engine_denied_by_unsupport_engine(monkeypatch, temp_config_dirs):
+async def test_create_run_rejects_engine_denied_by_unsupported_engines(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
 
@@ -431,7 +431,7 @@ async def test_create_run_rejects_engine_denied_by_unsupport_engine(monkeypatch,
         "demo-skill",
         with_input_schema=False,
         include_engines=False,
-        unsupport_engine=["gemini"],
+        unsupported_engines=["gemini"],
     )
     _patch_skill_registry(monkeypatch, skill)
 

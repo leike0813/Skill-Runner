@@ -18,7 +18,7 @@ from server.routers import temp_skill_runs as temp_skill_runs_router
 def _build_skill_zip(
     skill_id: str = "temp-router-skill",
     engines: list[str] | None = None,
-    unsupport_engine: list[str] | None = None,
+    unsupported_engines: list[str] | None = None,
     include_engines: bool = True,
     execution_modes: list[str] | None = None,
 ) -> bytes:
@@ -34,8 +34,8 @@ def _build_skill_zip(
     }
     if include_engines:
         runner["engines"] = engines or ["gemini"]
-    if unsupport_engine:
-        runner["unsupport_engine"] = unsupport_engine
+    if unsupported_engines:
+        runner["unsupported_engines"] = unsupported_engines
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
@@ -153,7 +153,7 @@ async def test_upload_rejects_interactive_when_skill_declares_auto_only(temp_con
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_engine_denied_by_unsupport_engine(temp_config_dirs, monkeypatch):
+async def test_upload_rejects_engine_denied_by_unsupported_engines(temp_config_dirs, monkeypatch):
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.model_registry.validate_model",
         lambda _e, m: {"model": m},
@@ -174,7 +174,7 @@ async def test_upload_rejects_engine_denied_by_unsupport_engine(temp_config_dirs
                 "skill.zip",
                 _build_skill_zip(
                     include_engines=False,
-                    unsupport_engine=["gemini"],
+                    unsupported_engines=["gemini"],
                 ),
             ),
             file=None,

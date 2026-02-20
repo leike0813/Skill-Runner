@@ -35,7 +35,7 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
         name="Demo Skill",
         version="1.2.3",
         engines=["gemini", "codex"],
-        unsupport_engine=["codex"],
+        unsupported_engines=["codex"],
         effective_engines=["gemini"],
         execution_modes=["auto", "interactive"],
         schemas={"output": "assets/output.schema.json"},
@@ -62,7 +62,7 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert body["skills"][0]["health"] == "healthy"
     assert body["skills"][0]["execution_modes"] == ["auto", "interactive"]
     assert body["skills"][0]["engines"] == ["gemini", "codex"]
-    assert body["skills"][0]["unsupport_engine"] == ["codex"]
+    assert body["skills"][0]["unsupported_engines"] == ["codex"]
     assert body["skills"][0]["effective_engines"] == ["gemini"]
 
     detail_res = await _request("GET", "/v1/management/skills/demo-skill")

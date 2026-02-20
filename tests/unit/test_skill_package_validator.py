@@ -16,7 +16,8 @@ def _build_skill_zip(
     skill_name: str | None = None,
     runner_id: str | None = None,
     include_engines: bool = True,
-    unsupport_engine: list[str] | None = None,
+    unsupported_engines: list[str] | None = None,
+    legacy_unsupport_engine: list[str] | None = None,
     include_output: bool = True,
     include_runner_artifacts: bool = True,
     include_execution_modes: bool = True,
@@ -37,8 +38,10 @@ def _build_skill_zip(
     }
     if include_engines:
         runner["engines"] = ["gemini"]
-    if unsupport_engine is not None:
-        runner["unsupport_engine"] = unsupport_engine
+    if unsupported_engines is not None:
+        runner["unsupported_engines"] = unsupported_engines
+    if legacy_unsupport_engine is not None:
+        runner["unsupport_engine"] = legacy_unsupport_engine
     if include_runner_artifacts:
         runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
     if include_execution_modes:
@@ -147,11 +150,11 @@ def test_rejects_missing_execution_modes(tmp_path):
         )
 
 
-def test_rejects_overlapping_engines_and_unsupport_engine(tmp_path):
+def test_rejects_overlapping_engines_and_unsupported_engines(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "overlap_engines.zip"
     zip_path.write_bytes(
-        _build_skill_zip(unsupport_engine=["gemini"])
+        _build_skill_zip(unsupported_engines=["gemini"])
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)
     validator.extract_zip_safe(zip_path, tmp_path / "stage_overlap_engines")
@@ -169,7 +172,7 @@ def test_rejects_empty_effective_engines_when_engines_omitted(tmp_path):
     zip_path.write_bytes(
         _build_skill_zip(
             include_engines=False,
-            unsupport_engine=["codex", "gemini", "iflow"],
+            unsupported_engines=["codex", "gemini", "iflow"],
         )
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)
@@ -177,6 +180,22 @@ def test_rejects_empty_effective_engines_when_engines_omitted(tmp_path):
     with pytest.raises(ValueError, match="must not be empty"):
         validator.validate_skill_dir(
             tmp_path / "stage_empty_effective_engines" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_legacy_unsupport_engine_field(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "legacy_unsupport_engine.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(legacy_unsupport_engine=["gemini"])
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_legacy_unsupport_engine")
+    with pytest.raises(ValueError, match="renamed to 'unsupported_engines'"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_legacy_unsupport_engine" / top,
             top,
             require_version=False,
         )

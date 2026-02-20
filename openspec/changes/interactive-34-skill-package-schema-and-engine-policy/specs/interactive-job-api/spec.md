@@ -9,7 +9,7 @@
 - **THEN** 系统接受请求并进入后续执行流程
 
 #### Scenario: 请求命中显式不支持引擎
-- **GIVEN** Skill 在 `runner.json.unsupport_engine` 中声明了请求引擎
+- **GIVEN** Skill 在 `runner.json.unsupported_engines` 中声明了请求引擎
 - **WHEN** 客户端提交创建 run 请求
 - **THEN** 系统返回 `400`
 - **AND** 错误码为 `SKILL_ENGINE_UNSUPPORTED`

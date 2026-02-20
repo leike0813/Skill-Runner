@@ -174,7 +174,7 @@ SKILL.md 的格式：
   "id": "skill-name",                 // 必须等于 SKILL.md frontmatter.name 且等于目录名（标准要求 name 匹配目录）:contentReference[oaicite:14]{index=14}
   "version": "1.0.0",
   "engines": ["codex", "gemini", "iflow"], // 可选：显式允许的引擎集合
-  "unsupport_engine": ["iflow"],           // 可选：显式不支持的引擎集合
+  "unsupported_engines": ["iflow"],        // 可选：显式不支持的引擎集合
   "execution_modes": ["auto", "interactive"], // 必填：允许的执行模式（仅 auto|interactive）
   "entrypoint": {
     "type": "prompt|script|hybrid",
@@ -219,8 +219,8 @@ SKILL.md 的格式：
 说明：
 - runner.json 是 Runner 私有合同：不会影响标准 skills-compatible agent 读取 SKILL.md。
 - `engines` 为可选字段；缺失时默认按“系统支持的全部引擎”处理。
-- `unsupport_engine` 为可选字段；用于从允许集合中剔除不支持的引擎。
-- 若同时声明 `engines` 与 `unsupport_engine`，两者不允许有重复项；计算后的有效集合必须非空。
+- `unsupported_engines` 为可选字段；用于从允许集合中剔除不支持的引擎。
+- 若同时声明 `engines` 与 `unsupported_engines`，两者不允许有重复项；计算后的有效集合必须非空。
 - `input.schema.json` / `parameter.schema.json` / `output.schema.json` 在上传阶段会执行服务端 meta-schema 预检，确保 Runner 关键扩展字段合法（如 `x-input-source`、`x-type`）。
 - `execution_modes` 必须为非空数组，值仅允许 `auto` / `interactive`。新上传或更新包缺失该字段会被拒绝；存量已安装且缺失的 skill 在兼容期按 `["auto"]` 解释并记录 deprecation 警告。
 - entrypoint.type=prompt 时，SKILL.md 正文仍应写清“执行步骤/输出格式/产物位置”，以便引擎（如 Codex）在激活 skill 时能按指令生成结果；同时 Runner 以 runner.json 作为“机器可执行合同”来编排与校验。
@@ -393,7 +393,7 @@ Artifact 索引规则：
 
 Management API（推荐前端入口）：
 1) GET /v1/management/skills
-- 返回 `SkillSummary` 列表（`id/name/version/engines/unsupport_engine/effective_engines/health`）
+- 返回 `SkillSummary` 列表（`id/name/version/engines/unsupported_engines/effective_engines/health`）
 
 2) GET /v1/management/skills/{skill_id}
 - 返回 `SkillDetail`（补充 `schemas/entrypoints/files/execution_modes`）
@@ -478,7 +478,7 @@ Response:
 
 注：
 - Input 文件（对应 input.schema.json）需通过 `POST /v1/jobs/{request_id}/upload` 单独上传。
-- `engine` 必须在 skill 的有效引擎集合内（`effective_engines = (engines 或 全量支持引擎) - unsupport_engine`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
+- `engine` 必须在 skill 的有效引擎集合内（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - `model` 需从 `GET /v1/engines/{engine}/models` 中选择；Codex 使用 `name@reasoning_effort` 格式。
 - interactive 会话超时统一使用 `runtime_options.session_timeout_sec`（默认 1200 秒）。
 

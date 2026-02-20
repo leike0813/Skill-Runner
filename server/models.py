@@ -149,11 +149,11 @@ class SkillManifest(BaseModel):
     engines: List[str] = Field(default_factory=list)
     """List of supported engines (e.g., ['gemini', 'codex'])."""
 
-    unsupport_engine: List[str] = Field(default_factory=list)
+    unsupported_engines: List[str] = Field(default_factory=list)
     """Explicit deny-list engines declared by skill manifest."""
 
     effective_engines: List[str] = Field(default_factory=list)
-    """Computed engine allowlist after applying unsupport_engine filtering."""
+    """Computed engine allowlist after applying unsupported_engines filtering."""
 
     execution_modes: List[ExecutionMode] = Field(default_factory=lambda: [ExecutionMode.AUTO])
     """Allowed execution modes for this skill."""
@@ -577,7 +577,7 @@ class ManagementSkillSummary(BaseModel):
     name: str
     version: str
     engines: List[str] = Field(default_factory=list)
-    unsupport_engine: List[str] = Field(default_factory=list)
+    unsupported_engines: List[str] = Field(default_factory=list)
     effective_engines: List[str] = Field(default_factory=list)
     execution_modes: List[str] = Field(default_factory=list)
     installed_at: Optional[datetime] = None
