@@ -56,3 +56,12 @@ def test_build_preview_payload_text_binary_and_size(tmp_path: Path):
     large_file.write_text("x" * (PREVIEW_MAX_BYTES + 1), encoding="utf-8")
     large_preview = build_preview_payload(large_file)
     assert large_preview["mode"] == "too_large"
+
+
+def test_build_preview_payload_gb18030_markdown_is_text(tmp_path: Path):
+    md_file = tmp_path / "digest.md"
+    content = "## TL;DR\n\n这是一个中文段落。"
+    md_file.write_bytes(content.encode("gb18030"))
+    preview = build_preview_payload(md_file)
+    assert preview["mode"] == "text"
+    assert "中文段落" in preview["content"]

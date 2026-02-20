@@ -41,6 +41,8 @@ def _create_skill(
     skill_id: str,
     with_input_schema: bool,
     engines: list[str] | None = None,
+    unsupport_engine: list[str] | None = None,
+    include_engines: bool = True,
     execution_modes: list[str] | None = None,
 ) -> SkillManifest:
     skill_dir = base_dir / skill_id
@@ -49,16 +51,20 @@ def _create_skill(
     (skill_dir / "SKILL.md").write_text("skill")
     if engines is None:
         engines = ["gemini"]
+    if unsupport_engine is None:
+        unsupport_engine = []
     if execution_modes is None:
         execution_modes = ["auto", "interactive"]
+    runner_payload = {
+        "id": skill_id,
+        "execution_modes": execution_modes,
+    }
+    if include_engines:
+        runner_payload["engines"] = engines
+    if unsupport_engine:
+        runner_payload["unsupport_engine"] = unsupport_engine
     (assets_dir / "runner.json").write_text(
-        json.dumps(
-            {
-                "id": skill_id,
-                "engines": engines,
-                "execution_modes": execution_modes,
-            }
-        )
+        json.dumps(runner_payload)
     )
 
     schemas = {}
@@ -81,7 +87,8 @@ def _create_skill(
         id=skill_id,
         path=skill_dir,
         schemas=schemas,
-        engines=engines,
+        engines=engines if include_engines else [],
+        unsupport_engine=unsupport_engine,
         execution_modes=execution_modes,
     )
 
@@ -359,25 +366,33 @@ async def test_create_run_with_inline_required_missing_returns_400(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_create_run_rejects_missing_engines(monkeypatch, temp_config_dirs):
+async def test_create_run_allows_missing_engines_and_defaults_to_all(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
 
-    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False, engines=[])
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        include_engines=False,
+    )
     _patch_skill_registry(monkeypatch, skill)
 
-    background_tasks = BackgroundTasks()
-    with pytest.raises(HTTPException) as excinfo:
-        await jobs_router.create_run(
-            RunCreateRequest(
-                skill_id=skill.id,
-                engine="gemini",
-                parameter={"a": 1}
-            ),
-            background_tasks
-        )
-
-    assert excinfo.value.status_code == 400
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+        ),
+        BackgroundTasks(),
+    )
+    assert response.request_id
 
 
 @pytest.mark.asyncio
@@ -400,6 +415,40 @@ async def test_create_run_rejects_engine_not_allowed(monkeypatch, temp_config_di
         )
 
     assert excinfo.value.status_code == 400
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "SKILL_ENGINE_UNSUPPORTED"
+    assert detail["requested_engine"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_engine_denied_by_unsupport_engine(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        include_engines=False,
+        unsupport_engine=["gemini"],
+    )
+    _patch_skill_registry(monkeypatch, skill)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="gemini",
+                parameter={"a": 1}
+            ),
+            BackgroundTasks()
+        )
+
+    assert excinfo.value.status_code == 400
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "SKILL_ENGINE_UNSUPPORTED"
 
 
 @pytest.mark.asyncio

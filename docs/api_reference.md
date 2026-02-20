@@ -17,8 +17,9 @@
 `/v1/management/*` 提供前端无关的统一管理契约，适用于内置 UI 与外部前端（如插件 WebView）复用。
 
 ### Skill 管理
-- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/health`）
-- `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files`）
+- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupport_engine/effective_engines/health`）
+- `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files/execution_modes`）
+- `GET /v1/management/skills/{skill_id}/schemas`：返回 `input/parameter/output` schema 内容（用于动态表单构建）
 
 ### Engine 管理
 - `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/auth_ready/sandbox_status/models_count`）
@@ -120,8 +121,14 @@
   - `assets/input.schema.json`
   - `assets/parameter.schema.json`
   - `assets/output.schema.json`
+- `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
+  - `input.schema.json` 的 `x-input-source` 仅允许 `file` / `inline`；
+  - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`；
+  - 三个 schema 需满足对象型 JSON Schema 基本结构约束。
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
-- `runner.json` 必须包含非空 `engines` 列表。
+- `runner.json.engines` 为可选字段；缺失时默认按系统支持的全部引擎处理。
+- `runner.json.unsupport_engine` 为可选字段；用于声明显式不支持引擎。
+- 若 `engines` 与 `unsupport_engine` 同时存在，二者不允许重复；计算后的有效引擎集合必须非空。
 - `runner.json` 必须包含非空 `execution_modes` 列表，且值仅允许 `auto` / `interactive`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
@@ -194,7 +201,7 @@
 - **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
-- **引擎约束**: `engine` 必须包含在 skill 的 `engines` 列表中，否则直接返回 400。
+- **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupport_engine`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - **模式准入约束**: 请求的 `runtime_options.execution_mode` 必须包含在 skill 的 `execution_modes` 声明中，否则返回 400（`SKILL_EXECUTION_MODE_UNSUPPORTED`）。
 - **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
@@ -212,6 +219,7 @@
 
 **错误码补充**:
 - `429`: 全局执行队列已满，请稍后重试。
+- `SKILL_ENGINE_UNSUPPORTED`（HTTP 400）: Skill 未声明支持请求的 `engine`。
 - `SKILL_EXECUTION_MODE_UNSUPPORTED`（HTTP 400）: Skill 未声明支持请求的 `execution_mode`。
 
 ### 查询状态 (Get Status)
@@ -464,6 +472,27 @@
 兼容旧接口（已弃用）：
 - `GET /ui/skills/table`
 
+### 内建 E2E 示例客户端服务（独立端口）
+
+内建 E2E 示例客户端是独立 FastAPI 服务（默认端口 `8011`），用于模拟真实前端调用链路，不复用 `/ui/*` 路由。
+
+配置：
+- `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `8011`；无效值回退到 `8011`。
+- `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:8000`。
+- `SKILL_RUNNER_E2E_CLIENT_RECORDINGS_DIR`：录制回放文件目录，默认 `e2e_client/recordings`。
+
+主要页面与接口：
+- `GET /`：读取并展示 Skill 列表。
+- `GET /skills/{skill_id}/run`：按 schema 渲染输入页（engine/execution_mode/model + inline/parameter/file + runtime_options）。
+- `POST /skills/{skill_id}/run`：提交执行（创建 run + 可选上传 zip）。
+- `GET /runs/{request_id}`：运行观测页（stdout 主对话区、stderr 独立窗口、pending/reply 交互）。
+- `GET /runs/{request_id}/result`：结果与产物展示页。
+- `GET /recordings`：录制会话列表。
+- `GET /recordings/{request_id}`：单步回放页。
+- `GET /api/runs/{request_id}/events`：代理后端 management SSE。
+- `POST /api/runs/{request_id}/reply`：代理后端 reply 并写入录制。
+- `GET /api/recordings/{request_id}`：读取录制 JSON。
+
 ### 页面上传安装 Skill 包
 `POST /ui/skill-packages/install`
 
@@ -560,8 +589,8 @@
 
 页面能力：
 - 展示 request/run 基本信息；
-- 展示 run 文件树（只读）与文件预览；
-- 通过 SSE 实时查看 stdout/stderr；
+- 展示 run 文件树（只读）与文件预览；文件区采用最大高度约束并在区内滚动；
+- 通过 SSE 实时查看输出：stdout 作为主对话区，stderr 在独立窗口展示；
 - `waiting_user` 下展示 pending 并提交 reply；
 - 支持 cancel 动作并收敛到终态。
 - 外部前端与内建 UI 均应遵循同一管理契约（`/v1/management/*`），避免分叉语义。
@@ -685,7 +714,7 @@
   - `assets/runner.json`
   - `runner.json.schemas` 指向的 `input` / `parameter` / `output` 三个 schema 文件
 - 身份一致性：顶层目录名、`runner.json.id`、`SKILL.md` frontmatter `name` 必须一致。
-- 元数据约束：`runner.json.engines` 必须非空；`runner.json.artifacts` 可选（若提供需为数组）。
+- 元数据约束：`runner.json.engines` 可选、`runner.json.unsupport_engine` 可选；若同时声明则不允许重复且计算后的有效引擎集合必须非空。`runner.json.artifacts` 可选（若提供需为数组）。
 - 包大小限制：受 `TEMP_SKILL_PACKAGE_MAX_BYTES` 控制（默认 20MB）。
 
 ### 生命周期与清理

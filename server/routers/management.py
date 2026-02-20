@@ -20,6 +20,7 @@ from ..models import (
     ManagementRunListResponse,
     ManagementSkillDetail,
     ManagementSkillListResponse,
+    ManagementSkillSchemasResponse,
     ManagementSkillSummary,
     RecoveryState,
     RunStatus,
@@ -29,7 +30,8 @@ from ..services.agent_cli_manager import AgentCliManager
 from ..services.model_registry import model_registry
 from ..services.run_observability import run_observability_service
 from ..services.run_store import run_store
-from ..services.skill_browser import list_skill_entries
+from ..services.skill_browser import list_skill_entries, resolve_skill_file_path
+from ..services.engine_policy import resolve_skill_engine_policy
 from ..services.skill_registry import skill_registry
 from . import jobs as jobs_router
 
@@ -64,6 +66,27 @@ async def get_management_skill(skill_id: str):
         schemas=_normalize_schemas(skill.schemas),
         entrypoints=skill.entrypoint if isinstance(skill.entrypoint, dict) else {},
         files=list_skill_entries(skill_root),
+    )
+
+
+@router.get("/skills/{skill_id}/schemas", response_model=ManagementSkillSchemasResponse)
+async def get_management_skill_schemas(skill_id: str):
+    skill = skill_registry.get_skill(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if not skill.path:
+        raise HTTPException(status_code=404, detail="Skill path not found")
+
+    skill_root = Path(skill.path)
+    if not skill_root.exists() or not skill_root.is_dir():
+        raise HTTPException(status_code=404, detail="Skill path not found")
+
+    schemas = _normalize_schemas(skill.schemas)
+    return ManagementSkillSchemasResponse(
+        skill_id=skill_id,
+        input=_read_skill_schema_content(skill_root, schemas, "input"),
+        parameter=_read_skill_schema_content(skill_root, schemas, "parameter"),
+        output=_read_skill_schema_content(skill_root, schemas, "output"),
     )
 
 
@@ -247,6 +270,7 @@ async def cancel_management_run(request_id: str):
 
 def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
     issues: list[str] = []
+    engine_policy = resolve_skill_engine_policy(skill)
     installed_at: datetime | None = None
     skill_path_raw = getattr(skill, "path", None)
     skill_path = Path(skill_path_raw) if skill_path_raw else None
@@ -268,7 +292,10 @@ def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
         id=str(getattr(skill, "id", "")),
         name=str(getattr(skill, "name", None) or getattr(skill, "id", "")),
         version=str(getattr(skill, "version", "")),
-        engines=list(getattr(skill, "engines", []) or []),
+        engines=engine_policy.declared_engines,
+        unsupport_engine=engine_policy.unsupport_engine,
+        effective_engines=engine_policy.effective_engines,
+        execution_modes=_normalize_execution_modes(getattr(skill, "execution_modes", [])),
         installed_at=installed_at,
         health="healthy" if not issues else "degraded",
         health_error="; ".join(issues) if issues else None,
@@ -283,6 +310,52 @@ def _normalize_schemas(raw: Any) -> dict[str, str]:
         if isinstance(key, str) and isinstance(value, str):
             normalized[key] = value
     return normalized
+
+
+def _normalize_execution_modes(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return ["auto"]
+    normalized: list[str] = []
+    for item in raw:
+        value = getattr(item, "value", item)
+        if isinstance(value, str):
+            mode = value.strip()
+            if mode:
+                normalized.append(mode)
+    if not normalized:
+        return ["auto"]
+    deduped = list(dict.fromkeys(normalized))
+    return deduped
+
+
+def _read_skill_schema_content(
+    skill_root: Path,
+    schemas: dict[str, str],
+    schema_key: str,
+) -> dict[str, Any] | None:
+    schema_path = schemas.get(schema_key)
+    if not schema_path:
+        return None
+    try:
+        target = resolve_skill_file_path(skill_root, schema_path)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid {schema_key} schema",
+        )
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid {schema_key} schema",
+        )
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid {schema_key} schema",
+        )
+    return payload
 
 
 def _derive_sandbox_status(engine: str, auth_ready: bool) -> str:

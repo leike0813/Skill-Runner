@@ -3,6 +3,12 @@ from typing import Any
 
 
 PREVIEW_MAX_BYTES = 256 * 1024
+TEXT_DECODE_CANDIDATES = (
+    "utf-8",
+    "utf-8-sig",
+    "gb18030",
+    "big5",
+)
 
 
 def list_skill_entries(skill_root: Path) -> list[dict[str, Any]]:
@@ -74,21 +80,40 @@ def build_preview_payload(file_path: Path) -> dict[str, Any]:
             "size": size,
             "meta": "无信息",
         }
+    content, encoding = _decode_text(raw)
 
     return {
         "mode": "text",
-        "content": raw.decode("utf-8", errors="replace"),
+        "content": content,
         "size": size,
-        "meta": f"{size} bytes, utf-8",
+        "meta": f"{size} bytes, {encoding}",
     }
 
 
 def _is_binary(data: bytes) -> bool:
     sample = data[:4096]
+    if not sample:
+        return False
     if b"\x00" in sample:
         return True
-    try:
-        sample.decode("utf-8")
-    except UnicodeDecodeError:
+    control_count = 0
+    for byte in sample:
+        if byte in {9, 10, 13}:
+            continue
+        if 32 <= byte <= 126:
+            continue
+        if byte >= 128:
+            continue
+        control_count += 1
+    if control_count / len(sample) > 0.30:
         return True
     return False
+
+
+def _decode_text(data: bytes) -> tuple[str, str]:
+    for encoding in TEXT_DECODE_CANDIDATES:
+        try:
+            return data.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace"), "utf-8-replace"

@@ -22,7 +22,17 @@
         button:disabled { opacity: 0.6; cursor: not-allowed; }
         .danger { background: #b91c1c; }
         .danger:hover { background: #991b1b; }
-        .logs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .pane-scroll { max-height: 340px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .conversation-window { min-height: 220px; max-height: 360px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .reply-box { margin-top: 10px; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+        .reply-textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+        .stderr-window { max-height: 220px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        @media (max-width: 960px) {
+            .row { grid-template-columns: 1fr; }
+            .pane-scroll { max-height: 260px; }
+            .conversation-window { max-height: 300px; }
+            .stderr-window { max-height: 180px; }
+        }
     </style>
 </head>
 <body>
@@ -37,60 +47,63 @@
         <div class="meta">updated_at: <span id="run-updated-at">{{ detail.updated_at or "-" }}</span></div>
         <div class="meta">pending_interaction_id: <span id="run-pending-id">{{ detail.pending_interaction_id if detail.pending_interaction_id is not none else "-" }}</span></div>
         <div class="meta">interaction_count: <span id="run-interaction-count">{{ detail.interaction_count }}</span></div>
-        <div style="margin-top: 10px;">
-            <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
-        </div>
     </div>
 
     <div class="row">
         <div class="card">
             <h3 style="margin:0 0 8px;">Run File Tree (Read-only)</h3>
-            {% for entry in detail.entries %}
-            <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
-                {% if entry.is_dir %}
-                <span class="dir">📁 {{ entry.name }}/</span>
-                {% else %}
-                <span class="file">📄</span>
-                <a
-                    href="#"
-                    hx-get="/ui/management/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
-                    hx-target="#run-file-preview"
-                    hx-swap="innerHTML"
-                >{{ entry.name }}</a>
-                {% endif %}
+            <div class="pane-scroll" id="run-file-tree-scroll">
+                {% for entry in detail.entries %}
+                <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
+                    {% if entry.is_dir %}
+                    <span class="dir">📁 {{ entry.name }}/</span>
+                    {% else %}
+                    <span class="file">📄</span>
+                    <a
+                        href="#"
+                        hx-get="/ui/management/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
+                        hx-target="#run-file-preview"
+                        hx-swap="innerHTML"
+                    >{{ entry.name }}</a>
+                    {% endif %}
+                </div>
+                {% endfor %}
             </div>
-            {% endfor %}
         </div>
         <div class="card">
             <h3 style="margin:0 0 8px;">File Preview</h3>
-            <div id="run-file-preview" class="meta">从左侧选择文件。</div>
-        </div>
-    </div>
-
-    <div class="card" id="pending-panel" style="display:none;">
-        <h3 style="margin:0 0 8px;">Pending Interaction</h3>
-        <div id="pending-prompt" class="meta"></div>
-        <form id="pending-reply-form" style="margin-top: 10px;">
-            <input id="pending-interaction-id" type="hidden" value="">
-            <textarea id="pending-reply-input" rows="3" style="width:100%; border:1px solid #d1d5db; border-radius:8px; padding:8px;" placeholder="输入回复内容"></textarea>
-            <div style="margin-top:8px;">
-                <button type="submit">Submit Reply</button>
+            <div class="pane-scroll" id="run-file-preview-scroll">
+                <div id="run-file-preview" class="meta">从左侧选择文件。</div>
             </div>
-        </form>
+        </div>
     </div>
 
     <div class="card">
-        <h3 style="margin:0 0 8px;">实时日志（SSE）</h3>
-        <div class="logs">
-            <div>
-                <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stdout</div>
-                <pre id="stdout-log" style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;"></pre>
-            </div>
-            <div>
-                <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stderr</div>
-                <pre id="stderr-log" style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;"></pre>
-            </div>
+        <h3 style="margin:0 0 8px;">对话区（stdout）</h3>
+        <div class="conversation-window">
+            <pre id="stdout-log"></pre>
         </div>
+        <div class="reply-box">
+            <div id="pending-state" class="meta">当前状态非 waiting_user，输入框已禁用。</div>
+            <div id="pending-prompt" class="meta"></div>
+            <form id="pending-reply-form" style="margin-top: 10px;">
+                <input id="pending-interaction-id" type="hidden" value="">
+                <textarea id="pending-reply-input" class="reply-textarea" rows="3" placeholder="等待待决交互..."></textarea>
+                <div style="margin-top:8px;">
+                    <button id="pending-reply-submit" type="submit">Submit Reply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 8px;">错误输出（stderr）</h3>
+        <pre id="stderr-log" class="stderr-window"></pre>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 8px;">Run Actions</h3>
+        <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
     </div>
 </div>
 
@@ -103,11 +116,12 @@
     const interactionCountEl = document.getElementById("run-interaction-count");
     const stdoutEl = document.getElementById("stdout-log");
     const stderrEl = document.getElementById("stderr-log");
-    const pendingPanel = document.getElementById("pending-panel");
+    const pendingStateEl = document.getElementById("pending-state");
     const pendingPromptEl = document.getElementById("pending-prompt");
     const pendingInteractionIdEl = document.getElementById("pending-interaction-id");
     const pendingReplyForm = document.getElementById("pending-reply-form");
     const pendingReplyInput = document.getElementById("pending-reply-input");
+    const pendingReplySubmit = document.getElementById("pending-reply-submit");
     const cancelBtn = document.getElementById("cancel-run-btn");
 
     let stdoutOffset = 0;
@@ -115,6 +129,20 @@
     let source = null;
     let reconnectTimer = null;
     let terminal = ["succeeded", "failed", "canceled"].includes(statusEl.textContent || "");
+
+    function setReplyEnabled(enabled, stateText, promptText) {
+        pendingReplyInput.disabled = !enabled;
+        pendingReplySubmit.disabled = !enabled;
+        if (stateText !== undefined) {
+            pendingStateEl.textContent = stateText || "";
+        }
+        if (promptText !== undefined) {
+            pendingPromptEl.textContent = promptText || "";
+        }
+        pendingReplyInput.placeholder = enabled
+            ? "输入给 Agent 的回复内容"
+            : "等待待决交互...";
+    }
 
     function appendLog(target, chunk) {
         if (!chunk) return;
@@ -136,10 +164,12 @@
             terminal = ["succeeded", "failed", "canceled"].includes(payload.status);
             if (terminal) {
                 closeStream();
-                pendingPanel.style.display = "none";
-            }
-            if (payload.status === "running") {
-                pendingPanel.style.display = "none";
+                setReplyEnabled(false, `Run 已进入终态：${payload.status}`, "");
+            } else if (payload.status === "running") {
+                setReplyEnabled(false, "Run 运行中，等待下一次待决交互。", "");
+            } else if (payload.status === "waiting_user") {
+                setReplyEnabled(false, "检测到 waiting_user，正在加载待决交互...", "");
+                loadPending().catch(() => {});
             }
         }
         if (payload.updated_at) {
@@ -165,12 +195,18 @@
         if (!res.ok) return;
         const data = await res.json();
         if (!data.pending) {
-            pendingPanel.style.display = "none";
+            pendingInteractionIdEl.value = "";
+            setReplyEnabled(false, "当前无待决交互。", "");
             return;
         }
-        pendingPromptEl.textContent = data.pending.prompt || "";
-        pendingInteractionIdEl.value = String(data.pending.interaction_id || "");
-        pendingPanel.style.display = "block";
+        const nextId = Number(data.pending.interaction_id || 0);
+        pendingInteractionIdEl.value = nextId > 0 ? String(nextId) : "";
+        pendingIdEl.textContent = nextId > 0 ? String(nextId) : "-";
+        setReplyEnabled(
+            nextId > 0,
+            nextId > 0 ? "待决交互已就绪，请输入回复后提交。" : "待决交互信息无效。",
+            data.pending.prompt || "",
+        );
     }
 
     function scheduleReconnect() {
@@ -247,7 +283,8 @@
         });
         if (!res.ok) return;
         pendingReplyInput.value = "";
-        pendingPanel.style.display = "none";
+        pendingInteractionIdEl.value = "";
+        setReplyEnabled(false, "回复已提交，等待后端继续执行。", "");
         pendingIdEl.textContent = "-";
         terminal = false;
         await refreshState();
@@ -262,8 +299,12 @@
     });
 
     if (statusEl.textContent === "waiting_user") {
+        setReplyEnabled(false, "检测到 waiting_user，正在加载待决交互...", "");
         loadPending().catch(() => {});
-    } else if (!terminal) {
+    } else if (terminal) {
+        setReplyEnabled(false, `Run 已进入终态：${statusEl.textContent}`, "");
+    } else {
+        setReplyEnabled(false, "Run 运行中，等待下一次待决交互。", "");
         connectEvents();
     }
 })();

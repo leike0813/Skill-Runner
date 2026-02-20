@@ -11,6 +11,28 @@ logger = logging.getLogger(__name__)
 from .base import EngineAdapter, ProcessExecutionResult
 from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 
+RUNNER_ONLY_OPTION_KEYS = {
+    "verbose",
+    "no_cache",
+    "debug",
+    "debug_keep_temp",
+    "execution_mode",
+    "interactive_require_user_reply",
+    "session_timeout_sec",
+    "interactive_wait_timeout_sec",
+    "hard_wait_timeout_sec",
+    "wait_timeout_sec",
+    "hard_timeout_seconds",
+}
+
+CODEX_CONFIG_PASSTHROUGH_KEYS = {
+    "model",
+    "model_reasoning_effort",
+    "model_reasoning_summary",
+    "model_verbosity",
+    "model_supports_reasoning_summaries",
+}
+
 class CodexAdapter(EngineAdapter):
     """Adapter for executing tasks via the Codex CLI in non-interactive mode."""
 
@@ -37,7 +59,8 @@ class CodexAdapter(EngineAdapter):
         
         # 2. Fuse Configuration
         try:
-            fused_settings = self.config_manager.generate_profile_settings(skill_defaults, options)
+            codex_overrides = self._extract_codex_overrides(options)
+            fused_settings = self.config_manager.generate_profile_settings(skill_defaults, codex_overrides)
             logger.info(f"Updating Codex profile '{CodexConfigManager.PROFILE_NAME}' with fused settings")
             
             # NOTE: Currently CodexConfigManager updates the GLOBAL user config.
@@ -51,6 +74,31 @@ class CodexAdapter(EngineAdapter):
             
         except ValueError as e:
             raise RuntimeError(f"Configuration Error: {e}")
+
+    def _extract_codex_overrides(self, options: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep only Codex config fields; exclude runner runtime/interactivity controls."""
+        overrides: Dict[str, Any] = {}
+
+        raw_codex_config = options.get("codex_config")
+        if isinstance(raw_codex_config, dict):
+            for key, value in raw_codex_config.items():
+                if not isinstance(key, str):
+                    continue
+                if key.startswith("__"):
+                    continue
+                if key in RUNNER_ONLY_OPTION_KEYS:
+                    continue
+                overrides[key] = value
+
+        for key in CODEX_CONFIG_PASSTHROUGH_KEYS:
+            if key not in options:
+                continue
+            value = options.get(key)
+            if value is None:
+                continue
+            overrides[key] = value
+
+        return overrides
 
     def _setup_environment(
         self,

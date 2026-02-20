@@ -11,10 +11,14 @@ from server.services.temp_skill_run_manager import TempSkillRunManager
 from server.services.temp_skill_run_store import TempSkillRunStore
 
 
-def _build_skill_zip(skill_id: str = "demo-temp-skill") -> bytes:
-    runner = {
+def _build_skill_zip(
+    skill_id: str = "demo-temp-skill",
+    *,
+    include_engines: bool = True,
+    unsupport_engine: list[str] | None = None,
+) -> bytes:
+    runner: dict[str, object] = {
         "id": skill_id,
-        "engines": ["gemini"],
         "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
@@ -23,6 +27,10 @@ def _build_skill_zip(skill_id: str = "demo-temp-skill") -> bytes:
         },
         "artifacts": [{"role": "result", "pattern": "out.txt", "required": True}],
     }
+    if include_engines:
+        runner["engines"] = ["gemini"]
+    if unsupport_engine:
+        runner["unsupport_engine"] = unsupport_engine
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
@@ -102,3 +110,25 @@ def test_debug_keep_temp_skips_immediate_cleanup(monkeypatch, temp_config_dirs):
     assert record is not None
     assert record["status"] == "succeeded"
     assert record["skill_package_path"] is not None
+
+
+def test_stage_missing_engines_defaults_to_all_supported(monkeypatch, temp_config_dirs):
+    store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
+    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    manager = TempSkillRunManager()
+
+    request_id = "req-temp-4"
+    store.create_request(
+        request_id=request_id,
+        engine="gemini",
+        parameter={},
+        model=None,
+        engine_options={},
+        runtime_options={},
+    )
+    manifest = manager.stage_skill_package(
+        request_id,
+        _build_skill_zip(include_engines=False),
+    )
+    assert manifest.engines == []
+    assert manifest.effective_engines == ["codex", "gemini", "iflow"]

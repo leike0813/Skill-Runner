@@ -3,7 +3,6 @@ import logging
 import shutil
 import threading
 from datetime import datetime
-import zipfile
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -58,8 +57,7 @@ class SkillPackageManager:
             shutil.rmtree(staging_root, ignore_errors=True)
         staging_root.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(package_path, "r") as zf:
-            zf.extractall(staging_root)
+        self.validator.extract_zip_safe(package_path, staging_root)
 
         staged_skill_dir = staging_root / top_level
         if not staged_skill_dir.exists() or not staged_skill_dir.is_dir():

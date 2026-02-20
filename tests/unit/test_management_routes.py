@@ -34,7 +34,10 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
         id="demo-skill",
         name="Demo Skill",
         version="1.2.3",
-        engines=["gemini"],
+        engines=["gemini", "codex"],
+        unsupport_engine=["codex"],
+        effective_engines=["gemini"],
+        execution_modes=["auto", "interactive"],
         schemas={"output": "assets/output.schema.json"},
         entrypoint={"type": "prompt"},
         path=skill_dir,
@@ -57,6 +60,10 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     body = list_res.json()
     assert body["skills"][0]["id"] == "demo-skill"
     assert body["skills"][0]["health"] == "healthy"
+    assert body["skills"][0]["execution_modes"] == ["auto", "interactive"]
+    assert body["skills"][0]["engines"] == ["gemini", "codex"]
+    assert body["skills"][0]["unsupport_engine"] == ["codex"]
+    assert body["skills"][0]["effective_engines"] == ["gemini"]
 
     detail_res = await _request("GET", "/v1/management/skills/demo-skill")
     assert detail_res.status_code == 200
@@ -65,6 +72,56 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert detail["schemas"]["output"] == "assets/output.schema.json"
     assert detail["entrypoints"]["type"] == "prompt"
     assert detail["files"][0]["path"] == "SKILL.md"
+    assert detail["execution_modes"] == ["auto", "interactive"]
+    assert detail["effective_engines"] == ["gemini"]
+
+
+@pytest.mark.asyncio
+async def test_management_skill_schemas_endpoint(monkeypatch, tmp_path: Path):
+    skill_dir = tmp_path / "schema-skill"
+    (skill_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "assets" / "runner.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "assets" / "input.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"query": {"type": "string"}}}),
+        encoding="utf-8",
+    )
+    (skill_dir / "assets" / "parameter.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"top_k": {"type": "integer"}}}),
+        encoding="utf-8",
+    )
+    (skill_dir / "assets" / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"answer": {"type": "string"}}}),
+        encoding="utf-8",
+    )
+    manifest = SkillManifest(
+        id="schema-skill",
+        name="Schema Skill",
+        version="1.0.0",
+        engines=["gemini"],
+        schemas={
+            "input": "assets/input.schema.json",
+            "parameter": "assets/parameter.schema.json",
+            "output": "assets/output.schema.json",
+        },
+        path=skill_dir,
+    )
+    monkeypatch.setattr(
+        "server.routers.management.skill_registry.get_skill",
+        lambda skill_id: manifest if skill_id == "schema-skill" else None,
+    )
+
+    res = await _request("GET", "/v1/management/skills/schema-skill/schemas")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["skill_id"] == "schema-skill"
+    assert body["input"]["type"] == "object"
+    assert body["parameter"]["properties"]["top_k"]["type"] == "integer"
+    assert body["output"]["properties"]["answer"]["type"] == "string"
+
+    missing = await _request("GET", "/v1/management/skills/missing/schemas")
+    assert missing.status_code == 404
+    assert "Skill not found" in missing.text
+    assert str(tmp_path) not in missing.text
 
 
 @pytest.mark.asyncio

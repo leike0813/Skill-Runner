@@ -75,6 +75,8 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
     run_detail = await _request("GET", "/ui/runs/req-ui")
     assert run_detail.status_code == 200
     assert "/v1/management/runs/${requestId}/events" in run_detail.text
+    assert "对话区（stdout）" in run_detail.text
+    assert "错误输出（stderr）" in run_detail.text
 
 
 @pytest.mark.asyncio

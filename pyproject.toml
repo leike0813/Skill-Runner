@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "pydantic>=2.0.0",
+    "httpx>=0.27.0",
     "apscheduler>=3.10.0",
     "jinja2>=3.1.0",
     "pyyaml",
@@ -31,7 +32,7 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*"]
+include = ["server*", "e2e_client*"]
 exclude = ["data*", "skills*", "tests*", "references*"]
 
 [tool.pytest.ini_options]

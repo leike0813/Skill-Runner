@@ -47,6 +47,7 @@ from ..services.run_store import run_store
 from ..services.run_cleanup_manager import run_cleanup_manager
 from ..services.concurrency_manager import concurrency_manager
 from ..services.run_observability import run_observability_service
+from ..services.engine_policy import SkillEnginePolicy, resolve_skill_engine_policy
 import uuid
 import json
 from pathlib import Path
@@ -62,15 +63,14 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
     skill = skill_registry.get_skill(request.skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{request.skill_id}' not found")
-    if not skill.engines:
-        raise HTTPException(status_code=400, detail=f"Skill '{request.skill_id}' does not declare supported engines")
-    if request.engine not in skill.engines:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Skill '{request.skill_id}' does not support engine '{request.engine}'"
-        )
 
     try:
+        engine_policy = resolve_skill_engine_policy(skill)
+        _ensure_skill_engine_supported(
+            skill_id=skill.id,
+            requested_engine=request.engine,
+            policy=engine_policy,
+        )
         runtime_opts = options_policy.validate_runtime_options(request.runtime_options)
         execution_mode = runtime_opts.get("execution_mode", ExecutionMode.AUTO.value)
         is_interactive = execution_mode == ExecutionMode.INTERACTIVE.value
@@ -741,6 +741,26 @@ def _ensure_skill_execution_mode_supported(
             ),
             "declared_execution_modes": sorted(declared_modes),
             "requested_execution_mode": requested_mode,
+        },
+    )
+
+
+def _ensure_skill_engine_supported(
+    skill_id: str,
+    requested_engine: str,
+    policy: SkillEnginePolicy,
+) -> None:
+    if requested_engine in policy.effective_engines:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "SKILL_ENGINE_UNSUPPORTED",
+            "message": f"Skill '{skill_id}' does not support engine '{requested_engine}'",
+            "declared_engines": policy.declared_engines,
+            "unsupport_engine": policy.unsupport_engine,
+            "effective_engines": policy.effective_engines,
+            "requested_engine": requested_engine,
         },
     )
 

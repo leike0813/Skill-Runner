@@ -30,6 +30,7 @@ from ..services.run_store import run_store
 from ..services.temp_skill_run_manager import temp_skill_run_manager
 from ..services.temp_skill_run_store import temp_skill_run_store
 from ..services.workspace_manager import workspace_manager
+from ..services.engine_policy import SkillEnginePolicy, resolve_skill_engine_policy
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
@@ -95,12 +96,12 @@ async def upload_temp_skill_and_start(
     try:
         skill_bytes = await skill_package.read()
         skill = temp_skill_run_manager.stage_skill_package(request_id, skill_bytes)
-        if not skill.engines:
-            raise ValueError(f"Skill '{skill.id}' does not declare supported engines")
-        if record["engine"] not in skill.engines:
-            raise ValueError(
-                f"Skill '{skill.id}' does not support engine '{record['engine']}'"
-            )
+        engine_policy = resolve_skill_engine_policy(skill)
+        _ensure_skill_engine_supported(
+            skill_id=skill.id,
+            requested_engine=record["engine"],
+            policy=engine_policy,
+        )
         requested_mode = record.get("runtime_options", {}).get(
             "execution_mode", ExecutionMode.AUTO.value
         )
@@ -409,6 +410,26 @@ def _declared_execution_modes(skill: Any) -> set[str]:
         else:
             modes.add(str(mode))
     return modes
+
+
+def _ensure_skill_engine_supported(
+    skill_id: str,
+    requested_engine: str,
+    policy: SkillEnginePolicy,
+) -> None:
+    if requested_engine in policy.effective_engines:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "SKILL_ENGINE_UNSUPPORTED",
+            "message": f"Skill '{skill_id}' does not support engine '{requested_engine}'",
+            "declared_engines": policy.declared_engines,
+            "unsupport_engine": policy.unsupport_engine,
+            "effective_engines": policy.effective_engines,
+            "requested_engine": requested_engine,
+        },
+    )
 
 
 def _read_log(path: Path) -> str | None:

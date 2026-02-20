@@ -142,3 +142,39 @@ def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
         config.defrost()
         config.SYSTEM.SKILLS_DIR = old_skills_dir
         config.freeze()
+
+
+def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    skill_dir = skills_dir / "legacy-engine-skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Legacy Engine")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "legacy-engine-skill",
+                "execution_modes": ["auto"],
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    old_skills_dir = config.SYSTEM.SKILLS_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(skills_dir)
+    config.freeze()
+
+    try:
+        registry = SkillRegistry()
+        registry.scan_skills()
+        skill = registry.get_skill("legacy-engine-skill")
+        assert skill is not None
+        assert skill.effective_engines == ["codex", "gemini", "iflow"]
+        assert skill.engines == []
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_skills_dir
+        config.freeze()

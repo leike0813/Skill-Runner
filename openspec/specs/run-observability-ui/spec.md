@@ -17,7 +17,7 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 - **AND** 页面提供 run 目录文件树只读浏览能力
 
 ### Requirement: 系统 MUST 支持 Run 文件只读预览
-系统 MUST 允许用户在 UI 中预览 run 目录文件内容，且不得提供修改入口。
+系统 MUST 允许用户在 UI 中预览 run 目录文件内容，且不得提供修改入口；文件树与预览区在页面中 MUST 使用固定最大高度并支持内部滚动，以避免详情页被长内容无限拉伸。
 
 #### Scenario: 预览文本文件
 - **WHEN** 用户请求 `/ui/runs/{request_id}/view?path=<relative_path>`
@@ -27,6 +27,11 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 #### Scenario: 非法路径被拒绝
 - **WHEN** 用户请求路径越界或文件不存在
 - **THEN** 系统返回错误响应（400 或 404）
+
+#### Scenario: 文件树与预览长内容滚动
+- **WHEN** 文件树项数量或预览文本长度超过详情页区块最大高度
+- **THEN** 文件树区与预览区在各自容器内滚动显示
+- **AND** 页面整体高度保持稳定，不因长内容持续增长
 
 ### Requirement: 系统 MUST 提供运行中日志动态刷新
 系统 MUST 提供 run 日志 tail 接口，并在运行态支持 UI 自动刷新。
@@ -50,17 +55,22 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 - **AND** 不引入仅 UI 可见的私有状态定义
 
 ### Requirement: Run 页面 MUST 支持对话窗口式管理体验
-系统 MUST 让内建 Run 页面在统一管理接口下支持对话窗口所需能力：实时输出、交互回复、文件浏览。
+系统 MUST 让内建 Run 页面在统一管理接口下支持对话窗口所需能力：stdout 作为主对话窗口实时更新、底部用户输入框提交 reply、stderr 在独立窗口展示。
 
 #### Scenario: waiting_user 交互
 - **WHEN** Run 状态进入 `waiting_user`
-- **THEN** 页面展示 pending 信息
-- **AND** 允许用户提交 reply 并恢复执行
+- **THEN** 页面展示 pending 信息并激活底部输入框
+- **AND** 用户可在同一对话区提交 reply 并恢复执行
 
 #### Scenario: 实时输出观测
 - **WHEN** Run 状态为 `running`
-- **THEN** 页面消费 SSE 输出事件并实时更新 stdout/stderr 显示
+- **THEN** 页面消费 SSE 输出事件并实时更新 stdout 主对话窗口
 - **AND** 断线后可续传恢复
+
+#### Scenario: stderr 独立展示
+- **WHEN** SSE 返回 stderr 增量事件
+- **THEN** 页面在独立 stderr 窗口中追加显示错误输出
+- **AND** stderr 显示不影响 stdout 主对话窗口的阅读与输入操作
 
 #### Scenario: 用户主动终止
 - **WHEN** 用户在 Run 页面触发 cancel

@@ -21,13 +21,26 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
     skill_dir = tmp_path / "skills" / "demo-skill"
     (skill_dir / "assets").mkdir(parents=True, exist_ok=True)
     (skill_dir / "assets" / "runner.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "assets" / "input.schema.json").write_text(
+        '{"type":"object","properties":{"q":{"type":"string"}}}',
+        encoding="utf-8",
+    )
+    (skill_dir / "assets" / "parameter.schema.json").write_text(
+        '{"type":"object","properties":{"limit":{"type":"integer"}}}',
+        encoding="utf-8",
+    )
     (skill_dir / "assets" / "output.schema.json").write_text("{}", encoding="utf-8")
     manifest = SkillManifest(
         id="demo-skill",
         name="Demo Skill",
         version="1.0.0",
         engines=["gemini"],
-        schemas={"output": "assets/output.schema.json"},
+        execution_modes=["auto", "interactive"],
+        schemas={
+            "input": "assets/input.schema.json",
+            "parameter": "assets/parameter.schema.json",
+            "output": "assets/output.schema.json",
+        },
         path=skill_dir,
     )
     monkeypatch.setattr("server.routers.management.skill_registry.list_skills", lambda: [manifest])
@@ -94,6 +107,12 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
     skill_detail_res = await _request("GET", "/v1/management/skills/demo-skill")
     assert skill_detail_res.status_code == 200
     assert skill_detail_res.json()["files"][0]["path"] == "SKILL.md"
+    assert skill_detail_res.json()["execution_modes"] == ["auto", "interactive"]
+
+    schemas_res = await _request("GET", "/v1/management/skills/demo-skill/schemas")
+    assert schemas_res.status_code == 200
+    assert schemas_res.json()["input"]["properties"]["q"]["type"] == "string"
+    assert schemas_res.json()["parameter"]["properties"]["limit"]["type"] == "integer"
 
     engines_res = await _request("GET", "/v1/management/engines")
     assert engines_res.status_code == 200

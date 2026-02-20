@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2 style="margin-top: 0;">Replay: <code>{{ request_id }}</code></h2>
+    <p class="muted">Single-step playback over recorded request/response summaries.</p>
+    <div class="row">
+        <button id="prev-step" class="btn secondary">Prev</button>
+        <button id="next-step" class="btn">Next</button>
+        <span class="muted">Step <span id="step-index">0</span> / {{ step_count }}</span>
+    </div>
+</section>
+
+<section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">Current Step</h3>
+    <div id="step-meta" class="muted">No data loaded</div>
+    <pre id="step-content" style="white-space: pre-wrap; border:1px solid #d8e6dd; border-radius:8px; background:#f7fbf8; padding:12px; min-height:180px;"></pre>
+</section>
+
+<script>
+(() => {
+    const requestId = "{{ request_id }}";
+    const metaEl = document.getElementById("step-meta");
+    const contentEl = document.getElementById("step-content");
+    const indexEl = document.getElementById("step-index");
+    const prevBtn = document.getElementById("prev-step");
+    const nextBtn = document.getElementById("next-step");
+    let steps = [];
+    let index = -1;
+
+    function render() {
+        if (!steps.length || index < 0 || index >= steps.length) {
+            metaEl.textContent = "No step selected";
+            contentEl.textContent = "";
+            indexEl.textContent = "0";
+            prevBtn.disabled = true;
+            nextBtn.disabled = !steps.length;
+            return;
+        }
+        const step = steps[index];
+        indexEl.textContent = String(index + 1);
+        metaEl.textContent = `${step.ts || "-"} • ${step.action || "unknown"} • status=${step.status || "-"}`;
+        contentEl.textContent = JSON.stringify(step, null, 2);
+        prevBtn.disabled = index <= 0;
+        nextBtn.disabled = index >= steps.length - 1;
+    }
+
+    prevBtn.addEventListener("click", () => {
+        if (index > 0) {
+            index -= 1;
+            render();
+        }
+    });
+
+    nextBtn.addEventListener("click", () => {
+        if (index < steps.length - 1) {
+            index += 1;
+            render();
+        }
+    });
+
+    async function init() {
+        const res = await fetch(`/api/recordings/${requestId}`);
+        if (!res.ok) {
+            metaEl.textContent = "Failed to load recording";
+            return;
+        }
+        const payload = await res.json();
+        steps = Array.isArray(payload.steps) ? payload.steps : [];
+        index = steps.length ? 0 : -1;
+        render();
+    }
+
+    init();
+})();
+</script>
+{% endblock %}
+

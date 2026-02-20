@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2 style="margin-top: 0;">Run Observation: <code>{{ request_id }}</code></h2>
+    <div class="row">
+        <div style="flex: 1 1 200px;"><strong>Status:</strong> <span id="run-status">loading</span></div>
+        <div style="flex: 1 1 200px;"><strong>Pending ID:</strong> <span id="pending-id">-</span></div>
+        <div style="flex: 1 1 200px;">
+            <a class="btn secondary" href="/runs">Runs</a>
+            <a class="btn secondary" href="/runs/{{ request_id }}/result">Result</a>
+            <a class="btn secondary" href="/recordings/{{ request_id }}">Replay</a>
+        </div>
+    </div>
+</section>
+
+<section class="row" style="margin-top: 16px;">
+    <div class="card" style="flex: 2 1 540px;">
+        <h3 style="margin-top: 0;">Conversation (stdout)</h3>
+        <div id="stdout-panel" style="height: 360px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8;"></div>
+        <div style="margin-top: 12px; border-top: 1px solid #e1ece5; padding-top: 12px;">
+            <div class="muted" id="pending-prompt">Waiting for pending interaction...</div>
+            <form id="reply-form" style="margin-top: 8px;">
+                <input type="hidden" id="interaction-id" value="">
+                <textarea id="reply-text" rows="3" style="width:100%; border-radius:8px; border:1px solid #c9ddce; padding:8px;" placeholder="Reply text"></textarea>
+                <div style="margin-top: 8px;">
+                    <button class="btn" id="reply-submit" type="submit" disabled>Submit Reply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="card" style="flex: 1 1 320px;">
+        <h3 style="margin-top: 0;">Errors (stderr)</h3>
+        <div id="stderr-panel" style="height: 360px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f1d2d2; border-radius:8px; padding:10px; background:#fff8f8;"></div>
+    </div>
+</section>
+
+<script>
+(() => {
+    const requestId = "{{ request_id }}";
+    const statusEl = document.getElementById("run-status");
+    const pendingIdEl = document.getElementById("pending-id");
+    const stdoutEl = document.getElementById("stdout-panel");
+    const stderrEl = document.getElementById("stderr-panel");
+    const replyForm = document.getElementById("reply-form");
+    const replyText = document.getElementById("reply-text");
+    const replySubmit = document.getElementById("reply-submit");
+    const promptEl = document.getElementById("pending-prompt");
+    const interactionIdEl = document.getElementById("interaction-id");
+    let stream = null;
+
+    function appendChunk(el, text) {
+        if (!text) return;
+        el.textContent += text;
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function setReplyEnabled(enabled, prompt) {
+        replyText.disabled = !enabled;
+        replySubmit.disabled = !enabled;
+        if (!enabled) {
+            interactionIdEl.value = "";
+        }
+        promptEl.textContent = prompt || (enabled ? "Pending response required." : "Current run is not waiting for user input.");
+    }
+
+    async function refreshState() {
+        const res = await fetch(`/api/runs/${requestId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        statusEl.textContent = data.status || "unknown";
+        pendingIdEl.textContent = data.pending_interaction_id == null ? "-" : String(data.pending_interaction_id);
+        if (data.status === "waiting_user") {
+            await refreshPending();
+        } else {
+            setReplyEnabled(false, "");
+        }
+        if (["succeeded", "failed", "canceled"].includes(data.status)) {
+            if (stream) {
+                stream.close();
+                stream = null;
+            }
+        }
+    }
+
+    async function refreshPending() {
+        const res = await fetch(`/api/runs/${requestId}/pending`);
+        if (!res.ok) {
+            setReplyEnabled(false, "Unable to read pending interaction.");
+            return;
+        }
+        const data = await res.json();
+        const pending = data.pending;
+        if (!pending) {
+            setReplyEnabled(false, "No pending interaction available.");
+            return;
+        }
+        interactionIdEl.value = String(pending.interaction_id || "");
+        pendingIdEl.textContent = String(pending.interaction_id || "-");
+        setReplyEnabled(true, pending.prompt || "Pending interaction");
+    }
+
+    function startStream() {
+        if (stream) {
+            stream.close();
+        }
+        stream = new EventSource(`/api/runs/${requestId}/events`);
+        stream.addEventListener("snapshot", (evt) => {
+            const data = JSON.parse(evt.data);
+            statusEl.textContent = data.status || "unknown";
+            if (data.pending_interaction_id != null) {
+                pendingIdEl.textContent = String(data.pending_interaction_id);
+            }
+        });
+        stream.addEventListener("stdout", (evt) => {
+            const data = JSON.parse(evt.data);
+            appendChunk(stdoutEl, data.chunk || "");
+        });
+        stream.addEventListener("stderr", (evt) => {
+            const data = JSON.parse(evt.data);
+            appendChunk(stderrEl, data.chunk || "");
+        });
+        stream.addEventListener("status", async (evt) => {
+            const data = JSON.parse(evt.data);
+            statusEl.textContent = data.status || "unknown";
+            if (data.pending_interaction_id != null) {
+                pendingIdEl.textContent = String(data.pending_interaction_id);
+            }
+            if (data.status === "waiting_user") {
+                await refreshPending();
+            }
+            if (["succeeded", "failed", "canceled"].includes(data.status || "")) {
+                setReplyEnabled(false, "");
+            }
+        });
+        stream.addEventListener("end", async (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            if (data.reason === "waiting_user") {
+                await refreshPending();
+            }
+            if (data.reason === "terminal" && stream) {
+                stream.close();
+                stream = null;
+            }
+            await refreshState();
+        });
+        stream.addEventListener("error", () => {
+            setReplyEnabled(false, "Event stream disconnected.");
+        });
+    }
+
+    replyForm.addEventListener("submit", async (evt) => {
+        evt.preventDefault();
+        const interactionId = Number(interactionIdEl.value || "0");
+        if (!interactionId) return;
+        const payload = {
+            interaction_id: interactionId,
+            response: { text: replyText.value || "" }
+        };
+        const res = await fetch(`/api/runs/${requestId}/reply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            promptEl.textContent = "Reply rejected.";
+            return;
+        }
+        replyText.value = "";
+        setReplyEnabled(false, "Reply accepted, resuming...");
+        setTimeout(() => {
+            startStream();
+            refreshState();
+        }, 200);
+    });
+
+    startStream();
+    refreshState();
+})();
+</script>
+{% endblock %}

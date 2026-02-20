@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2 style="margin-top: 0;">Runs</h2>
+    <p class="muted">All runs created from this client can be reopened from this table.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Request ID</th>
+                <th>Status</th>
+                <th>Skill</th>
+                <th>Engine</th>
+                <th>Updated At</th>
+                <th>Steps</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+            <tr>
+                <td><code>{{ row.request_id }}</code></td>
+                <td>
+                    {{ row.status }}
+                    {% if row.state_error %}
+                        <div class="muted">{{ row.state_error }}</div>
+                    {% endif %}
+                </td>
+                <td>{{ row.skill_id }}</td>
+                <td>{{ row.engine }}</td>
+                <td>{{ row.updated_at or "-" }}</td>
+                <td>{{ row.step_count }}</td>
+                <td>
+                    <a class="btn secondary" href="/runs/{{ row.request_id }}">Open Observation</a>
+                    <a class="btn secondary" href="/runs/{{ row.request_id }}/result">Result</a>
+                    <a class="btn secondary" href="/recordings/{{ row.request_id }}">Replay</a>
+                </td>
+            </tr>
+        {% endfor %}
+        {% if not rows %}
+            <tr><td colspan="7" class="muted">No runs created from this client yet.</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

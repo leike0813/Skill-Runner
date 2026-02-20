@@ -6,7 +6,10 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
+import jsonschema  # type: ignore[import-untyped]
 import yaml  # type: ignore
+
+from .engine_policy import apply_engine_policy_to_manifest
 
 _packaging_version: Any = None
 try:
@@ -22,6 +25,11 @@ class SkillPackageValidator:
         "SKILL.md",
         "assets/runner.json",
     )
+    SCHEMA_META_FILES = {
+        "input": "skill_input_schema.schema.json",
+        "parameter": "skill_parameter_schema.schema.json",
+        "output": "skill_output_schema.schema.json",
+    }
 
     def inspect_zip_top_level_from_bytes(self, payload: bytes) -> str:
         try:
@@ -95,6 +103,8 @@ class SkillPackageValidator:
             runner = json.loads(runner_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("Invalid assets/runner.json") from exc
+        self._validate_runner_schema(runner)
+        apply_engine_policy_to_manifest(runner)
 
         runner_id = runner.get("id")
         if not isinstance(runner_id, str) or not runner_id.strip():
@@ -114,19 +124,15 @@ class SkillPackageValidator:
             schema_rel = schemas.get(key)
             if not isinstance(schema_rel, str) or not schema_rel.strip():
                 raise ValueError("runner.json schemas must define input, parameter and output")
-            if not (skill_dir / schema_rel).exists():
+            schema_path = skill_dir / schema_rel
+            if not schema_path.exists():
                 missing.append(schema_rel)
+                continue
+            self._validate_skill_schema_file(schema_path, schema_key=key)
         if missing:
             raise ValueError(f"Skill package missing required files: {', '.join(missing)}")
 
-        engines = runner.get("engines")
-        if not isinstance(engines, list) or not engines:
-            raise ValueError("runner.json must define a non-empty engines list")
         self._validate_execution_modes(runner)
-
-        artifacts = runner.get("artifacts")
-        if artifacts is not None and not isinstance(artifacts, list):
-            raise ValueError("runner.json artifacts must be a list when provided")
 
         version = runner.get("version")
         if require_version:
@@ -141,6 +147,37 @@ class SkillPackageValidator:
             version = None
 
         return skill_id, version
+
+    def _validate_runner_schema(self, runner: dict[str, Any]) -> None:
+        schema_path = (
+            Path(__file__).resolve().parents[1] / "assets" / "schemas" / "skill_runner_manifest.schema.json"
+        )
+        try:
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError("Runner manifest schema is unreadable") from exc
+        try:
+            jsonschema.validate(instance=runner, schema=schema)
+        except jsonschema.ValidationError as exc:
+            raise ValueError(f"Invalid runner.json manifest: {exc.message}") from exc
+
+    def _validate_skill_schema_file(self, schema_path: Path, *, schema_key: str) -> None:
+        meta_filename = self.SCHEMA_META_FILES.get(schema_key)
+        if not meta_filename:
+            return
+        meta_schema_path = Path(__file__).resolve().parents[1] / "assets" / "schemas" / meta_filename
+        try:
+            schema_payload = json.loads(schema_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid {schema_key} schema: not valid JSON") from exc
+        try:
+            meta_schema = json.loads(meta_schema_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"{schema_key} meta-schema is unreadable") from exc
+        try:
+            jsonschema.validate(instance=schema_payload, schema=meta_schema)
+        except jsonschema.ValidationError as exc:
+            raise ValueError(f"Invalid {schema_key} schema: {exc.message}") from exc
 
     def _validate_execution_modes(self, runner: dict[str, Any]) -> None:
         execution_modes = runner.get("execution_modes")

@@ -86,6 +86,48 @@ def test_extract_session_handle_missing_thread_started_raises():
         adapter.extract_session_handle(raw_stdout, turn_index=1)
 
 
+def test_construct_config_excludes_runtime_interactive_options(tmp_path):
+    config_manager = MagicMock()
+    config_path = tmp_path / ".codex" / "config.toml"
+    config_manager.config_path = config_path
+    config_manager.generate_profile_settings.return_value = {"model": "gpt-5.2-codex"}
+    adapter = CodexAdapter(config_manager=config_manager)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+
+    result_path = adapter._construct_config(
+        skill,
+        run_dir,
+        options={
+            "model": "gpt-5.2-codex",
+            "model_reasoning_effort": "high",
+            "execution_mode": "interactive",
+            "interactive_require_user_reply": True,
+            "session_timeout_sec": 1200,
+            "interactive_wait_timeout_sec": 10,
+            "verbose": True,
+            "__resume_session_handle": {"handle_value": "th_1"},
+            "codex_config": {
+                "sandbox_mode": "workspace-write",
+                "session_timeout_sec": 999,
+            },
+        },
+    )
+
+    assert result_path == config_path
+    assert config_manager.generate_profile_settings.call_count == 1
+    _, passed_overrides = config_manager.generate_profile_settings.call_args[0]
+    assert passed_overrides["model"] == "gpt-5.2-codex"
+    assert passed_overrides["model_reasoning_effort"] == "high"
+    assert passed_overrides["sandbox_mode"] == "workspace-write"
+    assert "execution_mode" not in passed_overrides
+    assert "interactive_require_user_reply" not in passed_overrides
+    assert "session_timeout_sec" not in passed_overrides
+    assert "interactive_wait_timeout_sec" not in passed_overrides
+    assert "verbose" not in passed_overrides
+
+
 @pytest.mark.asyncio
 async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
     adapter = CodexAdapter(config_manager=MagicMock())

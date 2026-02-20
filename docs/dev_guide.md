@@ -173,7 +173,8 @@ SKILL.md 的格式：
 {
   "id": "skill-name",                 // 必须等于 SKILL.md frontmatter.name 且等于目录名（标准要求 name 匹配目录）:contentReference[oaicite:14]{index=14}
   "version": "1.0.0",
-  "engines": ["codex", "gemini", "iflow"],
+  "engines": ["codex", "gemini", "iflow"], // 可选：显式允许的引擎集合
+  "unsupport_engine": ["iflow"],           // 可选：显式不支持的引擎集合
   "execution_modes": ["auto", "interactive"], // 必填：允许的执行模式（仅 auto|interactive）
   "entrypoint": {
     "type": "prompt|script|hybrid",
@@ -217,6 +218,10 @@ SKILL.md 的格式：
 
 说明：
 - runner.json 是 Runner 私有合同：不会影响标准 skills-compatible agent 读取 SKILL.md。
+- `engines` 为可选字段；缺失时默认按“系统支持的全部引擎”处理。
+- `unsupport_engine` 为可选字段；用于从允许集合中剔除不支持的引擎。
+- 若同时声明 `engines` 与 `unsupport_engine`，两者不允许有重复项；计算后的有效集合必须非空。
+- `input.schema.json` / `parameter.schema.json` / `output.schema.json` 在上传阶段会执行服务端 meta-schema 预检，确保 Runner 关键扩展字段合法（如 `x-input-source`、`x-type`）。
 - `execution_modes` 必须为非空数组，值仅允许 `auto` / `interactive`。新上传或更新包缺失该字段会被拒绝；存量已安装且缺失的 skill 在兼容期按 `["auto"]` 解释并记录 deprecation 警告。
 - entrypoint.type=prompt 时，SKILL.md 正文仍应写清“执行步骤/输出格式/产物位置”，以便引擎（如 Codex）在激活 skill 时能按指令生成结果；同时 Runner 以 runner.json 作为“机器可执行合同”来编排与校验。
 - entrypoint.type=script/hybrid 时，scripts/ 中的脚本作为更确定的执行路径（建议用于 normalize/fallback 或关键产物生成）。
@@ -388,37 +393,53 @@ Artifact 索引规则：
 
 Management API（推荐前端入口）：
 1) GET /v1/management/skills
-- 返回 `SkillSummary` 列表（`id/name/version/engines/health`）
+- 返回 `SkillSummary` 列表（`id/name/version/engines/unsupport_engine/effective_engines/health`）
 
 2) GET /v1/management/skills/{skill_id}
-- 返回 `SkillDetail`（补充 `schemas/entrypoints/files`）
+- 返回 `SkillDetail`（补充 `schemas/entrypoints/files/execution_modes`）
 
-3) GET /v1/management/engines
+3) GET /v1/management/skills/{skill_id}/schemas
+- 返回 `input/parameter/output` schema 内容（用于动态表单渲染与前置校验）
+
+4) GET /v1/management/engines
 - 返回 `EngineSummary` 列表（`engine/cli_version/auth_ready/sandbox_status/models_count`）
 
-4) GET /v1/management/engines/{engine}
+5) GET /v1/management/engines/{engine}
 - 返回 `EngineDetail`（补充 `models/upgrade_status/last_error`）
 
-5) GET /v1/management/runs/{request_id}
+6) GET /v1/management/runs/{request_id}
 - 返回 `RunConversationState`（包含 `pending_interaction_id`、`interaction_count`、`auto_decision_count`、`last_auto_decision_at`、`recovery_state`、`recovered_at`、`recovery_reason`、`poll_logs`）
 
-6) GET /v1/management/runs/{request_id}/files
+7) GET /v1/management/runs/{request_id}/files
 - 返回对话窗口文件树
 
-7) GET /v1/management/runs/{request_id}/file?path=...
+8) GET /v1/management/runs/{request_id}/file?path=...
 - 返回文件预览（带路径越界保护）
 
-8) GET /v1/management/runs/{request_id}/events
+9) GET /v1/management/runs/{request_id}/events
 - SSE 增量日志流（复用 jobs 事件语义）
 
-9) GET /v1/management/runs/{request_id}/pending
+10) GET /v1/management/runs/{request_id}/pending
 - 查询当前待决交互
 
-10) POST /v1/management/runs/{request_id}/reply
+11) POST /v1/management/runs/{request_id}/reply
 - 提交交互回复（语义与 jobs 保持一致）
 
-11) POST /v1/management/runs/{request_id}/cancel
+12) POST /v1/management/runs/{request_id}/cancel
 - 取消运行（语义与 jobs 保持一致）
+
+内建 UI Run 详情页布局约定：
+- 文件树区与文件预览区使用固定最大高度并在各自容器内滚动，避免长内容拉伸整页。
+- stdout 作为主对话窗口；用户 reply 输入区固定在主对话窗口下方并按 pending 状态启用。
+- stderr 以独立窗口展示，与 stdout 主对话区分离。
+
+内建 E2E 示例客户端（独立服务）：
+- 服务入口：`e2e_client/app.py`，默认端口 `8011`，通过 `SKILL_RUNNER_E2E_CLIENT_PORT` 覆盖，无效值回退 `8011`。
+- 后端地址：`SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`（默认 `http://127.0.0.1:8000`）。
+- 客户端仅通过 HTTP API 与后端通信，不依赖 `server` 内部模块。
+- 执行页从 skill detail 的 `execution_modes` 读取允许模式，用户可选择后写入 `runtime_options.execution_mode`。
+- 执行页支持 model 选择（按 engine 动态加载）与常用 runtime_options 配置并一并提交。
+- 录制回放：关键动作（create/upload/reply/result_read）写入 `e2e_client/recordings/*.json`，回放页支持单步播放。
 
 旧 UI 数据接口弃用策略（Web 客户端迁移后）：
 - `warn`（默认）：旧接口继续返回，但附带 `Deprecation/Sunset/Link` 响应头，并记录调用日志。
@@ -457,7 +478,7 @@ Response:
 
 注：
 - Input 文件（对应 input.schema.json）需通过 `POST /v1/jobs/{request_id}/upload` 单独上传。
-- `engine` 必须在 skill 的 `engines` 列表内，否则返回 400。
+- `engine` 必须在 skill 的有效引擎集合内（`effective_engines = (engines 或 全量支持引擎) - unsupport_engine`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - `model` 需从 `GET /v1/engines/{engine}/models` 中选择；Codex 使用 `name@reasoning_effort` 格式。
 - interactive 会话超时统一使用 `runtime_options.session_timeout_sec`（默认 1200 秒）。
 

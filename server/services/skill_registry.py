@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from ..config import config
 from ..models import ExecutionMode, SkillManifest
+from .engine_policy import apply_engine_policy_to_manifest
 from .manifest_artifact_inference import infer_manifest_artifacts
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class SkillRegistry:
             with open(runner_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 data = infer_manifest_artifacts(data, skill_dir)
+                apply_engine_policy_to_manifest(data)
                 if "execution_modes" not in data:
                     data["execution_modes"] = [ExecutionMode.AUTO.value]
                     if skill_dir.name not in self._missing_execution_modes_warned:

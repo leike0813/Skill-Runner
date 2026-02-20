@@ -15,22 +15,30 @@ def _build_skill_zip(
     top_level: str | None = None,
     skill_name: str | None = None,
     runner_id: str | None = None,
+    include_engines: bool = True,
+    unsupport_engine: list[str] | None = None,
     include_output: bool = True,
     include_runner_artifacts: bool = True,
     include_execution_modes: bool = True,
+    input_schema_override: dict[str, Any] | None = None,
+    parameter_schema_override: dict[str, Any] | None = None,
+    output_schema_override: dict[str, Any] | None = None,
 ) -> bytes:
     top = top_level or skill_id
     name = skill_name or skill_id
     rid = runner_id or skill_id
     runner: dict[str, Any] = {
         "id": rid,
-        "engines": ["gemini"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
             "output": "assets/output.schema.json",
         },
     }
+    if include_engines:
+        runner["engines"] = ["gemini"]
+    if unsupport_engine is not None:
+        runner["unsupport_engine"] = unsupport_engine
     if include_runner_artifacts:
         runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
     if include_execution_modes:
@@ -39,10 +47,19 @@ def _build_skill_zip(
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
         zf.writestr(f"{top}/assets/runner.json", json.dumps(runner))
-        zf.writestr(f"{top}/assets/input.schema.json", json.dumps({"type": "object", "properties": {}}))
-        zf.writestr(f"{top}/assets/parameter.schema.json", json.dumps({"type": "object", "properties": {}}))
+        zf.writestr(
+            f"{top}/assets/input.schema.json",
+            json.dumps(input_schema_override or {"type": "object", "properties": {}}),
+        )
+        zf.writestr(
+            f"{top}/assets/parameter.schema.json",
+            json.dumps(parameter_schema_override or {"type": "object", "properties": {}}),
+        )
         if include_output:
-            zf.writestr(f"{top}/assets/output.schema.json", json.dumps({"type": "object", "properties": {}}))
+            zf.writestr(
+                f"{top}/assets/output.schema.json",
+                json.dumps(output_schema_override or {"type": "object", "properties": {}}),
+            )
     return bio.getvalue()
 
 
@@ -103,6 +120,19 @@ def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
     assert version is None
 
 
+def test_accepts_valid_temp_skill_without_engines(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_no_engines.zip"
+    zip_path.write_bytes(_build_skill_zip(include_engines=False))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_no_engines")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_no_engines" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
 def test_rejects_missing_execution_modes(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "missing_modes.zip"
@@ -112,6 +142,105 @@ def test_rejects_missing_execution_modes(tmp_path):
     with pytest.raises(ValueError, match="execution_modes"):
         validator.validate_skill_dir(
             tmp_path / "stage_missing_modes" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_overlapping_engines_and_unsupport_engine(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "overlap_engines.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(unsupport_engine=["gemini"])
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_overlap_engines")
+    with pytest.raises(ValueError, match="must not overlap"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_overlap_engines" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_empty_effective_engines_when_engines_omitted(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "empty_effective_engines.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            include_engines=False,
+            unsupport_engine=["codex", "gemini", "iflow"],
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_empty_effective_engines")
+    with pytest.raises(ValueError, match="must not be empty"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_empty_effective_engines" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_invalid_input_schema_extension_key(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "invalid_input_schema.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            input_schema_override={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "x-input-source": "bad-source"}
+                },
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_invalid_input_schema")
+    with pytest.raises(ValueError, match="Invalid input schema"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_invalid_input_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_invalid_parameter_schema_shape(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "invalid_parameter_schema.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            parameter_schema_override={"type": "array"},
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_invalid_parameter_schema")
+    with pytest.raises(ValueError, match="Invalid parameter schema"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_invalid_parameter_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "invalid_output_schema.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            output_schema_override={
+                "type": "object",
+                "properties": {
+                    "out_path": {"type": "string", "x-type": "binary-artifact"}
+                },
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_invalid_output_schema")
+    with pytest.raises(ValueError, match="Invalid output schema"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_invalid_output_schema" / top,
             top,
             require_version=False,
         )

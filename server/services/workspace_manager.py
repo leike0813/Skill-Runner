@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from ..config import config
 from ..models import RunCreateRequest, RunResponse, RunStatus, SkillManifest
+from .engine_policy import resolve_skill_engine_policy
 
 import zipfile
 import io
@@ -31,9 +32,8 @@ class WorkspaceManager:
         return self._create_run_dir_and_metadata(request)
 
     def _validate_skill_engine(self, skill: SkillManifest, engine: str) -> None:
-        if not skill.engines:
-            raise ValueError(f"Skill '{skill.id}' does not declare supported engines")
-        if engine not in skill.engines:
+        policy = resolve_skill_engine_policy(skill)
+        if engine not in policy.effective_engines:
             raise ValueError(
                 f"Skill '{skill.id}' does not support engine '{engine}'"
             )

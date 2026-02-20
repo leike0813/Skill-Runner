@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+    .tree-line { font-size: 13px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dir { color: #1d4ed8; }
+    .file { color: #111827; }
+    .pane-scroll { max-height: 340px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+    .preview-scroll { min-height: 280px; }
+    .result-json { white-space: pre-wrap; border: 1px solid #d8e6dd; border-radius: 8px; background: #f7fbf8; padding: 12px; }
+    @media (max-width: 960px) {
+        .pane-scroll { max-height: 260px; }
+    }
+</style>
+
+<section class="card">
+    <h2 style="margin-top: 0;">Run Result: <code>{{ request_id }}</code></h2>
+    <div class="row">
+        <a class="btn secondary" href="/runs">Runs</a>
+        <a class="btn secondary" href="/runs/{{ request_id }}">Back to Observation</a>
+        <a class="btn secondary" href="/recordings/{{ request_id }}">Open Replay</a>
+    </div>
+</section>
+
+<section class="row" style="margin-top: 16px;">
+    <div class="card" style="flex: 2 1 560px;">
+        <h3 style="margin-top: 0;">Result JSON</h3>
+        <pre class="result-json">{{ result_json }}</pre>
+    </div>
+    <div class="card" style="flex: 1 1 320px;">
+        <h3 style="margin-top: 0;">Artifacts</h3>
+        {% set artifacts = artifacts_payload.get("artifacts", []) %}
+        {% if artifacts %}
+            <ul>
+            {% for path in artifacts %}
+                <li>
+                    <a href="{{ backend_base_url }}/v1/jobs/{{ request_id }}/artifacts/{{ path }}" target="_blank" rel="noopener">{{ path }}</a>
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <div class="muted">No artifacts.</div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="row" style="margin-top: 16px;">
+    <div class="card" style="flex: 1 1 420px;">
+        <h3 style="margin:0 0 8px;">Run File Tree (Read-only)</h3>
+        {% if bundle_error %}
+            <div class="error">{{ bundle_error }}</div>
+        {% else %}
+            <div class="pane-scroll" id="run-file-tree-scroll">
+                {% for entry in bundle_entries %}
+                <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
+                        {% if entry.is_dir %}
+                    <span class="dir">📁 {{ entry.name }}/</span>
+                        {% else %}
+                    <span class="file">📄</span>
+                    <a
+                        href="#"
+                        hx-get="/runs/{{ request_id }}/bundle/view?path={{ entry.path|urlencode }}"
+                        hx-target="#run-file-preview"
+                        hx-swap="innerHTML"
+                    >{{ entry.name }}</a>
+                    <span class="muted">({{ entry.size }} bytes)</span>
+                        {% endif %}
+                </div>
+                {% endfor %}
+                {% if not bundle_entries %}
+                    <div class="muted">No bundle entries.</div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    <div class="card" style="flex: 2 1 560px;">
+        <h3 style="margin:0 0 8px;">File Preview</h3>
+        <div class="pane-scroll preview-scroll" id="run-file-preview-scroll">
+            <div id="run-file-preview" class="muted">从左侧选择文件。</div>
+        </div>
+    </div>
+</section>
+{% endblock %}

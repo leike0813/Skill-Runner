@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or "E2E Example Client" }}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        :root {
+            --bg: #f3f8f4;
+            --fg: #133321;
+            --muted: #4d6f5d;
+            --card: #ffffff;
+            --line: #d6e5dc;
+            --accent: #14643b;
+            --accent-soft: #e3f3ea;
+            --danger: #8f2323;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "IBM Plex Sans", "Noto Sans", sans-serif;
+            background: radial-gradient(circle at top right, #e4f6ea 0%, var(--bg) 45%, #edf4ff 100%);
+            color: var(--fg);
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(4px);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        header nav a {
+            margin-right: 14px;
+            text-decoration: none;
+            color: var(--muted);
+            font-weight: 600;
+        }
+        header nav a:hover {
+            color: var(--accent);
+        }
+        main {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(20, 100, 59, 0.08);
+        }
+        .muted { color: var(--muted); }
+        .btn {
+            border: 0;
+            border-radius: 10px;
+            background: var(--accent);
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 9px 14px;
+        }
+        .btn.secondary {
+            background: #e9f0eb;
+            color: #1b3f2c;
+        }
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+        .row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .error {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #e9b8b8;
+            background: #fff3f3;
+            color: var(--danger);
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            padding: 10px 8px;
+            vertical-align: top;
+        }
+        th {
+            color: var(--muted);
+            font-size: 0.93rem;
+        }
+        code {
+            background: var(--accent-soft);
+            color: #113d28;
+            border-radius: 4px;
+            padding: 0 4px;
+        }
+        @media (max-width: 820px) {
+            main { padding: 14px; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <strong>Skill Runner E2E Example Client</strong>
+    <nav>
+        <a href="/">Skills</a>
+        <a href="/runs">Runs</a>
+    </nav>
+</header>
+<main>
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

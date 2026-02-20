@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2 style="margin-top: 0;">Run Skill: {{ skill.name or skill.id }}</h2>
+    <p class="muted"><code>{{ skill.id }}</code> • engines: {{ ", ".join(engines) }}</p>
+
+    {% for error in errors %}
+        <div class="error">{{ error }}</div>
+    {% endfor %}
+
+    <form method="post" enctype="multipart/form-data">
+        <div style="margin-bottom: 14px;">
+            <label for="engine"><strong>Engine</strong></label><br>
+            <select id="engine" name="engine" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                {% for engine in engines %}
+                    <option value="{{ engine }}" {% if selected_engine == engine %}selected{% endif %}>{{ engine }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="margin-bottom: 14px;">
+            <label for="execution_mode"><strong>Execution Mode</strong></label><br>
+            <select id="execution_mode" name="execution_mode" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                {% for mode in execution_modes %}
+                    <option value="{{ mode }}" {% if selected_execution_mode == mode %}selected{% endif %}>{{ mode }}</option>
+                {% endfor %}
+            </select>
+            <div class="muted">Loaded from backend skill detail.</div>
+        </div>
+        <div style="margin-bottom: 14px;">
+            <label for="model"><strong>Model</strong></label><br>
+            <select id="model" name="model" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 280px;">
+                <option value="">(Backend default)</option>
+            </select>
+            <div class="muted">Models are loaded from management engine detail for selected engine.</div>
+        </div>
+
+        <div class="row">
+            <div class="card" style="flex: 1 1 320px;">
+                <h3 style="margin-top: 0;">Inline Input</h3>
+                {% if inline_fields %}
+                    {% for field in inline_fields %}
+                        <div style="margin-bottom: 12px;">
+                            <label for="input__{{ field.name }}"><strong>{{ field.name }}</strong>{% if field.required %} *{% endif %}</label><br>
+                            <input id="input__{{ field.name }}" name="input__{{ field.name }}" value="{{ submitted_input.get(field.name, '') }}"
+                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                            <div class="muted">{{ field.type }}{% if field.description %} • {{ field.description }}{% endif %}</div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="muted">No inline input field.</div>
+                {% endif %}
+            </div>
+
+            <div class="card" style="flex: 1 1 320px;">
+                <h3 style="margin-top: 0;">Parameters</h3>
+                {% if parameter_fields %}
+                    {% for field in parameter_fields %}
+                        <div style="margin-bottom: 12px;">
+                            <label for="parameter__{{ field.name }}"><strong>{{ field.name }}</strong>{% if field.required %} *{% endif %}</label><br>
+                            <input id="parameter__{{ field.name }}" name="parameter__{{ field.name }}" value="{{ submitted_parameter.get(field.name, '') }}"
+                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                            <div class="muted">{{ field.type }}{% if field.description %} • {{ field.description }}{% endif %}</div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="muted">No parameter field.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+            <h3 style="margin-top: 0;">File Upload</h3>
+            <p class="muted">Each selected file is zipped with its field name as file name before calling <code>/v1/jobs/{request_id}/upload</code>.</p>
+            {% if file_fields %}
+                {% for field in file_fields %}
+                    <div style="margin-bottom: 12px;">
+                        <label for="file__{{ field.name }}"><strong>{{ field.name }}</strong>{% if field.required %} *{% endif %}</label><br>
+                        <input id="file__{{ field.name }}" name="file__{{ field.name }}" type="file">
+                        <div class="muted">{{ field.type }}{% if field.description %} • {{ field.description }}{% endif %}</div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="muted">No file input field.</div>
+            {% endif %}
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+            <h3 style="margin-top: 0;">Runtime Options</h3>
+            <div class="row">
+                <div style="flex: 1 1 260px;">
+                    <label><input type="checkbox" name="runtime__verbose" {% if submitted_runtime_options.get("verbose") %}checked{% endif %}> verbose</label><br>
+                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> no_cache</label><br>
+                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> debug</label><br>
+                    <label><input type="checkbox" name="runtime__debug_keep_temp" {% if submitted_runtime_options.get("debug_keep_temp") %}checked{% endif %}> debug_keep_temp</label>
+                </div>
+                <div style="flex: 1 1 280px;">
+                    <label for="runtime__interactive_require_user_reply"><strong>interactive_require_user_reply</strong></label><br>
+                    <select id="runtime__interactive_require_user_reply" name="runtime__interactive_require_user_reply" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                        <option value="" {% if not submitted_runtime_options.get("interactive_require_user_reply") %}selected{% endif %}>(Default)</option>
+                        <option value="true" {% if submitted_runtime_options.get("interactive_require_user_reply") == "true" %}selected{% endif %}>true</option>
+                        <option value="false" {% if submitted_runtime_options.get("interactive_require_user_reply") == "false" %}selected{% endif %}>false</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row" style="margin-top: 12px;">
+                <div style="flex: 1 1 240px;">
+                    <label for="runtime__session_timeout_sec"><strong>session_timeout_sec</strong></label><br>
+                    <input id="runtime__session_timeout_sec" name="runtime__session_timeout_sec" value="{{ submitted_runtime_options.get('session_timeout_sec', '') }}"
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                </div>
+                <div style="flex: 1 1 240px;">
+                    <label for="runtime__interactive_wait_timeout_sec"><strong>interactive_wait_timeout_sec</strong></label><br>
+                    <input id="runtime__interactive_wait_timeout_sec" name="runtime__interactive_wait_timeout_sec" value="{{ submitted_runtime_options.get('interactive_wait_timeout_sec', '') }}"
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                </div>
+                <div style="flex: 1 1 240px;">
+                    <label for="runtime__hard_wait_timeout_sec"><strong>hard_wait_timeout_sec</strong></label><br>
+                    <input id="runtime__hard_wait_timeout_sec" name="runtime__hard_wait_timeout_sec" value="{{ submitted_runtime_options.get('hard_wait_timeout_sec', '') }}"
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                </div>
+                <div style="flex: 1 1 240px;">
+                    <label for="runtime__wait_timeout_sec"><strong>wait_timeout_sec</strong></label><br>
+                    <input id="runtime__wait_timeout_sec" name="runtime__wait_timeout_sec" value="{{ submitted_runtime_options.get('wait_timeout_sec', '') }}"
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <button type="submit" class="btn">Create Run</button>
+            <a class="btn secondary" href="/">Back</a>
+        </div>
+    </form>
+</section>
+<script>
+(() => {
+    const engineModels = {{ engine_models_by_engine | tojson }};
+    const selectedModel = {{ selected_model | tojson }};
+    const engineSelect = document.getElementById("engine");
+    const modelSelect = document.getElementById("model");
+
+    function renderModels() {
+        const engine = engineSelect.value;
+        const rows = Array.isArray(engineModels[engine]) ? engineModels[engine] : [];
+        const current = modelSelect.value || selectedModel || "";
+        modelSelect.innerHTML = "";
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "(Backend default)";
+        modelSelect.appendChild(defaultOption);
+        for (const row of rows) {
+            if (!row || typeof row.id !== "string") continue;
+            const option = document.createElement("option");
+            option.value = row.id;
+            option.textContent = row.display_name ? `${row.display_name} (${row.id})` : row.id;
+            modelSelect.appendChild(option);
+        }
+        if ([...modelSelect.options].some((item) => item.value === current)) {
+            modelSelect.value = current;
+        } else {
+            modelSelect.value = "";
+        }
+    }
+
+    engineSelect.addEventListener("change", renderModels);
+    renderModels();
+})();
+</script>
+{% endblock %}

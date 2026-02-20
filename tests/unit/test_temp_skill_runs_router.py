@@ -18,11 +18,12 @@ from server.routers import temp_skill_runs as temp_skill_runs_router
 def _build_skill_zip(
     skill_id: str = "temp-router-skill",
     engines: list[str] | None = None,
+    unsupport_engine: list[str] | None = None,
+    include_engines: bool = True,
     execution_modes: list[str] | None = None,
 ) -> bytes:
-    runner = {
+    runner: dict[str, object] = {
         "id": skill_id,
-        "engines": engines or ["gemini"],
         "execution_modes": execution_modes or ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
@@ -31,6 +32,10 @@ def _build_skill_zip(
         },
         "artifacts": [{"role": "result", "pattern": "out.txt", "required": True}],
     }
+    if include_engines:
+        runner["engines"] = engines or ["gemini"]
+    if unsupport_engine:
+        runner["unsupport_engine"] = unsupport_engine
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
@@ -145,6 +150,73 @@ async def test_upload_rejects_interactive_when_skill_declares_auto_only(temp_con
     assert exc.value.status_code == 400
     assert isinstance(exc.value.detail, dict)
     assert exc.value.detail["code"] == "SKILL_EXECUTION_MODE_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_engine_denied_by_unsupport_engine(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={},
+        )
+    )
+    with pytest.raises(HTTPException) as exc:
+        await temp_skill_runs_router.upload_temp_skill_and_start(
+            create.request_id,
+            BackgroundTasks(),
+            skill_package=_build_upload_file(
+                "skill.zip",
+                _build_skill_zip(
+                    include_engines=False,
+                    unsupport_engine=["gemini"],
+                ),
+            ),
+            file=None,
+        )
+    assert exc.value.status_code == 400
+    assert isinstance(exc.value.detail, dict)
+    assert exc.value.detail["code"] == "SKILL_ENGINE_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_upload_accepts_missing_engines_defaults_to_all(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.job_orchestrator.run_job",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.concurrency_manager.admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={},
+        )
+    )
+
+    res = await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        BackgroundTasks(),
+        skill_package=_build_upload_file(
+            "skill.zip",
+            _build_skill_zip(include_engines=False),
+        ),
+        file=None,
+    )
+    assert res.status == RunStatus.QUEUED
 
 
 @pytest.mark.asyncio

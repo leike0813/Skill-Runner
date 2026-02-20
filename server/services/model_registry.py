@@ -11,6 +11,12 @@ from .agent_cli_manager import AgentCliManager
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_ENGINES: Tuple[str, ...] = ("codex", "gemini", "iflow")
+
+
+def supported_engines() -> List[str]:
+    return list(SUPPORTED_ENGINES)
+
 
 @dataclass(frozen=True)
 class ModelEntry:
@@ -166,7 +172,7 @@ class ModelRegistry:
         return payload
 
     def _supported_engines(self) -> List[str]:
-        return ["codex", "gemini", "iflow"]
+        return supported_engines()
 
     def _load_manifest(self, engine: str) -> Dict[str, object]:
         manifest_path = self._models_root(engine) / "manifest.json"

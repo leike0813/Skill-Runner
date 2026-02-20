@@ -524,6 +524,12 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert detail_res.status_code == 200
     assert "Request: req-1" in detail_res.text
     assert "Run File Tree (Read-only)" in detail_res.text
+    assert "对话区（stdout）" in detail_res.text
+    assert "错误输出（stderr）" in detail_res.text
+    assert 'id="run-file-tree-scroll"' in detail_res.text
+    assert 'id="run-file-preview-scroll"' in detail_res.text
+    assert 'id="pending-state"' in detail_res.text
+    assert 'id="pending-reply-submit"' in detail_res.text
     assert "/v1/management/runs/${requestId}/events" in detail_res.text
     assert "connectEvents()" in detail_res.text
 
@@ -572,6 +578,9 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
     assert "/v1/management/runs/${requestId}/cancel" in response.text
     assert "stdout_from=${stdoutOffset}" in response.text
     assert "stderr_from=${stderrOffset}" in response.text
+    assert 'id="stdout-log"' in response.text
+    assert 'id="stderr-log"' in response.text
+    assert 'id="pending-state"' in response.text
     assert 'id="cancel-run-btn"' in response.text
 
 

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+    <h2 style="margin-top: 0;">Available Skills</h2>
+    <p class="muted">This client reads capabilities from <code>/v1/management/skills</code> and opens a schema-driven run form.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Skill</th>
+                <th>Version</th>
+                <th>Engines</th>
+                <th>Health</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for skill in skills %}
+            <tr>
+                <td>
+                    <div><strong>{{ skill.name or skill.id }}</strong></div>
+                    <div class="muted"><code>{{ skill.id }}</code></div>
+                </td>
+                <td>{{ skill.version }}</td>
+                <td>{{ ", ".join(skill.effective_engines or skill.engines or []) }}</td>
+                <td>{{ skill.health }}</td>
+                <td><a class="btn secondary" href="/skills/{{ skill.id }}/run">Run</a></td>
+            </tr>
+        {% endfor %}
+        {% if not skills %}
+            <tr><td colspan="5" class="muted">No skills returned by backend.</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

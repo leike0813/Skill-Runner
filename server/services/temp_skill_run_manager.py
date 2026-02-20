@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from ..config import config
 from ..models import RunStatus, SkillManifest
+from .engine_policy import apply_engine_policy_to_manifest
 from .skill_package_validator import SkillPackageValidator
 from .temp_skill_run_store import temp_skill_run_store
 from .manifest_artifact_inference import infer_manifest_artifacts
@@ -119,6 +120,7 @@ class TempSkillRunManager:
         except json.JSONDecodeError as exc:
             raise ValueError("Invalid assets/runner.json") from exc
         data = infer_manifest_artifacts(data, skill_dir)
+        apply_engine_policy_to_manifest(data)
         return SkillManifest(**data, path=skill_dir)
 
 

@@ -146,8 +146,14 @@ class SkillManifest(BaseModel):
     description: Optional[str] = None
     """Brief description of the skill's capability."""
     
-    engines: List[str] = []
+    engines: List[str] = Field(default_factory=list)
     """List of supported engines (e.g., ['gemini', 'codex'])."""
+
+    unsupport_engine: List[str] = Field(default_factory=list)
+    """Explicit deny-list engines declared by skill manifest."""
+
+    effective_engines: List[str] = Field(default_factory=list)
+    """Computed engine allowlist after applying unsupport_engine filtering."""
 
     execution_modes: List[ExecutionMode] = Field(default_factory=lambda: [ExecutionMode.AUTO])
     """Allowed execution modes for this skill."""
@@ -570,7 +576,10 @@ class ManagementSkillSummary(BaseModel):
     id: str
     name: str
     version: str
-    engines: List[str] = []
+    engines: List[str] = Field(default_factory=list)
+    unsupport_engine: List[str] = Field(default_factory=list)
+    effective_engines: List[str] = Field(default_factory=list)
+    execution_modes: List[str] = Field(default_factory=list)
     installed_at: Optional[datetime] = None
     health: str = "healthy"
     health_error: Optional[str] = None
@@ -578,14 +587,22 @@ class ManagementSkillSummary(BaseModel):
 
 class ManagementSkillDetail(ManagementSkillSummary):
     """Skill detail payload used by management API."""
-    schemas: Dict[str, str] = {}
-    entrypoints: Dict[str, Any] = {}
-    files: List[Dict[str, Any]] = []
+    schemas: Dict[str, str] = Field(default_factory=dict)
+    entrypoints: Dict[str, Any] = Field(default_factory=dict)
+    files: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ManagementSkillSchemasResponse(BaseModel):
+    """Skill schema content payload used by management API."""
+    skill_id: str
+    input: Optional[Dict[str, Any]] = None
+    parameter: Optional[Dict[str, Any]] = None
+    output: Optional[Dict[str, Any]] = None
 
 
 class ManagementSkillListResponse(BaseModel):
     """Response payload for management skill list."""
-    skills: List[ManagementSkillSummary] = []
+    skills: List[ManagementSkillSummary] = Field(default_factory=list)
 
 
 class ManagementEngineSummary(BaseModel):
