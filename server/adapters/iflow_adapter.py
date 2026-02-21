@@ -200,8 +200,7 @@ class IFlowAdapter(EngineAdapter):
             )
         else:
             cmd_parts.extend([str(iflow_cmd)])
-            if self._resolve_execution_mode(options) == "auto":
-                cmd_parts.append("--yolo")
+            cmd_parts.append("--yolo")
             cmd_parts.extend(["-p", prompt])
         
         logger.info("Executing iFlow command: %s in %s", " ".join(cmd_parts), run_dir)
@@ -255,6 +254,7 @@ class IFlowAdapter(EngineAdapter):
             str(iflow_cmd),
             "--resume",
             session_id,
+            "--yolo",
             "-p",
             prompt,
         ]

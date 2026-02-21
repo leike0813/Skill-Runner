@@ -1,205 +1,143 @@
 # 输入与文件协议 (Input & File Protocol)
 
-为了清晰区分“业务输入”与“配置参数”，系统采用了严格的命名和处理协议。
+本文档描述当前实现下 Skill Runner 的输入、上传、产物识别与下载协议。
 
-## 1. 术语定义
+## 1. 术语与模型
 
-- **Input (输入)**: 指代处理对象，可来自两种来源：
-  - `file`: 上传文件并注入路径（例如：`input_file`、`source_image`）。
-  - `inline`: 请求体中直接给出的 JSON 值（例如：`query`、`items`）。
-- **Parameter (参数/配置)**: 指代控制逻辑的选项。例如：`temperature`、`retry_count`、`language`、`divisor`。
+- `input`：业务输入，可混合两类来源。
+  - `file`：来自上传 Zip，运行时注入为绝对路径字符串。
+  - `inline`：来自 `POST /v1/jobs` 请求体的 `input` JSON 值。
+- `parameter`：业务参数/配置，来自 `POST /v1/jobs` 请求体的 `parameter`。
+- `artifact`：Skill 运行后写入 `run_dir/artifacts/` 的文件产物。
 
-## 2. Schema 定义规范
+## 2. `runner.json` 合同（当前实现）
 
-在 `skills/<skill_id>/assets/runner.json` 中，必须声明 `input`、`parameter` 和 `output` 的 Schema，并显式声明支持的 `engines`：
+最小必需字段：
 
 ```json
 {
-  "engines": ["gemini", "codex"],
+  "id": "your-skill-id",
+  "execution_modes": ["auto", "interactive"],
   "schemas": {
-    "input": "assets/input.schema.json",       // 定义文件输入
-    "parameter": "assets/parameter.schema.json", // 定义配置参数
+    "input": "assets/input.schema.json",
+    "parameter": "assets/parameter.schema.json",
     "output": "assets/output.schema.json"
   }
 }
 ```
 
-### `input.schema.json`
-定义业务输入。每个字段可通过 `x-input-source` 指定来源：
+可选引擎字段：
 
-- `file`（默认）：从 `uploads/` 目录按键名匹配文件并注入绝对路径。
-- `inline`：从 `POST /v1/jobs` 请求体顶层 `input` 直接读取 JSON 值。
+- `engines`：可选 allow-list。
+- `unsupported_engines`：可选 deny-list。
+- `effective_engines = (engines if provided else all_supported) - unsupported_engines`。
 
-对于 `file` 字段，可用 `extensions` 限制文件类型。
+约束：
+
+- `engines` 与 `unsupported_engines` 只能包含系统支持引擎。
+- 两者不可重叠。
+- `effective_engines` 不能为空。
+- 旧字段 `unsupport_engine` 会被拒绝（已重命名）。
+
+## 3. Schema 规范
+
+### 3.1 `input.schema.json`
+
+- 顶层应为 `type: "object"`。
+- 每个属性可用 `x-input-source` 指定来源：
+  - `file`（默认）
+  - `inline`
+
+示例：
 
 ```json
 {
   "type": "object",
   "properties": {
-    "input_file": {
-      "type": "string",
-      "description": "Path to the data file",
-      "x-input-source": "file",
-      "extensions": [".txt", ".md"] 
-    },
-    "query": {
-      "type": "string",
-      "x-input-source": "inline"
-    }
+    "input_file": { "type": "string", "x-input-source": "file" },
+    "query": { "type": "string", "x-input-source": "inline" }
   },
   "required": ["input_file", "query"]
 }
 ```
 
-### `parameter.schema.json`
-定义纯数值或字符串配置。
+说明：
 
-```json
-{
-  "type": "object",
-  "properties": {
-    "divisor": { 
-      "type": "integer", 
-      "default": 1 
-    }
-  }
-}
-```
+- `extensions` 字段允许出现在 schema 中（通过 meta-schema），但服务端当前不会基于 `extensions` 做文件后缀强校验。
 
-## 3. 严格键匹配机制 (Strict Key-Matching, 仅 file 输入)
+### 3.2 `parameter.schema.json`
 
-这是为了解决文件上传不确定性而引入的核心机制。
+- 顶层应为 `type: "object"`。
+- 用于校验 `parameter` payload。
 
-**规则**:
-当适配器处理 `x-input-source=file` 的 `input` 字段（例如 `input_file`）时：
-1. 它**仅**检查运行目录下的 `uploads/` 文件夹。
-2. 它查找是否存在文件名**完全等于**字段名（`input_file`）的文件。
-3. **如果找到**: 适配器会生成该文件的**绝对路径**，并将其作为该字段的值注入 `{{ input }}` 上下文。
-4. **如果未找到**: **直接报错**。
+### 3.3 `output.schema.json`
 
-**示例**:
-- Schema 定义了 `input_file`。
-- API 请求 (`POST /v1/jobs`): 可包含 inline 输入，例如 `{ "input": {"query": "hello"} }`。
-- 用户上传了 Zip，解压后包含文件 `uploads/input_file`。
-- **最终执行值**: `/abs/path/to/runs/xxx/uploads/input_file`。
-- **注意**: 如果 `uploads/input_file` 不存在，任务将直接失败。
+- 顶层应为 `type: "object"`。
+- 支持在属性上声明：
+  - `x-type: "artifact"` 或 `x-type: "file"`
+  - 可选 `x-role`
+  - 可选 `x-filename`
 
-## 4. Prompt 上下文与 Jinja2
+## 4. 输入校验与注入流程
 
-在 `GeminiAdapter` 的默认 Prompt 模板中，这两个上下文被分开渲染：
+### 4.1 Create 阶段（`POST /v1/jobs`）
 
-```jinja2
-# Inputs
-{% for key, value in input.items() %}
-- {{ key }}: {{ value }}
-{% endfor %}
+- 仅对 `inline` 输入做预校验：
+  - 未声明的 input key：报错。
+  - 把 `file` 类型 key 放到 `input`：报错（提示走 `/upload`）。
+  - `inline` 的类型/required 按 input schema 校验。
 
-# Parameters
-{% for key, value in parameter.items() %}
-- {{ key }}: {{ value }}
-{% endfor %}
-```
+### 4.2 Upload 阶段（`POST /v1/jobs/{request_id}/upload`）
 
-- `{{ input }}`: 包含解析后的 mixed input：
-  - file 字段值是绝对路径字符串
-  - inline 字段值是原始 JSON 值
-- `{{ parameter }}`: 包含所有的配置值。
+- 上传 Zip 先解压到 `data/requests/{request_id}/uploads/`。
+- 创建 run 时再“提升”到 `data/runs/{run_id}/uploads/`。
 
-在 `SKILL.md` 中，你也应该使用特定命名空间引用变量：
-- 引用 file 输入: `{{ input.input_file }}`
-- 引用 inline 输入: `{{ input.query }}`
-- 引用参数: `{{ parameter.divisor }}`
+### 4.3 执行前混合输入构建
 
-## 5. 自定义 Prompt 模版 (Custom Prompt Templates)
+- `file` 字段：按严格键匹配查找 `run_dir/uploads/<field_name>`。
+- `inline` 字段：读取 `input[field_name]` 原始 JSON 值。
+- 仅 `required` 的 file 字段缺失会触发缺文件错误。
 
-虽然系统提供了通用的默认模版，但在某些场景下（如消除歧义、构造特定 JSON 结构），Skill 开发者需要在 `runner.json` 中提供自定义模版。
+## 5. 严格键匹配（file 输入）
 
-### 场景 A：消除歧义 (Disambiguation)
-例如 `file-size-compare` 技能，需要明确区分“第一个文件”和“第二个文件”。通用模版的 KV 列表形式可能无法准确传达这种顺序关系。
+规则：
 
-**runner.json 配置**:
-```json
-{
-  "entrypoint": {
-    "prompts": {
-      "gemini": "调用file-size-compare技能，第一个文件是`{{ input.file_src }}`，第二个文件是`{{ input.file_dst }}`"
-    }
-  }
-}
-```
-通过这种方式，可以将 Input Schema 中的特定字段“钉死”在 Prompt 的特定语义位置。
+1. 仅查找 `run_dir/uploads/`。
+2. 文件名必须与 input 字段名完全一致（`<field_name>`）。
+3. 命中后注入绝对路径字符串。
+4. required file 未命中则校验失败并拒绝执行。
 
-### 场景 B：构造特定结构 (Specific Structure)
-例如 `literature-digest` 技能，可能要求输入必须是一个特定的 JSON 结构。
+## 6. Prompt 上下文
 
-**runner.json 配置**:
-```json
-{
-  "entrypoint": {
-    "prompts": {
-      "gemini": "请调用literature-digest技能，输入如下：\n```json\n{\n  \"md_path\": \"{{ input.md_path }}\",\n  \"language\": \"{{ parameter.language }}\"\n}\n```"
-    }
-  }
-}
-```
-这允许 Runner 适配各种对输入格式有严格要求的存量 Skill，而无需修改 Skill 本身的代码。
+- `{{ input }}`：混合输入上下文
+  - file 字段：绝对路径
+  - inline 字段：原始 JSON 值
+- `{{ parameter }}`：参数上下文
 
-## 6. 运行时依赖定义 (Runtime Dependencies)
+建议在模板中显式引用：
 
-为了支持基于容器或 `uv` 的动态环境创建，Skill 需要在 `runner.json` 中声明其运行时依赖。
+- `{{ input.xxx }}`
+- `{{ parameter.xxx }}`
 
-**runner.json 配置**:
-```json
-{
-  "runtime": {
-    "language": "python",
-    "version": "3.11",
-    "dependencies": [
-      "pandas>=2.0.0",
-      "numpy",
-      "scipy"
-    ]
-  }
-}
-```
+## 7. Artifact 协议与推断
 
-**机制**:
-1. 当 Job Orchestrator 准备执行环境时，会读取 `runtime.dependencies` 列表。
-2. 适配器（如 `GeminiAdapter` 或未来的 `DockerAdapter`）将使用这些依赖构建临时的隔离环境（例如使用 `uv run --with pandas --with numpy ...`）。
-3. 随后在此环境中执行 Skill 逻辑（如生成 Python 脚本）。
+### 7.1 声明来源
 
-## 7. Output Schema & Artifacts
+- 若 `runner.json.artifacts` 有内容：以其为准。
+- 若 `runner.json.artifacts` 缺失或为空：系统从 `output.schema.json` 自动推断：
+  - 识别 `x-type in {"artifact","file"}` 的字段
+  - `pattern = x-filename or 字段名`
+  - `role = x-role or "output"`
+  - `required = 字段名是否在 output.required`
 
-为了让 Runner 能够自动识别 Skill 生成的文件（Artifacts）并进行后续处理（如 Skill Patching），必须在 `output.schema.json` 中明确标识文件路径字段。
+### 7.2 运行期校验
 
-**规范**:
-在 Schema 的 Property 中添加 `x-type: "artifact"` 字段。
-此外，建议使用 `x-role` 和 `x-filename` 进一步明确 Artifact 的属性，从而免去在 `runner.json` 中重复定义。
+- 运行后系统会校验 required artifacts 是否存在于 `artifacts/<pattern>`。
+- 缺失 required artifact 会导致 run 失败。
 
-**output.schema.json 示例**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "digest_path": {
-      "type": "string",
-      "description": "Path to the generated digest file",
-      "x-type": "artifact",
-      "x-role": "digest",             // Optional: Semantic role (default: "output")
-      "x-filename": "digest.md"       // Optional: Expected filename (default: property key)
-    },
-    "metadata": {
-      "type": "object",
-      "description": "Validation metadata (Required, but not a file)"
-    }
-  },
-  "required": ["digest_path", "metadata"]
-}
-```
+## 8. 结果与下载
 
-**机制**:
-1. **Artifact 扫描**: 系统加载 Skill 时，会扫描 `output.schema.json`。
-2. **自动注册**: 所有标记为 `x-type: "artifact"` 的字段会被自动注册到 Skill Manifest 的 artifact 列表中。
-   - `role`: 取自 `x-role`，若未定义则默认为 `"output"`。
-   - `pattern`: 取自 `x-filename`，若未定义则默认为字段名 (Key)。
-3. **Skill Patching**: 执行时，适配器会将这些字段注入到 `SKILL.md` 的输出指令中。
+- `GET /v1/jobs/{request_id}/artifacts`：返回产物相对路径列表。
+- `GET /v1/jobs/{request_id}/artifacts/{artifact_path}`：下载单个产物，`artifact_path` 必须以 `artifacts/` 开头且路径安全。
+- `GET /v1/jobs/{request_id}/bundle`：下载 run bundle（普通或 debug 版本）。
+

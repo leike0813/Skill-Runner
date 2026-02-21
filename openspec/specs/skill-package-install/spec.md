@@ -32,10 +32,29 @@ The system MUST enforce that the skill directory name, `assets/runner.json` `id`
 - **THEN** the system rejects the package as invalid
 
 ### Requirement: Enforce engine declaration
-The system MUST require `assets/runner.json` to declare a non-empty `engines` list.
+The system MUST validate engine compatibility declarations in `assets/runner.json` using combined allow/deny semantics:
+- `engines` MAY be omitted;
+- `unsupported_engines` MAY be declared to explicitly deny engines;
+- when both are present, they MUST NOT overlap;
+- `effective_engines = (engines if provided else all system-supported engines) - unsupported_engines`;
+- `effective_engines` MUST be non-empty.
 
-#### Scenario: Missing engines
-- **WHEN** `assets/runner.json` omits `engines` or provides an empty list
+#### Scenario: Engines omitted and deny-list omitted
+- **WHEN** `assets/runner.json` omits both `engines` and `unsupported_engines`
+- **THEN** the system treats the skill as allowing all system-supported engines
+- **AND** the package passes engine contract validation
+
+#### Scenario: Explicit allow-list with deny-list
+- **WHEN** `assets/runner.json` declares non-empty `engines` and optional `unsupported_engines` without overlap
+- **THEN** the system computes `effective_engines` from allow-list minus deny-list
+- **AND** the package passes engine contract validation when `effective_engines` is non-empty
+
+#### Scenario: Allow-list overlaps deny-list
+- **WHEN** `assets/runner.json` declares `engines` and `unsupported_engines` with duplicated engine entries
+- **THEN** the system rejects the package as invalid
+
+#### Scenario: Effective engines becomes empty
+- **WHEN** the computed `effective_engines` is empty after applying `unsupported_engines`
 - **THEN** the system rejects the package as invalid
 
 ### Requirement: Enforce artifacts contract

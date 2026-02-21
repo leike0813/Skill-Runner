@@ -164,12 +164,13 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
         thread_idx = args.index("th_resume")
         prompt_idx = args.index("resume prompt")
         assert args[1] == "exec"
-        assert args[2] == "resume"
+        assert "--full-auto" in args or "--yolo" in args
+        assert "resume" in args
         assert thread_idx < prompt_idx
 
 
 @pytest.mark.asyncio
-async def test_execute_interactive_command_excludes_auto_flags(tmp_path):
+async def test_execute_interactive_command_includes_auto_flags(tmp_path):
     adapter = CodexAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -194,5 +195,4 @@ async def test_execute_interactive_command_excludes_auto_flags(tmp_path):
                 options={"execution_mode": "interactive"},
             )
         args, _ = mock_exec.call_args
-        assert "--full-auto" not in args
-        assert "--yolo" not in args
+        assert "--full-auto" in args or "--yolo" in args

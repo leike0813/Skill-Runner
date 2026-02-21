@@ -192,8 +192,7 @@ class GeminiAdapter(EngineAdapter):
             )
         else:
             cmd_parts.extend([str(gemini_cmd)])
-            if self._resolve_execution_mode(options) == "auto":
-                cmd_parts.append("--yolo")
+            cmd_parts.append("--yolo")
             cmd_parts.append(prompt)
         
         logger.info("Executing Gemini CLI: %s in %s", " ".join(cmd_parts), run_dir)
@@ -260,6 +259,7 @@ class GeminiAdapter(EngineAdapter):
             str(gemini_cmd),
             "--resume",
             session_id,
+            "--yolo",
             prompt,
         ]
 

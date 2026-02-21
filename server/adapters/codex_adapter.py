@@ -217,11 +217,7 @@ class CodexAdapter(EngineAdapter):
                 "-p", CodexConfigManager.PROFILE_NAME,
                 prompt
             ]
-            if self._resolve_execution_mode(options) == "auto":
-                sandbox_flag = "--full-auto"
-                if os.environ.get("LANDLOCK_ENABLED") == "0":
-                    sandbox_flag = "--yolo"
-                cmd.insert(2, sandbox_flag)
+            cmd.insert(2, self._resolve_auto_execution_flag())
         
         logger.info("Executing Codex command: %s", " ".join(cmd))
         
@@ -240,6 +236,12 @@ class CodexAdapter(EngineAdapter):
         if cmd is None:
             raise RuntimeError("Codex CLI not found in managed prefix")
         return cmd
+
+    def _resolve_auto_execution_flag(self) -> str:
+        sandbox_flag = "--full-auto"
+        if os.environ.get("LANDLOCK_ENABLED") == "0":
+            sandbox_flag = "--yolo"
+        return sandbox_flag
 
     def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
@@ -308,7 +310,7 @@ class CodexAdapter(EngineAdapter):
         thread_id = session_handle.handle_value.strip()
         if not thread_id:
             raise RuntimeError("SESSION_RESUME_FAILED: empty codex thread id")
-        return [
+        cmd = [
             str(self._resolve_codex_command()),
             "exec",
             "resume",
@@ -319,3 +321,5 @@ class CodexAdapter(EngineAdapter):
             thread_id,
             prompt,
         ]
+        cmd.insert(2, self._resolve_auto_execution_flag())
+        return cmd

@@ -41,3 +41,29 @@ TBD - created by archiving change interactive-27-unified-management-api-surface.
 - **AND** 对活跃 run 返回可观测终态（`canceled`）
 - **AND** 对终态 run 保持幂等响应
 
+### Requirement: Skill 管理 MUST 暴露可用于动态表单构建的 schema 内容
+系统 MUST 提供 management API 能力，让客户端可读取某个 Skill 的 input/parameter/output schema 内容，以支持动态执行表单和前置校验。
+
+#### Scenario: 读取 Skill schema 集合
+- **WHEN** 客户端请求指定 Skill 的 schema 信息
+- **THEN** 系统返回该 Skill 的 input/parameter/output schema 内容（若存在）
+- **AND** 响应结构可被前端直接用于动态表单渲染与校验
+
+#### Scenario: Skill 不存在
+- **WHEN** 客户端请求不存在的 skill_id 的 schema 信息
+- **THEN** 系统返回 `404`
+- **AND** 不暴露文件系统内部路径细节
+
+### Requirement: Skill 管理接口 MUST 返回可枚举的有效引擎集合
+系统 MUST 在 Skill 管理相关接口中返回可供前端直接枚举的 `effective_engines`，并保留声明字段用于解释来源。
+
+#### Scenario: 显式 allow-list 与 deny-list
+- **WHEN** Skill 同时声明 `engines` 与 `unsupported_engines`
+- **THEN** 管理接口返回计算后的 `effective_engines`
+- **AND** 返回原始声明字段（`engines`、`unsupported_engines`）供前端展示
+
+#### Scenario: 缺失 engines 的默认枚举
+- **WHEN** Skill 未声明 `engines`
+- **THEN** 管理接口将系统支持引擎减去 `unsupported_engines` 后作为 `effective_engines` 返回
+- **AND** 前端无需自行推断默认引擎集合
+

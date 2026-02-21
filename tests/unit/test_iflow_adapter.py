@@ -123,11 +123,11 @@ async def test_execute_resume_command_contains_resume_flag(tmp_path):
         args, _ = mock_exec.call_args
         assert "--resume" in args
         assert "iflow-session" in args
-        assert "--yolo" not in args
+        assert "--yolo" in args
 
 
 @pytest.mark.asyncio
-async def test_execute_interactive_command_excludes_yolo(tmp_path):
+async def test_execute_interactive_command_includes_yolo(tmp_path):
     adapter = IFlowAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
@@ -152,7 +152,7 @@ async def test_execute_interactive_command_excludes_yolo(tmp_path):
             options={"execution_mode": "interactive"},
         )
         args, _ = mock_exec.call_args
-        assert "--yolo" not in args
+        assert "--yolo" in args
 
 
 @pytest.mark.asyncio

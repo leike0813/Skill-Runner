@@ -240,11 +240,11 @@ async def test_execute_resume_command_contains_resume_flag(adapter, mock_skill, 
         args, _ = mock_exec.call_args
         assert "--resume" in args
         assert "sess_1" in args
-        assert "--yolo" not in args
+        assert "--yolo" in args
 
 
 @pytest.mark.asyncio
-async def test_execute_interactive_command_excludes_yolo(adapter, mock_skill, tmp_path):
+async def test_execute_interactive_command_includes_yolo(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
@@ -266,7 +266,7 @@ async def test_execute_interactive_command_excludes_yolo(adapter, mock_skill, tm
             options={"execution_mode": "interactive"},
         )
         args, _ = mock_exec.call_args
-        assert "--yolo" not in args
+        assert "--yolo" in args
 
 
 @pytest.mark.asyncio
