@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from ..config import config
 from ..models import SkillManifest
+from .skill_package_validator import SkillPackageValidator
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class SkillRegistry:
     """
     def __init__(self):
         self._skills: Dict[str, SkillManifest] = {}
+        self._validator = SkillPackageValidator()
 
     def scan_skills(self):
         """
@@ -60,6 +62,7 @@ class SkillRegistry:
         try:
             with open(runner_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+                data["engines"] = self._validator.resolve_manifest_engines(data)
                 # If artifacts are NOT explicitly defined, try to scan them from output schema
                 if ("artifacts" not in data or not data["artifacts"]) and "schemas" in data and "output" in data["schemas"]:
                      output_schema_path = skill_dir / data["schemas"]["output"]

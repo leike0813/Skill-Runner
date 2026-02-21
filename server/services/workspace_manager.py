@@ -23,16 +23,14 @@ class WorkspaceManager:
         skill = skill_registry.get_skill(request.skill_id)
         if not skill:
             raise ValueError(f"Skill '{request.skill_id}' not found")
-        self._validate_skill_engine(skill, request.engine)
+        self.validate_skill_engine(skill, request.engine)
         return self._create_run_dir_and_metadata(request)
 
     def create_run_for_skill(self, request: RunCreateRequest, skill: SkillManifest) -> RunResponse:
-        self._validate_skill_engine(skill, request.engine)
+        self.validate_skill_engine(skill, request.engine)
         return self._create_run_dir_and_metadata(request)
 
-    def _validate_skill_engine(self, skill: SkillManifest, engine: str) -> None:
-        if not skill.engines:
-            raise ValueError(f"Skill '{skill.id}' does not declare supported engines")
+    def validate_skill_engine(self, skill: SkillManifest, engine: str) -> None:
         if engine not in skill.engines:
             raise ValueError(
                 f"Skill '{skill.id}' does not support engine '{engine}'"

@@ -11,10 +11,15 @@ from server.services.temp_skill_run_manager import TempSkillRunManager
 from server.services.temp_skill_run_store import TempSkillRunStore
 
 
-def _build_skill_zip(skill_id: str = "demo-temp-skill") -> bytes:
+def _build_skill_zip(
+    skill_id: str = "demo-temp-skill",
+    *,
+    engines: list[str] | None = None,
+    include_engines: bool = True,
+    unsupported_engines: list[str] | None = None,
+) -> bytes:
     runner = {
         "id": skill_id,
-        "engines": ["gemini"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
@@ -22,6 +27,10 @@ def _build_skill_zip(skill_id: str = "demo-temp-skill") -> bytes:
         },
         "artifacts": [{"role": "result", "pattern": "out.txt", "required": True}],
     }
+    if include_engines:
+        runner["engines"] = ["gemini"] if engines is None else engines
+    if unsupported_engines is not None:
+        runner["unsupported_engines"] = unsupported_engines
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
@@ -58,6 +67,45 @@ def test_stage_and_cleanup_temp_skill(monkeypatch, temp_config_dirs):
     assert record is not None
     assert record["skill_package_path"] is None
     assert record["staged_skill_dir"] is None
+
+
+def test_stage_temp_skill_defaults_all_engines_when_missing(monkeypatch, temp_config_dirs):
+    store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
+    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    manager = TempSkillRunManager()
+
+    request_id = "req-temp-default-all"
+    store.create_request(
+        request_id=request_id,
+        engine="codex",
+        parameter={},
+        model=None,
+        engine_options={},
+        runtime_options={},
+    )
+    manifest = manager.stage_skill_package(request_id, _build_skill_zip(include_engines=False))
+    assert sorted(manifest.engines) == ["codex", "gemini", "iflow"]
+
+
+def test_stage_temp_skill_rejects_effective_empty_engine_set(monkeypatch, temp_config_dirs):
+    store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
+    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    manager = TempSkillRunManager()
+
+    request_id = "req-temp-empty-engines"
+    store.create_request(
+        request_id=request_id,
+        engine="codex",
+        parameter={},
+        model=None,
+        engine_options={},
+        runtime_options={},
+    )
+    with pytest.raises(ValueError, match="resolves to no supported engines"):
+        manager.stage_skill_package(
+            request_id,
+            _build_skill_zip(include_engines=False, unsupported_engines=["codex", "gemini", "iflow"]),
+        )
 
 
 def test_reject_oversized_skill_package(monkeypatch, temp_config_dirs):

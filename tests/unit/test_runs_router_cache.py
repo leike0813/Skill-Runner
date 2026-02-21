@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, UploadFile, HTTPException
 from server.config import config
 from server.models import RunCreateRequest, RunStatus, SkillManifest
 from server.routers import jobs as jobs_router
+from server.services.skill_package_validator import SkillPackageValidator
 from server.services.cache_key_builder import (
     build_input_manifest,
     compute_cache_key,
@@ -46,9 +47,12 @@ def _create_skill(
     assets_dir = skill_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text("skill")
+    runner: dict[str, object] = {"id": skill_id}
     if engines is None:
-        engines = ["gemini"]
-    (assets_dir / "runner.json").write_text(json.dumps({"id": skill_id, "engines": engines}))
+        runner["engines"] = ["gemini"]
+    else:
+        runner["engines"] = engines
+    (assets_dir / "runner.json").write_text(json.dumps(runner))
 
     schemas = {}
     if with_input_schema:
@@ -66,7 +70,8 @@ def _create_skill(
         )
         schemas["input"] = "assets/input.schema.json"
 
-    return SkillManifest(id=skill_id, path=skill_dir, schemas=schemas, engines=engines)
+    resolved_engines = SkillPackageValidator().resolve_manifest_engines(runner)
+    return SkillManifest(id=skill_id, path=skill_dir, schemas=schemas, engines=resolved_engines)
 
 
 def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
@@ -335,7 +340,7 @@ async def test_create_run_with_inline_required_missing_returns_400(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_create_run_rejects_missing_engines(monkeypatch, temp_config_dirs):
+async def test_create_run_accepts_empty_engines_as_default_all(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
 
@@ -343,17 +348,15 @@ async def test_create_run_rejects_missing_engines(monkeypatch, temp_config_dirs)
     _patch_skill_registry(monkeypatch, skill)
 
     background_tasks = BackgroundTasks()
-    with pytest.raises(HTTPException) as excinfo:
-        await jobs_router.create_run(
-            RunCreateRequest(
-                skill_id=skill.id,
-                engine="gemini",
-                parameter={"a": 1}
-            ),
-            background_tasks
-        )
-
-    assert excinfo.value.status_code == 400
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1}
+        ),
+        background_tasks
+    )
+    assert response.cache_hit is False
 
 
 @pytest.mark.asyncio

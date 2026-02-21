@@ -117,6 +117,7 @@ class TempSkillRunManager:
             data = json.loads(runner_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("Invalid assets/runner.json") from exc
+        data["engines"] = self.validator.resolve_manifest_engines(data)
         return SkillManifest(**data, path=skill_dir)
 
 

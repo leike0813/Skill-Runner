@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -6,13 +7,15 @@ from typing import Any, Dict, List
 from .run_store import run_store
 from .workspace_manager import workspace_manager
 from .skill_browser import (
-    build_preview_payload,
+    PREVIEW_MAX_BYTES,
     list_skill_entries,
     resolve_skill_file_path,
 )
 
 
 RUNNING_STATUSES = {"queued", "running"}
+RUN_PREVIEW_BINARY_SAMPLE_BYTES = 4096
+RUN_PREVIEW_CONTROL_RATIO_THRESHOLD = 0.30
 
 
 class RunObservabilityService:
@@ -80,7 +83,7 @@ class RunObservabilityService:
 
     def build_run_file_preview(self, request_id: str, relative_path: str) -> Dict[str, Any]:
         file_path = self.resolve_run_file_path(request_id, relative_path)
-        return build_preview_payload(file_path)
+        return self._build_run_preview_payload(file_path)
 
     def get_logs_tail(self, request_id: str, max_bytes: int = 64 * 1024) -> Dict[str, Any]:
         detail = self.get_run_detail(request_id)
@@ -166,6 +169,100 @@ class RunObservabilityService:
             data = f.read(read_size)
         return data.decode("utf-8", errors="replace")
 
+    def _build_run_preview_payload(self, file_path: Path) -> Dict[str, Any]:
+        size = file_path.stat().st_size
+        if size > PREVIEW_MAX_BYTES:
+            return {
+                "mode": "too_large",
+                "content": None,
+                "size": size,
+                "meta": "无信息",
+            }
+
+        raw = file_path.read_bytes()
+        if self._looks_binary(raw):
+            return {
+                "mode": "binary",
+                "content": None,
+                "size": size,
+                "meta": "无信息",
+            }
+
+        text, encoding = self._decode_text_with_fallback(raw)
+        if text is None or encoding is None:
+            return {
+                "mode": "binary",
+                "content": None,
+                "size": size,
+                "meta": "无信息",
+            }
+
+        return {
+            "mode": "text",
+            "content": text,
+            "size": size,
+            "meta": f"{size} bytes, {encoding}",
+        }
+
+    def _looks_binary(self, data: bytes) -> bool:
+        sample = data[:RUN_PREVIEW_BINARY_SAMPLE_BYTES]
+        if not sample:
+            return False
+        if b"\x00" in sample:
+            return True
+
+        control_count = 0
+        for byte in sample:
+            if byte == 127 or (byte < 32 and byte not in (9, 10, 13)):
+                control_count += 1
+        return (control_count / len(sample)) > RUN_PREVIEW_CONTROL_RATIO_THRESHOLD
+
+    def _decode_text_with_fallback(self, data: bytes) -> tuple[str | None, str | None]:
+        if data.startswith(b"\xef\xbb\xbf"):
+            try:
+                return data.decode("utf-8-sig"), "utf-8-sig"
+            except UnicodeDecodeError:
+                pass
+
+        for encoding in ("utf-8", "utf-8-sig"):
+            try:
+                return data.decode(encoding), encoding
+            except UnicodeDecodeError:
+                continue
+
+        candidates: list[tuple[str, str, int, int]] = []
+        for encoding in ("gb18030", "big5"):
+            try:
+                decoded = data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            score = self._score_decoded_text(decoded)
+            candidates.append((encoding, decoded, score, len(candidates)))
+        if not candidates:
+            return None, None
+        best = max(candidates, key=lambda item: (item[2], -item[3]))
+        return best[1], best[0]
+
+    def _score_decoded_text(self, text: str) -> int:
+        score = 0
+        for ch in text:
+            cp = ord(ch)
+            if ch in ("\t", "\n", "\r"):
+                score += 1
+                continue
+            if ch == "\ufeff":
+                score -= 2
+                continue
+            if 32 <= cp <= 126:
+                score += 1
+                continue
+            if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or 0xF900 <= cp <= 0xFAFF:
+                score += 2
+                continue
+            category = unicodedata.category(ch)
+            if category.startswith("C"):
+                score -= 3
+        return score
+
 
 run_observability_service = RunObservabilityService()
-

@@ -48,15 +48,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
     skill = skill_registry.get_skill(request.skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{request.skill_id}' not found")
-    if not skill.engines:
-        raise HTTPException(status_code=400, detail=f"Skill '{request.skill_id}' does not declare supported engines")
-    if request.engine not in skill.engines:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Skill '{request.skill_id}' does not support engine '{request.engine}'"
-        )
 
     try:
+        workspace_manager.validate_skill_engine(skill, request.engine)
         runtime_opts = options_policy.validate_runtime_options(request.runtime_options)
         engine_opts: dict[str, Any] = {}
         if request.model:

@@ -87,12 +87,7 @@ async def upload_temp_skill_and_start(
     try:
         skill_bytes = await skill_package.read()
         skill = temp_skill_run_manager.stage_skill_package(request_id, skill_bytes)
-        if not skill.engines:
-            raise ValueError(f"Skill '{skill.id}' does not declare supported engines")
-        if record["engine"] not in skill.engines:
-            raise ValueError(
-                f"Skill '{skill.id}' does not support engine '{record['engine']}'"
-            )
+        workspace_manager.validate_skill_engine(skill, record["engine"])
 
         if file is not None:
             input_bytes = await file.read()

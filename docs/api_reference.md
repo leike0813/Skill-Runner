@@ -91,7 +91,11 @@
   - `assets/parameter.schema.json`
   - `assets/output.schema.json`
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
-- `runner.json` 必须包含非空 `engines` 列表。
+- `runner.json.engines` 可选；若缺失或为空，默认候选引擎为 `codex/gemini/iflow` 全集。
+- `runner.json.unsupported_engines` 可选；用于从候选引擎中排除不支持引擎。
+- `runner.json.engines` 与 `runner.json.unsupported_engines` 中若出现未知引擎名，校验失败。
+- `runner.json.engines` 与 `runner.json.unsupported_engines` 不允许重叠。
+- 计算后的有效引擎集合若为空，校验失败。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
 - `runner.json` 必须包含可解析的 `version`。
@@ -149,7 +153,8 @@
 - **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
-- **引擎约束**: `engine` 必须包含在 skill 的 `engines` 列表中，否则直接返回 400。
+- **引擎约束**: `engine` 必须包含在 skill 的有效 `engines` 集合中，否则直接返回 400。
+  有效集合由 `runner.json.engines`（缺失/空则默认全引擎）减去 `runner.json.unsupported_engines` 得出。
 - **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
 - **严格校验**: 缺少 required 的输入/参数/输出字段时会标记为 failed（不会仅给 warning）。
@@ -488,7 +493,12 @@
   - `assets/runner.json`
   - `runner.json.schemas` 指向的 `input` / `parameter` / `output` 三个 schema 文件
 - 身份一致性：顶层目录名、`runner.json.id`、`SKILL.md` frontmatter `name` 必须一致。
-- 元数据约束：`runner.json.engines` 必须非空；`runner.json.artifacts` 可选（若提供需为数组）。
+- 元数据约束：
+  - `runner.json.engines` 可选；缺失或空时默认候选为 `codex/gemini/iflow`。
+  - `runner.json.unsupported_engines` 可选。
+  - 两字段中的引擎名必须属于 `codex/gemini/iflow`，且两字段不能重叠。
+  - 计算后的有效引擎集合不能为空。
+  - `runner.json.artifacts` 可选（若提供需为数组）。
 - 包大小限制：受 `TEMP_SKILL_PACKAGE_MAX_BYTES` 控制（默认 20MB）。
 
 ### 生命周期与清理

@@ -46,6 +46,7 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         registry.scan_skills()
         skill = registry.get_skill("demo-skill")
         assert skill is not None
+        assert sorted(skill.engines) == ["codex", "gemini", "iflow"]
         assert len(skill.artifacts) == 2
 
         artifacts = {a.role: a for a in skill.artifacts}
@@ -53,6 +54,38 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_skills_dir
+        config.freeze()
+
+
+def test_scan_skips_invalid_engine_contract(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    skill_dir = skills_dir / "bad-engine-skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Skill")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "bad-engine-skill",
+                "engines": ["unknown-engine"],
+            }
+        )
+    )
+
+    old_skills_dir = config.SYSTEM.SKILLS_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(skills_dir)
+    config.freeze()
+
+    try:
+        registry = SkillRegistry()
+        skills = registry.list_skills()
+        ids = {skill.id for skill in skills}
+        assert "bad-engine-skill" not in ids
     finally:
         config.defrost()
         config.SYSTEM.SKILLS_DIR = old_skills_dir

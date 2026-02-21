@@ -15,6 +15,9 @@ def _build_skill_zip(
     top_level: str | None = None,
     skill_name: str | None = None,
     runner_id: str | None = None,
+    engines: list[str] | None = None,
+    include_engines: bool = True,
+    unsupported_engines: list[str] | None = None,
     include_output: bool = True,
     include_runner_artifacts: bool = True,
 ) -> bytes:
@@ -23,13 +26,16 @@ def _build_skill_zip(
     rid = runner_id or skill_id
     runner: dict[str, Any] = {
         "id": rid,
-        "engines": ["gemini"],
         "schemas": {
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
             "output": "assets/output.schema.json",
         },
     }
+    if include_engines:
+        runner["engines"] = ["gemini"] if engines is None else engines
+    if unsupported_engines is not None:
+        runner["unsupported_engines"] = unsupported_engines
     if include_runner_artifacts:
         runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
     bio = io.BytesIO()
@@ -98,3 +104,69 @@ def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
     )
     assert skill_id == "demo-temp-skill"
     assert version is None
+
+
+def test_accepts_missing_engines_by_defaulting_to_all_supported(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_missing_engines.zip"
+    zip_path.write_bytes(_build_skill_zip(include_engines=False))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_missing_engines")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_missing_engines" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_accepts_empty_engines_by_defaulting_to_all_supported(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_empty_engines.zip"
+    zip_path.write_bytes(_build_skill_zip(engines=[]))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_empty_engines")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_empty_engines" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_rejects_unknown_engine_name(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_unknown_engine.zip"
+    zip_path.write_bytes(_build_skill_zip(engines=["gemini", "unknown"]))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_unknown_engine")
+    with pytest.raises(ValueError, match="contains unsupported engine"):
+        validator.validate_skill_dir(tmp_path / "stage_unknown_engine" / top, top, require_version=False)
+
+
+def test_rejects_unknown_engine_name_in_unsupported_list(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_unknown_unsupported.zip"
+    zip_path.write_bytes(_build_skill_zip(unsupported_engines=["unknown"]))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_unknown_unsupported")
+    with pytest.raises(ValueError, match="contains unsupported engine"):
+        validator.validate_skill_dir(tmp_path / "stage_unknown_unsupported" / top, top, require_version=False)
+
+
+def test_rejects_overlap_between_engines_and_unsupported_engines(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_overlap.zip"
+    zip_path.write_bytes(_build_skill_zip(engines=["gemini", "codex"], unsupported_engines=["gemini"]))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_overlap")
+    with pytest.raises(ValueError, match="must not overlap"):
+        validator.validate_skill_dir(tmp_path / "stage_overlap" / top, top, require_version=False)
+
+
+def test_rejects_effective_empty_engine_set(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_effective_empty.zip"
+    zip_path.write_bytes(_build_skill_zip(include_engines=False, unsupported_engines=["codex", "gemini", "iflow"]))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_effective_empty")
+    with pytest.raises(ValueError, match="resolves to no supported engines"):
+        validator.validate_skill_dir(tmp_path / "stage_effective_empty" / top, top, require_version=False)

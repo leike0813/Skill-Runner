@@ -18,6 +18,8 @@ except Exception:  # pragma: no cover
 class SkillPackageValidator:
     """Shared validator for persistent and temporary skill package uploads."""
 
+    SUPPORTED_ENGINES = ("codex", "gemini", "iflow")
+
     REQUIRED_FILES = (
         "SKILL.md",
         "assets/runner.json",
@@ -119,9 +121,7 @@ class SkillPackageValidator:
         if missing:
             raise ValueError(f"Skill package missing required files: {', '.join(missing)}")
 
-        engines = runner.get("engines")
-        if not isinstance(engines, list) or not engines:
-            raise ValueError("runner.json must define a non-empty engines list")
+        self.resolve_manifest_engines(runner)
 
         artifacts = runner.get("artifacts")
         if artifacts is not None and not isinstance(artifacts, list):
@@ -140,6 +140,49 @@ class SkillPackageValidator:
             version = None
 
         return skill_id, version
+
+    def resolve_manifest_engines(self, runner: dict[str, Any]) -> list[str]:
+        supported = set(self.SUPPORTED_ENGINES)
+
+        allowlist_raw = runner.get("engines")
+        blocklist_raw = runner.get("unsupported_engines")
+
+        if allowlist_raw is not None and not isinstance(allowlist_raw, list):
+            raise ValueError("runner.json engines must be a list when provided")
+        if blocklist_raw is not None and not isinstance(blocklist_raw, list):
+            raise ValueError("runner.json unsupported_engines must be a list when provided")
+
+        allowlist = self._normalize_engine_list("engines", allowlist_raw or [], supported)
+        blocklist = self._normalize_engine_list("unsupported_engines", blocklist_raw or [], supported)
+
+        base_engines = allowlist if allowlist else list(self.SUPPORTED_ENGINES)
+        overlap = sorted(set(allowlist) & set(blocklist))
+        if overlap:
+            raise ValueError(
+                "runner.json engines and unsupported_engines must not overlap: "
+                + ", ".join(overlap)
+            )
+
+        blockset = set(blocklist)
+        effective = [engine for engine in base_engines if engine not in blockset]
+        if not effective:
+            raise ValueError("runner.json resolves to no supported engines")
+        return effective
+
+    def _normalize_engine_list(self, field: str, values: list[Any], supported: set[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError(f"runner.json {field} must contain non-empty engine names")
+            engine = item.strip()
+            if engine not in supported:
+                raise ValueError(f"runner.json {field} contains unsupported engine: {engine}")
+            if engine in seen:
+                continue
+            seen.add(engine)
+            normalized.append(engine)
+        return normalized
 
     def parse_version(self, raw: str) -> Any:
         if _packaging_version is not None:

@@ -173,7 +173,8 @@ SKILL.md 的格式：
 {
   "id": "skill-name",                 // 必须等于 SKILL.md frontmatter.name 且等于目录名（标准要求 name 匹配目录）:contentReference[oaicite:14]{index=14}
   "version": "1.0.0",
-  "engines": ["codex", "gemini", "iflow"],
+  "engines": ["codex", "gemini", "iflow"], // 可选；缺失或空时默认全引擎
+  "unsupported_engines": ["iflow"],        // 可选；从 engines(或默认全集)中排除
   "entrypoint": {
     "type": "prompt|script|hybrid",
     "prompt": {
@@ -379,7 +380,9 @@ Response:
 
 注：
 - Input 文件（对应 input.schema.json）需通过 `POST /v1/jobs/{request_id}/upload` 单独上传。
-- `engine` 必须在 skill 的 `engines` 列表内，否则返回 400。
+- `engine` 必须在 skill 的有效 `engines` 集合内，否则返回 400。
+  有效集合 = `engines`（缺失/空则 `codex/gemini/iflow`）- `unsupported_engines`；
+  两字段不得重叠，且不得包含未知引擎名。
 - `model` 需从 `GET /v1/engines/{engine}/models` 中选择；Codex 使用 `name@reasoning_effort` 格式。
 
 4) GET /v1/jobs/{request_id}
