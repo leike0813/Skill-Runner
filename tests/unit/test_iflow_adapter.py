@@ -124,10 +124,11 @@ async def test_execute_resume_command_contains_resume_flag(tmp_path):
         assert "--resume" in args
         assert "iflow-session" in args
         assert "--yolo" in args
+        assert "--thinking" in args
 
 
 @pytest.mark.asyncio
-async def test_execute_interactive_command_includes_yolo(tmp_path):
+async def test_execute_interactive_command_includes_yolo_and_thinking(tmp_path):
     adapter = IFlowAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
@@ -153,10 +154,11 @@ async def test_execute_interactive_command_includes_yolo(tmp_path):
         )
         args, _ = mock_exec.call_args
         assert "--yolo" in args
+        assert "--thinking" in args
 
 
 @pytest.mark.asyncio
-async def test_execute_auto_command_includes_yolo(tmp_path):
+async def test_execute_auto_command_includes_yolo_and_thinking(tmp_path):
     adapter = IFlowAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
@@ -182,3 +184,4 @@ async def test_execute_auto_command_includes_yolo(tmp_path):
         )
         args, _ = mock_exec.call_args
         assert "--yolo" in args
+        assert "--thinking" in args

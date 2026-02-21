@@ -19,3 +19,4 @@ references/codex/
 references/gemini-cli/
 references/iflow-cli/
 e2e_client/recordings/*.json
+.opencode

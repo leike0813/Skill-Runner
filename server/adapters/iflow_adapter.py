@@ -201,6 +201,7 @@ class IFlowAdapter(EngineAdapter):
         else:
             cmd_parts.extend([str(iflow_cmd)])
             cmd_parts.append("--yolo")
+            cmd_parts.append("--thinking")
             cmd_parts.extend(["-p", prompt])
         
         logger.info("Executing iFlow command: %s in %s", " ".join(cmd_parts), run_dir)
@@ -255,6 +256,7 @@ class IFlowAdapter(EngineAdapter):
             "--resume",
             session_id,
             "--yolo",
+            "--thinking",
             "-p",
             prompt,
         ]
