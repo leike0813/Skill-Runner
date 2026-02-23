@@ -32,4 +32,36 @@
         </tbody>
     </table>
 </section>
+
+<section class="card" style="margin-top: 16px;">
+    <h2 style="margin-top: 0;">Fixture Skills (Temp Upload)</h2>
+    <p class="muted">Skills discovered from <code>tests/fixtures/skills</code>. On submit, the selected fixture skill is packaged on-the-fly and sent through <code>/v1/temp-skill-runs</code>.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Fixture</th>
+                <th>Skill ID</th>
+                <th>Version</th>
+                <th>Engines</th>
+                <th>Execution Modes</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for skill in fixture_skills %}
+            <tr>
+                <td><code>{{ skill.fixture_skill_id }}</code></td>
+                <td>{{ skill.id }}</td>
+                <td>{{ skill.version }}</td>
+                <td>{{ ", ".join(skill.engines or []) }}</td>
+                <td>{{ ", ".join(skill.execution_modes or []) }}</td>
+                <td><a class="btn secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">Run (Temp)</a></td>
+            </tr>
+        {% endfor %}
+        {% if not fixture_skills %}
+            <tr><td colspan="6" class="muted">No fixture skills found.</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+</section>
 {% endblock %}

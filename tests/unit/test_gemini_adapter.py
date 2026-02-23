@@ -75,7 +75,7 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
     try:
         # Mock dependencies
          with patch("server.services.config_generator.config_generator.generate_config"), \
-              patch("server.services.skill_patcher.skill_patcher.patch_skill_md"), \
+              patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
               patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
              
             mock_proc = MagicMock()
@@ -101,6 +101,7 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
             
             # parameter.divisor should be 5
             assert "divisor: 5" in prompt_content
+            assert mock_patch.call_count == 1
     finally:
         config.defrost()
         config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
@@ -137,7 +138,7 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
     
     try:
          with patch("server.services.config_generator.config_generator.generate_config"), \
-              patch("server.services.skill_patcher.skill_patcher.patch_skill_md"), \
+              patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
               patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
              
             mock_proc = MagicMock()
@@ -149,6 +150,7 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
             mock_exec.return_value = mock_proc
             with pytest.raises(ValueError, match="Missing required input files"):
                 await adapter.run(mock_skill, input_data, run_dir, options)
+            assert mock_patch.call_count == 1
     finally:
         config.defrost()
         config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
@@ -167,6 +169,87 @@ def test_extract_session_handle_from_json_body(adapter):
     )
     assert handle.handle_value == "sess_42"
     assert handle.created_at_turn == 2
+
+
+def test_extract_session_handle_from_plain_text_fallback(adapter):
+    handle = adapter.extract_session_handle(
+        'noise {"session_id":"sess_from_text"}',
+        turn_index=1,
+    )
+    assert handle.handle_value == "sess_from_text"
+
+
+def test_parse_runtime_stream_falls_back_to_stdout_json_lines(adapter):
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b'{"session_id":"sess_stdout","response":"hello from stdout"}\n',
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["session_id"] == "sess_stdout"
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from stdout"
+    assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
+
+
+def test_parse_runtime_stream_parses_pretty_json_from_stdout(adapter):
+    stdout = (
+        "YOLO mode is enabled. All tool calls will be automatically approved.\n"
+        "{\n"
+        '  "session_id": "sess_pretty",\n'
+        '  "response": "hello from pretty stdout",\n'
+        '  "stats": {"ok": true}\n'
+        "}\n"
+    ).encode("utf-8")
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=stdout,
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["session_id"] == "sess_pretty"
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from pretty stdout"
+    assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
+
+
+def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate(adapter):
+    split_json = (
+        "{\n"
+        '  "session_id": "sess_split",\n'
+        '  "response": "hello from split",\n'
+        '  "stats": {"ok": true}\n'
+        "}\n"
+    ).encode("utf-8")
+    pty_json = (
+        "Script started on ...\n"
+        "{\n"
+        '  "session_id": "sess_split",\n'
+        '  "response": "hello from split",\n'
+        '  "stats": {"ok": true}\n'
+        "}\n"
+        "Script done on ...\n"
+    ).encode("utf-8")
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=split_json,
+        stderr_raw=b"",
+        pty_raw=pty_json,
+    )
+    assert parsed["session_id"] == "sess_split"
+    assert len(parsed["assistant_messages"]) == 1
+    assert parsed["assistant_messages"][0]["text"] == "hello from split"
+    assert "PTY_FALLBACK_USED" not in parsed["diagnostics"]
+    assert all(row["stream"] != "pty" for row in parsed["raw_rows"])
+
+
+def test_parse_runtime_stream_falls_back_to_pty_json_lines(adapter):
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b"",
+        stderr_raw=b"",
+        pty_raw=b'{"session_id":"sess_pty","response":"hello from pty"}\n',
+    )
+    assert parsed["session_id"] == "sess_pty"
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from pty"
+    assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
 
 
 def test_parse_output_valid_ask_user_envelope(adapter):

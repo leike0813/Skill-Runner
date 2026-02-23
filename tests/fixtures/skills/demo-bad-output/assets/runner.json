@@ -3,8 +3,8 @@
     "version": "1.0.0",
     "name": "Demo: Bad Output",
     "description": "Produces output that violates schema for testing.",
-    "engines": [
-        "gemini"
+    "execution_modes": [
+        "auto"
     ],
     "schemas": {
         "input": "assets/input.schema.json",

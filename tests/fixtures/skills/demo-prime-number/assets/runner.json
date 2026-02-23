@@ -2,10 +2,8 @@
     "id": "demo-prime-number",
     "name": "Demo: Prime Number Analyzer",
     "description": "Analyzes numbers from a file for primality after optional division.",
-    "engines": [
-        "gemini",
-        "codex",
-        "iflow"
+    "execution_modes": [
+        "auto"
     ],
     "entrypoint": {},
     "schemas": {

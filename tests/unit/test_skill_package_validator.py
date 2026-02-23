@@ -21,6 +21,7 @@ def _build_skill_zip(
     include_output: bool = True,
     include_runner_artifacts: bool = True,
     include_execution_modes: bool = True,
+    max_attempt: Any = None,
     input_schema_override: dict[str, Any] | None = None,
     parameter_schema_override: dict[str, Any] | None = None,
     output_schema_override: dict[str, Any] | None = None,
@@ -46,6 +47,8 @@ def _build_skill_zip(
         runner["artifacts"] = [{"role": "result", "pattern": "out.txt", "required": True}]
     if include_execution_modes:
         runner["execution_modes"] = ["auto", "interactive"]
+    if max_attempt is not None:
+        runner["max_attempt"] = max_attempt
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -260,6 +263,37 @@ def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
     with pytest.raises(ValueError, match="Invalid output schema"):
         validator.validate_skill_dir(
             tmp_path / "stage_invalid_output_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
+@pytest.mark.parametrize("max_attempt", [1, 10])
+def test_accepts_valid_max_attempt(tmp_path, max_attempt):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / f"valid_max_attempt_{max_attempt}.zip"
+    zip_path.write_bytes(_build_skill_zip(max_attempt=max_attempt))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / f"stage_valid_max_attempt_{max_attempt}")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / f"stage_valid_max_attempt_{max_attempt}" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+@pytest.mark.parametrize("max_attempt", [0, -1, "three", 1.5])
+def test_rejects_invalid_max_attempt(tmp_path, max_attempt):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "invalid_max_attempt.zip"
+    zip_path.write_bytes(_build_skill_zip(max_attempt=max_attempt))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_invalid_max_attempt")
+    with pytest.raises(ValueError, match="Invalid runner\\.json manifest"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_invalid_max_attempt" / top,
             top,
             require_version=False,
         )

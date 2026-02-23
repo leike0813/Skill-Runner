@@ -4,6 +4,7 @@ from pathlib import Path
 from server.models import SkillManifest
 from server.services.cache_key_builder import (
     build_input_manifest,
+    compute_bytes_hash,
     compute_input_manifest_hash,
     compute_inline_input_hash,
     compute_skill_fingerprint,
@@ -145,3 +146,68 @@ def test_skill_fingerprint_without_path_returns_empty():
 def test_input_manifest_missing_dir():
     manifest = build_input_manifest(Path("does-not-exist"))
     assert manifest["files"] == []
+
+
+def test_compute_bytes_hash_changes_with_content():
+    assert compute_bytes_hash(b"one") != compute_bytes_hash(b"two")
+
+
+def test_cache_key_changes_with_temp_skill_package_hash(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("v1")
+    (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
+    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+
+    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    key1 = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        temp_skill_package_hash=compute_bytes_hash(b"zip-v1"),
+    )
+    key2 = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        temp_skill_package_hash=compute_bytes_hash(b"zip-v2"),
+    )
+    assert key1 != key2
+
+
+def test_cache_key_stable_with_same_temp_skill_package_hash(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("v1")
+    (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
+    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+
+    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    package_hash = compute_bytes_hash(b"zip-v1")
+    key1 = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        temp_skill_package_hash=package_hash,
+    )
+    key2 = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        temp_skill_package_hash=package_hash,
+    )
+    assert key1 == key2

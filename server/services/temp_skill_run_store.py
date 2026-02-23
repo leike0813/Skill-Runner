@@ -94,6 +94,9 @@ class TempSkillRunStore:
     def update_run_started(self, request_id: str, run_id: str) -> None:
         self._update(request_id, run_id=run_id, status=RunStatus.RUNNING.value, error=None)
 
+    def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        self._update(request_id, run_id=run_id, status=RunStatus.SUCCEEDED.value, error=None)
+
     def update_status(self, request_id: str, status: RunStatus, error: Optional[str] = None) -> None:
         self._update(request_id, status=status.value, error=error)
 

@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -217,6 +217,132 @@ async def test_upload_accepts_missing_engines_defaults_to_all(temp_config_dirs, 
         file=None,
     )
     assert res.status == RunStatus.QUEUED
+    assert res.cache_hit is False
+
+
+@pytest.mark.asyncio
+async def test_upload_auto_mode_cache_hit(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
+        lambda _key: "run-cached-temp-1",
+    )
+    run_job_mock = AsyncMock()
+    monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", run_job_mock)
+
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "auto"},
+        )
+    )
+
+    res = await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        BackgroundTasks(),
+        skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
+        file=None,
+    )
+    assert res.status == RunStatus.SUCCEEDED
+    assert res.cache_hit is True
+    run_job_mock.assert_not_called()
+
+    record = temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    assert record is not None
+    assert record.get("run_id") == "run-cached-temp-1"
+
+    from server.config import config
+
+    temp_root = Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / create.request_id
+    assert (temp_root / "skill_package.zip").exists() is False
+    assert (temp_root / "staged").exists() is False
+
+
+@pytest.mark.asyncio
+async def test_upload_interactive_mode_skips_cache_lookup_and_writeback_key(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    get_cached_run_mock = MagicMock(return_value="run-cached-temp-2")
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
+        get_cached_run_mock,
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.concurrency_manager.admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    run_job_mock = AsyncMock()
+    monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", run_job_mock)
+
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "interactive"},
+        )
+    )
+
+    background_tasks = BackgroundTasks()
+    res = await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        background_tasks,
+        skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
+        file=None,
+    )
+    assert res.status == RunStatus.QUEUED
+    assert res.cache_hit is False
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].kwargs["cache_key"] is None
+    get_cached_run_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_auto_mode_no_cache_skips_lookup_and_writeback_key(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    get_cached_run_mock = MagicMock(return_value="run-cached-temp-3")
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
+        get_cached_run_mock,
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.concurrency_manager.admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    run_job_mock = AsyncMock()
+    monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", run_job_mock)
+
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "auto", "no_cache": True},
+        )
+    )
+
+    background_tasks = BackgroundTasks()
+    res = await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        background_tasks,
+        skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
+        file=None,
+    )
+    assert res.status == RunStatus.QUEUED
+    assert res.cache_hit is False
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].kwargs["cache_key"] is None
+    get_cached_run_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -366,3 +492,119 @@ async def test_cancel_temp_skill_run_terminal_idempotent(temp_config_dirs, monke
     assert response.accepted is False
     assert response.status == RunStatus.SUCCEEDED
     cancel_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_syncs_temp_request_into_run_store(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.concurrency_manager.admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.job_orchestrator.run_job",
+        AsyncMock(),
+    )
+
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={"k": "v"},
+            model="gemini-test",
+            runtime_options={"execution_mode": "interactive"},
+        )
+    )
+    upload = await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        BackgroundTasks(),
+        skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
+        file=None,
+    )
+    assert upload.status == RunStatus.QUEUED
+
+    regular_record = temp_skill_runs_router.run_store.get_request(create.request_id)
+    assert regular_record is not None
+    assert regular_record["request_id"] == create.request_id
+    assert regular_record["skill_id"] == "temp-router-skill"
+    assert regular_record["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_temp_interaction_pending_and_reply_parity(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.concurrency_manager.admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    run_job_mock = AsyncMock()
+    monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", run_job_mock)
+
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "interactive"},
+        )
+    )
+    await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        BackgroundTasks(),
+        skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
+        file=None,
+    )
+    rec = temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    assert rec is not None
+    run_id = rec["run_id"]
+    assert isinstance(run_id, str)
+
+    run_dir = Path(temp_config_dirs / "runs" / run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        temp_skill_runs_router.workspace_manager,
+        "get_run_dir",
+        lambda candidate: run_dir if candidate == run_id else None,
+    )
+
+    temp_skill_runs_router.run_store.set_pending_interaction(
+        create.request_id,
+        {
+            "interaction_id": 3,
+            "kind": "open_text",
+            "prompt": "Need input",
+            "options": [],
+            "ui_hints": {},
+            "default_decision_policy": "engine_judgement",
+            "required_fields": [],
+        },
+    )
+
+    pending = await temp_skill_runs_router.get_temp_skill_interaction_pending(create.request_id)
+    assert pending.status == RunStatus.WAITING_USER
+    assert pending.pending is not None
+    assert pending.pending.interaction_id == 3
+
+    background_tasks = BackgroundTasks()
+    reply = await temp_skill_runs_router.reply_temp_skill_interaction(
+        create.request_id,
+        request=temp_skill_runs_router.InteractionReplyRequest(
+            interaction_id=3,
+            response={"answer": "ok"},
+            idempotency_key="ik-1",
+        ),
+        background_tasks=background_tasks,
+    )
+    assert reply.accepted is True
+    assert reply.status == RunStatus.QUEUED
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].kwargs["temp_request_id"] == create.request_id

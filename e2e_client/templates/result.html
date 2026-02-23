@@ -14,9 +14,10 @@
 
 <section class="card">
     <h2 style="margin-top: 0;">Run Result: <code>{{ request_id }}</code></h2>
+    <p class="muted"><strong>Source:</strong> {{ run_source }}</p>
     <div class="row">
         <a class="btn secondary" href="/runs">Runs</a>
-        <a class="btn secondary" href="/runs/{{ request_id }}">Back to Observation</a>
+        <a class="btn secondary" href="/runs/{{ request_id }}?source={{ run_source }}">Back to Observation</a>
         <a class="btn secondary" href="/recordings/{{ request_id }}">Open Replay</a>
     </div>
 </section>
@@ -33,7 +34,7 @@
             <ul>
             {% for path in artifacts %}
                 <li>
-                    <a href="{{ backend_base_url }}/v1/jobs/{{ request_id }}/artifacts/{{ path }}" target="_blank" rel="noopener">{{ path }}</a>
+                    <a href="{{ artifacts_download_base }}/artifacts/{{ path }}" target="_blank" rel="noopener">{{ path }}</a>
                 </li>
             {% endfor %}
             </ul>
@@ -58,7 +59,7 @@
                     <span class="file">📄</span>
                     <a
                         href="#"
-                        hx-get="/runs/{{ request_id }}/bundle/view?path={{ entry.path|urlencode }}"
+                        hx-get="/runs/{{ request_id }}/bundle/view?path={{ entry.path|urlencode }}&source={{ run_source }}"
                         hx-target="#run-file-preview"
                         hx-swap="innerHTML"
                     >{{ entry.name }}</a>

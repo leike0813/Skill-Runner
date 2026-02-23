@@ -120,3 +120,23 @@ def test_validation_failure(manager):
     with patch.object(manager, '_load_enforced_config', return_value={}):
         with pytest.raises(ValueError, match="validation failed"):
              manager.generate_profile_settings(skill_defaults, runtime_config)
+
+
+def test_custom_profile_falls_back_to_default_enforced_section(tmp_path):
+    mgr = CodexConfigManager(
+        config_path=tmp_path / "config.toml",
+        profile_name="skill-runner-harness",
+    )
+    enforced_config = {
+        "profiles": {
+            "skill-runner": {
+                "approval_policy": "never",
+                "sandbox_mode": "workspace-write",
+            }
+        }
+    }
+    with patch.object(mgr, "_load_enforced_config", return_value=enforced_config):
+        with patch.object(mgr, "_validate_config", return_value=None):
+            final_config = mgr.generate_profile_settings({"model": "gpt-5"}, {})
+    assert final_config["approval_policy"] == "never"
+    assert final_config["sandbox_mode"] == "workspace-write"

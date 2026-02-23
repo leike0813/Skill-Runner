@@ -5,9 +5,11 @@
     <div class="row">
         <div style="flex: 1 1 200px;"><strong>Status:</strong> <span id="run-status">loading</span></div>
         <div style="flex: 1 1 200px;"><strong>Pending ID:</strong> <span id="pending-id">-</span></div>
-        <div style="flex: 1 1 200px;">
+        <div style="flex: 1 1 200px;"><strong>Source:</strong> <span id="run-source">{{ run_source }}</span></div>
+        <div style="flex: 1 1 220px;"><strong>Cursor:</strong> <span id="run-cursor">0</span></div>
+        <div style="flex: 1 1 220px;">
             <a class="btn secondary" href="/runs">Runs</a>
-            <a class="btn secondary" href="/runs/{{ request_id }}/result">Result</a>
+            <a class="btn secondary" href="/runs/{{ request_id }}/result?source={{ run_source }}">Result</a>
             <a class="btn secondary" href="/recordings/{{ request_id }}">Replay</a>
         </div>
     </div>
@@ -15,8 +17,8 @@
 
 <section class="row" style="margin-top: 16px;">
     <div class="card" style="flex: 2 1 540px;">
-        <h3 style="margin-top: 0;">Conversation (stdout)</h3>
-        <div id="stdout-panel" style="height: 360px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8;"></div>
+        <h3 style="margin-top: 0;">Conversation (FCMP)</h3>
+        <div id="stdout-panel" style="height: 360px; overflow: auto; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8;"></div>
         <div style="margin-top: 12px; border-top: 1px solid #e1ece5; padding-top: 12px;">
             <div class="muted" id="pending-prompt">Waiting for pending interaction...</div>
             <form id="reply-form" style="margin-top: 8px;">
@@ -30,28 +32,75 @@
     </div>
     <div class="card" style="flex: 1 1 320px;">
         <h3 style="margin-top: 0;">Errors (stderr)</h3>
-        <div id="stderr-panel" style="height: 360px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f1d2d2; border-radius:8px; padding:10px; background:#fff8f8;"></div>
+        <div id="stderr-panel" style="height: 220px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f1d2d2; border-radius:8px; padding:10px; background:#fff8f8;"></div>
+        <h3 style="margin-top: 12px;">Diagnostics</h3>
+        <div id="diagnostic-panel" style="height: 140px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f0d9a4; border-radius:8px; padding:10px; background:#fffbf2;"></div>
+    </div>
+</section>
+
+<section class="row" style="margin-top: 16px;">
+    <div class="card" style="flex: 1 1 420px;">
+        <h3 style="margin-top: 0;">Event Relations</h3>
+        <div id="relation-panel" style="height: 220px; overflow: auto; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f9fcfa;"></div>
+    </div>
+    <div class="card" style="flex: 1 1 420px;">
+        <h3 style="margin-top: 0;">Raw Ref Preview</h3>
+        <div id="rawref-meta" class="muted">No raw reference selected.</div>
+        <div id="rawref-panel" style="height: 220px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8; margin-top: 8px;"></div>
     </div>
 </section>
 
 <script>
 (() => {
     const requestId = "{{ request_id }}";
+    const runSource = "{{ run_source }}";
     const statusEl = document.getElementById("run-status");
     const pendingIdEl = document.getElementById("pending-id");
+    const cursorEl = document.getElementById("run-cursor");
     const stdoutEl = document.getElementById("stdout-panel");
     const stderrEl = document.getElementById("stderr-panel");
+    const diagnosticEl = document.getElementById("diagnostic-panel");
+    const relationEl = document.getElementById("relation-panel");
+    const rawRefMetaEl = document.getElementById("rawref-meta");
+    const rawRefEl = document.getElementById("rawref-panel");
     const replyForm = document.getElementById("reply-form");
     const replyText = document.getElementById("reply-text");
     const replySubmit = document.getElementById("reply-submit");
     const promptEl = document.getElementById("pending-prompt");
     const interactionIdEl = document.getElementById("interaction-id");
     let stream = null;
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
+    let cursor = 0;
+    let stdoutOffset = 0;
+    let stderrOffset = 0;
+    const renderedChatKeys = new Set();
+    const renderedRunKeys = new Set();
+    const relationRows = [];
+    let currentStatus = "loading";
+    let observeSummaryDirty = false;
+    let observeSummaryInflight = false;
+    const observationSummary = {
+        cursor: 0,
+        last_chat_event: {},
+        key_events: [],
+        raw_refs: [],
+    };
+
+    function apiUrl(path) {
+        const separator = path.includes("?") ? "&" : "?";
+        return `${path}${separator}source=${encodeURIComponent(runSource)}`;
+    }
 
     function appendChunk(el, text) {
         if (!text) return;
         el.textContent += text;
         el.scrollTop = el.scrollHeight;
+    }
+
+    function appendDiagnostic(text) {
+        if (!text) return;
+        appendChunk(diagnosticEl, `${text}\n`);
     }
 
     function setReplyEnabled(enabled, prompt) {
@@ -63,89 +112,599 @@
         promptEl.textContent = prompt || (enabled ? "Pending response required." : "Current run is not waiting for user input.");
     }
 
+    function updateCursor(next) {
+        if (typeof next !== "number" || !Number.isFinite(next)) return;
+        if (next <= cursor) return;
+        cursor = next;
+        cursorEl.textContent = String(cursor);
+        if (cursor > observationSummary.cursor) {
+            observationSummary.cursor = cursor;
+            markObserveSummaryDirty();
+        }
+    }
+
+    function markObserveSummaryDirty() {
+        observeSummaryDirty = true;
+    }
+
+    function coerceNumber(raw) {
+        if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+        if (typeof raw === "string" && raw.trim()) {
+            const value = Number(raw);
+            return Number.isFinite(value) ? value : null;
+        }
+        return null;
+    }
+
+    function toObject(raw) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+        return raw;
+    }
+
+    function safeText(raw) {
+        return typeof raw === "string" ? raw : "";
+    }
+
+    function parseConfidence(payload) {
+        const checks = [
+            payload?.source?.confidence,
+            payload?.data?.source?.confidence,
+            payload?.event?.source?.confidence,
+            payload?.confidence,
+            payload?.data?.confidence,
+            payload?.event?.confidence,
+        ];
+        for (const candidate of checks) {
+            const value = coerceNumber(candidate);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    function parseCorrelation(payload) {
+        const checks = [
+            payload?.correlation?.id,
+            payload?.correlation_id,
+            payload?.data?.correlation?.id,
+            payload?.data?.correlation_id,
+            payload?.event?.correlation?.id,
+            payload?.event?.correlation_id,
+        ];
+        for (const candidate of checks) {
+            const text = safeText(candidate).trim();
+            if (text) return text;
+        }
+        return "";
+    }
+
+    function parseAttempt(payload) {
+        const checks = [
+            payload?.attempt_number,
+            payload?.meta?.attempt,
+            payload?.data?.meta?.attempt,
+            payload?.event?.attempt_number,
+            payload?.attempt,
+        ];
+        for (const candidate of checks) {
+            const value = coerceNumber(candidate);
+            if (value != null && value > 0) return Math.floor(value);
+        }
+        return 1;
+    }
+
+    function normalizeRawRef(raw) {
+        const obj = toObject(raw);
+        if (!obj) return null;
+        const stream = safeText(
+            obj.stream || obj.channel || obj.name
+        ).trim();
+        if (!stream) return null;
+        const byteFrom = coerceNumber(
+            obj.byte_from ?? obj.from ?? obj.start ?? obj.start_byte
+        );
+        const byteTo = coerceNumber(
+            obj.byte_to ?? obj.to ?? obj.end ?? obj.end_byte
+        );
+        if (byteFrom == null || byteTo == null) return null;
+        if (byteTo < byteFrom) return null;
+        return {
+            stream,
+            byte_from: Math.max(0, Math.floor(byteFrom)),
+            byte_to: Math.max(0, Math.floor(byteTo)),
+        };
+    }
+
+    function extractRawRefs(payload) {
+        const candidates = [
+            payload?.raw_ref,
+            payload?.raw_refs,
+            payload?.data?.raw_ref,
+            payload?.data?.raw_refs,
+            payload?.event?.raw_ref,
+            payload?.event?.raw_refs,
+            payload?.refs,
+            payload?.data?.refs,
+        ];
+        const refs = [];
+        const seen = new Set();
+        for (const candidate of candidates) {
+            if (candidate == null) continue;
+            const rows = Array.isArray(candidate) ? candidate : [candidate];
+            for (const row of rows) {
+                const ref = normalizeRawRef(row);
+                if (!ref) continue;
+                const identity = `${ref.stream}|${ref.byte_from}|${ref.byte_to}`;
+                if (seen.has(identity)) continue;
+                seen.add(identity);
+                refs.push(ref);
+            }
+        }
+        return refs;
+    }
+
+    function trackRawRef(ref) {
+        if (!ref) return;
+        const list = observationSummary.raw_refs;
+        const identity = `${ref.stream}|${ref.byte_from}|${ref.byte_to}`;
+        if (!list.some((item) => `${item.stream}|${item.byte_from}|${item.byte_to}` === identity)) {
+            list.push(ref);
+            if (list.length > 30) {
+                list.splice(0, list.length - 30);
+            }
+            markObserveSummaryDirty();
+        }
+    }
+
+    function trackKeyEvent(entry) {
+        const list = observationSummary.key_events;
+        const identity = `${entry.seq}|${entry.type}|${entry.correlation || ""}`;
+        if (!list.some((item) => `${item.seq}|${item.type}|${item.correlation || ""}` === identity)) {
+            list.push(entry);
+            if (list.length > 30) {
+                list.splice(0, list.length - 30);
+            }
+            markObserveSummaryDirty();
+        }
+    }
+
+    function addRelationRow(entry) {
+        const identity = `${entry.kind}|${entry.seq}|${entry.type}|${entry.correlation || ""}`;
+        if (relationRows.some((item) => item.identity === identity)) return;
+        relationRows.push({ identity, ...entry });
+        if (relationRows.length > 120) {
+            relationRows.splice(0, relationRows.length - 120);
+        }
+        renderRelations();
+    }
+
+    function renderRelations() {
+        relationEl.textContent = "";
+        if (!relationRows.length) {
+            relationEl.textContent = "No relation data yet.";
+            return;
+        }
+        for (const row of relationRows) {
+            const line = document.createElement("div");
+            line.style.marginBottom = "8px";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "btn secondary";
+            button.style.padding = "6px 8px";
+            button.style.marginRight = "8px";
+            const confidenceText = row.confidence != null ? ` conf=${Number(row.confidence).toFixed(2)}` : "";
+            const corrText = row.correlation ? ` corr=${row.correlation}` : "";
+            button.textContent = `[${row.seq}] ${row.kind}:${row.type}${corrText}${confidenceText}`;
+            button.addEventListener("click", () => {
+                if (Array.isArray(row.rawRefs) && row.rawRefs.length) {
+                    previewRawRef(row.rawRefs[0], true);
+                } else {
+                    rawRefMetaEl.textContent = "No raw_ref attached to selected relation.";
+                    rawRefEl.textContent = "";
+                }
+            });
+            line.appendChild(button);
+            if (row.lowConfidence) {
+                const badge = document.createElement("span");
+                badge.textContent = "low-confidence";
+                badge.style.color = "#8f2323";
+                badge.style.fontWeight = "700";
+                line.appendChild(badge);
+            }
+            relationEl.appendChild(line);
+        }
+        relationEl.scrollTop = relationEl.scrollHeight;
+    }
+
+    function appendConversationRow(role, text, options = {}) {
+        const row = document.createElement("div");
+        row.style.borderBottom = "1px solid #e7efe9";
+        row.style.padding = "8px 2px";
+        const header = document.createElement("div");
+        header.style.display = "flex";
+        header.style.alignItems = "center";
+        header.style.gap = "8px";
+        const roleEl = document.createElement("strong");
+        roleEl.textContent = role;
+        header.appendChild(roleEl);
+        if (options.lowConfidence) {
+            const badge = document.createElement("span");
+            badge.textContent = "low-confidence";
+            badge.style.color = "#8f2323";
+            badge.style.fontWeight = "700";
+            header.appendChild(badge);
+        }
+        row.appendChild(header);
+
+        const textEl = document.createElement("div");
+        textEl.style.whiteSpace = "pre-wrap";
+        textEl.textContent = text || "";
+        row.appendChild(textEl);
+
+        if (Array.isArray(options.rawRefs) && options.rawRefs.length) {
+            const refsWrap = document.createElement("div");
+            refsWrap.style.marginTop = "6px";
+            refsWrap.style.display = "flex";
+            refsWrap.style.flexWrap = "wrap";
+            refsWrap.style.gap = "6px";
+            for (const ref of options.rawRefs) {
+                const refButton = document.createElement("button");
+                refButton.type = "button";
+                refButton.className = "btn secondary";
+                refButton.style.padding = "4px 8px";
+                refButton.textContent = `raw_ref ${ref.stream}:${ref.byte_from}-${ref.byte_to}`;
+                refButton.addEventListener("click", () => previewRawRef(ref, true));
+                refsWrap.appendChild(refButton);
+            }
+            row.appendChild(refsWrap);
+        }
+
+        stdoutEl.appendChild(row);
+        stdoutEl.scrollTop = stdoutEl.scrollHeight;
+    }
+
+    async function previewRawRef(ref, track) {
+        const streamName = encodeURIComponent(ref.stream);
+        const from = encodeURIComponent(String(ref.byte_from));
+        const to = encodeURIComponent(String(ref.byte_to));
+        rawRefMetaEl.textContent = `${ref.stream} [${ref.byte_from}, ${ref.byte_to}]`;
+        rawRefEl.textContent = "Loading...";
+        const path = `/api/runs/${requestId}/logs/range?stream=${streamName}&byte_from=${from}&byte_to=${to}`;
+        const res = await fetch(apiUrl(path));
+        if (!res.ok) {
+            rawRefEl.textContent = "Unable to load raw reference segment.";
+            return;
+        }
+        const payload = await res.json();
+        const content = safeText(payload.content || payload.text || payload.chunk);
+        rawRefEl.textContent = content || JSON.stringify(payload, null, 2);
+        if (track) {
+            trackRawRef(ref);
+        }
+    }
+
+    function updateLastChatSummary(data, text) {
+        const seq = typeof data.seq === "number" ? data.seq : 0;
+        const type = safeText(data.type);
+        const role = type.startsWith("assistant.") ? "assistant" : type.startsWith("user.") ? "user" : "system";
+        observationSummary.last_chat_event = {
+            seq,
+            type,
+            role,
+            text_preview: (text || "").slice(0, 160),
+        };
+        markObserveSummaryDirty();
+    }
+
+    function handleRunEventPayload(data) {
+        const seq = typeof data.seq === "number" ? data.seq : 0;
+        const attempt = parseAttempt(data);
+        const eventType = safeText(data?.event?.type || data?.type || "unknown");
+        const runKey = `${attempt}:${seq}:${eventType}`;
+        if (seq && renderedRunKeys.has(runKey)) return;
+        if (seq) renderedRunKeys.add(runKey);
+        if (seq) updateCursor(seq);
+        const confidence = parseConfidence(data);
+        const correlation = parseCorrelation(data);
+        const rawRefs = extractRawRefs(data);
+        for (const ref of rawRefs) {
+            trackRawRef(ref);
+        }
+        if (eventType === "diagnostic.warning") {
+            const code = safeText(data?.data?.code || "UNKNOWN");
+            appendDiagnostic(`[${code}] ${JSON.stringify(data?.data || {})}`);
+        }
+        addRelationRow({
+            kind: "run_event",
+            seq: seq || 0,
+            type: eventType || "unknown",
+            correlation,
+            confidence,
+            lowConfidence: confidence != null && confidence < 0.7,
+            rawRefs,
+        });
+        trackKeyEvent({
+            seq: seq || 0,
+            type: eventType || "unknown",
+            correlation,
+            confidence,
+        });
+    }
+
+    function handleChatEventPayload(data) {
+        const type = safeText(data.type);
+        const seq = typeof data.seq === "number" ? data.seq : 0;
+        const attempt = parseAttempt(data);
+        const chatKey = `${attempt}:${seq}:${type}`;
+        if (seq && renderedChatKeys.has(chatKey)) return;
+        if (seq) renderedChatKeys.add(chatKey);
+        if (seq) updateCursor(seq);
+
+        const rawRefs = extractRawRefs(data);
+        const confidence = parseConfidence(data);
+        const lowConfidence = confidence != null && confidence < 0.7;
+        const correlation = parseCorrelation(data);
+        if (rawRefs.length) {
+            for (const ref of rawRefs) {
+                trackRawRef(ref);
+            }
+        }
+        addRelationRow({
+            kind: "chat_event",
+            seq: seq || 0,
+            type: type || "unknown",
+            correlation,
+            confidence,
+            lowConfidence,
+            rawRefs,
+        });
+        trackKeyEvent({
+            seq: seq || 0,
+            type: type || "unknown",
+            correlation,
+            confidence,
+        });
+
+        if (type === "assistant.message.final") {
+            const text = safeText(data?.data?.text);
+            appendConversationRow("Agent", text, { lowConfidence, rawRefs });
+            updateLastChatSummary(data, text);
+            return;
+        }
+        if (type === "user.input.required") {
+            const prompt = safeText(data?.data?.prompt || "Pending interaction");
+            appendConversationRow("System", prompt, { lowConfidence, rawRefs });
+            setReplyEnabled(true, prompt);
+            updateLastChatSummary(data, prompt);
+            return;
+        }
+        if (type === "conversation.completed") {
+            appendConversationRow("System", "任务完成", { lowConfidence, rawRefs });
+            updateLastChatSummary(data, "任务完成");
+            return;
+        }
+        if (type === "conversation.failed") {
+            appendConversationRow("System", "任务失败", { lowConfidence, rawRefs });
+            updateLastChatSummary(data, "任务失败");
+            return;
+        }
+        if (type === "diagnostic.warning") {
+            const code = safeText(data?.data?.code || "UNKNOWN");
+            appendDiagnostic(`[${code}] ${JSON.stringify(data?.data || {})}`);
+            return;
+        }
+        if (type === "raw.stderr") {
+            appendChunk(stderrEl, `${safeText(data?.data?.line)}\n`);
+            return;
+        }
+    }
+
+    function consumeHistoryEvent(item) {
+        const row = toObject(item);
+        if (!row) return;
+        const rowType = safeText(row.type);
+        if (rowType === "run_event" && toObject(row.event)) {
+            handleRunEventPayload(row.event);
+            return;
+        }
+        if (rowType === "chat_event" && toObject(row.event)) {
+            handleChatEventPayload(row.event);
+            return;
+        }
+        if (toObject(row.event) && typeof row.event.seq === "number") {
+            handleRunEventPayload(row.event);
+            return;
+        }
+        if (safeText(row.type).includes(".") || safeText(row.type).startsWith("assistant") || safeText(row.type).startsWith("user")) {
+            handleChatEventPayload(row);
+            return;
+        }
+        const payload = toObject(row.payload);
+        if (payload && rowType === "run_event") {
+            handleRunEventPayload(payload);
+            return;
+        }
+        if (payload && rowType === "chat_event") {
+            handleChatEventPayload(payload);
+        }
+    }
+
+    async function replayHistory(fromSeq) {
+        if (typeof fromSeq !== "number" || fromSeq <= 0) return;
+        const res = await fetch(apiUrl(`/api/runs/${requestId}/events/history?from_seq=${fromSeq}`));
+        if (!res.ok) return;
+        const payload = await res.json();
+        const rows = Array.isArray(payload.events) ? payload.events : [];
+        for (const row of rows) {
+            consumeHistoryEvent(row);
+        }
+    }
+
     async function refreshState() {
-        const res = await fetch(`/api/runs/${requestId}`);
+        const res = await fetch(apiUrl(`/api/runs/${requestId}`));
         if (!res.ok) return;
         const data = await res.json();
-        statusEl.textContent = data.status || "unknown";
+        currentStatus = safeText(data.status || "unknown");
+        statusEl.textContent = currentStatus;
         pendingIdEl.textContent = data.pending_interaction_id == null ? "-" : String(data.pending_interaction_id);
-        if (data.status === "waiting_user") {
+        if (currentStatus === "waiting_user") {
             await refreshPending();
         } else {
             setReplyEnabled(false, "");
         }
-        if (["succeeded", "failed", "canceled"].includes(data.status)) {
+        if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
             if (stream) {
                 stream.close();
                 stream = null;
             }
+            await flushObserveSummary();
         }
     }
 
     async function refreshPending() {
-        const res = await fetch(`/api/runs/${requestId}/pending`);
+        const res = await fetch(apiUrl(`/api/runs/${requestId}/pending`));
         if (!res.ok) {
             setReplyEnabled(false, "Unable to read pending interaction.");
             return;
         }
         const data = await res.json();
-        const pending = data.pending;
+        const pending = toObject(data.pending);
         if (!pending) {
             setReplyEnabled(false, "No pending interaction available.");
             return;
         }
         interactionIdEl.value = String(pending.interaction_id || "");
         pendingIdEl.textContent = String(pending.interaction_id || "-");
-        setReplyEnabled(true, pending.prompt || "Pending interaction");
+        const inferredFrom = safeText(pending?.context?.inferred_from);
+        const pendingPrompt = safeText(pending.prompt || "Pending interaction");
+        if (inferredFrom === "runtime_stream_assistant_message") {
+            setReplyEnabled(true, "Pending interaction available. Please reply below.");
+        } else {
+            setReplyEnabled(true, pendingPrompt);
+        }
     }
 
-    function startStream() {
+    async function scheduleReconnect() {
+        if (reconnectTimer) return;
+        if (currentStatus === "waiting_user" || ["succeeded", "failed", "canceled"].includes(currentStatus)) return;
+        const delay = Math.min(1000 * (2 ** reconnectAttempts), 10000);
+        reconnectAttempts += 1;
+        reconnectTimer = setTimeout(async () => {
+            reconnectTimer = null;
+            await startStream();
+            await refreshState();
+        }, delay);
+    }
+
+    async function startStream() {
         if (stream) {
             stream.close();
         }
-        stream = new EventSource(`/api/runs/${requestId}/events`);
+        stream = new EventSource(
+            apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}&stdout_from=${stdoutOffset}&stderr_from=${stderrOffset}`)
+        );
         stream.addEventListener("snapshot", (evt) => {
-            const data = JSON.parse(evt.data);
-            statusEl.textContent = data.status || "unknown";
+            reconnectAttempts = 0;
+            const data = JSON.parse(evt.data || "{}");
+            currentStatus = safeText(data.status || "unknown");
+            statusEl.textContent = currentStatus;
             if (data.pending_interaction_id != null) {
                 pendingIdEl.textContent = String(data.pending_interaction_id);
             }
+            if (typeof data.cursor === "number") updateCursor(data.cursor);
+            if (typeof data.stdout_offset === "number") stdoutOffset = data.stdout_offset;
+            if (typeof data.stderr_offset === "number") stderrOffset = data.stderr_offset;
         });
         stream.addEventListener("stdout", (evt) => {
-            const data = JSON.parse(evt.data);
-            appendChunk(stdoutEl, data.chunk || "");
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.to === "number") stdoutOffset = data.to;
+            if (data.chunk) appendDiagnostic(`[legacy-stdout] ${String(data.chunk).trim()}`);
         });
         stream.addEventListener("stderr", (evt) => {
-            const data = JSON.parse(evt.data);
-            appendChunk(stderrEl, data.chunk || "");
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.to === "number") stderrOffset = data.to;
+            appendChunk(stderrEl, safeText(data.chunk || ""));
+        });
+        stream.addEventListener("run_event", (evt) => {
+            reconnectAttempts = 0;
+            const data = JSON.parse(evt.data || "{}");
+            handleRunEventPayload(data);
+        });
+        stream.addEventListener("chat_event", (evt) => {
+            reconnectAttempts = 0;
+            const data = JSON.parse(evt.data || "{}");
+            handleChatEventPayload(data);
         });
         stream.addEventListener("status", async (evt) => {
-            const data = JSON.parse(evt.data);
-            statusEl.textContent = data.status || "unknown";
+            const data = JSON.parse(evt.data || "{}");
+            currentStatus = safeText(data.status || "unknown");
+            statusEl.textContent = currentStatus;
             if (data.pending_interaction_id != null) {
                 pendingIdEl.textContent = String(data.pending_interaction_id);
             }
-            if (data.status === "waiting_user") {
+            if (currentStatus === "waiting_user") {
                 await refreshPending();
             }
-            if (["succeeded", "failed", "canceled"].includes(data.status || "")) {
+            if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
                 setReplyEnabled(false, "");
             }
         });
         stream.addEventListener("end", async (evt) => {
             const data = JSON.parse(evt.data || "{}");
-            if (data.reason === "waiting_user") {
+            if (safeText(data.reason) === "waiting_user") {
+                currentStatus = "waiting_user";
                 await refreshPending();
+                if (stream) {
+                    stream.close();
+                    stream = null;
+                }
+                return;
             }
-            if (data.reason === "terminal" && stream) {
+            if (safeText(data.reason) === "terminal" && stream) {
                 stream.close();
                 stream = null;
             }
             await refreshState();
         });
-        stream.addEventListener("error", () => {
-            setReplyEnabled(false, "Event stream disconnected.");
+        stream.addEventListener("error", async () => {
+            if (currentStatus === "waiting_user") {
+                if (stream) {
+                    stream.close();
+                    stream = null;
+                }
+                return;
+            }
+            setReplyEnabled(false, "Event stream disconnected. Reconnecting...");
+            if (stream) {
+                stream.close();
+                stream = null;
+            }
+            await scheduleReconnect();
         });
+    }
+
+    async function flushObserveSummary() {
+        if (!observeSummaryDirty || observeSummaryInflight) return;
+        observeSummaryInflight = true;
+        try {
+            const payload = {
+                cursor: observationSummary.cursor,
+                last_chat_event: observationSummary.last_chat_event,
+                key_events: observationSummary.key_events,
+                raw_refs: observationSummary.raw_refs,
+            };
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/observe-summary`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            if (res.ok) {
+                observeSummaryDirty = false;
+            }
+        } catch (err) {
+            appendDiagnostic(`[observe-summary] ${String(err)}`);
+        } finally {
+            observeSummaryInflight = false;
+        }
     }
 
     replyForm.addEventListener("submit", async (evt) => {
@@ -154,12 +713,12 @@
         if (!interactionId) return;
         const payload = {
             interaction_id: interactionId,
-            response: { text: replyText.value || "" }
+            response: { text: replyText.value || "" },
         };
-        const res = await fetch(`/api/runs/${requestId}/reply`, {
+        const res = await fetch(apiUrl(`/api/runs/${requestId}/reply`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
         });
         if (!res.ok) {
             promptEl.textContent = "Reply rejected.";
@@ -167,14 +726,25 @@
         }
         replyText.value = "";
         setReplyEnabled(false, "Reply accepted, resuming...");
-        setTimeout(() => {
-            startStream();
-            refreshState();
+        await flushObserveSummary();
+        setTimeout(async () => {
+            await startStream();
+            await refreshState();
         }, 200);
     });
 
-    startStream();
-    refreshState();
+    setInterval(() => {
+        flushObserveSummary();
+    }, 5000);
+
+    window.addEventListener("beforeunload", () => {
+        flushObserveSummary();
+    });
+
+    (async () => {
+        await startStream();
+        await refreshState();
+    })();
 })();
 </script>
 {% endblock %}

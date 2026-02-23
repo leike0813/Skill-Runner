@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TypedDict, NotRequired
 import asyncio
 import json
 import re
@@ -44,6 +44,35 @@ class ProcessExecutionResult:
         self.raw_stdout = raw_stdout
         self.raw_stderr = raw_stderr
         self.failure_reason = failure_reason
+
+
+class RuntimeStreamRawRow(TypedDict):
+    stream: str
+    line: str
+    byte_from: int
+    byte_to: int
+
+
+class RuntimeStreamRawRef(TypedDict):
+    stream: str
+    byte_from: int
+    byte_to: int
+
+
+class RuntimeAssistantMessage(TypedDict):
+    text: str
+    raw_ref: NotRequired[RuntimeStreamRawRef | None]
+
+
+class RuntimeStreamParseResult(TypedDict):
+    parser: str
+    confidence: float
+    session_id: Optional[str]
+    assistant_messages: List[RuntimeAssistantMessage]
+    raw_rows: List[RuntimeStreamRawRow]
+    diagnostics: List[str]
+    structured_types: List[str]
+
 
 class EngineRunResult:
     """
@@ -96,11 +125,12 @@ class EngineAdapter(ABC):
         Orchestrates the standard execution lifecycle.
         Subclasses should implement the phases, not override this method unless absolutely necessary.
         """
-        # 1. Configuration
-        config_path = self._construct_config(skill, run_dir, options)
-        
-        # 2. Environment Setup
-        installed_skill_dir = self._setup_environment(skill, run_dir, config_path, options)
+        is_interactive_reply_turn = "__interactive_reply_payload" in options
+        if not is_interactive_reply_turn:
+            # 1. Configuration
+            config_path = self._construct_config(skill, run_dir, options)
+            # 2. Environment Setup
+            self._setup_environment(skill, run_dir, config_path, options)
         
         # 3. Context & Prompt
         prompt = self._build_prompt(skill, run_dir, input_data)
@@ -688,8 +718,37 @@ class EngineAdapter(ABC):
         prompt: str,
         options: Dict[str, Any],
         session_handle: EngineSessionHandle,
+        passthrough_args: Optional[List[str]] = None,
+        use_profile_defaults: bool = True,
     ) -> List[str]:
         raise RuntimeError(f"{self.__class__.__name__} does not implement resume command")
+
+    def build_start_command(
+        self,
+        *,
+        prompt: str,
+        options: Dict[str, Any],
+        passthrough_args: Optional[List[str]] = None,
+        use_profile_defaults: bool = True,
+    ) -> List[str]:
+        raise RuntimeError(f"{self.__class__.__name__} does not implement start command")
+
+    def parse_runtime_stream(
+        self,
+        *,
+        stdout_raw: bytes,
+        stderr_raw: bytes,
+        pty_raw: bytes = b"",
+    ) -> RuntimeStreamParseResult:
+        return {
+            "parser": "unknown",
+            "confidence": 0.2,
+            "session_id": None,
+            "assistant_messages": [],
+            "raw_rows": [],
+            "diagnostics": ["UNKNOWN_ENGINE_PROFILE"],
+            "structured_types": [],
+        }
 
     @abstractmethod
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: Dict[str, Any]) -> Path:

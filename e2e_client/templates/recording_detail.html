@@ -11,6 +11,11 @@
 </section>
 
 <section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">Observation Summary</h3>
+    <pre id="summary-content" style="white-space: pre-wrap; border:1px solid #d8e6dd; border-radius:8px; background:#f7fbf8; padding:12px; min-height:120px;"></pre>
+</section>
+
+<section class="card" style="margin-top: 16px;">
     <h3 style="margin-top: 0;">Current Step</h3>
     <div id="step-meta" class="muted">No data loaded</div>
     <pre id="step-content" style="white-space: pre-wrap; border:1px solid #d8e6dd; border-radius:8px; background:#f7fbf8; padding:12px; min-height:180px;"></pre>
@@ -24,6 +29,7 @@
     const indexEl = document.getElementById("step-index");
     const prevBtn = document.getElementById("prev-step");
     const nextBtn = document.getElementById("next-step");
+    const summaryEl = document.getElementById("summary-content");
     let steps = [];
     let index = -1;
 
@@ -65,6 +71,10 @@
             return;
         }
         const payload = await res.json();
+        const summary = payload.observation_summary && typeof payload.observation_summary === "object"
+            ? payload.observation_summary
+            : {};
+        summaryEl.textContent = JSON.stringify(summary, null, 2);
         steps = Array.isArray(payload.steps) ? payload.steps : [];
         index = steps.length ? 0 : -1;
         render();
@@ -74,4 +84,3 @@
 })();
 </script>
 {% endblock %}
-

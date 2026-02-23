@@ -1,0 +1,18 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "x": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Upper bound for random number generation."
+        },
+        "y": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Both generated numbers must be less than or equal to y."
+        }
+    },
+    "required": [],
+    "additionalProperties": false
+}

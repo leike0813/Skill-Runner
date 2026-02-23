@@ -1,15 +1,16 @@
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Request, UploadFile  # type: ignore[import-not-found]
-from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 
 from ..models import (
     CancelResponse,
     ExecutionMode,
+    InteractionPendingResponse,
+    InteractionReplyRequest,
+    InteractionReplyResponse,
     RecoveryState,
     RequestStatusResponse,
     RunArtifactsResponse,
@@ -24,31 +25,84 @@ from ..models import (
 from ..services.concurrency_manager import concurrency_manager
 from ..services.job_orchestrator import job_orchestrator
 from ..services.model_registry import model_registry
-from ..services.options_policy import options_policy
-from ..services.run_observability import run_observability_service
+from ..services.cache_key_builder import (
+    compute_bytes_hash,
+    compute_cache_key,
+    compute_inline_input_hash,
+    compute_input_manifest_hash,
+    compute_skill_fingerprint,
+)
 from ..services.run_store import run_store
 from ..services.temp_skill_run_manager import temp_skill_run_manager
 from ..services.temp_skill_run_store import temp_skill_run_store
 from ..services.workspace_manager import workspace_manager
-from ..services.engine_policy import SkillEnginePolicy, resolve_skill_engine_policy
+from ..services.engine_policy import resolve_skill_engine_policy
+from ..services.run_execution_core import (
+    declared_execution_modes,
+    ensure_skill_engine_supported,
+    ensure_skill_execution_mode_supported,
+    is_cache_enabled,
+    validate_runtime_and_model_options,
+)
+from ..services.run_interaction_service import run_interaction_service
+from ..services.run_read_facade import run_read_facade
+from ..services.run_source_adapter import RunSourceCapabilities
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
 
-TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
-ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER}
+
+class _TempRouterSourceAdapter:
+    source = "temp"
+    cache_namespace = "temp_cache_entries"
+    capabilities = RunSourceCapabilities(
+        supports_pending_reply=True,
+        supports_event_history=True,
+        supports_log_range=True,
+        supports_inline_input_create=False,
+    )
+
+    def get_request(self, request_id: str):
+        return temp_skill_run_store.get_request(request_id)
+
+    def get_cached_run(self, cache_key: str):
+        return run_store.get_temp_cached_run(cache_key)
+
+    def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        temp_skill_run_store.bind_cached_run(request_id, run_id)
+        if run_store.get_request(request_id):
+            run_store.update_request_run_id(request_id, run_id)
+
+    def mark_run_started(self, request_id: str, run_id: str) -> None:
+        temp_skill_run_store.update_run_started(request_id, run_id)
+        if run_store.get_request(request_id):
+            run_store.update_request_run_id(request_id, run_id)
+
+    def mark_failed(self, request_id: str, error_message: str) -> None:
+        temp_skill_run_store.update_status(
+            request_id=request_id,
+            status=RunStatus.FAILED,
+            error=error_message,
+        )
+
+    def get_run_job_temp_request_id(self, request_id: str) -> str | None:
+        return request_id
+
+    def build_cancel_kwargs(self, request_id: str) -> dict[str, str]:
+        return {"request_id": request_id, "temp_request_id": request_id}
+
+
+temp_source_adapter = _TempRouterSourceAdapter()
 
 
 @router.post("", response_model=TempSkillRunCreateResponse)
 async def create_temp_skill_run(request: TempSkillRunCreateRequest):
     try:
-        runtime_opts = options_policy.validate_runtime_options(request.runtime_options)
-        engine_opts: dict[str, Any] = {}
-        if request.model:
-            validated = model_registry.validate_model(request.engine, request.model)
-            engine_opts["model"] = validated["model"]
-            if "model_reasoning_effort" in validated:
-                engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
+        runtime_opts, engine_opts = validate_runtime_and_model_options(
+            engine=request.engine,
+            model=request.model,
+            runtime_options=request.runtime_options,
+        )
 
         request_id = str(uuid.uuid4())
         request_payload = {
@@ -95,9 +149,10 @@ async def upload_temp_skill_and_start(
     extracted_files: list[str] = []
     try:
         skill_bytes = await skill_package.read()
+        skill_package_hash = compute_bytes_hash(skill_bytes)
         skill = temp_skill_run_manager.stage_skill_package(request_id, skill_bytes)
         engine_policy = resolve_skill_engine_policy(skill)
-        _ensure_skill_engine_supported(
+        ensure_skill_engine_supported(
             skill_id=skill.id,
             requested_engine=record["engine"],
             policy=engine_policy,
@@ -105,25 +160,56 @@ async def upload_temp_skill_and_start(
         requested_mode = record.get("runtime_options", {}).get(
             "execution_mode", ExecutionMode.AUTO.value
         )
-        declared_modes = _declared_execution_modes(skill)
-        if requested_mode not in declared_modes:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "SKILL_EXECUTION_MODE_UNSUPPORTED",
-                    "message": (
-                        f"Skill '{skill.id}' does not support execution_mode "
-                        f"'{requested_mode}'"
-                    ),
-                    "declared_execution_modes": sorted(declared_modes),
-                    "requested_execution_mode": requested_mode,
-                },
-            )
+        ensure_skill_execution_mode_supported(
+            skill_id=skill.id,
+            requested_mode=requested_mode,
+            declared_modes=declared_execution_modes(skill),
+        )
 
         if file is not None:
             input_bytes = await file.read()
             upload_res = workspace_manager.handle_upload(request_id, input_bytes)
             extracted_files = upload_res.get("extracted_files", [])
+
+        runtime_options = record.get("runtime_options", {})
+        cache_enabled = is_cache_enabled(runtime_options)
+        _ensure_temp_request_synced_in_run_store(
+            request_id=request_id,
+            temp_record=record,
+            skill_id=skill.id,
+        )
+        manifest_path = workspace_manager.write_input_manifest(request_id)
+        manifest_hash = compute_input_manifest_hash(
+            json.loads(manifest_path.read_text(encoding="utf-8"))
+        )
+        run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
+        skill_fingerprint = compute_skill_fingerprint(skill, record["engine"])
+        cache_key = compute_cache_key(
+            skill_id=skill.id,
+            engine=record["engine"],
+            skill_fingerprint=skill_fingerprint,
+            parameter=record["parameter"],
+            engine_options=record["engine_options"],
+            input_manifest_hash=manifest_hash,
+            inline_input_hash=compute_inline_input_hash({}),
+            temp_skill_package_hash=skill_package_hash,
+        )
+        run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+        if cache_enabled:
+            cached_run = temp_source_adapter.get_cached_run(cache_key)
+            if cached_run:
+                temp_source_adapter.bind_cached_run(request_id, cached_run)
+                temp_skill_run_manager.on_terminal(
+                    request_id,
+                    RunStatus.SUCCEEDED,
+                    debug_keep_temp=bool(runtime_options.get("debug_keep_temp")),
+                )
+                return TempSkillRunUploadResponse(
+                    request_id=request_id,
+                    cache_hit=True,
+                    status=RunStatus.SUCCEEDED,
+                    extracted_files=extracted_files,
+                )
 
         run_request = RunCreateRequest(
             skill_id=skill.id,
@@ -134,7 +220,9 @@ async def upload_temp_skill_and_start(
         )
         run_status = workspace_manager.create_run_for_skill(run_request, skill)
         workspace_manager.promote_request_uploads(request_id, run_status.run_id)
-        temp_skill_run_store.update_run_started(request_id, run_status.run_id)
+        run_cache_key: str | None = cache_key if cache_enabled else None
+        run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+        temp_source_adapter.mark_run_started(request_id, run_status.run_id)
 
         merged_options = {**record["engine_options"], **record["runtime_options"]}
         admitted = await concurrency_manager.admit_or_reject()
@@ -146,12 +234,13 @@ async def upload_temp_skill_and_start(
             skill_id=skill.id,
             engine_name=record["engine"],
             options=merged_options,
-            cache_key=None,
+            cache_key=run_cache_key,
             skill_override=skill,
             temp_request_id=request_id,
         )
         return TempSkillRunUploadResponse(
             request_id=request_id,
+            cache_hit=False,
             status=run_status.status,
             extracted_files=extracted_files,
         )
@@ -185,6 +274,7 @@ async def get_temp_skill_run_status(request_id: str):
     run_id = rec.get("run_id")
 
     if not run_id:
+        auto_stats = run_store.get_auto_decision_stats(request_id)
         return RequestStatusResponse(
             request_id=request_id,
             status=RunStatus(rec.get("status", RunStatus.QUEUED.value)),
@@ -194,6 +284,10 @@ async def get_temp_skill_run_status(request_id: str):
             updated_at=updated_at,
             warnings=[],
             error={"message": rec["error"]} if rec.get("error") else None,
+            auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
+            last_auto_decision_at=_parse_optional_dt(auto_stats.get("last_auto_decision_at")),
+            pending_interaction_id=None,
+            interaction_count=run_store.get_interaction_count(request_id),
             recovery_state=RecoveryState.NONE,
             recovered_at=None,
             recovery_reason=None,
@@ -216,6 +310,12 @@ async def get_temp_skill_run_status(request_id: str):
     recovery_info = run_store.get_recovery_info(run_id)
     recovered_at_raw = recovery_info.get("recovered_at")
     recovered_at = _parse_dt(recovered_at_raw) if recovered_at_raw else None
+    auto_stats = run_store.get_auto_decision_stats(request_id)
+    pending_interaction_id = (
+        _read_pending_interaction_id(request_id)
+        if status == RunStatus.WAITING_USER
+        else None
+    )
 
     return RequestStatusResponse(
         request_id=request_id,
@@ -226,6 +326,10 @@ async def get_temp_skill_run_status(request_id: str):
         updated_at=updated_at,
         warnings=warnings,
         error=error,
+        auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
+        last_auto_decision_at=_parse_optional_dt(auto_stats.get("last_auto_decision_at")),
+        pending_interaction_id=pending_interaction_id,
+        interaction_count=run_store.get_interaction_count(request_id),
         recovery_state=_parse_recovery_state(recovery_info.get("recovery_state")),
         recovered_at=recovered_at,
         recovery_reason=_coerce_str_or_none(recovery_info.get("recovery_reason")),
@@ -234,122 +338,50 @@ async def get_temp_skill_run_status(request_id: str):
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
 async def get_temp_skill_run_result(request_id: str):
-    run_dir = _get_run_dir_from_temp_request(request_id)
-    result_path = run_dir / "result" / "result.json"
-    if not result_path.exists():
-        raise HTTPException(status_code=404, detail="Run result not found")
-    return RunResultResponse(
+    return run_read_facade.get_result(
+        source_adapter=temp_source_adapter,
         request_id=request_id,
-        result=json.loads(result_path.read_text(encoding="utf-8")),
     )
 
 
 @router.get("/{request_id}/artifacts", response_model=RunArtifactsResponse)
 async def get_temp_skill_run_artifacts(request_id: str):
-    run_dir = _get_run_dir_from_temp_request(request_id)
-    artifacts: list[str] = []
-    artifacts_dir = run_dir / "artifacts"
-    if artifacts_dir.exists():
-        for path in artifacts_dir.rglob("*"):
-            if path.is_file():
-                artifacts.append(path.relative_to(run_dir).as_posix())
-    return RunArtifactsResponse(request_id=request_id, artifacts=artifacts)
+    return run_read_facade.get_artifacts(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+    )
 
 
 @router.get("/{request_id}/bundle")
 async def get_temp_skill_run_bundle(request_id: str):
-    rec = temp_skill_run_store.get_request(request_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_dir = _get_run_dir_from_temp_request(request_id)
-    debug_mode = bool(rec.get("runtime_options", {}).get("debug"))
-    bundle_name = "run_bundle_debug.zip" if debug_mode else "run_bundle.zip"
-    bundle_path = run_dir / "bundle" / bundle_name
-    if not bundle_path.exists():
-        job_orchestrator._build_run_bundle(run_dir, debug_mode)
-    if not bundle_path.exists():
-        raise HTTPException(status_code=404, detail="Bundle not found")
-    return FileResponse(path=bundle_path, filename=bundle_path.name)
+    return run_read_facade.get_bundle(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+    )
 
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_temp_skill_artifact(request_id: str, artifact_path: str):
-    run_dir = _get_run_dir_from_temp_request(request_id)
-    if not artifact_path:
-        raise HTTPException(status_code=400, detail="Artifact path is required")
-    if not artifact_path.startswith("artifacts/"):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    target = (run_dir / artifact_path).resolve()
-    artifacts_root = (run_dir / "artifacts").resolve()
-    if not str(target).startswith(str(artifacts_root)):
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    return FileResponse(path=target, filename=target.name)
+    return run_read_facade.get_artifact_file(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        artifact_path=artifact_path,
+    )
 
 
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_temp_skill_run_logs(request_id: str):
-    run_dir = _get_run_dir_from_temp_request(request_id)
-    logs_dir = run_dir / "logs"
-    if not logs_dir.exists():
-        return RunLogsResponse(request_id=request_id)
-
-    return RunLogsResponse(
+    return run_read_facade.get_logs(
+        source_adapter=temp_source_adapter,
         request_id=request_id,
-        prompt=_read_log(logs_dir / "prompt.txt"),
-        stdout=_read_log(logs_dir / "stdout.txt"),
-        stderr=_read_log(logs_dir / "stderr.txt"),
     )
 
 
 @router.post("/{request_id}/cancel", response_model=CancelResponse)
 async def cancel_temp_skill_run(request_id: str):
-    rec = temp_skill_run_store.get_request(request_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id_obj = rec.get("run_id")
-    if not isinstance(run_id_obj, str) or not run_id_obj:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_id = run_id_obj
-    run_dir = _get_run_dir_from_temp_request(request_id)
-
-    status = RunStatus(rec.get("status", RunStatus.QUEUED.value))
-    status_file = run_dir / "status.json"
-    if status_file.exists():
-        payload = json.loads(status_file.read_text(encoding="utf-8"))
-        status = RunStatus(payload.get("status", status.value))
-
-    if status in TERMINAL_STATUSES:
-        return CancelResponse(
-            request_id=request_id,
-            run_id=run_id,
-            status=status,
-            accepted=False,
-            message="Run already in terminal state",
-        )
-    if status not in ACTIVE_CANCELABLE_STATUSES:
-        return CancelResponse(
-            request_id=request_id,
-            run_id=run_id,
-            status=status,
-            accepted=False,
-            message="Run is not cancelable",
-        )
-
-    accepted = await job_orchestrator.cancel_run(
-        run_id=run_id,
-        engine_name=str(rec.get("engine", "")),
-        run_dir=run_dir,
-        status=status,
-        temp_request_id=request_id,
-    )
-    return CancelResponse(
+    return await run_read_facade.cancel_run(
+        source_adapter=temp_source_adapter,
         request_id=request_id,
-        run_id=run_id,
-        status=RunStatus.CANCELED,
-        accepted=accepted,
-        message="Cancel request accepted" if accepted else "Cancel already requested",
     )
 
 
@@ -357,85 +389,111 @@ async def cancel_temp_skill_run(request_id: str):
 async def stream_temp_skill_run_events(
     request_id: str,
     request: Request,
+    cursor: int = Query(default=0, ge=0),
     stdout_from: int = Query(default=0, ge=0),
     stderr_from: int = Query(default=0, ge=0),
 ):
-    run_dir = _get_run_dir_from_temp_request(request_id)
-
-    async def _event_stream():
-        async for item in run_observability_service.iter_sse_events(
-            run_dir=run_dir,
-            request_id=None,
-            stdout_from=stdout_from,
-            stderr_from=stderr_from,
-            is_disconnected=request.is_disconnected,
-        ):
-            yield run_observability_service.format_sse_frame(
-                item["event"],
-                item["data"],
-            )
-
-    return StreamingResponse(
-        _event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    return await run_read_facade.stream_events(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        request=request,
+        cursor=cursor,
+        stdout_from=stdout_from,
+        stderr_from=stderr_from,
     )
 
 
-def _get_run_dir_from_temp_request(request_id: str) -> Path:
-    rec = temp_skill_run_store.get_request(request_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = rec.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return run_dir
+@router.get("/{request_id}/events/history")
+async def list_temp_skill_run_event_history(
+    request_id: str,
+    from_seq: int | None = Query(default=None, ge=0),
+    to_seq: int | None = Query(default=None, ge=0),
+    from_ts: str | None = Query(default=None),
+    to_ts: str | None = Query(default=None),
+):
+    return run_read_facade.list_event_history(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        from_seq=from_seq,
+        to_seq=to_seq,
+        from_ts=from_ts,
+        to_ts=to_ts,
+    )
 
 
-def _declared_execution_modes(skill: Any) -> set[str]:
-    raw_modes = getattr(skill, "execution_modes", [ExecutionMode.AUTO.value]) or [
-        ExecutionMode.AUTO.value
-    ]
-    modes: set[str] = set()
-    for mode in raw_modes:
-        if isinstance(mode, ExecutionMode):
-            modes.add(mode.value)
-        else:
-            modes.add(str(mode))
-    return modes
+@router.get("/{request_id}/logs/range")
+async def get_temp_skill_run_log_range(
+    request_id: str,
+    stream: str = Query(...),
+    byte_from: int = Query(default=0, ge=0),
+    byte_to: int = Query(default=0, ge=0),
+):
+    return run_read_facade.read_log_range(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        stream=stream,
+        byte_from=byte_from,
+        byte_to=byte_to,
+    )
 
 
-def _ensure_skill_engine_supported(
+@router.get("/{request_id}/interaction/pending", response_model=InteractionPendingResponse)
+async def get_temp_skill_interaction_pending(request_id: str):
+    return await run_interaction_service.get_pending(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        run_store_backend=run_store,
+    )
+
+
+@router.post("/{request_id}/interaction/reply", response_model=InteractionReplyResponse)
+async def reply_temp_skill_interaction(
+    request_id: str,
+    request: InteractionReplyRequest,
+    background_tasks: BackgroundTasks,
+):
+    return await run_interaction_service.submit_reply(
+        source_adapter=temp_source_adapter,
+        request_id=request_id,
+        request=request,
+        background_tasks=background_tasks,
+        run_store_backend=run_store,
+    )
+
+
+def _ensure_temp_request_synced_in_run_store(
+    *,
+    request_id: str,
+    temp_record: dict[str, Any],
     skill_id: str,
-    requested_engine: str,
-    policy: SkillEnginePolicy,
 ) -> None:
-    if requested_engine in policy.effective_engines:
+    if run_store.get_request(request_id):
         return
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "code": "SKILL_ENGINE_UNSUPPORTED",
-            "message": f"Skill '{skill_id}' does not support engine '{requested_engine}'",
-            "declared_engines": policy.declared_engines,
-            "unsupported_engines": policy.unsupported_engines,
-            "effective_engines": policy.effective_engines,
-            "requested_engine": requested_engine,
-        },
+    run_store.create_request(
+        request_id=request_id,
+        skill_id=skill_id,
+        engine=str(temp_record.get("engine", "")),
+        input_data={},
+        parameter=temp_record.get("parameter", {}),
+        engine_options=temp_record.get("engine_options", {}),
+        runtime_options=temp_record.get("runtime_options", {}),
     )
 
 
-def _read_log(path: Path) -> str | None:
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return None
+def _read_pending_interaction_id(request_id: str) -> int | None:
+    pending = run_store.get_pending_interaction(request_id)
+    if not isinstance(pending, dict):
+        return None
+    value = pending.get("interaction_id")
+    if value is None:
+        return None
+    try:
+        interaction_id = int(value)
+    except Exception:
+        return None
+    if interaction_id <= 0:
+        return None
+    return interaction_id
 
 
 def _parse_dt(raw: str | None) -> datetime:
@@ -445,6 +503,15 @@ def _parse_dt(raw: str | None) -> datetime:
         return datetime.fromisoformat(raw)
     except ValueError:
         return datetime.utcnow()
+
+
+def _parse_optional_dt(raw: Any) -> datetime | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 def _coerce_str_or_none(raw: Any) -> str | None:

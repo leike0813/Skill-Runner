@@ -3,10 +3,8 @@
     "version": "1.0.0",
     "name": "Pandas Data Stats",
     "description": "Calculate statistics from CSV using Pandas",
-    "engines": [
-        "gemini",
-        "codex",
-        "iflow"
+    "execution_modes": [
+        "auto"
     ],
     "runtime": {
         "language": "python",

@@ -6,12 +6,25 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .base import EngineAdapter, ProcessExecutionResult
+from .base import (
+    EngineAdapter,
+    ProcessExecutionResult,
+    RuntimeAssistantMessage,
+    RuntimeStreamParseResult,
+    RuntimeStreamRawRow,
+)
 from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from ..services.config_generator import config_generator
 from ..services.skill_patcher import skill_patcher
 from ..services.schema_validator import schema_validator
 from ..services.agent_cli_manager import AgentCliManager
+from ..services.engine_command_profile import engine_command_profile, merge_cli_args
+from ..services.runtime_parse_utils import (
+    dedup_assistant_messages,
+    find_session_id_in_text,
+    stream_lines_with_offsets,
+    strip_runtime_script_envelope,
+)
 from jinja2 import Template
 
 logger = logging.getLogger(__name__)
@@ -106,16 +119,15 @@ class IFlowAdapter(EngineAdapter):
              try:
                  shutil.copytree(skill.path, skills_target_dir)
                  logger.info("Installed skill %s to %s", skill.id, skills_target_dir)
-             except Exception as e:
+             except Exception:
                  logger.exception("Failed to copy skill")
                  
-        # Patching
-        if skill.artifacts:
-            skill_patcher.patch_skill_md(
-                skills_target_dir,
-                skill.artifacts,
-                execution_mode=self._resolve_execution_mode(options),
-            )
+        # Always patch runtime contract/mode semantics; artifacts patch is optional.
+        skill_patcher.patch_skill_md(
+            skills_target_dir,
+            skill.artifacts or [],
+            execution_mode=self._resolve_execution_mode(options),
+        )
             
         return skills_target_dir
 
@@ -186,23 +198,16 @@ class IFlowAdapter(EngineAdapter):
             for dep in skill.runtime.dependencies:
                 cmd_parts.append(f"--with={dep}")
 
-        iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
-        if iflow_cmd is None:
-            raise RuntimeError("iFlow CLI not found in managed prefix")
         resume_handle = options.get("__resume_session_handle")
         if isinstance(resume_handle, dict):
-            cmd_parts.extend(
-                self.build_resume_command(
-                    prompt=prompt,
-                    options=options,
-                    session_handle=EngineSessionHandle.model_validate(resume_handle),
-                )
+            engine_command = self.build_resume_command(
+                prompt=prompt,
+                options=options,
+                session_handle=EngineSessionHandle.model_validate(resume_handle),
             )
         else:
-            cmd_parts.extend([str(iflow_cmd)])
-            cmd_parts.append("--yolo")
-            cmd_parts.append("--thinking")
-            cmd_parts.extend(["-p", prompt])
+            engine_command = self.build_start_command(prompt=prompt, options=options)
+        cmd_parts.extend(engine_command)
         
         logger.info("Executing iFlow command: %s in %s", " ".join(cmd_parts), run_dir)
         
@@ -212,6 +217,28 @@ class IFlowAdapter(EngineAdapter):
             env=env,
         )
         return await self._capture_process_output(proc, run_dir, options, "iFlow")
+
+    def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
+        if not use_profile_defaults:
+            return []
+        return engine_command_profile.resolve_args(engine="iflow", action=action)
+
+    def build_start_command(
+        self,
+        *,
+        prompt: str,
+        options: Dict[str, Any],
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
+    ) -> list[str]:
+        iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
+        if iflow_cmd is None:
+            raise RuntimeError("iFlow CLI not found in managed prefix")
+        if passthrough_args is not None:
+            return [str(iflow_cmd), *passthrough_args]
+        defaults = self._resolve_profile_flags(action="start", use_profile_defaults=use_profile_defaults)
+        merged = merge_cli_args(defaults, [])
+        return [str(iflow_cmd), *merged, "-p", prompt]
 
     def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
@@ -244,6 +271,8 @@ class IFlowAdapter(EngineAdapter):
         prompt: str,
         options: Dict[str, Any],
         session_handle: EngineSessionHandle,
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
     ) -> list[str]:
         session_id = session_handle.handle_value.strip()
         if not session_id:
@@ -251,12 +280,69 @@ class IFlowAdapter(EngineAdapter):
         iflow_cmd = self.agent_manager.resolve_engine_command("iflow")
         if iflow_cmd is None:
             raise RuntimeError("iFlow CLI not found in managed prefix")
+        if passthrough_args is not None:
+            flags = [
+                token
+                for token in passthrough_args
+                if isinstance(token, str) and token.startswith("-")
+            ]
+            merged = merge_cli_args([], flags)
+            return [str(iflow_cmd), "--resume", session_id, *merged, "-p", prompt]
+        defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=use_profile_defaults)
+        merged = merge_cli_args(defaults, [])
         return [
             str(iflow_cmd),
             "--resume",
             session_id,
-            "--yolo",
-            "--thinking",
+            *merged,
             "-p",
             prompt,
         ]
+
+    def parse_runtime_stream(
+        self,
+        *,
+        stdout_raw: bytes,
+        stderr_raw: bytes,
+        pty_raw: bytes = b"",
+    ) -> RuntimeStreamParseResult:
+        stdout_rows = strip_runtime_script_envelope(stream_lines_with_offsets("stdout", stdout_raw))
+        stderr_rows = strip_runtime_script_envelope(stream_lines_with_offsets("stderr", stderr_raw))
+        pty_rows = strip_runtime_script_envelope(stream_lines_with_offsets("pty", pty_raw))
+        diagnostics: list[str] = []
+        split_merged = "\n".join([row["line"] for row in [*stdout_rows, *stderr_rows] if row["line"]])
+        pty_merged = "\n".join([row["line"] for row in pty_rows if row["line"]])
+        merged = "\n".join(
+            [row["line"] for row in [*stdout_rows, *stderr_rows, *pty_rows] if row["line"]]
+        )
+        cleaned_split = re.sub(r"<Execution Info>[\s\S]*?</Execution Info>", "", split_merged).strip()
+        cleaned_pty = re.sub(r"<Execution Info>[\s\S]*?</Execution Info>", "", pty_merged).strip()
+        use_pty_fallback = (not cleaned_split) and bool(cleaned_pty)
+        cleaned = cleaned_pty if use_pty_fallback else cleaned_split
+        assistant_messages: list[RuntimeAssistantMessage] = []
+        raw_rows: list[RuntimeStreamRawRow] = []
+        confidence = 0.45
+
+        if cleaned:
+            assistant_messages.append({"text": cleaned, "raw_ref": None})
+            confidence = 0.65
+            if use_pty_fallback:
+                diagnostics.append("PTY_FALLBACK_USED")
+        else:
+            raw_rows.extend(stdout_rows)
+            raw_rows.extend(stderr_rows)
+            raw_rows.extend(pty_rows)
+            diagnostics.append("LOW_CONFIDENCE_PARSE")
+
+        if stdout_rows and stderr_rows:
+            diagnostics.append("IFLOW_CHANNEL_DRIFT_OBSERVED")
+
+        return {
+            "parser": "iflow_text",
+            "confidence": confidence,
+            "session_id": find_session_id_in_text(merged),
+            "assistant_messages": dedup_assistant_messages(assistant_messages),
+            "raw_rows": raw_rows,
+            "diagnostics": list(dict.fromkeys(diagnostics)),
+            "structured_types": ["iflow.execution_info"],
+        }

@@ -14,13 +14,15 @@ Goals:
 - Service is standalone (`e2e_client/app.py`) and runs on a dedicated port.
 - Default port is `8011`.
 - `SKILL_RUNNER_E2E_CLIENT_PORT` overrides the port; invalid values fallback to `8011`.
-- Client accesses backend only through HTTP APIs (`/v1/management/*`, `/v1/jobs*`).
+- Client accesses backend only through HTTP APIs (`/v1/management/*`, `/v1/jobs*`, `/v1/temp-skill-runs*`).
+- Fixture skill root defaults to `tests/fixtures/skills` and can be overridden by `SKILL_RUNNER_E2E_CLIENT_FIXTURES_SKILLS_DIR`.
 
 ## 3. Navigation Structure
 
 Primary routes:
 - `/`: skill list page.
 - `/skills/{skill_id}/run`: schema-driven execution form.
+- `/fixtures/{fixture_skill_id}/run`: temp-skill execution form (fixture package uploaded at runtime).
 - `/runs/{request_id}`: run observation page.
 - `/runs/{request_id}/result`: result and artifact view.
 - `/recordings`: recording list.
@@ -46,21 +48,35 @@ Primary routes:
   - timeout options: `session_timeout_sec/interactive_wait_timeout_sec/hard_wait_timeout_sec/wait_timeout_sec`
 - Validation errors shown inline at top.
 - Submit action:
-  1. `POST /v1/jobs`
-  2. Optional `POST /v1/jobs/{request_id}/upload` with generated zip
+  - Installed skill source:
+    1. `POST /v1/jobs`
+    2. Optional `POST /v1/jobs/{request_id}/upload` with generated zip
+  - Fixture temp-skill source:
+    1. `POST /v1/temp-skill-runs`
+    2. `POST /v1/temp-skill-runs/{request_id}/upload` with dynamic `skill_package` zip
+    3. Optional input zip (`file`) uploaded in the same request
 
 ### 4.3 Run Observation
 - Header: status + pending interaction id + shortcuts (result/replay).
 - Main area:
-  - Left: stdout conversation panel (scrollable, fixed height).
+  - Left: FCMP-first conversation panel (scrollable, fixed height).
   - Right: stderr panel (separate scrollable window).
+- Secondary area:
+  - Event relations panel (minimal `seq/type/correlation` relation list).
+  - Raw ref preview panel (fetches `/api/runs/{request_id}/logs/range` on click).
 - Bottom interaction area:
   - pending prompt text.
   - user reply textbox + submit button.
 - Status sync:
   - consume SSE from `/api/runs/{request_id}/events`.
+  - API calls include `source=installed|temp` to route to the correct backend run chain.
+  - use `cursor + events/history` for disconnect compensation.
   - when `waiting_user`, fetch pending and enable reply.
   - when terminal, stop streaming and lock input.
+- Message rendering:
+  - `chat_event` is primary for conversation text.
+  - low-confidence badge is shown when event confidence `< 0.7`.
+  - `raw_ref` is rendered as clickable jump button for byte-range preview.
 
 ### 4.4 Result View
 - Left: formatted result JSON.
@@ -86,6 +102,13 @@ Each step stores:
 - `status`
 - `request` summary
 - `response` summary
+- `run_source` (`installed` or `temp`)
+
+Top-level optional observation summary:
+- `observation_summary.cursor`
+- `observation_summary.last_chat_event`
+- `observation_summary.key_events[]` (seq/type/correlation/confidence)
+- `observation_summary.raw_refs[]` (stream/byte_from/byte_to)
 
 Tracked actions in MVP:
 - `create_run`
@@ -108,3 +131,4 @@ Tracked actions in MVP:
 - All key user actions must be reachable with plain HTTP + HTML forms.
 - Replay payload is accessible via `GET /api/recordings/{request_id}`.
 - Observation stream is accessible via `GET /api/runs/{request_id}/events`.
+- Observation summary sync endpoint is accessible via `POST /api/runs/{request_id}/observe-summary`.

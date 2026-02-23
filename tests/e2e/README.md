@@ -1,7 +1,7 @@
 # REST E2E Tests
 
 This suite runs REST-level end-to-end tests against the in-process FastAPI app
-using TestClient. Test cases are sourced from `tests/suites/*.yaml`, matching
+using TestClient. Test cases are sourced from `tests/engine_integration/suites/*.yaml`, matching
 the input format used by the integration runner. Use the wrapper script for
 environment setup and filtering.
 

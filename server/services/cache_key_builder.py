@@ -14,6 +14,12 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def compute_bytes_hash(content: bytes) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(content)
+    return hasher.hexdigest()
+
+
 def _hash_file(path: Path) -> str:
     hasher = hashlib.sha256()
     with open(path, "rb") as f:
@@ -91,6 +97,7 @@ def compute_cache_key(
     engine_options: Dict[str, Any],
     input_manifest_hash: str,
     inline_input_hash: str = "",
+    temp_skill_package_hash: str = "",
 ) -> str:
     payload = {
         "skill_id": skill_id,
@@ -100,5 +107,6 @@ def compute_cache_key(
         "engine_options": engine_options,
         "input_manifest_hash": input_manifest_hash,
         "inline_input_hash": inline_input_hash,
+        "temp_skill_package_hash": temp_skill_package_hash,
     }
     return _hash_text(_stable_json_dumps(payload))

@@ -24,9 +24,17 @@
         .danger:hover { background: #991b1b; }
         .pane-scroll { max-height: 340px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
         .conversation-window { min-height: 220px; max-height: 360px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
+        .chat-item.system { background: #f3f4f6; }
+        .chat-item .meta { margin-top: 4px; }
+        .badge-low-confidence { display: inline-block; margin-left: 8px; color: #92400e; font-size: 11px; border: 1px solid #fbbf24; border-radius: 999px; padding: 1px 6px; background: #fef3c7; }
         .reply-box { margin-top: 10px; border-top: 1px solid #e5e7eb; padding-top: 10px; }
         .reply-textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; box-sizing: border-box; }
         .stderr-window { max-height: 220px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .diagnostic-window { max-height: 220px; overflow: auto; background: #fff9f2; border: 1px solid #f59e0b; border-radius: 8px; padding: 8px; font-size: 12px; }
+        .relation-window { max-height: 220px; overflow: auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; font-size: 12px; }
+        .raw-ref-window { max-height: 180px; overflow: auto; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; font-size: 12px; }
+        .link-btn { border: 0; background: none; color: #0f766e; cursor: pointer; padding: 0; font-size: 12px; text-decoration: underline; }
         @media (max-width: 960px) {
             .row { grid-template-columns: 1fr; }
             .pane-scroll { max-height: 260px; }
@@ -79,10 +87,8 @@
     </div>
 
     <div class="card">
-        <h3 style="margin:0 0 8px;">对话区（stdout）</h3>
-        <div class="conversation-window">
-            <pre id="stdout-log"></pre>
-        </div>
+        <h3 style="margin:0 0 8px;">对话区（FCMP）</h3>
+        <div id="stdout-log" class="conversation-window"></div>
         <div class="reply-box">
             <div id="pending-state" class="meta">当前状态非 waiting_user，输入框已禁用。</div>
             <div id="pending-prompt" class="meta"></div>
@@ -99,6 +105,12 @@
     <div class="card">
         <h3 style="margin:0 0 8px;">错误输出（stderr）</h3>
         <pre id="stderr-log" class="stderr-window"></pre>
+        <h3 style="margin:12px 0 8px;">诊断信息</h3>
+        <div id="diagnostic-log" class="diagnostic-window"></div>
+        <h3 style="margin:12px 0 8px;">事件关联视图</h3>
+        <div id="relation-view" class="relation-window"></div>
+        <h3 style="margin:12px 0 8px;">raw_ref 回跳预览</h3>
+        <div id="raw-ref-preview" class="raw-ref-window"></div>
     </div>
 
     <div class="card">
@@ -116,6 +128,9 @@
     const interactionCountEl = document.getElementById("run-interaction-count");
     const stdoutEl = document.getElementById("stdout-log");
     const stderrEl = document.getElementById("stderr-log");
+    const diagnosticEl = document.getElementById("diagnostic-log");
+    const relationEl = document.getElementById("relation-view");
+    const rawRefPreviewEl = document.getElementById("raw-ref-preview");
     const pendingStateEl = document.getElementById("pending-state");
     const pendingPromptEl = document.getElementById("pending-prompt");
     const pendingInteractionIdEl = document.getElementById("pending-interaction-id");
@@ -126,9 +141,12 @@
 
     let stdoutOffset = 0;
     let stderrOffset = 0;
+    let cursor = 0;
     let source = null;
     let reconnectTimer = null;
     let terminal = ["succeeded", "failed", "canceled"].includes(statusEl.textContent || "");
+    const runEventsBySeq = new Map();
+    const renderedChatSeq = new Set();
 
     function setReplyEnabled(enabled, stateText, promptText) {
         pendingReplyInput.disabled = !enabled;
@@ -148,6 +166,128 @@
         if (!chunk) return;
         target.textContent += chunk;
         target.scrollTop = target.scrollHeight;
+    }
+
+    function appendDiagnostic(text) {
+        if (!text) return;
+        const line = document.createElement("div");
+        line.textContent = text;
+        diagnosticEl.appendChild(line);
+        diagnosticEl.scrollTop = diagnosticEl.scrollHeight;
+    }
+
+    function renderRelationView() {
+        relationEl.innerHTML = "";
+        const seqs = Array.from(runEventsBySeq.keys()).sort((a, b) => a - b);
+        if (!seqs.length) {
+            relationEl.textContent = "暂无结构化事件。";
+            return;
+        }
+        for (const seq of seqs) {
+            const event = runEventsBySeq.get(seq);
+            if (!event || !event.event) continue;
+            const row = document.createElement("div");
+            const type = event.event.type || "unknown";
+            const sessionId = event.correlation && event.correlation.session_id
+                ? ` session=${event.correlation.session_id}`
+                : "";
+            const btn = document.createElement("button");
+            btn.className = "link-btn";
+            btn.setAttribute("data-seq", String(seq));
+            btn.type = "button";
+            btn.textContent = `#${seq}`;
+            row.appendChild(btn);
+            row.appendChild(document.createTextNode(` ${type}${sessionId}`));
+            relationEl.appendChild(row);
+        }
+        relationEl.querySelectorAll("button[data-seq]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const seq = Number(btn.getAttribute("data-seq") || "0");
+                if (!seq) return;
+                const target = document.querySelector(`[data-chat-seq="${seq}"]`);
+                if (target) {
+                    target.scrollIntoView({behavior: "smooth", block: "center"});
+                }
+            });
+        });
+    }
+
+    function lookupConfidence(rawRef) {
+        if (!rawRef) return 1.0;
+        const seqs = Array.from(runEventsBySeq.keys()).sort((a, b) => a - b);
+        for (const seq of seqs) {
+            const event = runEventsBySeq.get(seq);
+            if (!event || !event.raw_ref || !event.source) continue;
+            const same =
+                event.raw_ref.stream === rawRef.stream &&
+                event.raw_ref.byte_from === rawRef.byte_from &&
+                event.raw_ref.byte_to === rawRef.byte_to;
+            if (same) {
+                return Number(event.source.confidence || 1.0);
+            }
+        }
+        return 1.0;
+    }
+
+    async function previewRawRef(rawRef) {
+        if (!rawRef || typeof rawRef.stream !== "string") return;
+        const from = Number(rawRef.byte_from || 0);
+        const to = Number(rawRef.byte_to || 0);
+        rawRefPreviewEl.textContent = `loading ${rawRef.stream}[${from}, ${to}] ...`;
+        try {
+            const query = new URLSearchParams({
+                stream: rawRef.stream,
+                byte_from: String(from),
+                byte_to: String(to),
+            });
+            const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
+            if (!res.ok) {
+                rawRefPreviewEl.textContent = `raw_ref preview unavailable: HTTP ${res.status}`;
+                return;
+            }
+            const payload = await res.json();
+            const chunk = payload.chunk || "";
+            rawRefPreviewEl.textContent = `${payload.stream}[${payload.byte_from}, ${payload.byte_to}]\n\n${chunk}`;
+        } catch (err) {
+            rawRefPreviewEl.textContent = `raw_ref preview unavailable: ${String(err)}`;
+        }
+    }
+
+    function appendChatEvent(type, text, seq, rawRef) {
+        if (seq && renderedChatSeq.has(seq)) return;
+        if (seq) renderedChatSeq.add(seq);
+        const item = document.createElement("div");
+        item.className = `chat-item${type === "system" ? " system" : ""}`;
+        if (seq) item.setAttribute("data-chat-seq", String(seq));
+        const confidence = rawRef ? lookupConfidence(rawRef) : 1.0;
+        const title = type === "assistant" ? "Agent" : "System";
+        const header = document.createElement("div");
+        const strong = document.createElement("strong");
+        strong.textContent = title;
+        header.appendChild(strong);
+        if (confidence < 0.7) {
+            const badge = document.createElement("span");
+            badge.className = "badge-low-confidence";
+            badge.textContent = "low confidence";
+            header.appendChild(badge);
+        }
+        const pre = document.createElement("pre");
+        pre.textContent = text || "";
+        item.appendChild(header);
+        item.appendChild(pre);
+        if (rawRef) {
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            const btn = document.createElement("button");
+            btn.className = "link-btn";
+            btn.type = "button";
+            btn.textContent = `raw_ref ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+            btn.addEventListener("click", () => previewRawRef(rawRef));
+            meta.appendChild(btn);
+            item.appendChild(meta);
+        }
+        stdoutEl.appendChild(item);
+        stdoutEl.scrollTop = stdoutEl.scrollHeight;
     }
 
     function closeStream() {
@@ -175,7 +315,7 @@
         if (payload.updated_at) {
             updatedAtEl.textContent = payload.updated_at;
         }
-        if (payload.pending_interaction_id !== undefined) {
+            if (payload.pending_interaction_id !== undefined) {
             pendingIdEl.textContent = payload.pending_interaction_id === null ? "-" : String(payload.pending_interaction_id);
         }
         if (payload.interaction_count !== undefined && payload.interaction_count !== null) {
@@ -220,7 +360,7 @@
     function connectEvents() {
         if (terminal) return;
         closeStream();
-        const url = `/v1/management/runs/${requestId}/events?stdout_from=${stdoutOffset}&stderr_from=${stderrOffset}`;
+        const url = `/v1/management/runs/${requestId}/events?cursor=${cursor}&stdout_from=${stdoutOffset}&stderr_from=${stderrOffset}`;
         source = new EventSource(url);
 
         source.addEventListener("snapshot", (evt) => {
@@ -233,7 +373,9 @@
         source.addEventListener("stdout", (evt) => {
             const data = JSON.parse(evt.data || "{}");
             if (typeof data.to === "number") stdoutOffset = data.to;
-            appendLog(stdoutEl, data.chunk || "");
+            if (data.chunk) {
+                appendDiagnostic(`[legacy-stdout] ${String(data.chunk).trim()}`);
+            }
         });
 
         source.addEventListener("stderr", (evt) => {
@@ -245,6 +387,53 @@
         source.addEventListener("status", (evt) => {
             const data = JSON.parse(evt.data || "{}");
             updateStatus(data);
+        });
+
+        source.addEventListener("run_event", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            if (typeof data.seq === "number") {
+                cursor = Math.max(cursor, data.seq);
+                runEventsBySeq.set(data.seq, data);
+                renderRelationView();
+            }
+            const eventType = data.event && data.event.type ? data.event.type : "";
+            if (eventType === "diagnostic.warning") {
+                const code = data.data && data.data.code ? data.data.code : "UNKNOWN";
+                appendDiagnostic(`[${code}] ${JSON.stringify(data.data || {})}`);
+            }
+        });
+
+        source.addEventListener("chat_event", (evt) => {
+            const data = JSON.parse(evt.data || "{}");
+            const type = data.type || "";
+            const seq = typeof data.seq === "number" ? data.seq : 0;
+            if (type === "assistant.message.final") {
+                appendChatEvent("assistant", data.data ? data.data.text : "", seq, data.raw_ref || null);
+                return;
+            }
+            if (type === "user.input.required") {
+                const prompt = data.data && data.data.prompt ? data.data.prompt : "Provide next user turn";
+                appendChatEvent("system", `等待用户输入: ${prompt}`, seq, data.raw_ref || null);
+                pendingPromptEl.textContent = prompt;
+                setReplyEnabled(true, "待决交互已就绪，请输入回复后提交。", prompt);
+                return;
+            }
+            if (type === "conversation.completed") {
+                appendChatEvent("system", "任务已完成。", seq, data.raw_ref || null);
+                return;
+            }
+            if (type === "conversation.failed") {
+                appendChatEvent("system", "任务执行失败。", seq, data.raw_ref || null);
+                return;
+            }
+            if (type === "diagnostic.warning") {
+                const code = data.data && data.data.code ? data.data.code : "UNKNOWN";
+                appendDiagnostic(`[${code}] ${JSON.stringify(data.data || {})}`);
+                return;
+            }
+            if (type === "raw.stderr") {
+                appendLog(stderrEl, `${data.data && data.data.line ? data.data.line : ""}\n`);
+            }
         });
 
         source.addEventListener("end", async (evt) => {

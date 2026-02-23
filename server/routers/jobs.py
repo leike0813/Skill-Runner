@@ -10,16 +10,13 @@ Exposes endpoints for:
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
-from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 from typing import Any
 from ..models import (
     CancelResponse,
     ExecutionMode,
-    InteractiveErrorCode,
     InteractionPendingResponse,
     InteractionReplyRequest,
     InteractionReplyResponse,
-    PendingInteraction,
     RunCreateRequest,
     RunCreateResponse,
     RunUploadResponse,
@@ -35,7 +32,6 @@ from ..services.workspace_manager import workspace_manager
 from ..services.skill_registry import skill_registry
 from ..services.job_orchestrator import job_orchestrator
 from ..services.schema_validator import schema_validator
-from ..services.options_policy import options_policy
 from ..services.model_registry import model_registry
 from ..services.cache_key_builder import (
     compute_skill_fingerprint,
@@ -47,15 +43,58 @@ from ..services.run_store import run_store
 from ..services.run_cleanup_manager import run_cleanup_manager
 from ..services.concurrency_manager import concurrency_manager
 from ..services.run_observability import run_observability_service
-from ..services.engine_policy import SkillEnginePolicy, resolve_skill_engine_policy
+from ..services.engine_policy import resolve_skill_engine_policy
+from ..services.run_execution_core import (
+    declared_execution_modes,
+    ensure_skill_engine_supported,
+    ensure_skill_execution_mode_supported,
+    is_cache_enabled,
+    validate_runtime_and_model_options,
+)
+from ..services.run_interaction_service import run_interaction_service
+from ..services.run_read_facade import run_read_facade
+from ..services.run_source_adapter import RunSourceCapabilities
 import uuid
 import json
-from pathlib import Path
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
-ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER}
+
+class _InstalledRouterSourceAdapter:
+    source = "installed"
+    cache_namespace = "cache_entries"
+    capabilities = RunSourceCapabilities(
+        supports_pending_reply=True,
+        supports_event_history=True,
+        supports_log_range=True,
+        supports_inline_input_create=True,
+    )
+
+    def get_request(self, request_id: str):
+        return run_store.get_request(request_id)
+
+    def get_cached_run(self, cache_key: str):
+        return run_store.get_cached_run(cache_key)
+
+    def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        run_store.update_request_run_id(request_id, run_id)
+
+    def mark_run_started(self, request_id: str, run_id: str) -> None:
+        run_store.update_request_run_id(request_id, run_id)
+
+    def mark_failed(self, request_id: str, error_message: str) -> None:
+        _ = request_id
+        _ = error_message
+
+    def get_run_job_temp_request_id(self, request_id: str) -> str | None:
+        _ = request_id
+        return None
+
+    def build_cancel_kwargs(self, request_id: str) -> dict[str, str]:
+        return {"request_id": request_id}
+
+
+installed_source_adapter = _InstalledRouterSourceAdapter()
 
 @router.post("", response_model=RunCreateResponse)
 async def create_run(request: RunCreateRequest, background_tasks: BackgroundTasks):
@@ -66,25 +105,22 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
 
     try:
         engine_policy = resolve_skill_engine_policy(skill)
-        _ensure_skill_engine_supported(
+        ensure_skill_engine_supported(
             skill_id=skill.id,
             requested_engine=request.engine,
             policy=engine_policy,
         )
-        runtime_opts = options_policy.validate_runtime_options(request.runtime_options)
+        runtime_opts, engine_opts = validate_runtime_and_model_options(
+            engine=request.engine,
+            model=request.model,
+            runtime_options=request.runtime_options,
+        )
         execution_mode = runtime_opts.get("execution_mode", ExecutionMode.AUTO.value)
-        is_interactive = execution_mode == ExecutionMode.INTERACTIVE.value
-        _ensure_skill_execution_mode_supported(
+        ensure_skill_execution_mode_supported(
             skill_id=skill.id,
             requested_mode=execution_mode,
-            declared_modes=_declared_execution_modes(skill),
+            declared_modes=declared_execution_modes(skill),
         )
-        engine_opts: dict[str, Any] = {}
-        if request.model:
-            validated = model_registry.validate_model(request.engine, request.model)
-            engine_opts["model"] = validated["model"]
-            if "model_reasoning_effort" in validated:
-                engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
 
         request_id = str(uuid.uuid4())
         inline_input = request.input if isinstance(request.input, dict) else {}
@@ -109,7 +145,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
 
         has_input_schema = bool(skill.schemas and "input" in skill.schemas)
         has_required_file_inputs = schema_validator.has_required_file_inputs(skill)
-        no_cache = bool(runtime_opts.get("no_cache"))
+        cache_enabled = is_cache_enabled(runtime_opts)
         if not has_input_schema or not has_required_file_inputs:
             manifest_path = workspace_manager.write_input_manifest(request_id)
             manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
@@ -125,10 +161,10 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             )
             run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
             run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-            if not no_cache and not is_interactive:
-                cached_run = run_store.get_cached_run(cache_key)
+            if cache_enabled:
+                cached_run = installed_source_adapter.get_cached_run(cache_key)
                 if cached_run:
-                    run_store.update_request_run_id(request_id, cached_run)
+                    installed_source_adapter.bind_cached_run(request_id, cached_run)
                     return RunCreateResponse(
                         request_id=request_id,
                         cache_hit=True,
@@ -144,9 +180,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 runtime_options=runtime_opts
             )
             run_status = workspace_manager.create_run(run_request)
-            run_cache_key: str | None = None if is_interactive else cache_key
+            run_cache_key: str | None = cache_key if cache_enabled else None
             run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-            run_store.update_request_run_id(request_id, run_status.run_id)
+            installed_source_adapter.mark_run_started(request_id, run_status.run_id)
             merged_options = {**engine_opts, **runtime_opts}
             admitted = await concurrency_manager.admit_or_reject()
             if not admitted:
@@ -272,166 +308,46 @@ async def get_run_status(request_id: str):
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
 async def get_run_result(request_id: str):
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    result_path = run_dir / "result" / "result.json"
-    if not result_path.exists():
-        raise HTTPException(status_code=404, detail="Run result not found")
-
-    with open(result_path, "r") as f:
-        result_payload = json.load(f)
-
-    return RunResultResponse(request_id=request_id, result=result_payload)
+    return run_read_facade.get_result(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+    )
 
 @router.get("/{request_id}/artifacts", response_model=RunArtifactsResponse)
 async def get_run_artifacts(request_id: str):
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    artifacts_dir = run_dir / "artifacts"
-    artifacts = []
-    if artifacts_dir.exists():
-        for path in artifacts_dir.rglob("*"):
-            if path.is_file():
-                artifacts.append(path.relative_to(run_dir).as_posix())
-
-    return RunArtifactsResponse(request_id=request_id, artifacts=artifacts)
+    return run_read_facade.get_artifacts(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+    )
 
 @router.get("/{request_id}/bundle")
 async def get_run_bundle(request_id: str):
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    debug_mode = bool(request_record.get("runtime_options", {}).get("debug"))
-    bundle_name = "run_bundle_debug.zip" if debug_mode else "run_bundle.zip"
-    bundle_path = run_dir / "bundle" / bundle_name
-    if not bundle_path.exists():
-        from ..services.job_orchestrator import job_orchestrator
-        job_orchestrator._build_run_bundle(run_dir, debug_mode)
-
-    if not bundle_path.exists():
-        raise HTTPException(status_code=404, detail="Bundle not found")
-
-    return FileResponse(path=bundle_path, filename=bundle_path.name)
+    return run_read_facade.get_bundle(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+    )
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_run_artifact(request_id: str, artifact_path: str):
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if not artifact_path:
-        raise HTTPException(status_code=400, detail="Artifact path is required")
-
-    debug_mode = bool(request_record.get("runtime_options", {}).get("debug"))
-    if not artifact_path.startswith("artifacts/"):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    target = (run_dir / artifact_path).resolve()
-    run_root = run_dir.resolve()
-    artifacts_root = (run_dir / "artifacts").resolve()
-    if not str(target).startswith(str(artifacts_root)):
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-    if not target.exists() or not target.is_file():
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    return FileResponse(path=target, filename=target.name)
+    return run_read_facade.get_artifact_file(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+        artifact_path=artifact_path,
+    )
 
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_run_logs(request_id: str):
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    logs_dir = run_dir / "logs"
-    if not logs_dir.exists():
-        return RunLogsResponse(request_id=request_id)
-
-    def _read_log(path: Path) -> str | None:
-        if path.exists():
-            return path.read_text(encoding="utf-8")
-        return None
-
-    return RunLogsResponse(
+    return run_read_facade.get_logs(
+        source_adapter=installed_source_adapter,
         request_id=request_id,
-        prompt=_read_log(logs_dir / "prompt.txt"),
-        stdout=_read_log(logs_dir / "stdout.txt"),
-        stderr=_read_log(logs_dir / "stderr.txt")
     )
 
 
 @router.post("/{request_id}/cancel", response_model=CancelResponse)
 async def cancel_run(request_id: str):
-    request_record, run_dir = _get_request_and_run_dir(request_id)
-    run_id_obj = request_record.get("run_id")
-    if not isinstance(run_id_obj, str) or not run_id_obj:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_id = run_id_obj
-
-    status, warnings, error, _updated_at = _read_run_status(run_dir)
-    if status in TERMINAL_STATUSES:
-        return CancelResponse(
-            request_id=request_id,
-            run_id=run_id,
-            status=status,
-            accepted=False,
-            message="Run already in terminal state",
-        )
-    if status not in ACTIVE_CANCELABLE_STATUSES:
-        return CancelResponse(
-            request_id=request_id,
-            run_id=run_id,
-            status=status,
-            accepted=False,
-            message="Run is not cancelable",
-        )
-
-    accepted = await job_orchestrator.cancel_run(
-        run_id=run_id,
-        engine_name=str(request_record.get("engine", "")),
-        run_dir=run_dir,
-        status=status,
+    return await run_read_facade.cancel_run(
+        source_adapter=installed_source_adapter,
         request_id=request_id,
-    )
-    return CancelResponse(
-        request_id=request_id,
-        run_id=run_id,
-        status=RunStatus.CANCELED,
-        accepted=accepted,
-        message="Cancel request accepted" if accepted else "Cancel already requested",
     )
 
 
@@ -439,48 +355,60 @@ async def cancel_run(request_id: str):
 async def stream_run_events(
     request_id: str,
     request: Request,
+    cursor: int = Query(default=0, ge=0),
     stdout_from: int = Query(default=0, ge=0),
     stderr_from: int = Query(default=0, ge=0),
 ):
-    _request_record, run_dir = _get_request_and_run_dir(request_id)
+    return await run_read_facade.stream_events(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+        request=request,
+        cursor=cursor,
+        stdout_from=stdout_from,
+        stderr_from=stderr_from,
+    )
 
-    async def _event_stream():
-        async for item in run_observability_service.iter_sse_events(
-            run_dir=run_dir,
-            request_id=request_id,
-            stdout_from=stdout_from,
-            stderr_from=stderr_from,
-            is_disconnected=request.is_disconnected,
-        ):
-            yield run_observability_service.format_sse_frame(
-                item["event"],
-                item["data"],
-            )
 
-    return StreamingResponse(
-        _event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+@router.get("/{request_id}/events/history")
+async def list_run_event_history(
+    request_id: str,
+    from_seq: int | None = Query(default=None, ge=0),
+    to_seq: int | None = Query(default=None, ge=0),
+    from_ts: str | None = Query(default=None),
+    to_ts: str | None = Query(default=None),
+):
+    return run_read_facade.list_event_history(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+        from_seq=from_seq,
+        to_seq=to_seq,
+        from_ts=from_ts,
+        to_ts=to_ts,
+    )
+
+
+@router.get("/{request_id}/logs/range")
+async def get_run_log_range(
+    request_id: str,
+    stream: str = Query(...),
+    byte_from: int = Query(default=0, ge=0),
+    byte_to: int = Query(default=0, ge=0),
+):
+    return run_read_facade.read_log_range(
+        source_adapter=installed_source_adapter,
+        request_id=request_id,
+        stream=stream,
+        byte_from=byte_from,
+        byte_to=byte_to,
     )
 
 
 @router.get("/{request_id}/interaction/pending", response_model=InteractionPendingResponse)
 async def get_interaction_pending(request_id: str):
-    request_record, run_dir = _get_request_and_run_dir(request_id)
-    _ensure_interactive_mode(request_record)
-    status, _, _, _ = _read_run_status(run_dir)
-    pending_payload = run_store.get_pending_interaction(request_id)
-    pending = None
-    if pending_payload and status == RunStatus.WAITING_USER:
-        pending = PendingInteraction.model_validate(pending_payload)
-    return InteractionPendingResponse(
+    return await run_interaction_service.get_pending(
+        source_adapter=installed_source_adapter,
         request_id=request_id,
-        status=status,
-        pending=pending,
+        run_store_backend=run_store,
     )
 
 
@@ -490,131 +418,12 @@ async def reply_interaction(
     request: InteractionReplyRequest,
     background_tasks: BackgroundTasks,
 ):
-    request_record, run_dir = _get_request_and_run_dir(request_id)
-    _ensure_interactive_mode(request_record)
-    status, warnings, _, _ = _read_run_status(run_dir)
-    if status != RunStatus.WAITING_USER:
-        replay = _resolve_idempotent_replay(request_id, request, status)
-        if replay:
-            return replay
-        raise HTTPException(status_code=409, detail="Run is not waiting for user interaction")
-
-    pending_payload = run_store.get_pending_interaction(request_id)
-    if not pending_payload:
-        replay = _resolve_idempotent_replay(request_id, request, status)
-        if replay:
-            return replay
-        raise HTTPException(status_code=409, detail="No pending interaction")
-
-    raw_interaction_id = pending_payload.get("interaction_id")
-    if isinstance(raw_interaction_id, int):
-        current_interaction_id = raw_interaction_id
-    elif isinstance(raw_interaction_id, str):
-        try:
-            current_interaction_id = int(raw_interaction_id)
-        except ValueError:
-            raise HTTPException(status_code=409, detail="stale interaction")
-    else:
-        raise HTTPException(status_code=409, detail="stale interaction")
-    if request.interaction_id != current_interaction_id:
-        raise HTTPException(status_code=409, detail="stale interaction")
-
-    reply_state = run_store.submit_interaction_reply(
+    return await run_interaction_service.submit_reply(
+        source_adapter=installed_source_adapter,
         request_id=request_id,
-        interaction_id=request.interaction_id,
-        response=request.response,
-        idempotency_key=request.idempotency_key,
-    )
-    if reply_state == "idempotent":
-        return InteractionReplyResponse(request_id=request_id, status=status, accepted=True)
-    if reply_state == "idempotency_conflict":
-        raise HTTPException(
-            status_code=409,
-            detail="idempotency_key already used with different response",
-        )
-    if reply_state == "stale":
-        raise HTTPException(status_code=409, detail="stale interaction")
-
-    profile = run_store.get_interactive_profile(request_id) or {}
-    if profile.get("kind") == "sticky_process":
-        sticky_runtime = run_store.get_sticky_wait_runtime(request_id)
-        if not sticky_runtime:
-            await _mark_run_failed(
-                request_record=request_record,
-                run_dir=run_dir,
-                code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                message="Sticky process runtime missing",
-            )
-            raise HTTPException(status_code=409, detail="sticky process lost")
-        deadline_raw = sticky_runtime.get("wait_deadline_at")
-        process_binding = sticky_runtime.get("process_binding") or {}
-        if not deadline_raw:
-            await _mark_run_failed(
-                request_record=request_record,
-                run_dir=run_dir,
-                code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                message="Sticky process deadline missing",
-            )
-            raise HTTPException(status_code=409, detail="sticky process lost")
-        try:
-            deadline = datetime.fromisoformat(str(deadline_raw))
-        except ValueError:
-            await _mark_run_failed(
-                request_record=request_record,
-                run_dir=run_dir,
-                code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                message="Sticky process deadline invalid",
-            )
-            raise HTTPException(status_code=409, detail="sticky process lost")
-        if datetime.utcnow() > deadline:
-            await _mark_run_failed(
-                request_record=request_record,
-                run_dir=run_dir,
-                code=InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-                message="Sticky process wait timeout",
-            )
-            raise HTTPException(status_code=409, detail="interaction wait timeout")
-        if process_binding.get("alive") is False:
-            await _mark_run_failed(
-                request_record=request_record,
-                run_dir=run_dir,
-                code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                message="Sticky process exited",
-            )
-            raise HTTPException(status_code=409, detail="sticky process lost")
-
-    is_sticky_profile = profile.get("kind") == "sticky_process"
-    next_status = RunStatus.RUNNING if is_sticky_profile else RunStatus.QUEUED
-    _write_run_status(run_dir, next_status, warnings=warnings)
-    run_id = request_record.get("run_id")
-    if run_id:
-        run_store.update_run_status(run_id, next_status)
-        merged_options = {
-            **request_record.get("engine_options", {}),
-            **request_record.get("runtime_options", {}),
-            "__interactive_reply_payload": request.response,
-            "__interactive_reply_interaction_id": request.interaction_id,
-            "__interactive_resolution_mode": "user_reply",
-        }
-        if is_sticky_profile:
-            merged_options["__sticky_slot_held"] = True
-            job_orchestrator.cancel_sticky_watchdog(request_id)
-        else:
-            admitted = await concurrency_manager.admit_or_reject()
-            if not admitted:
-                raise HTTPException(status_code=429, detail="Job queue is full")
-        background_tasks.add_task(
-            job_orchestrator.run_job,
-            run_id=run_id,
-            skill_id=request_record["skill_id"],
-            engine_name=request_record["engine"],
-            options=merged_options,
-            cache_key=None,
-        )
-    return InteractionReplyResponse(
-        request_id=request_id,
-        status=next_status,
-        accepted=True,
+        request=request,
+        background_tasks=background_tasks,
+        run_store_backend=run_store,
     )
 
 @router.post("/{request_id}/upload", response_model=RunUploadResponse)
@@ -644,15 +453,12 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         )
         run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
         run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-        no_cache = bool(request_record.get("runtime_options", {}).get("no_cache"))
-        execution_mode = request_record.get("runtime_options", {}).get(
-            "execution_mode", ExecutionMode.AUTO.value
-        )
-        is_interactive = execution_mode == ExecutionMode.INTERACTIVE.value
-        if not no_cache and not is_interactive:
-            cached_run = run_store.get_cached_run(cache_key)
+        runtime_options = request_record.get("runtime_options", {})
+        cache_enabled = is_cache_enabled(runtime_options)
+        if cache_enabled:
+            cached_run = installed_source_adapter.get_cached_run(cache_key)
             if cached_run:
-                run_store.update_request_run_id(request_id, cached_run)
+                installed_source_adapter.bind_cached_run(request_id, cached_run)
                 return RunUploadResponse(
                     request_id=request_id,
                     cache_hit=True,
@@ -670,9 +476,9 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
             )
         )
         workspace_manager.promote_request_uploads(request_id, run_status.run_id)
-        run_cache_key: str | None = None if is_interactive else cache_key
+        run_cache_key: str | None = cache_key if cache_enabled else None
         run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-        run_store.update_request_run_id(request_id, run_status.run_id)
+        installed_source_adapter.mark_run_started(request_id, run_status.run_id)
         merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
         admitted = await concurrency_manager.admit_or_reject()
         if not admitted:
@@ -696,98 +502,6 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def _get_request_and_run_dir(request_id: str) -> tuple[dict[str, Any], Path]:
-    request_record = run_store.get_request(request_id)
-    if not request_record:
-        raise HTTPException(status_code=404, detail="Request not found")
-    run_id = request_record.get("run_id")
-    if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return request_record, run_dir
-
-
-def _declared_execution_modes(skill: Any) -> set[str]:
-    raw_modes = getattr(skill, "execution_modes", [ExecutionMode.AUTO.value]) or [
-        ExecutionMode.AUTO.value
-    ]
-    modes: set[str] = set()
-    for mode in raw_modes:
-        if isinstance(mode, ExecutionMode):
-            modes.add(mode.value)
-        else:
-            modes.add(str(mode))
-    return modes
-
-
-def _ensure_skill_execution_mode_supported(
-    skill_id: str,
-    requested_mode: str,
-    declared_modes: set[str],
-) -> None:
-    if requested_mode in declared_modes:
-        return
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "code": "SKILL_EXECUTION_MODE_UNSUPPORTED",
-            "message": (
-                f"Skill '{skill_id}' does not support execution_mode "
-                f"'{requested_mode}'"
-            ),
-            "declared_execution_modes": sorted(declared_modes),
-            "requested_execution_mode": requested_mode,
-        },
-    )
-
-
-def _ensure_skill_engine_supported(
-    skill_id: str,
-    requested_engine: str,
-    policy: SkillEnginePolicy,
-) -> None:
-    if requested_engine in policy.effective_engines:
-        return
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "code": "SKILL_ENGINE_UNSUPPORTED",
-            "message": f"Skill '{skill_id}' does not support engine '{requested_engine}'",
-            "declared_engines": policy.declared_engines,
-            "unsupported_engines": policy.unsupported_engines,
-            "effective_engines": policy.effective_engines,
-            "requested_engine": requested_engine,
-        },
-    )
-
-
-def _ensure_interactive_mode(request_record: dict[str, Any]) -> None:
-    runtime_options = request_record.get("runtime_options", {})
-    execution_mode = runtime_options.get("execution_mode", ExecutionMode.AUTO.value)
-    if execution_mode != ExecutionMode.INTERACTIVE.value:
-        raise HTTPException(
-            status_code=400,
-            detail="Interaction endpoints require runtime_options.execution_mode=interactive",
-        )
-
-
-def _read_run_status(run_dir: Path) -> tuple[RunStatus, list[Any], Any, str]:
-    status_file = run_dir / "status.json"
-    current_status = RunStatus.QUEUED
-    warnings: list[Any] = []
-    error: Any = None
-    updated_at = ""
-    if status_file.exists():
-        payload = json.loads(status_file.read_text(encoding="utf-8"))
-        current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
-        warnings = payload.get("warnings", [])
-        error = payload.get("error")
-        updated_at = payload.get("updated_at", "")
-    return current_status, warnings, error, updated_at
 
 
 def _read_pending_interaction_id(request_id: str) -> int | None:
@@ -824,87 +538,6 @@ def _parse_recovery_state(raw: Any) -> RecoveryState:
         except ValueError:
             return RecoveryState.NONE
     return RecoveryState.NONE
-
-
-def _write_run_status(
-    run_dir: Path,
-    status: RunStatus,
-    warnings: list[Any] | None = None,
-    error: Any = None,
-    effective_session_timeout_sec: int | None = None,
-) -> None:
-    status_file = run_dir / "status.json"
-    existing_timeout = None
-    if status_file.exists():
-        try:
-            existing = json.loads(status_file.read_text(encoding="utf-8"))
-            existing_timeout = existing.get("effective_session_timeout_sec")
-        except Exception:
-            existing_timeout = None
-    payload = {
-        "status": status.value if isinstance(status, RunStatus) else str(status),
-        "updated_at": datetime.now().isoformat(),
-        "warnings": warnings or [],
-        "error": error,
-        "effective_session_timeout_sec": (
-            effective_session_timeout_sec
-            if effective_session_timeout_sec is not None
-            else existing_timeout
-        ),
-    }
-    status_file.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-async def _mark_run_failed(
-    request_record: dict[str, Any],
-    run_dir: Path,
-    code: str,
-    message: str,
-) -> None:
-    error_payload = {"code": code, "message": message}
-    _write_run_status(
-        run_dir,
-        RunStatus.FAILED,
-        error=error_payload,
-        effective_session_timeout_sec=run_store.get_effective_session_timeout(
-            request_record.get("request_id", "")
-        )
-        if isinstance(request_record.get("request_id"), str)
-        else None,
-    )
-    run_id = request_record.get("run_id")
-    if run_id:
-        run_store.update_run_status(run_id, RunStatus.FAILED)
-        await concurrency_manager.release_slot()
-
-
-def _resolve_idempotent_replay(
-    request_id: str,
-    request: InteractionReplyRequest,
-    status: RunStatus,
-) -> InteractionReplyResponse | None:
-    if not request.idempotency_key:
-        return None
-    existing_reply = run_store.get_interaction_reply(
-        request_id=request_id,
-        interaction_id=request.interaction_id,
-        idempotency_key=request.idempotency_key,
-    )
-    if existing_reply is None:
-        return None
-    if existing_reply != request.response:
-        raise HTTPException(
-            status_code=409,
-            detail="idempotency_key already used with different response",
-        )
-    return InteractionReplyResponse(
-        request_id=request_id,
-        status=status,
-        accepted=True,
-    )
 
 
 @router.post("/cleanup", response_model=RunCleanupResponse)

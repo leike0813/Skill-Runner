@@ -1,0 +1,38 @@
+{
+  "codex": {
+    "start": [
+      "--skip-git-repo-check",
+      "--json",
+      "--full-auto",
+      "-p",
+      "skill-runner"
+    ],
+    "resume": [
+      "--skip-git-repo-check",
+      "--json",
+      "--full-auto"
+    ]
+  },
+  "gemini": {
+    "start": [
+      "--yolo"
+    ],
+    "resume": [
+      "--yolo"
+    ]
+  },
+  "iflow": {
+    "start": [
+      "--yolo",
+      "--thinking"
+    ],
+    "resume": [
+      "--yolo",
+      "--thinking"
+    ]
+  },
+  "opencode": {
+    "start": [],
+    "resume": []
+  }
+}

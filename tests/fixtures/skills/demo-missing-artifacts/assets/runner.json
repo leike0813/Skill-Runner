@@ -3,8 +3,8 @@
     "version": "1.0.0",
     "name": "Demo: Missing Artifacts",
     "description": "Intentionally omits required artifacts for validation.",
-    "engines": [
-        "gemini"
+    "execution_modes": [
+        "auto"
     ],
     "schemas": {
         "input": "assets/input.schema.json",

@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from .run_store import run_store
+from .runtime_event_protocol import (
+    build_fcmp_events,
+    build_rasp_events,
+    compute_protocol_metrics,
+    read_jsonl,
+    write_jsonl,
+)
 from .workspace_manager import workspace_manager
 from .skill_browser import (
     build_preview_payload,
@@ -16,6 +23,11 @@ from .skill_browser import (
 
 RUNNING_STATUSES = {"queued", "running"}
 TERMINAL_STATUSES = {"succeeded", "failed", "canceled"}
+AUDIT_DIR_NAME = ".audit"
+RASP_EVENTS_FILE = "events.jsonl"
+PARSER_DIAGNOSTICS_FILE = "parser_diagnostics.jsonl"
+FCMP_EVENTS_FILE = "fcmp_events.jsonl"
+PROTOCOL_METRICS_FILE = "protocol_metrics.json"
 
 
 class RunObservabilityService:
@@ -51,11 +63,53 @@ class RunObservabilityService:
             "chunk": data.decode("utf-8", errors="replace"),
         }
 
+    def read_log_range(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        stream: str,
+        byte_from: int,
+        byte_to: int,
+    ) -> Dict[str, Any]:
+        safe_stream = stream.strip().lower()
+        if safe_stream not in {"stdout", "stderr", "pty"}:
+            raise ValueError("stream must be one of: stdout, stderr, pty")
+        status_payload = self._read_status_payload(run_dir)
+        status_obj = status_payload.get("status")
+        status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
+        attempt_number = self._resolve_attempt_number(
+            request_id,
+            status=status,
+            run_dir=run_dir,
+        )
+        logs_dir = run_dir / "logs"
+        audit_dir = run_dir / AUDIT_DIR_NAME
+        if safe_stream == "pty":
+            attempted_path = audit_dir / f"pty-output.{attempt_number}.log"
+            path = attempted_path if attempted_path.exists() else logs_dir / "pty-output.txt"
+        else:
+            attempted_path = audit_dir / f"{safe_stream}.{attempt_number}.log"
+            path = attempted_path if attempted_path.exists() else logs_dir / f"{safe_stream}.txt"
+        start = max(0, int(byte_from))
+        end = max(start, int(byte_to))
+        if not path.exists() or not path.is_file():
+            return {"stream": safe_stream, "byte_from": start, "byte_to": start, "chunk": ""}
+        raw = path.read_bytes()
+        size = len(raw)
+        start = min(start, size)
+        end = min(end, size)
+        if end <= start:
+            return {"stream": safe_stream, "byte_from": start, "byte_to": start, "chunk": ""}
+        chunk = raw[start:end].decode("utf-8", errors="replace")
+        return {"stream": safe_stream, "byte_from": start, "byte_to": end, "chunk": chunk}
+
     async def iter_sse_events(
         self,
         *,
         run_dir: Path,
         request_id: Optional[str],
+        cursor: int = 0,
         stdout_from: int = 0,
         stderr_from: int = 0,
         chunk_bytes: int = 8 * 1024,
@@ -77,6 +131,7 @@ class RunObservabilityService:
             "status": status,
             "stdout_offset": stdout_offset,
             "stderr_offset": stderr_offset,
+            "cursor": max(0, int(cursor)),
         }
         pending_id = self._read_pending_interaction_id(request_id)
         if pending_id is not None:
@@ -86,6 +141,26 @@ class RunObservabilityService:
         last_status = status
         last_updated_at = status_payload.get("updated_at")
         last_heartbeat_at = time.monotonic()
+        last_run_event_seq = max(0, int(cursor))
+        last_chat_event_seq = 0
+
+        protocol_payload = self._materialize_protocol_stream(
+            run_dir=run_dir,
+            request_id=request_id,
+            status_payload=status_payload,
+        )
+        for event in protocol_payload["rasp_events"]:
+            seq_obj = event.get("seq")
+            if not isinstance(seq_obj, int) or seq_obj <= last_run_event_seq:
+                continue
+            yield {"event": "run_event", "data": event}
+            last_run_event_seq = seq_obj
+        for event in protocol_payload["fcmp_events"]:
+            seq_obj = event.get("seq")
+            if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
+                continue
+            yield {"event": "chat_event", "data": event}
+            last_chat_event_seq = seq_obj
 
         while True:
             if is_disconnected is not None and await is_disconnected():
@@ -128,6 +203,26 @@ class RunObservabilityService:
                 last_status = current_status
                 last_updated_at = updated_at
 
+            protocol_payload = self._materialize_protocol_stream(
+                run_dir=run_dir,
+                request_id=request_id,
+                status_payload=status_payload,
+            )
+            for event in protocol_payload["rasp_events"]:
+                seq_obj = event.get("seq")
+                if not isinstance(seq_obj, int) or seq_obj <= last_run_event_seq:
+                    continue
+                yield {"event": "run_event", "data": event}
+                emitted = True
+                last_run_event_seq = seq_obj
+            for event in protocol_payload["fcmp_events"]:
+                seq_obj = event.get("seq")
+                if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
+                    continue
+                yield {"event": "chat_event", "data": event}
+                emitted = True
+                last_chat_event_seq = seq_obj
+
             if current_status == "waiting_user":
                 if not should_emit_status:
                     status_event = {"status": current_status}
@@ -163,6 +258,209 @@ class RunObservabilityService:
                 if updated_at and updated_at != last_updated_at:
                     last_updated_at = updated_at
             await asyncio.sleep(poll_interval_sec)
+
+    def list_event_history(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int] = None,
+        to_seq: Optional[int] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        status_payload = self._read_status_payload(run_dir)
+        self._materialize_protocol_stream(
+            run_dir=run_dir,
+            request_id=request_id,
+            status_payload=status_payload,
+        )
+        paths = self._protocol_paths(run_dir)
+        rows = read_jsonl(paths["events"])
+        return self._filter_events(
+            rows=rows,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+
+    def _protocol_paths(self, run_dir: Path) -> Dict[str, Path]:
+        audit_dir = run_dir / AUDIT_DIR_NAME
+        return {
+            "audit_dir": audit_dir,
+            "events": audit_dir / RASP_EVENTS_FILE,
+            "diagnostics": audit_dir / PARSER_DIAGNOSTICS_FILE,
+            "fcmp": audit_dir / FCMP_EVENTS_FILE,
+            "metrics": audit_dir / PROTOCOL_METRICS_FILE,
+        }
+
+    def _resolve_engine_name(self, request_id: Optional[str]) -> str:
+        if not request_id:
+            return "unknown"
+        request_record = run_store.get_request(request_id)
+        if not request_record:
+            return "unknown"
+        engine_obj = request_record.get("engine")
+        if isinstance(engine_obj, str) and engine_obj:
+            return engine_obj
+        return "unknown"
+
+    def _latest_attempt_number(self, run_dir: Path) -> int:
+        audit_dir = run_dir / AUDIT_DIR_NAME
+        if not audit_dir.exists() or not audit_dir.is_dir():
+            return 0
+        latest = 0
+        for path in audit_dir.glob("meta.*.json"):
+            parts = path.name.split(".")
+            if len(parts) != 3:
+                continue
+            try:
+                candidate = int(parts[1])
+            except Exception:
+                continue
+            if candidate > latest:
+                latest = candidate
+        return latest
+
+    def _resolve_attempt_number(
+        self,
+        request_id: Optional[str],
+        *,
+        status: str,
+        run_dir: Path,
+    ) -> int:
+        if not request_id:
+            return 1
+        request_record = run_store.get_request(request_id)
+        if not request_record:
+            return 1
+        runtime_options = request_record.get("runtime_options")
+        execution_mode = ""
+        if isinstance(runtime_options, dict):
+            execution_mode_obj = runtime_options.get("execution_mode")
+            if isinstance(execution_mode_obj, str):
+                execution_mode = execution_mode_obj
+        if execution_mode != "interactive":
+            return 1
+        latest_attempt = self._latest_attempt_number(run_dir)
+        if status in {"waiting_user", "succeeded", "failed", "canceled"} and latest_attempt > 0:
+            return latest_attempt
+        interaction_count = run_store.get_interaction_count(request_id)
+        return max(1, int(interaction_count) + 1)
+
+    def _materialize_protocol_stream(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        status_payload: Dict[str, Any],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        logs_dir = run_dir / "logs"
+        status_obj = status_payload.get("status")
+        status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
+        pending_payload = run_store.get_pending_interaction(request_id) if request_id else None
+        pending_interaction = pending_payload if isinstance(pending_payload, dict) else None
+        run_id = run_dir.name
+        engine_name = self._resolve_engine_name(request_id)
+        attempt_number = self._resolve_attempt_number(
+            request_id,
+            status=status,
+            run_dir=run_dir,
+        )
+
+        audit_dir = run_dir / AUDIT_DIR_NAME
+        attempted_stdout_path = audit_dir / f"stdout.{attempt_number}.log"
+        attempted_stderr_path = audit_dir / f"stderr.{attempt_number}.log"
+        attempted_pty_path = audit_dir / f"pty-output.{attempt_number}.log"
+        stdout_path = attempted_stdout_path if attempted_stdout_path.exists() else logs_dir / "stdout.txt"
+        stderr_path = attempted_stderr_path if attempted_stderr_path.exists() else logs_dir / "stderr.txt"
+        pty_path = attempted_pty_path if attempted_pty_path.exists() else logs_dir / "pty-output.txt"
+        completion_payload: Optional[Dict[str, Any]] = None
+        meta_path = audit_dir / f"meta.{attempt_number}.json"
+        if meta_path.exists():
+            try:
+                meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                completion_obj = meta_payload.get("completion")
+                if isinstance(completion_obj, dict):
+                    completion_payload = completion_obj
+            except Exception:
+                completion_payload = None
+
+        rasp_models = build_rasp_events(
+            run_id=run_id,
+            engine=engine_name,
+            attempt_number=attempt_number,
+            status=status,
+            pending_interaction=pending_interaction,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            pty_path=pty_path,
+            completion=completion_payload,
+        )
+        rasp_rows = [model.model_dump(mode="json") for model in rasp_models]
+        fcmp_models = build_fcmp_events(rasp_models)
+        fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
+        metrics_payload = compute_protocol_metrics(rasp_models)
+
+        paths = self._protocol_paths(run_dir)
+        write_jsonl(paths["events"], rasp_rows)
+        write_jsonl(
+            paths["diagnostics"],
+            [
+                row
+                for row in rasp_rows
+                if isinstance(row.get("event"), dict)
+                and row["event"].get("category") == "diagnostic"
+            ],
+        )
+        write_jsonl(paths["fcmp"], fcmp_rows)
+        paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
+        paths["metrics"].write_text(
+            json.dumps(metrics_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return {"rasp_events": rasp_rows, "fcmp_events": fcmp_rows}
+
+    def _filter_events(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+        from_ts: Optional[str],
+        to_ts: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        from_seq_value = int(from_seq) if from_seq is not None else None
+        to_seq_value = int(to_seq) if to_seq is not None else None
+        from_ts_value = self._parse_optional_ts(from_ts)
+        to_ts_value = self._parse_optional_ts(to_ts)
+
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            seq_obj = row.get("seq")
+            if not isinstance(seq_obj, int):
+                continue
+            if from_seq_value is not None and seq_obj < from_seq_value:
+                continue
+            if to_seq_value is not None and seq_obj > to_seq_value:
+                continue
+            ts_obj = self._parse_optional_ts(row.get("ts"))
+            if from_ts_value is not None and ts_obj is not None and ts_obj < from_ts_value:
+                continue
+            if to_ts_value is not None and ts_obj is not None and ts_obj > to_ts_value:
+                continue
+            filtered.append(row)
+        return filtered
+
+    def _parse_optional_ts(self, value: Any) -> Optional[datetime]:
+        if not isinstance(value, str) or not value:
+            return None
+        normalized = value.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
 
     def list_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
         rows = run_store.list_requests_with_runs(limit=limit)

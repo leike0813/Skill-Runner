@@ -18,5 +18,8 @@ uv.lock
 references/codex/
 references/gemini-cli/
 references/iflow-cli/
+references/opencode/
+references/agent-test-env/
 e2e_client/recordings/*.json
+.opencode/
 .opencode

@@ -55,25 +55,24 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 - **AND** 不引入仅 UI 可见的私有状态定义
 
 ### Requirement: Run 页面 MUST 支持对话窗口式管理体验
-系统 MUST 让内建 Run 页面在统一管理接口下支持对话窗口所需能力：stdout 作为主对话窗口实时更新、底部用户输入框提交 reply、stderr 在独立窗口展示。
+The Run page MUST activate waiting-user interactions from status and pending/protocol events, and MUST NOT depend on ask_user JSON blocks embedded in assistant text.
 
-#### Scenario: waiting_user 交互
+#### Scenario: waiting_user 交互来源稳定
 - **WHEN** Run 状态进入 `waiting_user`
-- **THEN** 页面展示 pending 信息并激活底部输入框
-- **AND** 用户可在同一对话区提交 reply 并恢复执行
+- **THEN** 页面通过 pending 接口或 `user.input.required` 事件激活输入框
+- **AND** 不要求 assistant 消息中出现结构化 ask_user 文本
 
-#### Scenario: 实时输出观测
-- **WHEN** Run 状态为 `running`
-- **THEN** 页面消费 SSE 输出事件并实时更新 stdout 主对话窗口
-- **AND** 断线后可续传恢复
+#### Scenario: assistant 文本中的 ask_user 块仅作展示
+- **WHEN** assistant 消息正文包含 ask_user-like JSON 文本
+- **THEN** 页面将其视为普通消息内容
+- **AND** 不据此单独驱动交互状态机
 
-#### Scenario: stderr 独立展示
-- **WHEN** SSE 返回 stderr 增量事件
-- **THEN** 页面在独立 stderr 窗口中追加显示错误输出
-- **AND** stderr 显示不影响 stdout 主对话窗口的阅读与输入操作
+#### Scenario: 软条件完成告警可见
+- **WHEN** 后端以软条件完成 interactive run
+- **THEN** 页面展示 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER` 诊断告警
+- **AND** 不影响 completed 状态展示
 
-#### Scenario: 用户主动终止
-- **WHEN** 用户在 Run 页面触发 cancel
-- **THEN** 页面调用 management API 的 cancel 动作
-- **AND** 页面状态收敛到 `canceled` 并停止继续交互
+#### Scenario: 超轮次失败原因可见
+- **WHEN** interactive run 因 `max_attempt` 触发失败
+- **THEN** 页面展示 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED` 失败原因
 

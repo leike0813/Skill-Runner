@@ -15,12 +15,13 @@
 
 ```text
 tests/
-├── integration/
-│   └── run_integration_tests.py # 通用测试执行器 (Integration Runner)
+├── engine_integration/
+│   ├── harness_fixture.py
+│   └── run_engine_integration_tests.py # 通用测试执行器 (Engine Integration Runner)
 ├── fixtures/                 # 具体的测试文件资源 (图片, markdown, etc)
 │   ├── basic_numbers.md
 │   └── secure_image.jpg
-└── suites/                   # 测试套件定义 (每个 Skill 一个 YAML/JSON)
+└── engine_integration/suites/ # 测试套件定义 (每个 Skill 一个 YAML/JSON)
     ├── demo-prime-number.yaml
     ├── demo-prime-number-csv-mismatch.yaml
     └── demo-bible-verse.yaml
@@ -30,7 +31,7 @@ tests/
 
 采用 YAML 格式定义测试用例，清晰易读。
 
-### 示例 (`tests/suites/demo-prime-number.yaml`)
+### 示例 (`tests/engine_integration/suites/demo-prime-number.yaml`)
 
 ```yaml
 skill_id: "demo-prime-number"
@@ -68,13 +69,13 @@ cases:
 - `skill_source=installed`: 使用 `skills/` 目录中已安装 skill。
 - `skill_source=temp`: 从 `tests/fixtures/skills/<skill_fixture>/` 打包后走临时 skill 执行路径。
 
-## 4. 核心组件：Test Runner (`tests/integration/run_integration_tests.py`)
+## 4. 核心组件：Test Runner (`tests/engine_integration/run_engine_integration_tests.py`)
 
 Runner 将是一个 Python 脚本，负责读取 YAML 并在本地**黑盒调用**我们的 Service 层 (或 API Client)。
 
 ### 执行流程
 
-1.  **Load**: 读取 `tests/suites/*.yaml`。
+1.  **Load**: 读取 `tests/engine_integration/suites/*.yaml`。
 2.  **Setup**:
     *   生成 request_id 并写入 request.json。
 3.  **Upload**:
@@ -109,9 +110,11 @@ tests/
 │   ├── test_schema_validator.py
 │   ├── test_gemini_adapter.py
 │   └── test_workspace_manager.py
-├── integration/              # 上述的通用 Runner 和 Suites
-│   ├── run_integration_tests.py
-│   └── ...
+├── engine_integration/       # 引擎执行链路集成测试
+│   ├── run_engine_integration_tests.py
+│   └── suites/*.yaml
+├── api_integration/          # API/UI 契约集成测试
+│   └── test_*.py
 ```
 
 ### 关键测试点

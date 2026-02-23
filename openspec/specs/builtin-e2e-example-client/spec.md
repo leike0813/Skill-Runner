@@ -59,17 +59,25 @@ TBD - created by archiving change interactive-33-builtin-e2e-example-client. Upd
 - **AND** 页面跳转到运行观测视图
 
 ### Requirement: 示例客户端 MUST 支持交互式对话直到终态
-示例客户端 MUST 通过状态与事件流持续观测运行，并在 `waiting_user` 状态支持 pending/reply 交互，直到 run 进入终态。
+The example client MUST treat backend lifecycle state as the single source of truth for interaction progression and MUST NOT parse assistant ask_user JSON text as control state.
 
-#### Scenario: waiting_user 交互回复
+#### Scenario: waiting_user 时从 pending 驱动 reply
 - **WHEN** 运行进入 `waiting_user`
-- **THEN** 客户端展示 pending 问题
-- **AND** 用户可提交 reply 并继续推进运行
+- **THEN** 客户端通过 pending 接口获取 `interaction_id/prompt`
+- **AND** 用户提交 reply 后继续推进运行
 
-#### Scenario: 终态收敛
-- **WHEN** 运行进入 `succeeded|failed|canceled`
-- **THEN** 客户端停止继续交互
-- **AND** 展示终态结果入口
+#### Scenario: assistant ask_user 文本不驱动状态机
+- **WHEN** assistant 消息包含 ask_user-like JSON 文本
+- **THEN** 客户端仅将其展示在对话区
+- **AND** 不把其当作 reply 表单数据来源
+
+#### Scenario: 客户端展示软完成告警
+- **WHEN** interactive run 通过“无 done marker 但 schema 通过”完成
+- **THEN** 客户端展示 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER` 诊断信息
+
+#### Scenario: 客户端展示 max_attempt 失败原因
+- **WHEN** interactive run 达到 `max_attempt` 且无完成证据
+- **THEN** 客户端展示 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED` 失败原因
 
 ### Requirement: 示例客户端 MUST 提供 run 实时观测的可重复进入入口
 示例客户端 MUST 为每个在客户端创建过的 run 提供稳定入口，允许用户在关闭页面后再次进入实时观测与对话页面。

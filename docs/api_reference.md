@@ -31,6 +31,8 @@
 - `GET /v1/management/runs/{request_id}/files`：文件树
 - `GET /v1/management/runs/{request_id}/file?path=...`：文件预览
 - `GET /v1/management/runs/{request_id}/events`：SSE 实时输出（复用 jobs 事件语义）
+- `GET /v1/management/runs/{request_id}/events/history`：结构化历史事件（支持 `from_seq/to_seq/from_ts/to_ts`）
+- `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳）
 - `GET /v1/management/runs/{request_id}/pending`：查询待决交互
 - `POST /v1/management/runs/{request_id}/reply`：提交交互回复
 - `POST /v1/management/runs/{request_id}/cancel`：取消运行
@@ -130,6 +132,8 @@
 - `runner.json.unsupported_engines` 为可选字段；用于声明显式不支持引擎。
 - 若 `engines` 与 `unsupported_engines` 同时存在，二者不允许重复；计算后的有效引擎集合必须非空。
 - `runner.json` 必须包含非空 `execution_modes` 列表，且值仅允许 `auto` / `interactive`。
+- `runner.json.max_attempt` 为可选正整数（`>=1`），仅在 `interactive` 模式生效：
+  - 当 `attempt_number >= max_attempt` 且当轮既无 `__SKILL_DONE__` 也无法通过 output schema 软完成时，run 失败并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
 - `runner.json` 必须包含可解析的 `version`。
@@ -252,6 +256,11 @@
 - `interaction_count` 为当前 request 已记录的交互轮次计数。
 - `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
 - `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`INTERACTION_PROCESS_LOST`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
+- interactive 双轨完成说明：
+  - 解析到 `__SKILL_DONE__` 时按强条件完成；
+  - 未解析到 marker 但输出通过 schema 时按软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+  - ask_user 提示建议使用非 JSON 结构化格式（YAML，示例：`<ASK_USER_YAML>...</ASK_USER_YAML>`），避免被结果 JSON 误判。
+  - ask_user 提示始终为可选 enrichment，不参与后端生命周期控制判定。
 
 ### 查询待决交互 (Get Pending Interaction)
 `GET /v1/jobs/{request_id}/interaction/pending`
@@ -397,14 +406,17 @@
 ### 获取日志事件流 (SSE)
 `GET /v1/jobs/{request_id}/events`
 
-返回 `text/event-stream`，用于实时增量消费 stdout/stderr 与状态变化。
+返回 `text/event-stream`，用于实时消费结构化运行事件（RASP）与对话事件（FCMP），并兼容 stdout/stderr 增量日志事件。
 
 **Query 参数**:
+- `cursor`（可选，默认 `0`）：结构化事件续传游标（按 `run_event.seq`）。
 - `stdout_from`（可选，默认 `0`）：stdout 起始 offset。
 - `stderr_from`（可选，默认 `0`）：stderr 起始 offset。
 
 **事件类型**:
 - `snapshot`：首帧快照，字段：`status`, `stdout_offset`, `stderr_offset`, `pending_interaction_id?`
+- `run_event`：RASP 结构化事件（`protocol_version=rasp/1.0`）
+- `chat_event`：FCMP 对话事件（`protocol_version=fcmp/1.0`）
 - `stdout`：stdout 增量，字段：`from`, `to`, `chunk`
 - `stderr`：stderr 增量，字段：`from`, `to`, `chunk`
 - `status`：状态变化，字段：`status`, `updated_at?`, `pending_interaction_id?`
@@ -412,8 +424,27 @@
 - `end`：连接结束，字段：`reason`（`waiting_user` 或 `terminal`）
 
 **重连约定**:
-- 客户端记录最近一条 `stdout/stderr` 事件的 `to`。
-- 重连时将该值带回 `stdout_from/stderr_from`，服务端仅推送未消费区间。
+- 结构化续传：客户端记录最近 `run_event.seq`，重连时使用 `cursor`。
+- 文本续传：客户端记录 `stdout/stderr` 事件 `to`，重连时回传 `stdout_from/stderr_from`。
+
+### 获取结构化历史事件
+`GET /v1/jobs/{request_id}/events/history`
+
+按区间拉取 `run_event` 历史，适用于断线补偿与复盘。
+
+**Query 参数**:
+- `from_seq` / `to_seq`（可选）：按序号区间拉取
+- `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
+
+### 获取日志片段（raw_ref 回跳）
+`GET /v1/jobs/{request_id}/logs/range`
+
+按字节区间读取日志片段，供前端从结构化事件回跳原始证据。
+
+**Query 参数**:
+- `stream`：`stdout` / `stderr` / `pty`
+- `byte_from`：起始字节偏移（含）
+- `byte_to`：结束字节偏移（不含）
 
 ### 取消运行 (Cancel Run)
 `POST /v1/jobs/{request_id}/cancel`
@@ -489,7 +520,7 @@
 - `GET /runs/{request_id}/result`：结果与产物展示页。
 - `GET /recordings`：录制会话列表。
 - `GET /recordings/{request_id}`：单步回放页。
-- `GET /api/runs/{request_id}/events`：代理后端 management SSE。
+- `GET /api/runs/{request_id}/events`：按 `run_source` 代理后端 SSE（installed:`/v1/jobs/*`，temp:`/v1/temp-skill-runs/*`）。
 - `POST /api/runs/{request_id}/reply`：代理后端 reply 并写入录制。
 - `GET /api/recordings/{request_id}`：读取录制 JSON。
 
@@ -590,7 +621,9 @@
 页面能力：
 - 展示 request/run 基本信息；
 - 展示 run 文件树（只读）与文件预览；文件区采用最大高度约束并在区内滚动；
-- 通过 SSE 实时查看输出：stdout 作为主对话区，stderr 在独立窗口展示；
+- 通过 SSE 实时查看输出：主对话优先消费 `chat_event`（FCMP），并将诊断/原始日志分区展示；
+- 支持 `raw_ref` 回跳：从结构化消息定位并预览原始日志区间；
+- 提供结构化事件关联视图（按 `seq/correlation` 浏览）；
 - `waiting_user` 下展示 pending 并提交 reply；
 - 支持 cancel 动作并收敛到终态。
 - 外部前端与内建 UI 均应遵循同一管理契约（`/v1/management/*`），避免分叉语义。
@@ -678,6 +711,7 @@
 ```json
 {
   "request_id": "2fd0a860-a560-4f2d-8c91-2d1d65f6a4f1",
+  "cache_hit": false,
   "status": "queued",
   "extracted_files": ["input_file"]
 }
@@ -704,7 +738,11 @@
 - `POST /v1/temp-skill-runs/{request_id}/cancel`
 
 语义与 `/v1/jobs/*` 对齐，但作用范围仅限临时 skill 的这次请求。
-另外，临时 skill 运行固定绕过缓存（不读 cache，也不回写 cache）。
+缓存策略与常规链路一致：
+- `runtime_options.execution_mode=auto` 且 `no_cache!=true`：允许 cache lookup 与 write-back。
+- `runtime_options.execution_mode=interactive`：不读 cache，也不回写 cache。
+- `runtime_options.no_cache=true`：无论模式，均禁用 cache lookup 与 write-back。
+- 临时 skill 的 auto 缓存键额外包含“上传 skill 压缩包整体哈希”，避免不同包误命中。
 
 ### 临时 Skill 包校验规则（严格）
 - Zip 必须且只能有一个顶层目录（顶层目录名即 `skill_id`）。

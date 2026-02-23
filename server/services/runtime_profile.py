@@ -98,6 +98,7 @@ class RuntimeProfile:
             env["HOME"] = str(self.agent_home)
         else:
             env["HOME"] = str(self.agent_home)
+            env["ZDOTDIR"] = str(self.agent_home)
         existing_path = env.get("PATH", "")
         prepend = os.pathsep.join(str(path) for path in self.managed_bin_dirs)
         env["PATH"] = f"{prepend}{os.pathsep}{existing_path}" if existing_path else prepend

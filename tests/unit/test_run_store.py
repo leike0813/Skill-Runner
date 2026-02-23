@@ -37,6 +37,14 @@ def test_run_store_cache_miss_returns_none(tmp_path):
     assert store.get_cached_run("missing") is None
 
 
+def test_run_store_regular_and_temp_cache_are_isolated(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    store.record_cache_entry("shared-key", "run-regular")
+    store.record_temp_cache_entry("shared-key", "run-temp")
+    assert store.get_cached_run("shared-key") == "run-regular"
+    assert store.get_temp_cached_run("shared-key") == "run-temp"
+
+
 def test_update_run_status_without_result_path(tmp_path):
     store = RunStore(db_path=tmp_path / "runs.db")
     store.create_run("run-1", "cachekey", "queued")

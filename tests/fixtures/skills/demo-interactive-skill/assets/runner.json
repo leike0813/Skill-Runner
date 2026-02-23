@@ -1,0 +1,20 @@
+{
+    "id": "demo-interactive-skill",
+    "version": "1.0.0",
+    "name": "Demo: Interactive Skill",
+    "description": "A demo skill that requires interactive conversation with the user.",
+    "engines": [
+        "codex",
+        "gemini",
+        "iflow"
+    ],
+    "execution_modes": [
+        "interactive"
+    ],
+    "entrypoint": {},
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    }
+}

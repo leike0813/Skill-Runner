@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -819,6 +820,43 @@ class InteractiveAskMissingHandleAdapter(InteractiveAskAdapter):
         raise RuntimeError("SESSION_RESUME_FAILED: missing thread.started")
 
 
+class InteractiveAskSessionInStderrAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "ask_user": {
+                        "interaction_id": 1,
+                        "kind": "open_text",
+                        "prompt": "continue?",
+                    }
+                }
+            )
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="assistant: please continue\n",
+            raw_stderr='{"session-id":"iflow-session-1"}\n',
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        match = re.search(r'"session-id"\s*:\s*"([^"]+)"', raw_stdout)
+        if not match:
+            raise RuntimeError("SESSION_RESUME_FAILED: missing iflow session-id")
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value=match.group(1),
+            created_at_turn=turn_index,
+        )
+
+
 class InteractiveAskMissingIdAdapter:
     async def run(self, skill, input_data, run_dir, options):
         output_path = run_dir / "raw" / "output.json"
@@ -841,12 +879,30 @@ class InteractiveAskMissingIdAdapter:
             artifacts_created=[],
         )
 
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="thread-1",
+            created_at_turn=turn_index,
+        )
+
 
 @pytest.mark.asyncio
 async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            }
+        )
+    )
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     skill = SkillManifest(
@@ -918,10 +974,94 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_job_interactive_invalid_ask_user_does_not_enter_waiting_user(tmp_path):
+async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_from_stderr(tmp_path):
+    skill_dir = tmp_path / "skill-stderr-session"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-stderr-session",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_request(
+            request_id="req-interactive-stderr-session",
+            skill_id="test-skill-stderr-session",
+            engine="codex",
+            parameter={},
+            engine_options={},
+            runtime_options={"execution_mode": "interactive"},
+            input_data={},
+        )
+        local_store.update_request_run_id("req-interactive-stderr-session", run_id)
+        local_store.create_run(run_id, None, "queued")
+
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveAskSessionInStderrAdapter()}
+        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
+            kind=EngineInteractiveProfileKind.RESUMABLE,
+            reason="probe_ok",
+            session_timeout_sec=session_timeout_sec,
+        )
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                "test-skill-stderr-session",
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        assert status_data["error"] is None
+        pending = local_store.get_pending_interaction("req-interactive-stderr-session")
+        assert pending is not None
+        handle = local_store.get_engine_session_handle("req-interactive-stderr-session")
+        assert handle is not None
+        assert handle["handle_value"] == "iflow-session-1"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_user(tmp_path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {"ok": {"type": "boolean"}}}))
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+            }
+        )
+    )
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     skill = SkillManifest(
@@ -971,8 +1111,753 @@ async def test_run_job_interactive_invalid_ask_user_does_not_enter_waiting_user(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = json.loads((run_dir / "status.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        pending = local_store.get_pending_interaction("req-interactive-invalid")
+        assert pending is not None
+        assert pending["interaction_id"] == 1
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+class DoneMarkerOutputAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "value": 7,
+                    "__SKILL_DONE__": True,
+                }
+            )
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":7,\\"__SKILL_DONE__\\":true}"}}\n',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+class EscapedDoneMarkerStreamOnlyAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "stream-marker-only"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":\\"stream-marker-only\\",\\"__SKILL_DONE__\\": true}"}}\n',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+class EscapedDoneMarkerWithInvalidOutputAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("{")
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":\\"bad\\",\\"__SKILL_DONE__\\": true}"}}\n',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+class InteractiveSoftCompletionAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"value": "soft-complete"}))
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"soft-complete"}}\n',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+class InteractiveNoEvidenceAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "ask_user": {
+                        "interaction_id": "bad-id",
+                        "kind": "open_text",
+                    }
+                }
+            )
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+class InteractiveYamlAskUserSignalAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps({"note": "this still passes permissive schema"}))
+        stdout = (
+            "<ASK_USER_YAML>\n"
+            "ask_user:\n"
+            "  interaction_id: 3\n"
+            "  kind: open_text\n"
+            "  prompt: Please provide missing details.\n"
+            "</ASK_USER_YAML>\n"
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout=stdout,
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_job_output_validation_strips_done_marker(tmp_path):
+    skill_dir = tmp_path / "skill-done-marker"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "integer"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-done-marker",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": DoneMarkerOutputAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": 7}
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_escaped_stream_done_marker_completes_without_soft_warning(tmp_path):
+    skill_dir = tmp_path / "skill-escaped-stream-marker"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-escaped-stream-marker",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": EscapedDoneMarkerStreamOnlyAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": "stream-marker-only"}
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" not in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_waiting(tmp_path):
+    skill_dir = tmp_path / "skill-done-marker-invalid-output"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-done-marker-invalid-output",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": EscapedDoneMarkerWithInvalidOutputAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
-        assert local_store.get_pending_interaction("req-interactive-invalid") is None
+        assert result_data["status"] == "failed"
+        assert result_data["pending_interaction"] is None
+        assert "Failed to validate output schema" in result_data["error"]["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path):
+    skill_dir = tmp_path / "skill-soft-complete"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-soft-complete",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": "soft-complete"}
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-no-evidence"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-no-evidence",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        max_attempt=3,
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        assert result_data["status"] == "waiting_user"
+        assert result_data["error"] is None
+        assert result_data["pending_interaction"] is not None
+        assert result_data["pending_interaction"]["interaction_id"] == 1
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-max-attempt"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-max-attempt",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        max_attempt=1,
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_path):
+    skill_dir = tmp_path / "skill-auto-soft-complete"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-auto-soft-complete",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "auto"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": "soft-complete"}
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" not in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-yaml-ask-user-enrichment"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-yaml-ask-user-enrichment",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        assert result_data["status"] == "waiting_user"
+        assert result_data["pending_interaction"] is not None
+        assert result_data["pending_interaction"]["interaction_id"] == 3
+        assert result_data["pending_interaction"]["prompt"] == "Please provide missing details."
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-yaml-ask-user-soft-complete"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {}})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-yaml-ask-user-soft-complete",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+class InteractiveDirectStringInteractionAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        output_path = run_dir / "raw" / "output.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "interaction_id": "demo-interactive-1",
+                    "kind": "open_text",
+                    "prompt": "Please share a short self-introduction.",
+                }
+            )
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
+            raw_stderr="",
+            output_file_path=output_path,
+            artifacts_created=[],
+        )
+
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="thread-1",
+            created_at_turn=turn_index,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_user(tmp_path):
+    skill_dir = tmp_path / "skill-direct-interaction"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"advise": {"type": "string"}},
+                "required": ["advise"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-direct-interaction",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        local_store.create_request(
+            request_id="req-direct-interactive",
+            skill_id=skill.id,
+            engine="codex",
+            parameter={},
+            engine_options={},
+            runtime_options={"execution_mode": "interactive"},
+            input_data={},
+        )
+        local_store.update_request_run_id("req-direct-interactive", run_id)
+        local_store.create_run(run_id, None, "queued")
+
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveDirectStringInteractionAdapter()}
+        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
+            kind=EngineInteractiveProfileKind.RESUMABLE,
+            reason="probe_ok",
+            session_timeout_sec=session_timeout_sec,
+        )
+
+        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = json.loads((run_dir / "status.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        pending = local_store.get_pending_interaction("req-direct-interactive")
+        assert pending is not None
+        assert pending["interaction_id"] == 1
+        assert pending["prompt"] == "Please share a short self-introduction."
+        assert pending["context"]["external_interaction_id"] == "demo-interactive-1"
+        assert pending["context"]["interaction_id_source"] == "fallback"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -985,7 +1870,7 @@ class InteractiveTwoTurnAdapter:
         output_path = run_dir / "raw" / "output.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if "__interactive_reply_payload" in options:
-            output_path.write_text(json.dumps({"value": "ok"}))
+            output_path.write_text(json.dumps({"value": "ok", "__SKILL_DONE__": True}))
             return EngineRunResult(
                 exit_code=0,
                 raw_stdout='{"type":"item.completed"}',
@@ -1028,7 +1913,13 @@ def _build_interactive_skill(tmp_path: Path) -> SkillManifest:
     skill_dir = tmp_path / "skill-interactive"
     skill_dir.mkdir()
     (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}})
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            }
+        )
     )
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
@@ -1038,6 +1929,54 @@ def _build_interactive_skill(tmp_path: Path) -> SkillManifest:
         engines=["codex"],
         schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
     )
+
+
+def test_load_skill_from_run_dir_reads_workspace_manifest(tmp_path):
+    run_dir = tmp_path / "run-resume"
+    skill_id = "temp-resume-skill"
+    skill_dir = run_dir / ".codex" / "skills" / skill_id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("demo", encoding="utf-8")
+    (assets_dir / "input.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {}}),
+        encoding="utf-8",
+    )
+    (assets_dir / "parameter.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {}}),
+        encoding="utf-8",
+    )
+    (assets_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"ok": {"type": "boolean"}}}),
+        encoding="utf-8",
+    )
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": skill_id,
+                "name": "Temp Resume Skill",
+                "version": "0.1.0",
+                "engines": ["codex"],
+                "execution_modes": ["interactive"],
+                "schemas": {
+                    "input": "assets/input.schema.json",
+                    "parameter": "assets/parameter.schema.json",
+                    "output": "assets/output.schema.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    orchestrator = JobOrchestrator()
+    manifest = orchestrator._load_skill_from_run_dir(
+        run_dir=run_dir,
+        skill_id=skill_id,
+        engine_name="codex",
+    )
+    assert manifest is not None
+    assert manifest.id == skill_id
+    assert manifest.path == skill_dir
 
 
 def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> None:
@@ -1427,7 +2366,15 @@ async def test_sticky_strict_false_auto_decides_and_continues(monkeypatch, tmp_p
 async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp_path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            }
+        )
+    )
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     skill = SkillManifest(

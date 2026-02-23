@@ -297,6 +297,65 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_management_run_events_history_delegate(monkeypatch):
+    async def _history(
+        request_id: str,
+        from_seq: int | None = None,
+        to_seq: int | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+    ):
+        assert request_id == "req-events"
+        assert from_seq == 2
+        assert to_seq == 4
+        assert from_ts is None
+        assert to_ts is None
+        return {
+            "request_id": request_id,
+            "count": 1,
+            "events": [{"seq": 3, "event": {"type": "agent.message.final"}}],
+        }
+
+    monkeypatch.setattr("server.routers.management.jobs_router.list_run_event_history", _history)
+
+    response = await _request(
+        "GET",
+        "/v1/management/runs/req-events/events/history?from_seq=2&to_seq=4",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request_id"] == "req-events"
+    assert payload["count"] == 1
+    assert payload["events"][0]["seq"] == 3
+
+
+@pytest.mark.asyncio
+async def test_management_run_log_range_delegate(monkeypatch):
+    async def _logs_range(
+        request_id: str,
+        stream: str,
+        byte_from: int,
+        byte_to: int,
+    ):
+        assert request_id == "req-events"
+        assert stream == "stderr"
+        assert byte_from == 2
+        assert byte_to == 7
+        return {"stream": "stderr", "byte_from": 2, "byte_to": 7, "chunk": "error"}
+
+    monkeypatch.setattr("server.routers.management.jobs_router.get_run_log_range", _logs_range)
+
+    response = await _request(
+        "GET",
+        "/v1/management/runs/req-events/logs/range?stream=stderr&byte_from=2&byte_to=7",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream"] == "stderr"
+    assert payload["chunk"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_management_run_pending_reply_cancel_delegate_to_jobs(monkeypatch):
     async def _pending(_request_id: str):
         return InteractionPendingResponse(

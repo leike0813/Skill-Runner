@@ -12,7 +12,7 @@ Skill-Runner/
 ├── server/                 # 服务端核心代码
 ├── skills/                 # 技能注册表 (Skill Registry)
 ├── tests/                  # 测试套件
-├── tests/integration/run_integration_tests.py # 集成测试入口脚本
+├── tests/engine_integration/run_engine_integration_tests.py # 引擎集成测试入口脚本
 ├── tests/e2e/run_e2e_tests.py # REST E2E 测试入口脚本
 ├── data/runs.db            # 运行元数据/缓存索引 (sqlite)
 ├── pyproject.toml          # Python 项目配置与依赖
@@ -70,15 +70,16 @@ skills/
 
 ```
 tests/
-├── integration/            # 集成测试逻辑
-│   ├── run_integration_tests.py # 集成测试运行器
-│   └── run_integration_tests.sh # 集成测试脚本封装
+├── engine_integration/     # 引擎执行链路集成测试
+│   ├── run_engine_integration_tests.py # 引擎集成测试运行器
+│   ├── run_engine_integration_tests.sh # 引擎集成测试脚本封装
+│   └── suites/             # 引擎集成测试套件定义 (YAML)
+├── api_integration/        # API/UI 契约集成测试
+│   ├── test_*.py
+│   └── run_api_integration_tests.sh
 ├── e2e/                    # REST E2E 测试
 │   ├── run_e2e_tests.py     # E2E 测试运行器
 │   └── run_e2e_tests.sh     # E2E 脚本封装
-├── suites/                 # 测试套件定义 (YAML)
-│   ├── demo-bible-verse.yaml
-│   └── ...
 ├── fixtures/               # 测试用静态文件
 ├── unit/                   # 单元测试 (Pytest)
 │   ├── test_adapters.py
@@ -113,6 +114,6 @@ data/
 ## 关键文件说明
 
 - **`pyproject.toml`**: 项目元数据、依赖列表和构建配置。
-- **`tests/integration/run_integration_tests.py`**: 统一的测试入口，支持运行指定的测试套件。
+- **`tests/engine_integration/run_engine_integration_tests.py`**: 引擎链路集成测试入口，统一通过夹具执行测试套件。
 - **`tests/e2e/run_e2e_tests.py`**: REST E2E 测试入口，覆盖 API 全流程。
 - **`server/core_config.py`**: 定义了系统的核心配置项（如默认径、超时设置等），采用 YACS 配置库管理。

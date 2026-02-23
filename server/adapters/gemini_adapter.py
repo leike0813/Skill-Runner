@@ -4,12 +4,29 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
-from .base import EngineAdapter, ProcessExecutionResult
+from .base import (
+    EngineAdapter,
+    ProcessExecutionResult,
+    RuntimeAssistantMessage,
+    RuntimeStreamParseResult,
+    RuntimeStreamRawRow,
+)
 from ..config import config
 from ..services.config_generator import config_generator
 from ..services.skill_patcher import skill_patcher
 from ..services.schema_validator import schema_validator
 from ..services.agent_cli_manager import AgentCliManager
+from ..services.engine_command_profile import engine_command_profile, merge_cli_args
+from ..services.runtime_parse_utils import (
+    collect_json_parse_errors,
+    dedup_assistant_messages,
+    extract_json_document_with_span,
+    extract_fenced_or_plain_json,
+    find_session_id,
+    find_session_id_in_text,
+    stream_lines_with_offsets,
+    strip_runtime_script_envelope,
+)
 from jinja2 import Template
 import shutil
 
@@ -92,18 +109,17 @@ class GeminiAdapter(EngineAdapter):
             try:
                 shutil.copytree(skill.path, skills_target_dir)
                 logger.info("Installed skill %s to %s", skill.id, skills_target_dir)
-            except Exception as e:
+            except Exception:
                  logger.exception("Failed to install skill")
                  # We might want to re-raise here if critical? 
                  # For now, print error, but execution might fail later.
 
-            # Patching
-            if skill.artifacts:
-                skill_patcher.patch_skill_md(
-                    skills_target_dir,
-                    skill.artifacts,
-                    execution_mode=self._resolve_execution_mode(options),
-                )
+            # Always patch runtime contract/mode semantics; artifacts patch is optional.
+            skill_patcher.patch_skill_md(
+                skills_target_dir,
+                skill.artifacts or [],
+                execution_mode=self._resolve_execution_mode(options),
+            )
                 
             return skills_target_dir
         return Path(gemini_config_dir / "skills" / "unknown") # Should verify earlier
@@ -178,22 +194,16 @@ class GeminiAdapter(EngineAdapter):
             for dep in skill.runtime.dependencies:
                 cmd_parts.append(f"--with={dep}")
                 
-        gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
-        if gemini_cmd is None:
-            raise RuntimeError("Gemini CLI not found in managed prefix")
         resume_handle = options.get("__resume_session_handle")
         if isinstance(resume_handle, dict):
-            cmd_parts.extend(
-                self.build_resume_command(
-                    prompt=prompt,
-                    options=options,
-                    session_handle=EngineSessionHandle.model_validate(resume_handle),
-                )
+            engine_command = self.build_resume_command(
+                prompt=prompt,
+                options=options,
+                session_handle=EngineSessionHandle.model_validate(resume_handle),
             )
         else:
-            cmd_parts.extend([str(gemini_cmd)])
-            cmd_parts.append("--yolo")
-            cmd_parts.append(prompt)
+            engine_command = self.build_start_command(prompt=prompt, options=options)
+        cmd_parts.extend(engine_command)
         
         logger.info("Executing Gemini CLI: %s in %s", " ".join(cmd_parts), run_dir)
         
@@ -203,6 +213,28 @@ class GeminiAdapter(EngineAdapter):
             env=env,
         )
         return await self._capture_process_output(proc, run_dir, options, "Gemini")
+
+    def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
+        if not use_profile_defaults:
+            return []
+        return engine_command_profile.resolve_args(engine="gemini", action=action)
+
+    def build_start_command(
+        self,
+        *,
+        prompt: str,
+        options: Dict[str, Any],
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
+    ) -> list[str]:
+        gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
+        if gemini_cmd is None:
+            raise RuntimeError("Gemini CLI not found in managed prefix")
+        if passthrough_args is not None:
+            return [str(gemini_cmd), *passthrough_args]
+        defaults = self._resolve_profile_flags(action="start", use_profile_defaults=use_profile_defaults)
+        flags = merge_cli_args(defaults, [])
+        return [str(gemini_cmd), *flags, prompt]
 
     def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
@@ -248,6 +280,8 @@ class GeminiAdapter(EngineAdapter):
         prompt: str,
         options: Dict[str, Any],
         session_handle: EngineSessionHandle,
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
     ) -> list[str]:
         session_id = session_handle.handle_value.strip()
         if not session_id:
@@ -255,20 +289,212 @@ class GeminiAdapter(EngineAdapter):
         gemini_cmd = self.agent_manager.resolve_engine_command("gemini")
         if gemini_cmd is None:
             raise RuntimeError("Gemini CLI not found in managed prefix")
+        if passthrough_args is not None:
+            flags = [
+                token
+                for token in passthrough_args
+                if isinstance(token, str) and token.startswith("-")
+            ]
+            merged = merge_cli_args([], flags)
+            return [str(gemini_cmd), "--resume", session_id, *merged, prompt]
+        defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=use_profile_defaults)
+        merged = merge_cli_args(defaults, [])
         return [
             str(gemini_cmd),
             "--resume",
             session_id,
-            "--yolo",
+            *merged,
             prompt,
         ]
+
+    def parse_runtime_stream(
+        self,
+        *,
+        stdout_raw: bytes,
+        stderr_raw: bytes,
+        pty_raw: bytes = b"",
+    ) -> RuntimeStreamParseResult:
+        stdout_rows = strip_runtime_script_envelope(stream_lines_with_offsets("stdout", stdout_raw))
+        stderr_rows = stream_lines_with_offsets("stderr", stderr_raw)
+        pty_rows = strip_runtime_script_envelope(stream_lines_with_offsets("pty", pty_raw))
+        stdout_text = stdout_raw.decode("utf-8", errors="replace")
+        stderr_text = stderr_raw.decode("utf-8", errors="replace")
+        pty_text = pty_raw.decode("utf-8", errors="replace")
+
+        assistant_messages: list[RuntimeAssistantMessage] = []
+        diagnostics: list[str] = []
+        session_id: str | None = None
+        structured_types: list[str] = []
+        confidence = 0.5
+        consumed_ranges: dict[str, list[tuple[int, int]]] = {
+            "stdout": [],
+            "stderr": [],
+            "pty": [],
+        }
+
+        def _mark_consumed(stream: str, byte_from: int, byte_to: int) -> None:
+            if byte_from < 0 or byte_to <= byte_from:
+                return
+            bucket = consumed_ranges.get(stream)
+            if bucket is None:
+                return
+            bucket.append((byte_from, byte_to))
+
+        def _consume_payload(
+            *,
+            payload: Any,
+            stream: str,
+            byte_from: int,
+            byte_to: int,
+            structured_type: str,
+        ) -> bool:
+            nonlocal session_id, confidence
+            if not isinstance(payload, dict):
+                return False
+            if structured_type:
+                structured_types.append(structured_type)
+            consumed = False
+            row_session_id = find_session_id(payload)
+            if row_session_id and not session_id:
+                session_id = row_session_id
+            response = payload.get("response")
+            if isinstance(response, str) and response.strip():
+                assistant_messages.append(
+                    {
+                        "text": response,
+                        "raw_ref": {
+                            "stream": stream,
+                            "byte_from": byte_from,
+                            "byte_to": byte_to,
+                        },
+                    }
+                )
+                confidence = max(confidence, 0.9 if stream == "stderr" else 0.8)
+                consumed = True
+            elif response is not None:
+                assistant_messages.append(
+                    {
+                        "text": json.dumps(response, ensure_ascii=False),
+                        "raw_ref": {
+                            "stream": stream,
+                            "byte_from": byte_from,
+                            "byte_to": byte_to,
+                        },
+                    }
+                )
+                confidence = max(confidence, 0.8 if stream == "stderr" else 0.75)
+                consumed = True
+            if row_session_id:
+                consumed = True
+            if consumed:
+                _mark_consumed(stream, byte_from, byte_to)
+            return consumed
+
+        def _consume_stream_records(records: list[dict[str, Any]]) -> bool:
+            consumed_any = False
+            for row in records:
+                if _consume_payload(
+                    payload=row["payload"],
+                    stream=str(row["stream"]),
+                    byte_from=int(row["byte_from"]),
+                    byte_to=int(row["byte_to"]),
+                    structured_type="gemini.stream_response",
+                ):
+                    consumed_any = True
+            return consumed_any
+
+        def _document_json_fallback(*, stream: str, text: str, raw_size: int) -> bool:
+            doc = extract_json_document_with_span(text)
+            if doc is None:
+                return False
+            payload, byte_from, byte_to = doc
+            return _consume_payload(
+                payload=payload,
+                stream=stream,
+                byte_from=byte_from,
+                byte_to=byte_to if byte_to > byte_from else raw_size,
+                structured_type="gemini.stream_response" if stream != "stderr" else "gemini.response",
+            )
+
+        used_stream_json_fallback = False
+        if stderr_text.strip():
+            stderr_used = _document_json_fallback(stream="stderr", text=stderr_text, raw_size=len(stderr_raw))
+            if not stderr_used:
+                fallback = extract_fenced_or_plain_json(stderr_text)
+                if fallback is not None:
+                    stderr_used = _consume_payload(
+                        payload=fallback,
+                        stream="stderr",
+                        byte_from=0,
+                        byte_to=len(stderr_raw),
+                        structured_type="gemini.fenced_json_fallback",
+                    )
+                if not stderr_used:
+                    diagnostics.append("GEMINI_STDERR_JSON_PARSE_FAILED")
+
+        if not assistant_messages and stdout_text.strip():
+            stdout_used = _document_json_fallback(stream="stdout", text=stdout_text, raw_size=len(stdout_raw))
+            if not stdout_used:
+                stdout_records, _ = collect_json_parse_errors(stdout_rows)
+                stdout_used = _consume_stream_records(stdout_records)
+            if stdout_used:
+                used_stream_json_fallback = True
+
+        pty_used = False
+        if not assistant_messages and pty_text.strip():
+            pty_used = _document_json_fallback(stream="pty", text=pty_text, raw_size=len(pty_raw))
+            if not pty_used:
+                pty_records, _ = collect_json_parse_errors(pty_rows)
+                pty_used = _consume_stream_records(pty_records)
+            if pty_used:
+                diagnostics.append("PTY_FALLBACK_USED")
+                used_stream_json_fallback = True
+
+        if used_stream_json_fallback:
+            diagnostics.append("GEMINI_STREAM_JSON_FALLBACK_USED")
+
+        if not session_id:
+            session_id = (
+                find_session_id_in_text(stderr_text)
+                or find_session_id_in_text(stdout_text)
+                or find_session_id_in_text(pty_text)
+            )
+
+        def _row_overlaps_consumed(row: RuntimeStreamRawRow) -> bool:
+            ranges = consumed_ranges.get(row["stream"], [])
+            if not ranges:
+                return False
+            row_start = int(row["byte_from"])
+            row_end = int(row["byte_to"])
+            for start, end in ranges:
+                if row_start < end and row_end > start:
+                    return True
+            return False
+
+        raw_candidates: list[RuntimeStreamRawRow] = [*stdout_rows, *stderr_rows]
+        if pty_used:
+            raw_candidates.extend(pty_rows)
+        raw_rows = [row for row in raw_candidates if not _row_overlaps_consumed(row)]
+
+        if any(row["stream"] == "stdout" for row in raw_rows):
+            diagnostics.append("GEMINI_STDOUT_NOISE")
+
+        return {
+            "parser": "gemini_json",
+            "confidence": confidence,
+            "session_id": session_id,
+            "assistant_messages": dedup_assistant_messages(assistant_messages),
+            "raw_rows": raw_rows,
+            "diagnostics": list(dict.fromkeys(diagnostics)),
+            "structured_types": list(dict.fromkeys(structured_types)),
+        }
 
     def _extract_session_id(self, raw_stdout: str) -> Optional[str]:
         try:
             payload = json.loads(raw_stdout)
         except json.JSONDecodeError:
-            return None
-        return self._find_session_id(payload)
+            return find_session_id_in_text(raw_stdout)
+        return self._find_session_id(payload) or find_session_id_in_text(raw_stdout)
 
     def _find_session_id(self, payload: Any) -> Optional[str]:
         if isinstance(payload, dict):

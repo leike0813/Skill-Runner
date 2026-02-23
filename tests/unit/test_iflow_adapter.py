@@ -55,6 +55,71 @@ def test_extract_session_handle_missing_session_id_raises():
         adapter.extract_session_handle("<Execution Info>{}</Execution Info>", turn_index=1)
 
 
+def test_parse_runtime_stream_extracts_session_id_from_execution_info_and_cleans_message():
+    adapter = IFlowAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b"hello from iflow\n"
+            b"<Execution Info>\n"
+            b"{\"session-id\":\"iflow-xyz\",\"assistantRounds\":1}\n"
+            b"</Execution Info>\n"
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["session_id"] == "iflow-xyz"
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from iflow"
+
+
+def test_parse_runtime_stream_extracts_session_id_from_pty_when_stdout_missing():
+    adapter = IFlowAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b"",
+        stderr_raw=b"",
+        pty_raw=(
+            b"<Execution Info>\n"
+            b"{\"session-id\":\"iflow-from-pty\"}\n"
+            b"</Execution Info>\n"
+        ),
+    )
+    assert parsed["session_id"] == "iflow-from-pty"
+
+
+def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate():
+    adapter = IFlowAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b"hello from iflow\n"
+            b"<Execution Info>\n"
+            b"{\"session-id\":\"iflow-main\"}\n"
+            b"</Execution Info>\n"
+        ),
+        stderr_raw=b"",
+        pty_raw=(
+            b"hello from iflow\n"
+            b"<Execution Info>\n"
+            b"{\"session-id\":\"iflow-main\"}\n"
+            b"</Execution Info>\n"
+        ),
+    )
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from iflow"
+    assert "PTY_FALLBACK_USED" not in parsed["diagnostics"]
+
+
+def test_parse_runtime_stream_uses_pty_fallback_when_split_empty():
+    adapter = IFlowAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b"",
+        stderr_raw=b"",
+        pty_raw=b"hello from pty only\n",
+    )
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "hello from pty only"
+    assert "PTY_FALLBACK_USED" in parsed["diagnostics"]
+
+
 def test_parse_output_valid_ask_user_envelope():
     adapter = IFlowAdapter()
     raw = json.dumps(

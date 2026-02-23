@@ -7,6 +7,7 @@
         <thead>
             <tr>
                 <th>Request ID</th>
+                <th>Source</th>
                 <th>Status</th>
                 <th>Skill</th>
                 <th>Engine</th>
@@ -19,6 +20,7 @@
         {% for row in rows %}
             <tr>
                 <td><code>{{ row.request_id }}</code></td>
+                <td>{{ row.run_source }}</td>
                 <td>
                     {{ row.status }}
                     {% if row.state_error %}
@@ -30,14 +32,14 @@
                 <td>{{ row.updated_at or "-" }}</td>
                 <td>{{ row.step_count }}</td>
                 <td>
-                    <a class="btn secondary" href="/runs/{{ row.request_id }}">Open Observation</a>
-                    <a class="btn secondary" href="/runs/{{ row.request_id }}/result">Result</a>
+                    <a class="btn secondary" href="/runs/{{ row.request_id }}?source={{ row.run_source }}">Open Observation</a>
+                    <a class="btn secondary" href="/runs/{{ row.request_id }}/result?source={{ row.run_source }}">Result</a>
                     <a class="btn secondary" href="/recordings/{{ row.request_id }}">Replay</a>
                 </td>
             </tr>
         {% endfor %}
         {% if not rows %}
-            <tr><td colspan="7" class="muted">No runs created from this client yet.</td></tr>
+            <tr><td colspan="8" class="muted">No runs created from this client yet.</td></tr>
         {% endif %}
         </tbody>
     </table>

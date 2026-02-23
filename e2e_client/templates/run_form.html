@@ -3,12 +3,13 @@
 <section class="card">
     <h2 style="margin-top: 0;">Run Skill: {{ skill.name or skill.id }}</h2>
     <p class="muted"><code>{{ skill.id }}</code> • engines: {{ ", ".join(engines) }}</p>
+    <p class="muted"><strong>Run Source:</strong> {{ run_source }}</p>
 
     {% for error in errors %}
         <div class="error">{{ error }}</div>
     {% endfor %}
 
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" action="{{ form_action }}">
         <div style="margin-bottom: 14px;">
             <label for="engine"><strong>Engine</strong></label><br>
             <select id="engine" name="engine" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
@@ -70,7 +71,11 @@
 
         <div class="card" style="margin-top: 16px;">
             <h3 style="margin-top: 0;">File Upload</h3>
-            <p class="muted">Each selected file is zipped with its field name as file name before calling <code>/v1/jobs/{request_id}/upload</code>.</p>
+            {% if run_source == "temp" %}
+                <p class="muted">The selected fixture skill is dynamically packaged and uploaded via <code>/v1/temp-skill-runs/{request_id}/upload</code>. Input files are zipped with schema keys as entry names.</p>
+            {% else %}
+                <p class="muted">Each selected file is zipped with its field name as file name before calling <code>/v1/jobs/{request_id}/upload</code>.</p>
+            {% endif %}
             {% if file_fields %}
                 {% for field in file_fields %}
                     <div style="margin-bottom: 12px;">

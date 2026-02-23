@@ -238,14 +238,48 @@ async def get_management_run_file(
 async def stream_management_run_events(
     request_id: str,
     request: Request,
+    cursor: int = Query(default=0, ge=0),
     stdout_from: int = Query(default=0, ge=0),
     stderr_from: int = Query(default=0, ge=0),
 ):
     return await jobs_router.stream_run_events(
         request_id=request_id,
         request=request,
+        cursor=cursor,
         stdout_from=stdout_from,
         stderr_from=stderr_from,
+    )
+
+
+@router.get("/runs/{request_id}/events/history")
+async def list_management_run_event_history(
+    request_id: str,
+    from_seq: int | None = Query(default=None, ge=0),
+    to_seq: int | None = Query(default=None, ge=0),
+    from_ts: str | None = Query(default=None),
+    to_ts: str | None = Query(default=None),
+):
+    return await jobs_router.list_run_event_history(
+        request_id=request_id,
+        from_seq=from_seq,
+        to_seq=to_seq,
+        from_ts=from_ts,
+        to_ts=to_ts,
+    )
+
+
+@router.get("/runs/{request_id}/logs/range")
+async def get_management_run_log_range(
+    request_id: str,
+    stream: str = Query(...),
+    byte_from: int = Query(default=0, ge=0),
+    byte_to: int = Query(default=0, ge=0),
+):
+    return await jobs_router.get_run_log_range(
+        request_id=request_id,
+        stream=stream,
+        byte_from=byte_from,
+        byte_to=byte_to,
     )
 
 

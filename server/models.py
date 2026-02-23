@@ -50,6 +50,7 @@ class InteractiveErrorCode(str, Enum):
     SESSION_RESUME_FAILED = "SESSION_RESUME_FAILED"
     INTERACTION_WAIT_TIMEOUT = "INTERACTION_WAIT_TIMEOUT"
     INTERACTION_PROCESS_LOST = "INTERACTION_PROCESS_LOST"
+    INTERACTIVE_MAX_ATTEMPT_EXCEEDED = "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
     ORCHESTRATOR_RESTART_INTERRUPTED = "ORCHESTRATOR_RESTART_INTERRUPTED"
 
 
@@ -157,6 +158,9 @@ class SkillManifest(BaseModel):
 
     execution_modes: List[ExecutionMode] = Field(default_factory=lambda: [ExecutionMode.AUTO])
     """Allowed execution modes for this skill."""
+
+    max_attempt: Optional[int] = Field(default=None, ge=1)
+    """Optional maximum interactive turn attempts before forced failure."""
     
     entrypoint: Optional[Dict[str, Any]] = {} 
     """
@@ -241,6 +245,7 @@ class TempSkillRunCreateResponse(BaseModel):
 class TempSkillRunUploadResponse(BaseModel):
     """Response for temporary skill package/input upload."""
     request_id: str
+    cache_hit: bool = False
     status: RunStatus
     extracted_files: List[str] = []
 
@@ -490,6 +495,66 @@ class RunLogsResponse(BaseModel):
 
     stderr: Optional[str] = None
     """Captured stderr output."""
+
+
+class RuntimeEventCategory(str, Enum):
+    """Top-level category for runtime protocol events."""
+    LIFECYCLE = "lifecycle"
+    AGENT = "agent"
+    INTERACTION = "interaction"
+    TOOL = "tool"
+    ARTIFACT = "artifact"
+    DIAGNOSTIC = "diagnostic"
+    RAW = "raw"
+
+
+class RuntimeEventSource(BaseModel):
+    """Source metadata for a runtime event."""
+    engine: str
+    parser: Optional[str] = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class RuntimeEventRef(BaseModel):
+    """Byte-level reference back to raw stream evidence."""
+    attempt_number: int = Field(ge=1)
+    stream: str
+    byte_from: int = Field(ge=0)
+    byte_to: int = Field(ge=0)
+    encoding: str = "utf-8"
+
+
+class RuntimeEventIdentity(BaseModel):
+    """Event semantic identity."""
+    category: RuntimeEventCategory
+    type: str
+
+
+class RuntimeEventEnvelope(BaseModel):
+    """RASP/1.0 event envelope."""
+    protocol_version: str = "rasp/1.0"
+    run_id: str
+    seq: int = Field(ge=1)
+    ts: datetime
+    source: RuntimeEventSource
+    event: RuntimeEventIdentity
+    data: Dict[str, Any] = Field(default_factory=dict)
+    correlation: Dict[str, Any] = Field(default_factory=dict)
+    attempt_number: int = Field(ge=1)
+    raw_ref: Optional[RuntimeEventRef] = None
+
+
+class ConversationEventEnvelope(BaseModel):
+    """FCMP/1.0 event envelope."""
+    protocol_version: str = "fcmp/1.0"
+    run_id: str
+    seq: int = Field(ge=1)
+    ts: datetime
+    engine: str
+    type: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+    meta: Dict[str, Any] = Field(default_factory=dict)
+    raw_ref: Optional[RuntimeEventRef] = None
 
 
 class InteractionKind(str, Enum):

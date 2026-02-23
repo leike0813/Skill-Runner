@@ -10,6 +10,7 @@ PORT_ENV = "SKILL_RUNNER_E2E_CLIENT_PORT"
 BACKEND_BASE_URL_ENV = "SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL"
 HOST_ENV = "SKILL_RUNNER_E2E_CLIENT_HOST"
 RECORDINGS_DIR_ENV = "SKILL_RUNNER_E2E_CLIENT_RECORDINGS_DIR"
+FIXTURES_SKILLS_DIR_ENV = "SKILL_RUNNER_E2E_CLIENT_FIXTURES_SKILLS_DIR"
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class E2EClientSettings:
     port: int
     backend_base_url: str
     recordings_dir: Path
+    fixtures_skills_dir: Path
 
 
 def load_settings() -> E2EClientSettings:
@@ -36,11 +38,19 @@ def load_settings() -> E2EClientSettings:
     else:
         recordings_dir = Path(__file__).resolve().parent / "recordings"
     recordings_dir.mkdir(parents=True, exist_ok=True)
+    fixtures_skills_dir_raw = os.environ.get(FIXTURES_SKILLS_DIR_ENV, "").strip()
+    if fixtures_skills_dir_raw:
+        fixtures_skills_dir = Path(fixtures_skills_dir_raw).expanduser()
+    else:
+        fixtures_skills_dir = (
+            Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "skills"
+        )
     return E2EClientSettings(
         host=host,
         port=port,
         backend_base_url=backend_base_url.rstrip("/"),
         recordings_dir=recordings_dir,
+        fixtures_skills_dir=fixtures_skills_dir,
     )
 
 
@@ -57,4 +67,3 @@ def _parse_port(raw: str | None, *, default: int) -> int:
     if value < 1 or value > 65535:
         return default
     return value
-

@@ -5,10 +5,23 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from server.services.codex_config_manager import CodexConfigManager
 from server.services.agent_cli_manager import AgentCliManager
+from server.services.engine_command_profile import engine_command_profile, merge_cli_args
+from server.services.runtime_parse_utils import (
+    collect_json_parse_errors,
+    dedup_assistant_messages,
+    find_session_id,
+    stream_lines_with_offsets,
+    strip_runtime_script_envelope,
+)
 
 logger = logging.getLogger(__name__)
 
-from .base import EngineAdapter, ProcessExecutionResult
+from .base import (
+    EngineAdapter,
+    ProcessExecutionResult,
+    RuntimeAssistantMessage,
+    RuntimeStreamParseResult,
+)
 from ..models import AdapterTurnResult, EngineSessionHandle, EngineSessionHandleType, SkillManifest
 
 RUNNER_ONLY_OPTION_KEYS = {
@@ -59,18 +72,41 @@ class CodexAdapter(EngineAdapter):
         
         # 2. Fuse Configuration
         try:
+            profile_name_override = options.get("__codex_profile_name")
+            profile_name = (
+                profile_name_override.strip()
+                if isinstance(profile_name_override, str)
+                else ""
+            )
+            config_manager = self.config_manager
+            if profile_name:
+                if isinstance(self.config_manager, CodexConfigManager):
+                    config_manager = CodexConfigManager(
+                        config_path=self.config_manager.config_path,
+                        profile_name=profile_name,
+                    )
+                else:
+                    try:
+                        setattr(config_manager, "profile_name", profile_name)
+                    except Exception:
+                        pass
             codex_overrides = self._extract_codex_overrides(options)
-            fused_settings = self.config_manager.generate_profile_settings(skill_defaults, codex_overrides)
-            logger.info(f"Updating Codex profile '{CodexConfigManager.PROFILE_NAME}' with fused settings")
+            fused_settings = config_manager.generate_profile_settings(skill_defaults, codex_overrides)
+            active_profile_name = getattr(
+                config_manager,
+                "profile_name",
+                CodexConfigManager.PROFILE_NAME,
+            )
+            logger.info("Updating Codex profile '%s' with fused settings", active_profile_name)
             
             # NOTE: Currently CodexConfigManager updates the GLOBAL user config.
             # Ideal architecture requires local config file passed to CLI via -c, 
             # but Codex CLI might not fully support isolation yet.
             # Stick to profile injection for now as documented in design.
-            self.config_manager.update_profile(fused_settings)
+            config_manager.update_profile(fused_settings)
             
             # Return path to global config as a placeholder since we modified it in-place
-            return self.config_manager.config_path
+            return config_manager.config_path
             
         except ValueError as e:
             raise RuntimeError(f"Configuration Error: {e}")
@@ -123,18 +159,17 @@ class CodexAdapter(EngineAdapter):
                 import shutil
                 shutil.copytree(skill.path, skills_target_dir)
                 logger.info("Installed skill %s to %s", skill.id, skills_target_dir)
-            except Exception as e:
+            except Exception:
                  logger.exception("Failed to install skill")
                  # Proceed with original path? No, standard requires workspace copy.
         
-        # Patching
-        if skill.artifacts:
-            from ..services.skill_patcher import skill_patcher
-            skill_patcher.patch_skill_md(
-                skills_target_dir,
-                skill.artifacts,
-                execution_mode=self._resolve_execution_mode(options),
-            )
+        # Always patch runtime contract/mode semantics; artifacts patch is optional.
+        from ..services.skill_patcher import skill_patcher
+        skill_patcher.patch_skill_md(
+            skills_target_dir,
+            skill.artifacts or [],
+            execution_mode=self._resolve_execution_mode(options),
+        )
                 
         return skills_target_dir
 
@@ -209,15 +244,7 @@ class CodexAdapter(EngineAdapter):
                 session_handle=EngineSessionHandle.model_validate(resume_handle),
             )
         else:
-            cmd = [
-                str(self._resolve_codex_command()),
-                "exec",
-                "--skip-git-repo-check",
-                "--json",
-                "-p", CodexConfigManager.PROFILE_NAME,
-                prompt
-            ]
-            cmd.insert(2, self._resolve_auto_execution_flag())
+            cmd = self.build_start_command(prompt=prompt, options=options)
         
         logger.info("Executing Codex command: %s", " ".join(cmd))
         
@@ -237,11 +264,53 @@ class CodexAdapter(EngineAdapter):
             raise RuntimeError("Codex CLI not found in managed prefix")
         return cmd
 
-    def _resolve_auto_execution_flag(self) -> str:
-        sandbox_flag = "--full-auto"
-        if os.environ.get("LANDLOCK_ENABLED") == "0":
-            sandbox_flag = "--yolo"
-        return sandbox_flag
+    def _apply_landlock_flag_fallback(self, flags: list[str]) -> list[str]:
+        if os.environ.get("LANDLOCK_ENABLED") != "0":
+            return flags
+        replaced = ["--yolo" if token == "--full-auto" else token for token in flags]
+        if "--yolo" in replaced:
+            return replaced
+        return replaced
+
+    def _strip_resume_profile_flags(self, flags: list[str]) -> list[str]:
+        filtered: list[str] = []
+        skip_next = False
+        for token in flags:
+            if skip_next:
+                skip_next = False
+                continue
+            if token == "-p":
+                skip_next = True
+                continue
+            if token == "--profile":
+                skip_next = True
+                continue
+            if token.startswith("--profile="):
+                continue
+            filtered.append(token)
+        return filtered
+
+    def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
+        if not use_profile_defaults:
+            return []
+        return engine_command_profile.resolve_args(engine="codex", action=action)
+
+    def build_start_command(
+        self,
+        *,
+        prompt: str,
+        options: Dict[str, Any],
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
+    ) -> list[str]:
+        executable = str(self._resolve_codex_command())
+        if passthrough_args is not None:
+            fallback_flags = self._apply_landlock_flag_fallback(list(passthrough_args))
+            return [executable, *fallback_flags]
+        default_flags = self._resolve_profile_flags(action="start", use_profile_defaults=use_profile_defaults)
+        merged_flags = merge_cli_args(default_flags, [])
+        merged_flags = self._apply_landlock_flag_fallback(merged_flags)
+        return [executable, "exec", *merged_flags, prompt]
 
     def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         """
@@ -306,20 +375,121 @@ class CodexAdapter(EngineAdapter):
         prompt: str,
         options: Dict[str, Any],
         session_handle: EngineSessionHandle,
+        passthrough_args: list[str] | None = None,
+        use_profile_defaults: bool = True,
     ) -> list[str]:
         thread_id = session_handle.handle_value.strip()
         if not thread_id:
             raise RuntimeError("SESSION_RESUME_FAILED: empty codex thread id")
-        cmd = [
-            str(self._resolve_codex_command()),
-            "exec",
-            "resume",
-            "--skip-git-repo-check",
-            "--json",
-            "-p",
-            CodexConfigManager.PROFILE_NAME,
-            thread_id,
-            prompt,
-        ]
-        cmd.insert(2, self._resolve_auto_execution_flag())
-        return cmd
+        executable = str(self._resolve_codex_command())
+        if passthrough_args is not None:
+            flags = [
+                token
+                for token in passthrough_args
+                if isinstance(token, str) and token.startswith("-")
+            ]
+            defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=False)
+            merged = merge_cli_args(defaults, flags)
+            merged = self._strip_resume_profile_flags(merged)
+            merged = self._apply_landlock_flag_fallback(merged)
+            return [executable, "exec", "resume", *merged, thread_id, prompt]
+        defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=use_profile_defaults)
+        merged = merge_cli_args(defaults, [])
+        merged = self._strip_resume_profile_flags(merged)
+        merged = self._apply_landlock_flag_fallback(merged)
+        return [executable, "exec", "resume", *merged, thread_id, prompt]
+
+    def parse_runtime_stream(
+        self,
+        *,
+        stdout_raw: bytes,
+        stderr_raw: bytes,
+        pty_raw: bytes = b"",
+    ) -> RuntimeStreamParseResult:
+        stdout_rows = strip_runtime_script_envelope(stream_lines_with_offsets("stdout", stdout_raw))
+        pty_rows = strip_runtime_script_envelope(stream_lines_with_offsets("pty", pty_raw))
+        records, raw_rows = collect_json_parse_errors(stdout_rows)
+        pty_records, pty_raw_rows = collect_json_parse_errors(pty_rows)
+
+        assistant_messages: list[RuntimeAssistantMessage] = []
+        diagnostics: list[str] = []
+        session_id: str | None = None
+        structured_types: list[str] = []
+
+        for row in records:
+            payload = row["payload"]
+            row_session_id = find_session_id(payload)
+            if row_session_id and not session_id:
+                session_id = row_session_id
+            payload_type = payload.get("type")
+            if isinstance(payload_type, str):
+                structured_types.append(payload_type)
+            if payload.get("type") != "item.completed":
+                continue
+            item = payload.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    assistant_messages.append(
+                        {
+                            "text": text,
+                            "raw_ref": {
+                                "stream": row["stream"],
+                                "byte_from": row["byte_from"],
+                                "byte_to": row["byte_to"],
+                            },
+                        }
+                    )
+
+        stdout_turn_completed = any(
+            isinstance(row["payload"], dict) and row["payload"].get("type") == "turn.completed"
+            for row in records
+        )
+        pty_turn_completed = any(
+            isinstance(row["payload"], dict) and row["payload"].get("type") == "turn.completed"
+            for row in pty_records
+        )
+        use_pty_fallback = (not assistant_messages and pty_records) or (
+            not stdout_turn_completed and pty_turn_completed
+        )
+
+        if use_pty_fallback:
+            diagnostics.append("PTY_FALLBACK_USED")
+            for row in pty_records:
+                payload = row["payload"]
+                row_session_id = find_session_id(payload)
+                if row_session_id and not session_id:
+                    session_id = row_session_id
+                payload_type = payload.get("type")
+                if isinstance(payload_type, str):
+                    structured_types.append(payload_type)
+                if payload.get("type") != "item.completed":
+                    continue
+                item = payload.get("item")
+                if isinstance(item, dict) and item.get("type") == "agent_message":
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        assistant_messages.append(
+                            {
+                                "text": text,
+                                "raw_ref": {
+                                    "stream": row["stream"],
+                                    "byte_from": row["byte_from"],
+                                    "byte_to": row["byte_to"],
+                                },
+                            }
+                        )
+
+        raw_rows.extend(pty_raw_rows)
+        if raw_rows:
+            diagnostics.append("UNPARSED_CONTENT_FELL_BACK_TO_RAW")
+
+        return {
+            "parser": "codex_ndjson",
+            "confidence": 0.95 if assistant_messages else 0.6,
+            "session_id": session_id,
+            "assistant_messages": dedup_assistant_messages(assistant_messages),
+            "raw_rows": list(raw_rows),
+            "diagnostics": diagnostics,
+            "structured_types": list(dict.fromkeys(structured_types)),
+        }

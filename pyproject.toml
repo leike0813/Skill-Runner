@@ -27,12 +27,15 @@ dev = [
     "httpx",
 ]
 
+[project.scripts]
+agent-harness = "agent_harness.cli:main"
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*", "e2e_client*"]
+include = ["server*", "e2e_client*", "agent_harness*"]
 exclude = ["data*", "skills*", "tests*", "references*"]
 
 [tool.pytest.ini_options]

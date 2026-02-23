@@ -178,3 +178,40 @@ def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
         config.defrost()
         config.SYSTEM.SKILLS_DIR = old_skills_dir
         config.freeze()
+
+
+def test_scan_loads_manifest_max_attempt(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    skill_dir = skills_dir / "interactive-max-attempt-skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Interactive Max Attempt")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "interactive-max-attempt-skill",
+                "engines": ["codex"],
+                "execution_modes": ["interactive"],
+                "max_attempt": 7,
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    old_skills_dir = config.SYSTEM.SKILLS_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(skills_dir)
+    config.freeze()
+
+    try:
+        registry = SkillRegistry()
+        registry.scan_skills()
+        skill = registry.get_skill("interactive-max-attempt-skill")
+        assert skill is not None
+        assert skill.max_attempt == 7
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_skills_dir
+        config.freeze()

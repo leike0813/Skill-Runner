@@ -1,0 +1,15 @@
+{
+    "id": "demo-auto-skill",
+    "version": "1.0.0",
+    "name": "Demo: Auto Skill",
+    "description": "A demo skill that must run fully in auto mode.",
+    "execution_modes": [
+        "auto"
+    ],
+    "entrypoint": {},
+    "schemas": {
+        "input": "assets/input.schema.json",
+        "parameter": "assets/parameter.schema.json",
+        "output": "assets/output.schema.json"
+    }
+}

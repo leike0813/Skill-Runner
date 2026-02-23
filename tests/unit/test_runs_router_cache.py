@@ -679,6 +679,9 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     request_record = store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
+    run_record = store.get_run(request_record["run_id"])
+    assert run_record is not None
+    assert run_record["cache_key"] is None
 
 
 @pytest.mark.asyncio
@@ -722,6 +725,9 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
     request_record = store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
+    run_record = store.get_run(request_record["run_id"])
+    assert run_record is not None
+    assert run_record["cache_key"] is None
 
 
 @pytest.mark.asyncio

@@ -118,6 +118,19 @@ Quick auth/path diagnostics for managed engines (local/container):
 ./scripts/check_agent_auth.sh container
 ```
 
+External runtime harness (no server startup required):
+```bash
+python -m agent_harness codex
+python -m agent_harness codex exec --json --full-auto -p skill-runner-harness "hello"
+python -m agent_harness resume <handle8> "next turn"
+```
+
+Harness defaults:
+- Run root: `data/harness_runs/`
+- Override run root: `SKILL_RUNNER_HARNESS_RUN_ROOT=/path/to/runs`
+- Managed prefix/env behavior follows `scripts/deploy_local.sh` semantics
+- `--translate 0|1|2|3` controls harness rendering only and is never forwarded to engine CLI
+
 Inline TUI entry (requires UI Basic Auth when enabled):
 ```
 http://127.0.0.1:8000/ui/engines

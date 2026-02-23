@@ -2,9 +2,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+import yaml  # type: ignore[import-untyped]
 from ..models import (
     EngineSessionHandle,
     EngineInteractiveProfile,
@@ -17,15 +19,20 @@ from ..models import (
 from ..services.agent_cli_manager import AgentCliManager
 from ..services.workspace_manager import workspace_manager
 from ..services.skill_registry import skill_registry
-from ..adapters.codex_adapter import CodexAdapter
-from ..adapters.gemini_adapter import GeminiAdapter
-from ..adapters.iflow_adapter import IFlowAdapter
+from ..services.engine_adapter_registry import engine_adapter_registry
 from ..services.schema_validator import schema_validator
 from ..services.run_store import run_store
 from ..services.concurrency_manager import concurrency_manager
 from ..services.run_folder_trust_manager import run_folder_trust_manager
 from ..services.session_timeout import resolve_session_timeout
+from ..services.engine_policy import apply_engine_policy_to_manifest
+from ..services.manifest_artifact_inference import infer_manifest_artifacts
 from ..config import config
+
+DONE_MARKER_STREAM_PATTERN = re.compile(
+    r'(?:\\)?"__SKILL_DONE__(?:\\)?"\s*:\s*true',
+    re.IGNORECASE,
+)
 
 
 class RunCanceled(Exception):
@@ -44,14 +51,9 @@ class JobOrchestrator:
     - Writes status updates to the workspace.
     """
     def __init__(self):
-        # In v0, we just map engines to class instances
         self.agent_cli_manager = AgentCliManager()
         self._sticky_watchdog_tasks: dict[str, asyncio.Task[None]] = {}
-        self.adapters = {
-            "codex": CodexAdapter(),
-            "gemini": GeminiAdapter(),
-            "iflow": IFlowAdapter(),
-        }
+        self.adapters = engine_adapter_registry.adapter_map()
 
     async def run_job(
         self,
@@ -112,6 +114,18 @@ class JobOrchestrator:
                 engine_name=engine_name,
                 options=options,
             )
+        attempt_number = self._resolve_attempt_number(
+            request_id=request_id,
+            is_interactive=is_interactive,
+        )
+        attempt_started_at = datetime.utcnow()
+        fs_before_snapshot = self._capture_filesystem_snapshot(run_dir)
+        process_exit_code: Optional[int] = None
+        process_failure_reason: Optional[str] = None
+        process_raw_stdout = ""
+        process_raw_stderr = ""
+        turn_payload_for_completion: Dict[str, Any] = {}
+        done_signal_found_in_payload = False
         if run_store.is_cancel_requested(run_id):
             canceled_error = self._build_canceled_error()
             result_path = self._write_canceled_result(run_dir, canceled_error)
@@ -142,6 +156,8 @@ class JobOrchestrator:
             return
         final_status: Optional[RunStatus] = None
         normalized_error_message: Optional[str] = None
+        final_validation_warnings: list[str] = []
+        final_error_code: Optional[str] = None
         trust_registered = False
 
         # 1. Update status to RUNNING
@@ -152,11 +168,28 @@ class JobOrchestrator:
                 interactive_profile.session_timeout_sec if interactive_profile is not None else None
             ),
         )
+        self._append_orchestrator_event(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            category="lifecycle",
+            type_name="lifecycle.run.started",
+            data={"status": RunStatus.RUNNING.value},
+        )
         self._update_latest_run_id(run_id)
 
         try:
             # 2. Get Skill
             skill = skill_override or skill_registry.get_skill(skill_id)
+            if (
+                skill is None
+                and is_interactive
+                and "__interactive_reply_payload" in options
+            ):
+                skill = self._load_skill_from_run_dir(
+                    run_dir=run_dir,
+                    skill_id=skill_id,
+                    engine_name=engine_name,
+                )
             if not skill:
                 raise ValueError(f"Skill {skill_id} not found during execution")
             if not skill.schemas or not all(key in skill.schemas for key in ("input", "parameter", "output")):
@@ -197,6 +230,7 @@ class JobOrchestrator:
             trust_registered = True
             run_options = dict(options)
             run_options["__run_id"] = run_id
+            run_options["__attempt_number"] = attempt_number
             if is_interactive and request_id and interactive_profile:
                 run_options["__interactive_profile"] = interactive_profile.model_dump(mode="json")
                 self._inject_interactive_resume_context(
@@ -221,33 +255,79 @@ class JobOrchestrator:
                             exc_info=True,
                         )
                     trust_registered = False
+            process_exit_code = result.exit_code
+            process_failure_reason = result.failure_reason
+            process_raw_stdout = result.raw_stdout or ""
+            process_raw_stderr = result.raw_stderr or ""
             if run_store.is_cancel_requested(run_id):
                 raise RunCanceled()
 
             # 6. Verify Result and Normalize
             warnings: list[str] = []
-            output_data = {}
-            output_errors: list[str] = []
+            output_data: Dict[str, Any] = {}
+            schema_output_errors: list[str] = []
+            terminal_validation_errors: list[str] = []
             pending_interaction: Optional[Dict[str, Any]] = None
+            pending_interaction_candidate: Optional[Dict[str, Any]] = None
             repair_level = result.repair_level or "none"
+            has_structured_output = False
+            done_marker_found_in_stream = self._contains_done_marker_in_stream(
+                raw_stdout=result.raw_stdout,
+                raw_stderr=result.raw_stderr,
+            )
+            done_signal_found = done_marker_found_in_stream
             if result.exit_code == 0:
                 if result.output_file_path and result.output_file_path.exists():
                     try:
                         with open(result.output_file_path, "r") as f:
-                            output_data = json.load(f)
-                        if is_interactive:
-                            pending_interaction = self._extract_pending_interaction(output_data)
-                        if pending_interaction is None and is_interactive and self._looks_like_ask_user_payload(output_data):
-                            output_errors = ["Invalid ask_user payload"]
-                        elif pending_interaction is None:
-                            output_errors = schema_validator.validate_output(skill, output_data)
-                            if not output_errors and repair_level == "deterministic_generic":
-                                warnings.append("OUTPUT_REPAIRED_GENERIC")
+                            raw_output_data = json.load(f)
+                        if isinstance(raw_output_data, dict):
+                            has_structured_output = True
+                            turn_payload_for_completion = dict(raw_output_data)
+                            output_data, done_signal_found_in_payload = (
+                                self._strip_done_marker_for_output_validation(raw_output_data)
+                            )
+                            done_signal_found = (
+                                done_signal_found_in_payload or done_marker_found_in_stream
+                            )
+                        else:
+                            schema_output_errors = ["Output JSON must be an object"]
+                            output_data = {}
+                        if not schema_output_errors:
+                            schema_output_errors = schema_validator.validate_output(skill, output_data)
+                        if not schema_output_errors and repair_level == "deterministic_generic":
+                            warnings.append("OUTPUT_REPAIRED_GENERIC")
                     except Exception as e:
-                        output_errors = [f"Failed to validate output schema: {str(e)}"]
+                        schema_output_errors = [f"Failed to validate output schema: {str(e)}"]
                         output_data = {}
                 else:
-                    output_errors = ["Output JSON missing or unreadable"]
+                    schema_output_errors = ["Output JSON missing or unreadable"]
+
+            if is_interactive and not done_signal_found:
+                pending_interaction_candidate = self._extract_pending_interaction(
+                    output_data,
+                    fallback_interaction_id=attempt_number,
+                )
+                stream_pending_interaction = self._extract_pending_interaction_from_stream(
+                    raw_stdout=result.raw_stdout,
+                    raw_stderr=result.raw_stderr,
+                    fallback_interaction_id=attempt_number,
+                )
+                if stream_pending_interaction is not None:
+                    if pending_interaction_candidate is None:
+                        pending_interaction_candidate = stream_pending_interaction
+                if pending_interaction_candidate is None:
+                    pending_interaction_candidate = self._infer_pending_interaction(
+                        output_data,
+                        fallback_interaction_id=attempt_number,
+                    )
+                if pending_interaction_candidate is None:
+                    pending_interaction_candidate = self._infer_pending_interaction_from_runtime_stream(
+                        adapter=adapter,
+                        raw_stdout=result.raw_stdout,
+                        raw_stderr=result.raw_stderr,
+                        fallback_interaction_id=attempt_number,
+                    )
 
             # 6.1 Normalization (N0)
             # Create standard envelope
@@ -268,11 +348,11 @@ class JobOrchestrator:
                 expected_path = f"artifacts/{pattern}"
                 if expected_path not in artifacts:
                     missing_artifacts.append(pattern)
+            artifact_errors: list[str] = []
             if missing_artifacts:
-                output_errors.append(
+                artifact_errors.append(
                     f"Missing required artifacts: {', '.join(missing_artifacts)}"
                 )
-            has_output_error = bool(output_errors)
             forced_failure_reason = result.failure_reason if result.failure_reason in {
                 "AUTH_REQUIRED",
                 "TIMEOUT",
@@ -280,7 +360,51 @@ class JobOrchestrator:
                 InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
                 InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
             } else None
-            if pending_interaction and is_interactive and request_id and interactive_profile:
+
+            normalized_status = "success"
+            if forced_failure_reason or result.exit_code != 0:
+                normalized_status = "failed"
+            elif is_interactive:
+                soft_completion = (
+                    (not done_signal_found)
+                    and has_structured_output
+                    and not schema_output_errors
+                )
+                if done_signal_found:
+                    terminal_validation_errors = [*schema_output_errors, *artifact_errors]
+                    if terminal_validation_errors:
+                        normalized_status = "failed"
+                elif soft_completion:
+                    terminal_validation_errors = [*artifact_errors]
+                    if terminal_validation_errors:
+                        normalized_status = "failed"
+                    else:
+                        warnings.append("INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER")
+                else:
+                    max_attempt = skill.max_attempt
+                    if max_attempt is not None and attempt_number >= max_attempt:
+                        forced_failure_reason = (
+                            InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
+                        )
+                        normalized_status = "failed"
+                    else:
+                        normalized_status = RunStatus.WAITING_USER.value
+                        pending_interaction = pending_interaction_candidate
+            else:
+                terminal_validation_errors = [*schema_output_errors, *artifact_errors]
+                if terminal_validation_errors:
+                    normalized_status = "failed"
+
+            if (
+                normalized_status == RunStatus.WAITING_USER.value
+                and pending_interaction is not None
+                and is_interactive
+                and request_id
+                and interactive_profile
+            ):
+                raw_runtime_output = "\n".join(
+                    part for part in [result.raw_stdout, result.raw_stderr] if isinstance(part, str)
+                )
                 wait_status = self._persist_waiting_interaction(
                     adapter=adapter,
                     run_id=run_id,
@@ -289,16 +413,14 @@ class JobOrchestrator:
                     profile=interactive_profile,
                     interactive_require_user_reply=interactive_require_user_reply,
                     pending_interaction=pending_interaction,
-                    raw_stdout=result.raw_stdout,
+                    raw_runtime_output=raw_runtime_output,
                 )
                 if wait_status is not None:
                     forced_failure_reason = wait_status
+                    normalized_status = "failed"
+                    pending_interaction = None
 
-            normalized_status = "success"
-            if forced_failure_reason or result.exit_code != 0 or has_output_error:
-                normalized_status = "failed"
-            if pending_interaction and not forced_failure_reason and not has_output_error:
-                normalized_status = RunStatus.WAITING_USER.value
+            has_output_error = bool(terminal_validation_errors)
             normalized_error: dict[str, Any] | None = None
             if normalized_status == RunStatus.WAITING_USER.value:
                 normalized_error = None
@@ -318,11 +440,12 @@ class JobOrchestrator:
                     InteractiveErrorCode.SESSION_RESUME_FAILED.value,
                     InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
                     InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
+                    InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value,
                 }:
                     error_code = forced_failure_reason
                     error_message = forced_failure_reason
                 elif has_output_error:
-                    error_message = "; ".join(output_errors)
+                    error_message = "; ".join(terminal_validation_errors)
                 else:
                     error_message = f"Exit code {result.exit_code}"
                 normalized_error = {
@@ -344,6 +467,12 @@ class JobOrchestrator:
                     else None
                 ),
             }
+            final_validation_warnings = list(warnings)
+            final_error_code = (
+                str(normalized_error.get("code"))
+                if isinstance(normalized_error, dict) and normalized_error.get("code")
+                else None
+            )
             
             # Allow adapter to communicate error via output if present
             if result.exit_code != 0 and result.raw_stderr:
@@ -396,13 +525,25 @@ class JobOrchestrator:
                 ),
             )
             run_store.update_run_status(run_id, final_status, str(result_path))
+            self._append_orchestrator_event(
+                run_dir=run_dir,
+                attempt_number=attempt_number,
+                category="lifecycle",
+                type_name="lifecycle.run.terminal",
+                data={"status": final_status.value},
+            )
             if cache_key and final_status == RunStatus.SUCCEEDED:
-                run_store.record_cache_entry(cache_key, run_id)
+                if temp_request_id:
+                    run_store.record_temp_cache_entry(cache_key, run_id)
+                else:
+                    run_store.record_cache_entry(cache_key, run_id)
 
         except RunCanceled:
             final_status = RunStatus.CANCELED
             canceled_error = self._build_canceled_error()
             normalized_error_message = canceled_error["message"]
+            final_error_code = str(canceled_error.get("code"))
+            final_validation_warnings = []
             if request_id:
                 self.cancel_sticky_watchdog(request_id)
             result_path = self._write_canceled_result(run_dir, canceled_error) if run_dir else None
@@ -420,6 +561,14 @@ class JobOrchestrator:
                 RunStatus.CANCELED,
                 str(result_path) if result_path is not None else None,
             )
+            if run_dir:
+                self._append_orchestrator_event(
+                    run_dir=run_dir,
+                    attempt_number=attempt_number,
+                    category="lifecycle",
+                    type_name="lifecycle.run.canceled",
+                    data={"status": RunStatus.CANCELED.value},
+                )
         except Exception as e:
             logger.exception("Job failed")
             final_status = RunStatus.FAILED
@@ -427,6 +576,12 @@ class JobOrchestrator:
                 self.cancel_sticky_watchdog(request_id)
             normalized_error = self._error_from_exception(e)
             normalized_error_message = str(normalized_error.get("message", str(e)))
+            final_error_code = (
+                str(normalized_error.get("code"))
+                if isinstance(normalized_error, dict) and normalized_error.get("code")
+                else None
+            )
+            final_validation_warnings = []
             if run_dir:
                 self._update_status(
                     run_dir,
@@ -437,7 +592,44 @@ class JobOrchestrator:
                     ),
                 )
             run_store.update_run_status(run_id, RunStatus.FAILED)
+            if run_dir:
+                self._append_orchestrator_event(
+                    run_dir=run_dir,
+                    attempt_number=attempt_number,
+                    category="error",
+                    type_name="error.run.failed",
+                    data={"message": normalized_error_message or "unknown"},
+                )
         finally:
+            if run_dir is not None:
+                try:
+                    self._write_attempt_audit_artifacts(
+                        run_dir=run_dir,
+                        run_id=run_id,
+                        request_id=request_id,
+                        engine_name=engine_name,
+                        execution_mode=execution_mode,
+                        attempt_number=attempt_number,
+                        started_at=attempt_started_at,
+                        finished_at=datetime.utcnow(),
+                        status=final_status,
+                        fs_before_snapshot=fs_before_snapshot,
+                        process_exit_code=process_exit_code,
+                        process_failure_reason=process_failure_reason,
+                        process_raw_stdout=process_raw_stdout,
+                        process_raw_stderr=process_raw_stderr,
+                        turn_payload=turn_payload_for_completion,
+                        validation_warnings=final_validation_warnings,
+                        terminal_error_code=final_error_code,
+                        options=options,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to write attempt audit artifacts for run_id=%s attempt=%s",
+                        run_id,
+                        attempt_number,
+                        exc_info=True,
+                    )
             if trust_registered and run_dir:
                 try:
                     run_folder_trust_manager.remove_run_folder(engine_name, run_dir)
@@ -576,6 +768,36 @@ class JobOrchestrator:
         except Exception as e:
             logger.exception("Failed to update latest_run_id")
 
+    def _load_skill_from_run_dir(
+        self,
+        *,
+        run_dir: Path,
+        skill_id: str,
+        engine_name: str,
+    ) -> Optional[SkillManifest]:
+        workspace_prefix = {
+            "codex": ".codex",
+            "gemini": ".gemini",
+            "iflow": ".iflow",
+        }.get(engine_name, f".{engine_name}")
+        skill_dir = run_dir / workspace_prefix / "skills" / skill_id
+        runner_path = skill_dir / "assets" / "runner.json"
+        if not runner_path.exists() or not runner_path.is_file():
+            return None
+        try:
+            data = json.loads(runner_path.read_text(encoding="utf-8"))
+            data = infer_manifest_artifacts(data, skill_dir)
+            apply_engine_policy_to_manifest(data)
+            return SkillManifest(**data, path=skill_dir)
+        except Exception:
+            logger.warning(
+                "Failed to load skill manifest from run directory for resume: run_id=%s skill_id=%s",
+                run_dir.name,
+                skill_id,
+                exc_info=True,
+            )
+            return None
+
     def _build_run_bundle(self, run_dir: Path, debug: bool) -> str:
         bundle_dir = run_dir / "bundle"
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -651,6 +873,310 @@ class JobOrchestrator:
         except Exception:
             pass
         return default_timeout
+
+    def _resolve_attempt_number(self, *, request_id: Optional[str], is_interactive: bool) -> int:
+        if not request_id or not is_interactive:
+            return 1
+        interaction_count = run_store.get_interaction_count(request_id)
+        return max(1, int(interaction_count) + 1)
+
+    def _capture_filesystem_snapshot(self, run_dir: Path) -> Dict[str, Dict[str, Any]]:
+        snapshot: Dict[str, Dict[str, Any]] = {}
+        audit_prefix = ".audit/"
+        for path in run_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            rel_path = path.relative_to(run_dir).as_posix()
+            if rel_path.startswith(audit_prefix):
+                continue
+            snapshot[rel_path] = {
+                "size": path.stat().st_size,
+                "mtime": path.stat().st_mtime,
+                "sha256": self._hash_file(path),
+            }
+        return snapshot
+
+    def _diff_filesystem_snapshot(
+        self,
+        before_snapshot: Dict[str, Dict[str, Any]],
+        after_snapshot: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, List[str]]:
+        before_keys = set(before_snapshot.keys())
+        after_keys = set(after_snapshot.keys())
+        created = sorted(after_keys - before_keys)
+        deleted = sorted(before_keys - after_keys)
+        modified = sorted(
+            path
+            for path in (before_keys & after_keys)
+            if before_snapshot[path].get("sha256") != after_snapshot[path].get("sha256")
+        )
+        return {"created": created, "modified": modified, "deleted": deleted}
+
+    def _find_done_markers(
+        self,
+        *,
+        raw_stdout: str,
+        raw_stderr: str,
+        turn_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        done_signal_found = "__SKILL_DONE__" in turn_payload and turn_payload.get("__SKILL_DONE__") is True
+        markers: List[Dict[str, Any]] = []
+        for stream_name, text in (("stdout", raw_stdout), ("stderr", raw_stderr)):
+            for match in DONE_MARKER_STREAM_PATTERN.finditer(text):
+                markers.append(
+                    {
+                        "stream": stream_name,
+                        "byte_from": match.start(),
+                        "byte_to": match.end(),
+                    }
+                )
+        return {
+            "done_signal_found": done_signal_found,
+            "done_marker_found": bool(markers),
+            "done_marker_count": len(markers),
+            "first_marker": markers[0] if markers else None,
+        }
+
+    def _contains_done_marker_in_stream(
+        self,
+        *,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> bool:
+        stream_text = f"{raw_stdout}\n{raw_stderr}"
+        return bool(DONE_MARKER_STREAM_PATTERN.search(stream_text))
+
+    def _classify_completion(
+        self,
+        *,
+        status: Optional[RunStatus],
+        process_exit_code: Optional[int],
+        done_info: Dict[str, Any],
+        validation_warnings: List[str],
+        terminal_error_code: Optional[str],
+    ) -> Dict[str, Any]:
+        done_signal_found = bool(done_info.get("done_signal_found"))
+        done_marker_found = bool(done_info.get("done_marker_found"))
+        marker_count = int(done_info.get("done_marker_count") or 0)
+        diagnostics: List[str] = []
+        if marker_count > 1:
+            diagnostics.append("MULTIPLE_DONE_MARKERS_IGNORED")
+
+        if done_signal_found:
+            return {
+                "state": "completed",
+                "reason_code": "DONE_SIGNAL_FOUND",
+                "diagnostics": diagnostics,
+            }
+        if process_exit_code is not None and int(process_exit_code) != 0:
+            if done_marker_found:
+                diagnostics.append("DONE_MARKER_PROCESS_FAILURE_CONFLICT")
+            return {
+                "state": "interrupted",
+                "reason_code": "PROCESS_EXIT_NONZERO",
+                "diagnostics": diagnostics,
+            }
+        if terminal_error_code == InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value:
+            diagnostics.append(InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value)
+            return {
+                "state": "interrupted",
+                "reason_code": InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value,
+                "diagnostics": diagnostics,
+            }
+        if status == RunStatus.SUCCEEDED:
+            if "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in validation_warnings:
+                diagnostics.append("DONE_MARKER_MISSING")
+                diagnostics.append("INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER")
+                return {
+                    "state": "completed",
+                    "reason_code": "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER",
+                    "diagnostics": diagnostics,
+                }
+            if done_marker_found:
+                return {
+                    "state": "completed",
+                    "reason_code": "DONE_MARKER_FOUND",
+                    "diagnostics": diagnostics,
+                }
+            return {
+                "state": "completed",
+                "reason_code": "OUTPUT_VALIDATED",
+                "diagnostics": diagnostics,
+            }
+        if done_marker_found:
+            return {
+                "state": "completed",
+                "reason_code": "DONE_MARKER_FOUND",
+                "diagnostics": diagnostics,
+            }
+        if status == RunStatus.WAITING_USER:
+            diagnostics.append("DONE_MARKER_MISSING")
+            return {
+                "state": "awaiting_user_input",
+                "reason_code": "WAITING_USER_INPUT",
+                "diagnostics": diagnostics,
+            }
+        if status in {RunStatus.FAILED, RunStatus.CANCELED}:
+            return {
+                "state": "interrupted",
+                "reason_code": terminal_error_code or "TERMINAL_SIGNAL_FAILED",
+                "diagnostics": diagnostics,
+            }
+        return {
+            "state": "unknown",
+            "reason_code": "INSUFFICIENT_EVIDENCE",
+            "diagnostics": diagnostics,
+        }
+
+    def _write_attempt_audit_artifacts(
+        self,
+        *,
+        run_dir: Path,
+        run_id: str,
+        request_id: Optional[str],
+        engine_name: str,
+        execution_mode: str,
+        attempt_number: int,
+        started_at: datetime,
+        finished_at: datetime,
+        status: Optional[RunStatus],
+        fs_before_snapshot: Dict[str, Dict[str, Any]],
+        process_exit_code: Optional[int],
+        process_failure_reason: Optional[str],
+        process_raw_stdout: str,
+        process_raw_stderr: str,
+        turn_payload: Dict[str, Any],
+        validation_warnings: List[str],
+        terminal_error_code: Optional[str],
+        options: Dict[str, Any],
+    ) -> None:
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f".{attempt_number}"
+        meta_path = audit_dir / f"meta{suffix}.json"
+        stdin_path = audit_dir / f"stdin{suffix}.log"
+        stdout_path = audit_dir / f"stdout{suffix}.log"
+        stderr_path = audit_dir / f"stderr{suffix}.log"
+        pty_output_path = audit_dir / f"pty-output{suffix}.log"
+        fs_before_path = audit_dir / f"fs-before{suffix}.json"
+        fs_after_path = audit_dir / f"fs-after{suffix}.json"
+        fs_diff_path = audit_dir / f"fs-diff{suffix}.json"
+
+        logs_dir = run_dir / "logs"
+        live_stdout_path = logs_dir / "stdout.txt"
+        live_stderr_path = logs_dir / "stderr.txt"
+        live_pty_output_path = logs_dir / "pty-output.txt"
+
+        stdout_text = live_stdout_path.read_text(encoding="utf-8") if live_stdout_path.exists() else process_raw_stdout
+        stderr_text = live_stderr_path.read_text(encoding="utf-8") if live_stderr_path.exists() else process_raw_stderr
+        pty_text = (
+            live_pty_output_path.read_text(encoding="utf-8")
+            if live_pty_output_path.exists()
+            else f"{stdout_text}{stderr_text}"
+        )
+        stdin_payload = options.get("__interactive_reply_payload")
+        if stdin_payload is None:
+            stdin_text = ""
+        else:
+            stdin_text = json.dumps(stdin_payload, ensure_ascii=False)
+
+        stdin_path.write_text(stdin_text, encoding="utf-8")
+        stdout_path.write_text(stdout_text, encoding="utf-8")
+        stderr_path.write_text(stderr_text, encoding="utf-8")
+        pty_output_path.write_text(pty_text, encoding="utf-8")
+
+        fs_after_snapshot = self._capture_filesystem_snapshot(run_dir)
+        fs_diff = self._diff_filesystem_snapshot(fs_before_snapshot, fs_after_snapshot)
+        fs_before_path.write_text(
+            json.dumps(fs_before_snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        fs_after_path.write_text(
+            json.dumps(fs_after_snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        fs_diff_path.write_text(
+            json.dumps(fs_diff, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        done_info = self._find_done_markers(
+            raw_stdout=stdout_text,
+            raw_stderr=stderr_text,
+            turn_payload=turn_payload,
+        )
+        completion = self._classify_completion(
+            status=status,
+            process_exit_code=process_exit_code,
+            done_info=done_info,
+            validation_warnings=validation_warnings,
+            terminal_error_code=terminal_error_code,
+        )
+
+        reconstruction_error = None
+        try:
+            stdout_chunks = len(stdout_text.splitlines())
+            stderr_chunks = len(stderr_text.splitlines())
+        except Exception as exc:
+            reconstruction_error = str(exc)
+            stdout_chunks = 0
+            stderr_chunks = 0
+
+        status_text = status.value if isinstance(status, RunStatus) else (str(status) if status else "unknown")
+        meta_payload = {
+            "run_id": run_id,
+            "request_id": request_id,
+            "engine": engine_name,
+            "execution_mode": execution_mode,
+            "attempt": {"number": attempt_number},
+            "status": status_text,
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "process": {
+                "exit_code": process_exit_code,
+                "failure_reason": process_failure_reason,
+            },
+            "completion": {
+                **completion,
+                "done_signal_found": bool(done_info.get("done_signal_found")),
+                "done_marker_found": bool(done_info.get("done_marker_found")),
+                "done_marker_count": int(done_info.get("done_marker_count") or 0),
+                "first_done_marker": done_info.get("first_marker"),
+            },
+            "validation_warnings": [str(item) for item in validation_warnings],
+            "reconstruction_used": False,
+            "stdout_chunks": stdout_chunks,
+            "stderr_chunks": stderr_chunks,
+            "reconstruction_error": reconstruction_error,
+            "filesystem_diff": fs_diff,
+        }
+        meta_path.write_text(
+            json.dumps(meta_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _append_orchestrator_event(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        category: str,
+        type_name: str,
+        data: Dict[str, Any],
+    ) -> None:
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        event_path = audit_dir / "orchestrator_events.jsonl"
+        payload = {
+            "ts": datetime.utcnow().isoformat(),
+            "attempt_number": max(1, int(attempt_number)),
+            "category": category,
+            "type": type_name,
+            "data": data,
+        }
+        with event_path.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False))
+            fp.write("\n")
 
     def _resolve_session_timeout_seconds(self, options: Dict[str, Any]) -> int:
         return resolve_session_timeout(
@@ -775,7 +1301,12 @@ class JobOrchestrator:
             },
         )
 
-    def _extract_pending_interaction(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_pending_interaction(
+        self,
+        payload: Dict[str, Any],
+        *,
+        fallback_interaction_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
         if not isinstance(payload, dict):
             return None
         interaction_payload: Optional[Dict[str, Any]] = None
@@ -785,19 +1316,27 @@ class JobOrchestrator:
             interaction_payload = payload.get("interaction")
         elif payload.get("type") == "ask_user" and isinstance(payload.get("interaction"), dict):
             interaction_payload = payload.get("interaction")
+        elif self._looks_like_direct_interaction_payload(payload):
+            interaction_payload = payload
         if interaction_payload is None:
             return None
 
         prompt = interaction_payload.get("prompt") or interaction_payload.get("question")
         if not isinstance(prompt, str) or not prompt.strip():
             return None
+        interaction_id = 0
+        interaction_id_source = "payload"
         interaction_id_raw = interaction_payload.get("interaction_id")
-        if interaction_id_raw is None:
-            return None
-        try:
-            interaction_id = int(interaction_id_raw)
-        except Exception:
-            return None
+        raw_interaction_id: Optional[str] = None
+        if interaction_id_raw is not None:
+            try:
+                interaction_id = int(interaction_id_raw)
+            except Exception:
+                interaction_id = 0
+                raw_interaction_id = str(interaction_id_raw).strip() or None
+        if interaction_id <= 0 and fallback_interaction_id is not None and int(fallback_interaction_id) > 0:
+            interaction_id = int(fallback_interaction_id)
+            interaction_id_source = "fallback"
         if interaction_id <= 0:
             return None
         kind = self._normalize_interaction_kind_name(interaction_payload.get("kind"))
@@ -822,6 +1361,18 @@ class JobOrchestrator:
             if isinstance(default_decision_policy_raw, str) and default_decision_policy_raw.strip()
             else "engine_judgement"
         )
+        context_obj = interaction_payload.get("context")
+        context: Optional[Dict[str, Any]]
+        if isinstance(context_obj, dict):
+            context = dict(context_obj)
+        else:
+            context = {}
+        if raw_interaction_id:
+            context["external_interaction_id"] = raw_interaction_id
+        if interaction_id_source != "payload":
+            context["interaction_id_source"] = interaction_id_source
+        if not context:
+            context = None
         return {
             "interaction_id": interaction_id,
             "kind": kind,
@@ -830,7 +1381,85 @@ class JobOrchestrator:
             "ui_hints": ui_hints,
             "default_decision_policy": default_decision_policy,
             "required_fields": required_fields,
-            "context": interaction_payload.get("context"),
+            "context": context,
+        }
+
+    def _infer_pending_interaction(
+        self,
+        payload: Dict[str, Any],
+        *,
+        fallback_interaction_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return None
+        outcome_obj = payload.get("outcome")
+        if isinstance(outcome_obj, str) and outcome_obj.strip().lower() == "error":
+            return None
+        extracted = self._extract_pending_interaction(
+            payload,
+            fallback_interaction_id=fallback_interaction_id,
+        )
+        if extracted is not None:
+            return extracted
+        if fallback_interaction_id <= 0:
+            return None
+        prompt_obj = payload.get("prompt") or payload.get("question")
+        prompt = (
+            prompt_obj.strip()
+            if isinstance(prompt_obj, str) and prompt_obj.strip()
+            else "Provide next user turn"
+        )
+        return {
+            "interaction_id": int(fallback_interaction_id),
+            "kind": "open_text",
+            "prompt": prompt,
+            "options": [],
+            "ui_hints": {},
+            "default_decision_policy": "engine_judgement",
+            "required_fields": [],
+            "context": {"inferred_from": "done_marker_missing"},
+        }
+
+    def _infer_pending_interaction_from_runtime_stream(
+        self,
+        *,
+        adapter: Any,
+        raw_stdout: str,
+        raw_stderr: str,
+        fallback_interaction_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        if fallback_interaction_id <= 0:
+            return None
+        try:
+            parsed = adapter.parse_runtime_stream(
+                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
+                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
+                pty_raw=b"",
+            )
+        except Exception:
+            return None
+        messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
+        if not isinstance(messages, list) or not messages:
+            return None
+        latest_text = ""
+        for item in reversed(messages):
+            if not isinstance(item, dict):
+                continue
+            text_obj = item.get("text")
+            if isinstance(text_obj, str) and text_obj.strip():
+                latest_text = text_obj.strip()
+                break
+        if not latest_text:
+            return None
+        return {
+            "interaction_id": int(fallback_interaction_id),
+            "kind": "open_text",
+            "prompt": latest_text,
+            "options": [],
+            "ui_hints": {},
+            "default_decision_policy": "engine_judgement",
+            "required_fields": [],
+            "context": {"inferred_from": "runtime_stream_assistant_message"},
         }
 
     def _normalize_interaction_kind_name(self, raw_kind: Any) -> str:
@@ -846,18 +1475,70 @@ class JobOrchestrator:
             return "open_text"
         return kind_name
 
-    def _looks_like_ask_user_payload(self, payload: Dict[str, Any]) -> bool:
+    def _looks_like_direct_interaction_payload(self, payload: Dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
-        if isinstance(payload.get("ask_user"), dict):
+        prompt_obj = payload.get("prompt") or payload.get("question")
+        if not isinstance(prompt_obj, str) or not prompt_obj.strip():
+            return False
+        if "interaction_id" in payload:
             return True
-        if payload.get("action") == "ask_user":
+        if "kind" in payload:
             return True
-        if payload.get("type") == "ask_user":
-            return True
-        if payload.get("outcome") == "ask_user":
+        if isinstance(payload.get("options"), list):
             return True
         return False
+
+    def _extract_pending_interaction_from_stream(
+        self,
+        *,
+        raw_stdout: str,
+        raw_stderr: str,
+        fallback_interaction_id: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        stream_text = "\n".join(
+            part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str)
+        )
+        if not stream_text.strip():
+            return None
+        snippets: List[str] = []
+        tag_pattern = re.compile(
+            r"<ASK_USER_YAML>\s*(.*?)\s*</ASK_USER_YAML>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippets.extend(match.group(1) for match in tag_pattern.finditer(stream_text))
+        fence_pattern = re.compile(
+            r"```(?:ask_user_yaml|ask-user-yaml)\s*(.*?)```",
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippets.extend(match.group(1) for match in fence_pattern.finditer(stream_text))
+        for snippet in snippets:
+            try:
+                parsed = yaml.safe_load(snippet)
+            except Exception:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            extracted = self._extract_pending_interaction(
+                parsed,
+                fallback_interaction_id=fallback_interaction_id,
+            )
+            if extracted is not None:
+                return extracted
+        return None
+
+    def _strip_done_marker_for_output_validation(
+        self,
+        payload: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], bool]:
+        if not isinstance(payload, dict):
+            return {}, False
+        marker_value = payload.get("__SKILL_DONE__")
+        if "__SKILL_DONE__" not in payload:
+            return dict(payload), False
+        sanitized = dict(payload)
+        sanitized.pop("__SKILL_DONE__", None)
+        return sanitized, marker_value is True
 
     def _persist_waiting_interaction(
         self,
@@ -869,8 +1550,12 @@ class JobOrchestrator:
         profile: EngineInteractiveProfile,
         interactive_require_user_reply: bool,
         pending_interaction: Dict[str, Any],
-        raw_stdout: str,
+        raw_runtime_output: str,
     ) -> Optional[str]:
+        attempt_number = self._resolve_attempt_number(
+            request_id=request_id,
+            is_interactive=True,
+        )
         run_store.set_pending_interaction(request_id, pending_interaction)
         run_store.set_interactive_profile(request_id, profile.model_dump(mode="json"))
         run_store.append_interaction_history(
@@ -879,10 +1564,20 @@ class JobOrchestrator:
             event_type="ask_user",
             payload=pending_interaction,
         )
+        self._append_orchestrator_event(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            category="interaction",
+            type_name="interaction.user_input.required",
+            data={
+                "interaction_id": int(pending_interaction["interaction_id"]),
+                "kind": str(pending_interaction.get("kind", "open_text")),
+            },
+        )
         if profile.kind == EngineInteractiveProfileKind.RESUMABLE:
             try:
                 handle = adapter.extract_session_handle(
-                    raw_stdout,
+                    raw_runtime_output,
                     turn_index=int(pending_interaction["interaction_id"]),
                 )
             except Exception:

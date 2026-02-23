@@ -3,8 +3,8 @@
     "version": "1.0.0",
     "name": "Demo: Bad Input",
     "description": "Demonstrates missing required input handling.",
-    "engines": [
-        "gemini"
+    "execution_modes": [
+        "auto"
     ],
     "entrypoint": {},
     "schemas": {

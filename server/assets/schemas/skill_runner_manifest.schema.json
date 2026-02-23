@@ -44,6 +44,10 @@
       "minItems": 1,
       "uniqueItems": true
     },
+    "max_attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
     "schemas": {
       "type": "object",
       "required": [

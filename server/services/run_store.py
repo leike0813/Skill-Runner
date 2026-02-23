@@ -89,6 +89,16 @@ class RunStore:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS temp_cache_entries (
+                    cache_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS request_interactions (
                     request_id TEXT NOT NULL,
                     interaction_id INTEGER NOT NULL,
@@ -326,20 +336,32 @@ class RunStore:
                 )
 
     def record_cache_entry(self, cache_key: str, run_id: str) -> None:
+        self._record_cache_entry(table="cache_entries", cache_key=cache_key, run_id=run_id)
+
+    def record_temp_cache_entry(self, cache_key: str, run_id: str) -> None:
+        self._record_cache_entry(table="temp_cache_entries", cache_key=cache_key, run_id=run_id)
+
+    def _record_cache_entry(self, table: str, cache_key: str, run_id: str) -> None:
         created_at = datetime.utcnow().isoformat()
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT OR REPLACE INTO cache_entries (cache_key, run_id, status, created_at)
+                f"""
+                INSERT OR REPLACE INTO {table} (cache_key, run_id, status, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
                 (cache_key, run_id, "succeeded", created_at)
             )
 
     def get_cached_run(self, cache_key: str) -> Optional[str]:
+        return self._get_cached_run(table="cache_entries", cache_key=cache_key)
+
+    def get_temp_cached_run(self, cache_key: str) -> Optional[str]:
+        return self._get_cached_run(table="temp_cache_entries", cache_key=cache_key)
+
+    def _get_cached_run(self, table: str, cache_key: str) -> Optional[str]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT run_id FROM cache_entries WHERE cache_key = ? AND status = ?",
+                f"SELECT run_id FROM {table} WHERE cache_key = ? AND status = ?",
                 (cache_key, "succeeded")
             ).fetchone()
         if not row:
@@ -395,6 +417,7 @@ class RunStore:
                 )
             conn.execute("DELETE FROM requests WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM cache_entries WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM temp_cache_entries WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
         return request_ids
 
@@ -410,11 +433,13 @@ class RunStore:
             run_count = len(run_rows)
             request_count = len(request_rows)
             cache_rows = conn.execute("SELECT cache_key FROM cache_entries").fetchall()
-            cache_count = len(cache_rows)
+            temp_cache_rows = conn.execute("SELECT cache_key FROM temp_cache_entries").fetchall()
+            cache_count = len(cache_rows) + len(temp_cache_rows)
             conn.execute("DELETE FROM request_interactions")
             conn.execute("DELETE FROM request_interactive_runtime")
             conn.execute("DELETE FROM request_interaction_history")
             conn.execute("DELETE FROM cache_entries")
+            conn.execute("DELETE FROM temp_cache_entries")
             conn.execute("DELETE FROM runs")
             conn.execute("DELETE FROM requests")
         return {"runs": run_count, "requests": request_count, "cache_entries": cache_count}

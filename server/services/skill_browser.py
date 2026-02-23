@@ -98,14 +98,14 @@ def _is_binary(data: bytes) -> bool:
         return True
     control_count = 0
     for byte in sample:
-        if byte in {9, 10, 13}:
+        if byte in {9, 10, 12, 13, 27}:
             continue
         if 32 <= byte <= 126:
             continue
         if byte >= 128:
             continue
         control_count += 1
-    if control_count / len(sample) > 0.30:
+    if control_count / len(sample) > 0.55:
         return True
     return False
 

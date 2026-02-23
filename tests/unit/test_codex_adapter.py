@@ -128,6 +128,30 @@ def test_construct_config_excludes_runtime_interactive_options(tmp_path):
     assert "verbose" not in passed_overrides
 
 
+def test_construct_config_allows_harness_profile_override(tmp_path):
+    config_manager = MagicMock()
+    config_path = tmp_path / ".codex" / "config.toml"
+    config_manager.config_path = config_path
+    config_manager.generate_profile_settings.return_value = {"model": "gpt-5.2-codex"}
+    adapter = CodexAdapter(config_manager=config_manager)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+
+    result_path = adapter._construct_config(
+        skill,
+        run_dir,
+        options={
+            "__codex_profile_name": "skill-runner-harness",
+        },
+    )
+
+    assert result_path == config_path
+    assert config_manager.profile_name == "skill-runner-harness"
+    assert config_manager.generate_profile_settings.call_count == 1
+    assert config_manager.update_profile.call_count == 1
+
+
 @pytest.mark.asyncio
 async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
     adapter = CodexAdapter(config_manager=MagicMock())
@@ -167,6 +191,44 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
         assert "--full-auto" in args or "--yolo" in args
         assert "resume" in args
         assert thread_idx < prompt_idx
+
+
+@pytest.mark.asyncio
+async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path):
+    adapter = CodexAdapter(config_manager=MagicMock())
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=skill_dir)
+
+    process_result = MagicMock()
+    process_result.exit_code = 0
+    process_result.raw_stdout = '{"value":"ok"}'
+    process_result.raw_stderr = ""
+    process_result.failure_reason = None
+
+    with patch.object(adapter, "_construct_config", autospec=True) as mock_construct, \
+         patch.object(adapter, "_setup_environment", autospec=True) as mock_setup, \
+         patch.object(adapter, "_build_prompt", autospec=True, return_value="reply prompt"), \
+         patch.object(adapter, "_execute_process", new=AsyncMock(return_value=process_result)):
+        await adapter.run(
+            skill,
+            {},
+            run_dir,
+            options={
+                "__interactive_reply_payload": {"text": "continue"},
+                "__resume_session_handle": {
+                    "engine": "codex",
+                    "handle_type": "session_id",
+                    "handle_value": "th_resume",
+                    "created_at_turn": 1,
+                },
+            },
+        )
+
+    assert mock_construct.call_count == 0
+    assert mock_setup.call_count == 0
 
 
 @pytest.mark.asyncio

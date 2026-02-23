@@ -25,7 +25,7 @@ from tests.common.skill_fixture_loader import (
     fixture_skill_needs_input,
 )
 
-SUITES_DIR = PROJECT_ROOT / "tests" / "suites"
+SUITES_DIR = PROJECT_ROOT / "tests" / "engine_integration" / "suites"
 FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
 
 DEFAULT_DATA_DIR = "/home/joshua/Workspace/Code/Skill-Runner/data"

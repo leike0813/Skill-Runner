@@ -1,10 +1,9 @@
 {
     "id": "demo-bible-verse",
     "version": "1.0.0",
-    "engines": [
-        "gemini",
-        "codex",
-        "iflow"
+    "execution_modes": [
+        "auto",
+        "interactive"
     ],
     "entrypoint": {},
     "schemas": {

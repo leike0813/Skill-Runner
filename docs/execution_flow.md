@@ -14,6 +14,8 @@
 4. **WorkspaceManager**:
    - 解压 Zip 到 `data/requests/<request_id>/uploads/`。
    - 生成 `input_manifest.json` 并计算 cache key。
+   - 缓存仅在 `execution_mode=auto` 且 `no_cache!=true` 时启用；`interactive` 不读不写缓存。
+   - 临时 skill 链路的 cache key 额外包含上传 skill 压缩包整体哈希。
    - 命中缓存则将缓存的 run 绑定到 `request_id`；未命中则创建 `data/runs/<run_id>/`。
 
 ## 阶段二：任务调度 (Orchestration)

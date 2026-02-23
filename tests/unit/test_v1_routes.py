@@ -164,6 +164,28 @@ async def test_v1_temp_skill_runs_cancel_route_available():
 
 
 @pytest.mark.asyncio
+async def test_v1_temp_skill_runs_interaction_and_history_routes_available():
+    pending = await _request("GET", "/v1/temp-skill-runs/does-not-exist/interaction/pending")
+    assert pending.status_code == 404
+
+    reply = await _request(
+        "POST",
+        "/v1/temp-skill-runs/does-not-exist/interaction/reply",
+        json={"interaction_id": 1, "response": {"answer": "x"}},
+    )
+    assert reply.status_code == 404
+
+    history = await _request("GET", "/v1/temp-skill-runs/does-not-exist/events/history")
+    assert history.status_code == 404
+
+    logs_range = await _request(
+        "GET",
+        "/v1/temp-skill-runs/does-not-exist/logs/range?stream=stdout&byte_from=0&byte_to=10",
+    )
+    assert logs_range.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_v1_management_routes_available():
     run_res = await _request("GET", "/v1/management/runs/does-not-exist")
     assert run_res.status_code == 404
@@ -326,6 +348,69 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
     assert response.status_code == 200
     assert "\"status\": \"canceled\"" in response.text
     assert "\"error_code\": \"CANCELED_BY_USER\"" in response.text
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run-history"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        lambda request_id: {"request_id": request_id, "run_id": "run-history"},
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_observability_service.list_event_history",
+        lambda **_kwargs: [
+            {"seq": 2, "event": {"type": "agent.message.final"}},
+            {"seq": 3, "event": {"type": "lifecycle.run.terminal"}},
+        ],
+    )
+
+    response = await _request(
+        "GET",
+        "/v1/jobs/req-history/events/history?from_seq=2&to_seq=3",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request_id"] == "req-history"
+    assert payload["count"] == 2
+    assert payload["events"][0]["seq"] == 2
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_log_range_route(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run-log-range"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        lambda request_id: {"request_id": request_id, "run_id": "run-log-range"},
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_observability_service.read_log_range",
+        lambda **_kwargs: {
+            "stream": "stdout",
+            "byte_from": 1,
+            "byte_to": 4,
+            "chunk": "abc",
+        },
+    )
+
+    response = await _request(
+        "GET",
+        "/v1/jobs/req-log-range/logs/range?stream=stdout&byte_from=1&byte_to=4",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream"] == "stdout"
+    assert payload["chunk"] == "abc"
 
 
 @pytest.mark.asyncio

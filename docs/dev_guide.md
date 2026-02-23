@@ -223,6 +223,8 @@ SKILL.md 的格式：
 - 若同时声明 `engines` 与 `unsupported_engines`，两者不允许有重复项；计算后的有效集合必须非空。
 - `input.schema.json` / `parameter.schema.json` / `output.schema.json` 在上传阶段会执行服务端 meta-schema 预检，确保 Runner 关键扩展字段合法（如 `x-input-source`、`x-type`）。
 - `execution_modes` 必须为非空数组，值仅允许 `auto` / `interactive`。新上传或更新包缺失该字段会被拒绝；存量已安装且缺失的 skill 在兼容期按 `["auto"]` 解释并记录 deprecation 警告。
+- `max_attempt` 为可选正整数（`>=1`），仅作用于 `interactive`：
+  - 当 `attempt_number >= max_attempt` 且当轮既无 `__SKILL_DONE__` 也未通过 output schema 软完成时，run 失败并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 - entrypoint.type=prompt 时，SKILL.md 正文仍应写清“执行步骤/输出格式/产物位置”，以便引擎（如 Codex）在激活 skill 时能按指令生成结果；同时 Runner 以 runner.json 作为“机器可执行合同”来编排与校验。
 - entrypoint.type=script/hybrid 时，scripts/ 中的脚本作为更确定的执行路径（建议用于 normalize/fallback 或关键产物生成）。
 
@@ -278,6 +280,12 @@ Interactive 会话恢复约定（v0.2）：
 - strict 开关：`runtime_options.interactive_require_user_reply`（默认 `true`）：
   - `true`：保持人工回复门禁；`resumable` 停留 waiting_user，`sticky_process` 超时失败。
   - `false`：等待超时触发自动决策并继续执行（`resumable` 自动 resume，`sticky_process` 自动注入继续）。
+- interactive 完成判定（双轨）：
+  - 强条件：检测到 `__SKILL_DONE__`。
+  - 软条件：未检测到 marker，但当轮输出通过 output schema。
+  - 软条件完成会记录 warning：`INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+  - ask_user 提示建议采用 YAML（非 JSON）并包裹 `<ASK_USER_YAML>...</ASK_USER_YAML>`，降低与业务输出 JSON 混淆风险。
+  - ask_user 提示仅用于 pending/UI enrichment，不参与生命周期门控判定。
 - 服务启动期恢复（startup reconciliation）：
   - 扫描非终态 run：`queued/running/waiting_user`。
   - `waiting_user + resumable`：校验 `pending_interaction_id + session handle`，有效则保持 waiting；无效则 `SESSION_RESUME_FAILED`。
@@ -296,6 +304,7 @@ Interactive 会话恢复约定（v0.2）：
   - `SESSION_RESUME_FAILED`
   - `INTERACTION_WAIT_TIMEOUT`
   - `INTERACTION_PROCESS_LOST`
+  - `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`
   - `ORCHESTRATOR_RESTART_INTERRUPTED`
 
 CodexAdapter(v0) 策略（建议）：
@@ -417,7 +426,13 @@ Management API（推荐前端入口）：
 - 返回文件预览（带路径越界保护）
 
 9) GET /v1/management/runs/{request_id}/events
-- SSE 增量日志流（复用 jobs 事件语义）
+- SSE 实时流（包含 `run_event`/`chat_event` 及兼容 `stdout/stderr` 增量）
+
+9a) GET /v1/management/runs/{request_id}/events/history
+- 结构化历史事件回放（支持 `from_seq/to_seq/from_ts/to_ts`）
+
+9b) GET /v1/management/runs/{request_id}/logs/range
+- 日志区间读取（`stream=stdout|stderr|pty` + `byte_from/byte_to`），供 `raw_ref` 回跳
 
 10) GET /v1/management/runs/{request_id}/pending
 - 查询当前待决交互
@@ -532,9 +547,15 @@ Response:
 
 9) GET /v1/jobs/{request_id}/events
 - 返回 `text/event-stream` 增量事件流（适合实时监控与断线续传）
-- query: `stdout_from` / `stderr_from`
-- 事件: `snapshot/stdout/stderr/status/heartbeat/end`
+- query: `cursor` / `stdout_from` / `stderr_from`
+- 事件: `snapshot/run_event/chat_event/stdout/stderr/status/heartbeat/end`
 - `waiting_user` 为非终态，推荐停止日志轮询并改走 pending/reply 流程。
+
+9c) GET /v1/jobs/{request_id}/events/history
+- 返回结构化历史事件，支持按 `seq` 与时间区间拉取。
+
+9d) GET /v1/jobs/{request_id}/logs/range
+- 返回日志字节区间，用于前端从 `raw_ref` 回跳原始证据。
 
 9a) GET /v1/jobs/{request_id}/interaction/pending
 - 读取当前待决交互问题；仅 `runtime_options.execution_mode=interactive` 可用。

@@ -11,9 +11,9 @@
     -   **依赖**: 包含项目运行所需的基础 Python 包 (如 `jsonschema`, `tomlkit`, `fastapi` 等)。
     -   **激活方式**: `conda activate DataProcessing`
 
-2.  **UV 隔离环境 (`.venv` via `tests/integration/run_integration_tests.sh`)**:
+2.  **UV 隔离环境 (`.venv` via `tests/engine_integration/run_engine_integration_tests.sh`)**:
     -   **用途**: 专门用于 **Skill 集成测试**。
-    -   **特点**: 由 `tests/integration/run_integration_tests.sh` 脚本自动通过 `uv` 管理，确保测试在纯净、隔离且与生产环境一致的依赖环境中运行。
+    -   **特点**: 由 `tests/engine_integration/run_engine_integration_tests.sh` 脚本自动通过 `uv` 管理，确保测试在纯净、隔离且与生产环境一致的依赖环境中运行。
 
 ## 2. 操作规范
 
@@ -38,9 +38,9 @@ pytest tests/unit/
 
 ### 2.2 Skill 集成测试 (Integration Tests)
 
-所有针对 Skill 的端到端集成测试，**必须** 使用 `tests/integration/run_integration_tests.sh` 脚本执行。
+所有针对 Skill 的端到端集成测试，**必须** 使用 `tests/engine_integration/run_engine_integration_tests.sh` 脚本执行。
 
-**严禁** 直接使用 python 运行 `tests/integration/run_integration_tests.py`，因为这会跳过必要的环境变量注入（如 `SKILL_RUNNER_DATA_DIR`）和环境隔离。
+**严禁** 直接使用 python 运行 `tests/engine_integration/run_engine_integration_tests.py`，因为这会跳过必要的环境变量注入（如 `SKILL_RUNNER_DATA_DIR`）和环境隔离。
 
 **适用场景**:
 - 验证某个 Skill (如 `demo-bible-verse`) 在特定引擎 (Gemini/Codex) 下的完整执行流程。
@@ -48,16 +48,16 @@ pytest tests/unit/
 
 **执行命令**:
 ```bash
-# 格式: ./tests/integration/run_integration_tests.sh [args passed to run_integration_tests.py]
+# 格式: ./tests/engine_integration/run_engine_integration_tests.sh [args passed to run_engine_integration_tests.py]
 
 # 示例 1: 测试 demo-bible-verse 技能，使用 Gemini 引擎 (详细日志)
-./tests/integration/run_integration_tests.sh -k demo-bible-verse -e gemini -v
+./tests/engine_integration/run_engine_integration_tests.sh -k demo-bible-verse -e gemini -v
 
 # 示例 2: 测试所有 Pandas 相关技能，使用 Codex 引擎
-./tests/integration/run_integration_tests.sh -k pandas -e codex
+./tests/engine_integration/run_engine_integration_tests.sh -k pandas -e codex
 
 # 示例 3: 运行所有集成测试
-./tests/integration/run_integration_tests.sh
+./tests/engine_integration/run_engine_integration_tests.sh
 ```
 
 **Suite 扩展字段**:
@@ -80,7 +80,12 @@ pytest tests/unit/
 
 **执行命令**:
 ```bash
-conda run --no-capture-output -n DataProcessing python -u -m pytest tests/integration/test_skill_package_install_api.py -q
+conda run --no-capture-output -n DataProcessing python -u -m pytest tests/api_integration/test_skill_package_install_api.py -q
+```
+
+或使用统一 API 集成包装脚本：
+```bash
+bash tests/api_integration/run_api_integration_tests.sh -q tests/api_integration/test_skill_package_install_api.py
 ```
 
 ### 2.4 临时 Skill 运行接口集成测试
@@ -96,7 +101,12 @@ conda run --no-capture-output -n DataProcessing python -u -m pytest tests/integr
 
 **执行命令**:
 ```bash
-conda run --no-capture-output -n DataProcessing python -u -m pytest tests/integration/test_temp_skill_runs_api.py -q
+conda run --no-capture-output -n DataProcessing python -u -m pytest tests/api_integration/test_temp_skill_runs_api.py -q
+```
+
+或使用统一 API 集成包装脚本：
+```bash
+bash tests/api_integration/run_api_integration_tests.sh -q tests/api_integration/test_temp_skill_runs_api.py
 ```
 
 ### 2.5 REST E2E Tests
@@ -111,7 +121,7 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 
 **规则**:
 - 若 `engine` 不在 skill 的 `engines` 列表中，测试应预期失败（以 `workspace_manager` 抛错为判定）。
-- E2E 与集成测试共用 `tests/suites/*.yaml` 输入格式。
+- E2E 与引擎集成测试共用 `tests/engine_integration/suites/*.yaml` 输入格式。
 - 当 suite 配置 `skill_source=temp` 时，E2E 走 `/v1/temp-skill-runs` 两步接口。
 
 ### 2.5 日志配置 (Logging)
@@ -127,14 +137,14 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 **示例**:
 ```bash
 LOG_LEVEL=DEBUG LOG_FILE=/tmp/skill_runner.log LOG_MAX_BYTES=1048576 LOG_BACKUP_COUNT=3 \
-./tests/integration/run_integration_tests.sh -k demo-bible-verse -e gemini -v
+./tests/engine_integration/run_engine_integration_tests.sh -k demo-bible-verse -e gemini -v
 ```
 
 ## 3. 常见问题 (FAQ)
 
 **Q: 为什么集成测试不能用 Conda 环境？**
-A: 集成测试旨在模拟真实的生产运行环境。`tests/integration/run_integration_tests.sh` 使用 `uv` 创建的虚拟环境更接近 Docker 容器或生产服务器的部署状态，能有效避免 Conda 环境中可能存在的环境污染问题。同时，`tests/integration/run_integration_tests.sh` 负责设置关键的 `DATA_DIR` 等环境变量，直接运行 Python 脚本可能会导致产生脏数据或路径错误。
+A: 集成测试旨在模拟真实的生产运行环境。`tests/engine_integration/run_engine_integration_tests.sh` 使用 `uv` 创建的虚拟环境更接近 Docker 容器或生产服务器的部署状态，能有效避免 Conda 环境中可能存在的环境污染问题。同时，`tests/engine_integration/run_engine_integration_tests.sh` 负责设置关键的 `DATA_DIR` 等环境变量，直接运行 Python 脚本可能会导致产生脏数据或路径错误。
 
 **Q: 我开发了一个新功能，如何验证？**
 1.  首先在 Conda 环境下编写并运行 **单元测试** (`pytest tests/unit/`)，无需启动完整服务。
-2.  单元测试通过后，使用 `./tests/integration/run_integration_tests.sh` 运行相关的 **集成测试**，验证端到端逻辑。
+2.  单元测试通过后，使用 `./tests/engine_integration/run_engine_integration_tests.sh` 运行相关的 **集成测试**，验证端到端逻辑。

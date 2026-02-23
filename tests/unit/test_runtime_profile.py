@@ -25,6 +25,7 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("SKILL_RUNNER_AGENT_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("SKILL_RUNNER_AGENT_HOME", str(tmp_path / "agent-home"))
     monkeypatch.setenv("SKILL_RUNNER_NPM_PREFIX", str(tmp_path / "npm"))
+    monkeypatch.setenv("ZDOTDIR", str(tmp_path / "host-zdot"))
     runtime_profile.reset_runtime_profile_cache()
 
     profile = runtime_profile.get_runtime_profile()
@@ -38,3 +39,5 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     assert env["SKILL_RUNNER_AGENT_HOME"] == str(profile.agent_home)
     assert env["NPM_CONFIG_PREFIX"] == str(profile.npm_prefix)
     assert str(profile.npm_prefix) in env["PATH"]
+    assert env["HOME"] == str(profile.agent_home)
+    assert env["ZDOTDIR"] == str(profile.agent_home)

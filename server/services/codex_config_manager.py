@@ -26,9 +26,11 @@ class CodexConfigManager:
     ENFORCED_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex_enforced.toml"
     SCHEMA_PATH = Path(__file__).parent.parent / "assets" / "schemas" / "codex_profile_schema.json"
     
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Optional[Path] = None, profile_name: Optional[str] = None):
         profile = get_runtime_profile()
         self.config_path = config_path or profile.agent_home / ".codex" / "config.toml"
+        normalized_profile_name = (profile_name or self.PROFILE_NAME).strip()
+        self.profile_name = normalized_profile_name or self.PROFILE_NAME
         
     def ensure_config_exists(self) -> None:
         """Create empty config file if it doesn't exist."""
@@ -54,8 +56,17 @@ class CodexConfigManager:
         
         # 3. Merge Enforced Config (Mandatory overrides)
         enforced_config = self._load_enforced_config()
-        # We only care about the [profiles.skill-runner] section from enforced config
-        enforced_profile = enforced_config.get("profiles", {}).get(self.PROFILE_NAME, {})
+        # Prefer enforced section that matches current profile name.
+        # Fallback to default profile to keep backward compatibility when custom
+        # profile sections are not present in enforced config.
+        profiles_obj = enforced_config.get("profiles", {})
+        if not isinstance(profiles_obj, dict):
+            profiles_obj = {}
+        enforced_profile = profiles_obj.get(self.profile_name)
+        if not isinstance(enforced_profile, dict):
+            enforced_profile = profiles_obj.get(self.PROFILE_NAME, {})
+        if not isinstance(enforced_profile, dict):
+            enforced_profile = {}
         self._deep_merge(final_config, enforced_profile)
         
         # 4. Validate
@@ -99,7 +110,7 @@ class CodexConfigManager:
 
     def update_profile(self, settings: Dict[str, Any]) -> None:
         """
-        Injects or updates the [profiles.skill-runner] section in the user's config.toml.
+        Injects or updates the configured profile section in the user's config.toml.
         Preserves comments and formatting using tomlkit.
         """
         self.ensure_config_exists()
@@ -112,10 +123,10 @@ class CodexConfigManager:
             
         profiles = cast(Any, doc["profiles"])
         
-        if self.PROFILE_NAME not in profiles:
-            profiles[self.PROFILE_NAME] = tomlkit.table()
+        if self.profile_name not in profiles:
+            profiles[self.profile_name] = tomlkit.table()
             
-        profile = cast(Any, profiles[self.PROFILE_NAME])
+        profile = cast(Any, profiles[self.profile_name])
         
         # Update settings in the profile
         for key, value in settings.items():
@@ -126,14 +137,17 @@ class CodexConfigManager:
             f.write(tomlkit.dumps(doc))
 
     def get_profile(self) -> Dict[str, Any]:
-        """Retrieve the current settings for the skill-runner profile."""
+        """Retrieve the current settings for the configured profile."""
         if not self.config_path.exists():
             return {}
             
         with open(self.config_path, "r", encoding="utf-8") as f:
             doc = cast(Any, tomlkit.parse(f.read()))
             
-        return doc.get("profiles", {}).get(self.PROFILE_NAME, {})
+        profiles_obj = doc.get("profiles", {})
+        if not isinstance(profiles_obj, dict):
+            return {}
+        return profiles_obj.get(self.profile_name, {})
 
 
 logger = logging.getLogger(__name__)
