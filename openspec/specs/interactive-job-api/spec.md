@@ -117,3 +117,26 @@ The reply protocol MUST remain `interaction_id + response` driven and MUST NOT i
 - **THEN** API 返回 `failed`
 - **AND** 失败原因包含 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`
 
+### Requirement: 对外交互会话配置 MUST 不暴露 legacy kind 字段
+系统 MUST 从对外读取接口中移除 `interactive_profile.kind` 语义。
+
+#### Scenario: result/status 读取不返回 kind
+- **WHEN** 客户端读取状态或结果
+- **THEN** 响应不包含 `interactive_profile.kind`
+- **AND** 保持 `execution_mode`、`pending_interaction`、`interaction history` 等核心字段不变
+
+#### Scenario: reply 提交后统一回到 queued
+- **WHEN** 客户端提交合法 reply
+- **THEN** 返回 `status=queued`
+- **AND** 不存在 sticky 专属 `running` 直连分支
+
+### Requirement: 事件流 cursor/history MUST 使用 FCMP 语义
+系统 MUST 统一使用 FCMP `seq` 作为事件重连与历史拉取锚点。
+
+#### Scenario: cursor 续传按 chat_event.seq
+- **WHEN** 客户端调用 `/events?cursor=n`
+- **THEN** 服务端仅推送 `chat_event.seq > n` 的事件
+
+#### Scenario: events/history 返回 FCMP 序列
+- **WHEN** 客户端调用 `/events/history`
+- **THEN** 响应事件为 FCMP envelope（`protocol_version=fcmp/1.0`）

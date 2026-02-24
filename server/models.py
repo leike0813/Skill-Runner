@@ -39,17 +39,9 @@ class EngineSessionHandleType(str, Enum):
     OPAQUE = "opaque"
 
 
-class EngineInteractiveProfileKind(str, Enum):
-    """Interactive execution tier chosen by capability probe."""
-    RESUMABLE = "resumable"
-    STICKY_PROCESS = "sticky_process"
-
-
 class InteractiveErrorCode(str, Enum):
     """Stable error codes for interactive execution."""
     SESSION_RESUME_FAILED = "SESSION_RESUME_FAILED"
-    INTERACTION_WAIT_TIMEOUT = "INTERACTION_WAIT_TIMEOUT"
-    INTERACTION_PROCESS_LOST = "INTERACTION_PROCESS_LOST"
     INTERACTIVE_MAX_ATTEMPT_EXCEEDED = "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
     ORCHESTRATOR_RESTART_INTERRUPTED = "ORCHESTRATOR_RESTART_INTERRUPTED"
 
@@ -84,8 +76,7 @@ class EngineResumeCapability(BaseModel):
 
 
 class EngineInteractiveProfile(BaseModel):
-    """Resolved execution profile for interactive runs."""
-    kind: EngineInteractiveProfileKind
+    """Single resumable session configuration for interactive runs."""
     reason: str = ""
     session_timeout_sec: int = Field(default=1200, ge=1)
 
@@ -555,6 +546,21 @@ class ConversationEventEnvelope(BaseModel):
     data: Dict[str, Any] = Field(default_factory=dict)
     meta: Dict[str, Any] = Field(default_factory=dict)
     raw_ref: Optional[RuntimeEventRef] = None
+
+
+class FcmpEventType(str, Enum):
+    """Canonical FCMP event type names for public stream contracts."""
+    CONVERSATION_STARTED = "conversation.started"
+    CONVERSATION_STATE_CHANGED = "conversation.state.changed"
+    ASSISTANT_MESSAGE_FINAL = "assistant.message.final"
+    USER_INPUT_REQUIRED = "user.input.required"
+    INTERACTION_REPLY_ACCEPTED = "interaction.reply.accepted"
+    INTERACTION_AUTO_DECIDE_TIMEOUT = "interaction.auto_decide.timeout"
+    CONVERSATION_COMPLETED = "conversation.completed"
+    CONVERSATION_FAILED = "conversation.failed"
+    DIAGNOSTIC_WARNING = "diagnostic.warning"
+    RAW_STDOUT = "raw.stdout"
+    RAW_STDERR = "raw.stderr"
 
 
 class InteractionKind(str, Enum):

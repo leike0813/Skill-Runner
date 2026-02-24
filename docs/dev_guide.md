@@ -273,13 +273,12 @@ EngineRunResult 字段建议：
 - artifacts_created: [str]        # 初步扫描得到的产物相对路径列表
 - events: [dict] or events.jsonl  # 可选
 
-Interactive 会话恢复约定（v0.2）：
-- Orchestrator 在 interactive 首回合前做 capability probe，并落地 `interactive_profile.kind`：
-  - `resumable`: 进入 `waiting_user` 前必须持久化 `EngineSessionHandle`。
-  - `sticky_process`: 持久化 `wait_deadline_at` 与进程绑定信息。
+Interactive 会话恢复约定（v0.3）：
+- 统一为单一可恢复会话范式（single resumable），不再区分 `resumable/sticky_process` 双档位。
+- Orchestrator 在 interactive 首回合前完成恢复能力探测；无论 probe 结果如何，都走统一可恢复路径并持久化 `EngineSessionHandle`。
 - strict 开关：`runtime_options.interactive_require_user_reply`（默认 `true`）：
-  - `true`：保持人工回复门禁；`resumable` 停留 waiting_user，`sticky_process` 超时失败。
-  - `false`：等待超时触发自动决策并继续执行（`resumable` 自动 resume，`sticky_process` 自动注入继续）。
+  - `true`：保持人工回复门禁；`waiting_user` 不因会话超时自动失败。
+  - `false`：等待超时触发自动决策并继续执行（统一回到 `queued` 再恢复）。
 - interactive 完成判定（双轨）：
   - 强条件：检测到 `__SKILL_DONE__`。
   - 软条件：未检测到 marker，但当轮输出通过 output schema。
@@ -288,10 +287,9 @@ Interactive 会话恢复约定（v0.2）：
   - ask_user 提示仅用于 pending/UI enrichment，不参与生命周期门控判定。
 - 服务启动期恢复（startup reconciliation）：
   - 扫描非终态 run：`queued/running/waiting_user`。
-  - `waiting_user + resumable`：校验 `pending_interaction_id + session handle`，有效则保持 waiting；无效则 `SESSION_RESUME_FAILED`。
-  - `waiting_user + sticky_process`：重启后统一收敛为 `failed`，错误码 `INTERACTION_PROCESS_LOST`。
+  - `waiting_user`：校验 `pending_interaction_id + session handle`，有效则保持 waiting；无效则 `SESSION_RESUME_FAILED`。
   - `queued/running`：默认收敛为 `failed`，错误码 `ORCHESTRATOR_RESTART_INTERRUPTED`。
-  - 清理孤儿进程与 stale trust/session/slot 绑定，且清理逻辑必须幂等。
+  - 清理逻辑要求幂等，不依赖 sticky 专属进程绑定语义。
 - 恢复观测字段：
   - `recovery_state`: `none | recovered_waiting | failed_reconciled`
   - `recovered_at`: 恢复决策写入时间（ISO）
@@ -302,8 +300,6 @@ Interactive 会话恢复约定（v0.2）：
   - iFlow: `<Execution Info>` 中 `session-id`
 - 标准错误码：
   - `SESSION_RESUME_FAILED`
-  - `INTERACTION_WAIT_TIMEOUT`
-  - `INTERACTION_PROCESS_LOST`
   - `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`
   - `ORCHESTRATOR_RESTART_INTERRUPTED`
 
@@ -426,7 +422,7 @@ Management API（推荐前端入口）：
 - 返回文件预览（带路径越界保护）
 
 9) GET /v1/management/runs/{request_id}/events
-- SSE 实时流（包含 `run_event`/`chat_event` 及兼容 `stdout/stderr` 增量）
+- SSE 实时流（FCMP 单流：`snapshot/chat_event/heartbeat`）
 
 9a) GET /v1/management/runs/{request_id}/events/history
 - 结构化历史事件回放（支持 `from_seq/to_seq/from_ts/to_ts`）
@@ -546,13 +542,13 @@ Response:
 - 返回 prompt/stdout/stderr 的全量快照（适合低频排查）
 
 9) GET /v1/jobs/{request_id}/events
-- 返回 `text/event-stream` 增量事件流（适合实时监控与断线续传）
-- query: `cursor` / `stdout_from` / `stderr_from`
-- 事件: `snapshot/run_event/chat_event/stdout/stderr/status/heartbeat/end`
-- `waiting_user` 为非终态，推荐停止日志轮询并改走 pending/reply 流程。
+- 返回 `text/event-stream` FCMP 单流（适合实时监控与断线续传）
+- query: `cursor`（基于 `chat_event.seq`）
+- 事件: `snapshot/chat_event/heartbeat`
+- `waiting_user` 为非终态，推荐改走 pending/reply 流程。
 
 9c) GET /v1/jobs/{request_id}/events/history
-- 返回结构化历史事件，支持按 `seq` 与时间区间拉取。
+- 返回 FCMP 历史事件，支持按 `seq` 与时间区间拉取。
 
 9d) GET /v1/jobs/{request_id}/logs/range
 - 返回日志字节区间，用于前端从 `raw_ref` 回跳原始证据。

@@ -72,8 +72,6 @@
     let reconnectTimer = null;
     let reconnectAttempts = 0;
     let cursor = 0;
-    let stdoutOffset = 0;
-    let stderrOffset = 0;
     const renderedChatKeys = new Set();
     const renderedRunKeys = new Set();
     const relationRows = [];
@@ -464,6 +462,32 @@
             confidence,
         });
 
+        if (type === "conversation.state.changed") {
+            const to = safeText(data?.data?.to || currentStatus);
+            currentStatus = to || currentStatus;
+            statusEl.textContent = currentStatus;
+            if (data?.data?.pending_interaction_id != null) {
+                pendingIdEl.textContent = String(data.data.pending_interaction_id);
+            }
+            if (currentStatus === "waiting_user") {
+                refreshPending().catch(() => {});
+            }
+            if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
+                setReplyEnabled(false, "");
+            }
+            return;
+        }
+        if (type === "interaction.reply.accepted") {
+            setReplyEnabled(false, "Reply accepted, resuming...");
+            pendingIdEl.textContent = "-";
+            return;
+        }
+        if (type === "interaction.auto_decide.timeout") {
+            appendConversationRow("System", "等待超时，系统已自动决策并继续执行。", { lowConfidence, rawRefs });
+            pendingIdEl.textContent = "-";
+            return;
+        }
+
         if (type === "assistant.message.final") {
             const text = safeText(data?.data?.text);
             appendConversationRow("Agent", text, { lowConfidence, rawRefs });
@@ -600,7 +624,7 @@
             stream.close();
         }
         stream = new EventSource(
-            apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}&stdout_from=${stdoutOffset}&stderr_from=${stderrOffset}`)
+            apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}`)
         );
         stream.addEventListener("snapshot", (evt) => {
             reconnectAttempts = 0;
@@ -611,59 +635,11 @@
                 pendingIdEl.textContent = String(data.pending_interaction_id);
             }
             if (typeof data.cursor === "number") updateCursor(data.cursor);
-            if (typeof data.stdout_offset === "number") stdoutOffset = data.stdout_offset;
-            if (typeof data.stderr_offset === "number") stderrOffset = data.stderr_offset;
-        });
-        stream.addEventListener("stdout", (evt) => {
-            const data = JSON.parse(evt.data || "{}");
-            if (typeof data.to === "number") stdoutOffset = data.to;
-            if (data.chunk) appendDiagnostic(`[legacy-stdout] ${String(data.chunk).trim()}`);
-        });
-        stream.addEventListener("stderr", (evt) => {
-            const data = JSON.parse(evt.data || "{}");
-            if (typeof data.to === "number") stderrOffset = data.to;
-            appendChunk(stderrEl, safeText(data.chunk || ""));
-        });
-        stream.addEventListener("run_event", (evt) => {
-            reconnectAttempts = 0;
-            const data = JSON.parse(evt.data || "{}");
-            handleRunEventPayload(data);
         });
         stream.addEventListener("chat_event", (evt) => {
             reconnectAttempts = 0;
             const data = JSON.parse(evt.data || "{}");
             handleChatEventPayload(data);
-        });
-        stream.addEventListener("status", async (evt) => {
-            const data = JSON.parse(evt.data || "{}");
-            currentStatus = safeText(data.status || "unknown");
-            statusEl.textContent = currentStatus;
-            if (data.pending_interaction_id != null) {
-                pendingIdEl.textContent = String(data.pending_interaction_id);
-            }
-            if (currentStatus === "waiting_user") {
-                await refreshPending();
-            }
-            if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
-                setReplyEnabled(false, "");
-            }
-        });
-        stream.addEventListener("end", async (evt) => {
-            const data = JSON.parse(evt.data || "{}");
-            if (safeText(data.reason) === "waiting_user") {
-                currentStatus = "waiting_user";
-                await refreshPending();
-                if (stream) {
-                    stream.close();
-                    stream = null;
-                }
-                return;
-            }
-            if (safeText(data.reason) === "terminal" && stream) {
-                stream.close();
-                stream = null;
-            }
-            await refreshState();
         });
         stream.addEventListener("error", async () => {
             if (currentStatus === "waiting_user") {

@@ -3,14 +3,13 @@ import contextlib
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 from ..models import (
     EngineSessionHandle,
     EngineInteractiveProfile,
-    EngineInteractiveProfileKind,
     ExecutionMode,
     InteractiveErrorCode,
     RunStatus,
@@ -27,6 +26,12 @@ from ..services.run_folder_trust_manager import run_folder_trust_manager
 from ..services.session_timeout import resolve_session_timeout
 from ..services.engine_policy import apply_engine_policy_to_manifest
 from ..services.manifest_artifact_inference import infer_manifest_artifacts
+from ..services.session_statechart import (
+    SessionEvent,
+    timeout_requires_auto_decision,
+    waiting_recovery_event,
+    waiting_reply_target_status,
+)
 from ..config import config
 
 DONE_MARKER_STREAM_PATTERN = re.compile(
@@ -52,7 +57,6 @@ class JobOrchestrator:
     """
     def __init__(self):
         self.agent_cli_manager = AgentCliManager()
-        self._sticky_watchdog_tasks: dict[str, asyncio.Task[None]] = {}
         self.adapters = engine_adapter_registry.adapter_map()
 
     async def run_job(
@@ -81,13 +85,9 @@ class JobOrchestrator:
         """
         slot_acquired = False
         release_slot_on_exit = True
-        sticky_slot_held = bool(options.get("__sticky_slot_held"))
         run_dir: Path | None = None
-        if sticky_slot_held:
-            slot_acquired = True
-        else:
-            await concurrency_manager.acquire_slot()
-            slot_acquired = True
+        await concurrency_manager.acquire_slot()
+        slot_acquired = True
         run_dir = workspace_manager.get_run_dir(run_id)
         if not run_dir:
             logger.error("Run dir %s not found", run_id)
@@ -232,7 +232,6 @@ class JobOrchestrator:
             run_options["__run_id"] = run_id
             run_options["__attempt_number"] = attempt_number
             if is_interactive and request_id and interactive_profile:
-                run_options["__interactive_profile"] = interactive_profile.model_dump(mode="json")
                 self._inject_interactive_resume_context(
                     request_id=request_id,
                     profile=interactive_profile,
@@ -357,8 +356,6 @@ class JobOrchestrator:
                 "AUTH_REQUIRED",
                 "TIMEOUT",
                 InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-                InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-                InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
             } else None
 
             normalized_status = "success"
@@ -438,8 +435,6 @@ class JobOrchestrator:
                     )
                 elif forced_failure_reason in {
                     InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-                    InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-                    InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
                     InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value,
                 }:
                     error_code = forced_failure_reason
@@ -461,11 +456,6 @@ class JobOrchestrator:
                 "validation_warnings": warnings,
                 "error": normalized_error,
                 "pending_interaction": pending_interaction,
-                "interactive_profile": (
-                    interactive_profile.model_dump(mode="json")
-                    if interactive_profile is not None
-                    else None
-                ),
             }
             final_validation_warnings = list(warnings)
             final_error_code = (
@@ -499,19 +489,15 @@ class JobOrchestrator:
                 and request_id
                 and pending_interaction
             ):
-                wait_runtime = run_store.get_sticky_wait_runtime(request_id)
-                if wait_runtime and wait_runtime.get("wait_deadline_at"):
-                    if interactive_profile.kind == EngineInteractiveProfileKind.STICKY_PROCESS:
-                        release_slot_on_exit = False
-                    self._schedule_sticky_watchdog(
-                        request_id=request_id,
-                        run_id=run_id,
-                        wait_deadline_at=str(wait_runtime["wait_deadline_at"]),
+                if timeout_requires_auto_decision(interactive_require_user_reply):
+                    delay_sec = max(1, int(interactive_profile.session_timeout_sec))
+                    asyncio.create_task(
+                        self._auto_decide_after_timeout(
+                            request_id=request_id,
+                            run_id=run_id,
+                            delay_sec=delay_sec,
+                        )
                     )
-                elif interactive_profile.kind == EngineInteractiveProfileKind.STICKY_PROCESS:
-                    release_slot_on_exit = False
-            elif request_id:
-                self.cancel_sticky_watchdog(request_id)
             if final_status != RunStatus.WAITING_USER:
                 self._build_run_bundle(run_dir, debug=False)
                 self._build_run_bundle(run_dir, debug=True)
@@ -544,8 +530,6 @@ class JobOrchestrator:
             normalized_error_message = canceled_error["message"]
             final_error_code = str(canceled_error.get("code"))
             final_validation_warnings = []
-            if request_id:
-                self.cancel_sticky_watchdog(request_id)
             result_path = self._write_canceled_result(run_dir, canceled_error) if run_dir else None
             if run_dir:
                 self._update_status(
@@ -572,8 +556,6 @@ class JobOrchestrator:
         except Exception as e:
             logger.exception("Job failed")
             final_status = RunStatus.FAILED
-            if request_id:
-                self.cancel_sticky_watchdog(request_id)
             normalized_error = self._error_from_exception(e)
             normalized_error_message = str(normalized_error.get("message", str(e)))
             final_error_code = (
@@ -691,13 +673,6 @@ class JobOrchestrator:
         )
         run_store.update_run_status(run_id, RunStatus.CANCELED)
 
-        if request_id:
-            self.cancel_sticky_watchdog(request_id)
-            if status == RunStatus.WAITING_USER:
-                profile = run_store.get_interactive_profile(request_id) or {}
-                if profile.get("kind") == EngineInteractiveProfileKind.STICKY_PROCESS.value:
-                    await concurrency_manager.release_slot()
-
         if temp_request_id:
             from .temp_skill_run_store import temp_skill_run_store
 
@@ -725,7 +700,6 @@ class JobOrchestrator:
             "validation_warnings": [],
             "error": error,
             "pending_interaction": None,
-            "interactive_profile": None,
         }
         result_path = run_dir / "result" / "result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1254,39 +1228,12 @@ class JobOrchestrator:
         options["__prompt_override"] = self._build_reply_prompt(
             options.get("__interactive_reply_payload")
         )
-        if profile.kind == EngineInteractiveProfileKind.RESUMABLE:
-            handle = run_store.get_engine_session_handle(request_id)
-            if not handle:
-                raise RuntimeError(
-                    f"{InteractiveErrorCode.SESSION_RESUME_FAILED.value}: missing session handle"
-                )
-            options["__resume_session_handle"] = handle
-            return
-        wait_runtime = run_store.get_sticky_wait_runtime(request_id)
-        if not wait_runtime:
+        handle = run_store.get_engine_session_handle(request_id)
+        if not handle:
             raise RuntimeError(
-                f"{InteractiveErrorCode.INTERACTION_PROCESS_LOST.value}: missing sticky wait state"
+                f"{InteractiveErrorCode.SESSION_RESUME_FAILED.value}: missing session handle"
             )
-        deadline_raw = wait_runtime.get("wait_deadline_at")
-        process_binding = wait_runtime.get("process_binding") or {}
-        if not deadline_raw:
-            raise RuntimeError(
-                f"{InteractiveErrorCode.INTERACTION_PROCESS_LOST.value}: missing wait_deadline_at"
-            )
-        try:
-            deadline = datetime.fromisoformat(deadline_raw)
-        except Exception as exc:
-            raise RuntimeError(
-                f"{InteractiveErrorCode.INTERACTION_PROCESS_LOST.value}: invalid wait_deadline_at"
-            ) from exc
-        if datetime.utcnow() > deadline:
-            raise RuntimeError(
-                f"{InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value}: sticky wait expired"
-            )
-        if process_binding.get("alive") is False:
-            raise RuntimeError(
-                f"{InteractiveErrorCode.INTERACTION_PROCESS_LOST.value}: sticky process exited"
-            )
+        options["__resume_session_handle"] = handle
         self._write_interaction_mirror_files(
             run_dir=run_dir,
             request_id=request_id,
@@ -1574,47 +1521,18 @@ class JobOrchestrator:
                 "kind": str(pending_interaction.get("kind", "open_text")),
             },
         )
-        if profile.kind == EngineInteractiveProfileKind.RESUMABLE:
-            try:
-                handle = adapter.extract_session_handle(
-                    raw_runtime_output,
-                    turn_index=int(pending_interaction["interaction_id"]),
-                )
-            except Exception:
-                return InteractiveErrorCode.SESSION_RESUME_FAILED.value
-            run_store.set_engine_session_handle(
-                request_id,
-                handle.model_dump(mode="json"),
+        _ = run_id
+        _ = interactive_require_user_reply
+        try:
+            handle = adapter.extract_session_handle(
+                raw_runtime_output,
+                turn_index=int(pending_interaction["interaction_id"]),
             )
-            self._write_interaction_mirror_files(
-                run_dir=run_dir,
-                request_id=request_id,
-                pending_interaction=pending_interaction,
-            )
-            if not interactive_require_user_reply:
-                wait_deadline = datetime.utcnow() + timedelta(seconds=profile.session_timeout_sec)
-                run_store.set_sticky_wait_runtime(
-                    request_id=request_id,
-                    wait_deadline_at=wait_deadline.isoformat(),
-                    process_binding={
-                        "run_id": run_id,
-                        "exec_session_id": f"{run_id}:{pending_interaction['interaction_id']}",
-                        "alive": True,
-                        "profile_kind": profile.kind.value,
-                    },
-                )
-            return None
-
-        wait_deadline = datetime.utcnow() + timedelta(seconds=profile.session_timeout_sec)
-        run_store.set_sticky_wait_runtime(
-            request_id=request_id,
-            wait_deadline_at=wait_deadline.isoformat(),
-            process_binding={
-                "run_id": run_id,
-                "exec_session_id": f"{run_id}:{pending_interaction['interaction_id']}",
-                "alive": True,
-                "profile_kind": profile.kind.value,
-            },
+        except Exception:
+            return InteractiveErrorCode.SESSION_RESUME_FAILED.value
+        run_store.set_engine_session_handle(
+            request_id,
+            handle.model_dump(mode="json"),
         )
         self._write_interaction_mirror_files(
             run_dir=run_dir,
@@ -1644,7 +1562,6 @@ class JobOrchestrator:
         runtime_state = {
             "interactive_profile": run_store.get_interactive_profile(request_id),
             "effective_session_timeout_sec": run_store.get_effective_session_timeout(request_id),
-            "sticky_wait_runtime": run_store.get_sticky_wait_runtime(request_id),
             "session_handle": run_store.get_engine_session_handle(request_id),
         }
         (interactions_dir / "runtime_state.json").write_text(
@@ -1652,112 +1569,42 @@ class JobOrchestrator:
             encoding="utf-8",
         )
 
-    def _schedule_sticky_watchdog(self, request_id: str, run_id: str, wait_deadline_at: str) -> None:
-        self.cancel_sticky_watchdog(request_id)
-        self._sticky_watchdog_tasks[request_id] = asyncio.create_task(
-            self._sticky_watchdog_task(
-                request_id=request_id,
-                run_id=run_id,
-                wait_deadline_at=wait_deadline_at,
-            )
-        )
-
-    def cancel_sticky_watchdog(self, request_id: str) -> None:
-        task = self._sticky_watchdog_tasks.pop(request_id, None)
-        if task:
-            task.cancel()
-
-    async def _sticky_watchdog_task(
+    async def _auto_decide_after_timeout(
         self,
         *,
         request_id: str,
         run_id: str,
-        wait_deadline_at: str,
+        delay_sec: int,
     ) -> None:
-        try:
-            await self._run_sticky_watchdog_logic(
-                request_id=request_id,
-                run_id=run_id,
-                wait_deadline_at=wait_deadline_at,
-            )
-        finally:
-            self._sticky_watchdog_tasks.pop(request_id, None)
-
-    async def _run_sticky_watchdog_logic(
-        self,
-        *,
-        request_id: str,
-        run_id: str,
-        wait_deadline_at: str,
-    ) -> None:
-        try:
-            deadline = datetime.fromisoformat(wait_deadline_at)
-        except Exception:
-            deadline = datetime.utcnow()
-        sleep_sec = max(0.0, (deadline - datetime.utcnow()).total_seconds())
-        try:
-            await asyncio.sleep(sleep_sec)
-        except asyncio.CancelledError:
-            return
-
+        await asyncio.sleep(max(1, int(delay_sec)))
         request_record = run_store.get_request(request_id)
         if not request_record or request_record.get("run_id") != run_id:
             return
         run_dir = workspace_manager.get_run_dir(run_id)
-        if not run_dir:
+        if run_dir is None:
             return
         status_file = run_dir / "status.json"
-        current_status = RunStatus.QUEUED
-        if status_file.exists():
-            payload = json.loads(status_file.read_text(encoding="utf-8"))
-            current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
+        if not status_file.exists():
+            return
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+        current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
         if current_status != RunStatus.WAITING_USER:
             return
         pending_interaction = run_store.get_pending_interaction(request_id)
         if pending_interaction is None:
             return
-
         runtime_options = request_record.get("runtime_options", {})
         interactive_require_user_reply = bool(
             runtime_options.get("interactive_require_user_reply", True)
         )
-        profile = run_store.get_interactive_profile(request_id) or {}
-        profile_kind = str(profile.get("kind", ""))
-
-        if not interactive_require_user_reply:
-            await self._resume_with_auto_decision(
-                request_record=request_record,
-                run_id=run_id,
-                request_id=request_id,
-                pending_interaction=pending_interaction,
-                profile_kind=profile_kind,
-            )
+        if not timeout_requires_auto_decision(interactive_require_user_reply):
             return
-
-        if profile_kind != EngineInteractiveProfileKind.STICKY_PROCESS.value:
-            return
-
-        error_payload = {
-            "code": InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-            "message": "INTERACTION_WAIT_TIMEOUT: sticky wait expired",
-        }
-        self._update_status(
-            run_dir,
-            RunStatus.FAILED,
-            error=error_payload,
-            effective_session_timeout_sec=run_store.get_effective_session_timeout(request_id),
-        )
-        run_store.update_run_status(run_id, RunStatus.FAILED)
-        sticky_runtime = run_store.get_sticky_wait_runtime(request_id) or {}
-        process_binding = sticky_runtime.get("process_binding") or {}
-        process_binding["alive"] = False
-        wait_deadline = sticky_runtime.get("wait_deadline_at") or wait_deadline_at
-        run_store.set_sticky_wait_runtime(
+        await self._resume_with_auto_decision(
+            request_record=request_record,
+            run_id=run_id,
             request_id=request_id,
-            wait_deadline_at=str(wait_deadline),
-            process_binding=process_binding,
+            pending_interaction=pending_interaction,
         )
-        await concurrency_manager.release_slot()
 
     async def _resume_with_auto_decision(
         self,
@@ -1766,7 +1613,6 @@ class JobOrchestrator:
         run_id: str,
         request_id: str,
         pending_interaction: Dict[str, Any],
-        profile_kind: str,
     ) -> None:
         interaction_id_obj = pending_interaction.get("interaction_id")
         if isinstance(interaction_id_obj, int):
@@ -1806,8 +1652,7 @@ class JobOrchestrator:
         if reply_state not in {"accepted", "idempotent"}:
             return
 
-        is_sticky = profile_kind == EngineInteractiveProfileKind.STICKY_PROCESS.value
-        next_status = RunStatus.RUNNING if is_sticky else RunStatus.QUEUED
+        next_status = waiting_reply_target_status()
         run_dir = workspace_manager.get_run_dir(run_id)
         if run_dir is None:
             return
@@ -1827,20 +1672,6 @@ class JobOrchestrator:
             "__interactive_auto_reason": "user_no_reply",
             "__interactive_auto_policy": default_policy,
         }
-        if is_sticky:
-            options["__sticky_slot_held"] = True
-            sticky_runtime = run_store.get_sticky_wait_runtime(request_id) or {}
-            process_binding = sticky_runtime.get("process_binding") or {}
-            process_binding["alive"] = True
-            timeout_sec = run_store.get_effective_session_timeout(request_id) or 1
-            refreshed_deadline = (
-                datetime.utcnow() + timedelta(seconds=max(1, int(timeout_sec)))
-            ).isoformat()
-            run_store.set_sticky_wait_runtime(
-                request_id=request_id,
-                wait_deadline_at=refreshed_deadline,
-                process_binding=process_binding,
-            )
         await self.run_job(
             run_id=run_id,
             skill_id=str(request_record["skill_id"]),
@@ -1883,46 +1714,26 @@ class JobOrchestrator:
             return
 
         if run_status == RunStatus.WAITING_USER:
-            profile_raw = record.get("interactive_profile")
-            profile_kind = (
-                str(profile_raw.get("kind", "")).strip()
-                if isinstance(profile_raw, dict)
-                else ""
+            pending = run_store.get_pending_interaction(request_id)
+            handle = run_store.get_engine_session_handle(request_id)
+            recovery_event = waiting_recovery_event(
+                has_pending_interaction=isinstance(pending, dict),
+                has_valid_handle=self._is_valid_session_handle(handle),
             )
-            if profile_kind == EngineInteractiveProfileKind.RESUMABLE.value:
-                pending = run_store.get_pending_interaction(request_id)
-                handle = run_store.get_engine_session_handle(request_id)
-                if isinstance(pending, dict) and self._is_valid_session_handle(handle):
-                    run_store.update_run_status(run_id, RunStatus.WAITING_USER)
-                    run_store.set_recovery_info(
-                        run_id,
-                        recovery_state="recovered_waiting",
-                        recovery_reason="resumable_waiting_preserved",
-                    )
-                    return
-                await self._mark_restart_reconciled_failed(
-                    request_id=request_id,
-                    run_id=run_id,
-                    engine_name=engine_name,
-                    error_code=InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-                    reason="missing pending interaction or session handle after restart",
-                )
-                return
-            if profile_kind == EngineInteractiveProfileKind.STICKY_PROCESS.value:
-                await self._mark_restart_reconciled_failed(
-                    request_id=request_id,
-                    run_id=run_id,
-                    engine_name=engine_name,
-                    error_code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                    reason="sticky process context cannot survive orchestrator restart",
+            if recovery_event == SessionEvent.RESTART_PRESERVE_WAITING:
+                run_store.update_run_status(run_id, RunStatus.WAITING_USER)
+                run_store.set_recovery_info(
+                    run_id,
+                    recovery_state="recovered_waiting",
+                    recovery_reason="resumable_waiting_preserved",
                 )
                 return
             await self._mark_restart_reconciled_failed(
                 request_id=request_id,
                 run_id=run_id,
                 engine_name=engine_name,
-                error_code=InteractiveErrorCode.ORCHESTRATOR_RESTART_INTERRUPTED.value,
-                reason="waiting_user run missing or invalid interactive_profile",
+                error_code=InteractiveErrorCode.SESSION_RESUME_FAILED.value,
+                reason="missing pending interaction or session handle after restart",
             )
             return
 
@@ -1961,32 +1772,13 @@ class JobOrchestrator:
         )
         run_store.clear_pending_interaction(request_id)
         run_store.clear_engine_session_handle(request_id)
-        run_store.clear_sticky_wait_runtime(request_id)
-        self.cancel_sticky_watchdog(request_id)
         adapter = self.adapters.get(engine_name)
         if adapter is not None:
             with contextlib.suppress(Exception):
                 await adapter.cancel_run_process(run_id)
 
     async def _cleanup_orphan_runtime_bindings(self, records: List[Dict[str, Any]]) -> None:
-        active_run_ids = set(run_store.list_active_run_ids())
-        for record in records:
-            request_id = str(record.get("request_id") or "")
-            if not request_id:
-                continue
-            process_binding = record.get("process_binding")
-            if not isinstance(process_binding, dict):
-                continue
-            bound_run_id = str(process_binding.get("run_id") or "")
-            if not bound_run_id or bound_run_id in active_run_ids:
-                continue
-            engine_name = str(record.get("engine") or "")
-            adapter = self.adapters.get(engine_name)
-            if adapter is not None:
-                with contextlib.suppress(Exception):
-                    await adapter.cancel_run_process(bound_run_id)
-            run_store.clear_engine_session_handle(request_id)
-            run_store.clear_sticky_wait_runtime(request_id)
+        _ = records
 
     def _is_valid_session_handle(self, handle: Any) -> bool:
         if not isinstance(handle, dict):
@@ -2006,8 +1798,6 @@ class JobOrchestrator:
         text = str(exc)
         for code in (
             InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-            InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-            InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
             InteractiveErrorCode.ORCHESTRATOR_RESTART_INTERRUPTED.value,
         ):
             if text.startswith(code):

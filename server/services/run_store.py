@@ -116,26 +116,13 @@ class RunStore:
                 """
                 CREATE TABLE IF NOT EXISTS request_interactive_runtime (
                     request_id TEXT PRIMARY KEY,
-                    profile_json TEXT,
                     effective_session_timeout_sec INTEGER,
                     session_handle_json TEXT,
-                    wait_deadline_at TEXT,
-                    process_binding_json TEXT,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
-            runtime_cols = {
-                row["name"]
-                for row in conn.execute(
-                    "PRAGMA table_info(request_interactive_runtime)"
-                ).fetchall()
-            }
-            if "effective_session_timeout_sec" not in runtime_cols:
-                conn.execute(
-                    "ALTER TABLE request_interactive_runtime "
-                    "ADD COLUMN effective_session_timeout_sec INTEGER"
-                )
+            self._migrate_interactive_runtime_table(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS request_interaction_history (
@@ -154,6 +141,79 @@ class RunStore:
                 ON request_interactions (request_id, state)
                 """
             )
+
+    def _migrate_interactive_runtime_table(self, conn: sqlite3.Connection) -> None:
+        runtime_cols = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(request_interactive_runtime)"
+            ).fetchall()
+        }
+        expected_cols = {
+            "request_id",
+            "effective_session_timeout_sec",
+            "session_handle_json",
+            "updated_at",
+        }
+        if runtime_cols == expected_cols:
+            return
+        now = datetime.utcnow().isoformat()
+        conn.execute(
+            "ALTER TABLE request_interactive_runtime RENAME TO request_interactive_runtime_legacy"
+        )
+        conn.execute(
+            """
+            CREATE TABLE request_interactive_runtime (
+                request_id TEXT PRIMARY KEY,
+                effective_session_timeout_sec INTEGER,
+                session_handle_json TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        legacy_rows = conn.execute(
+            "SELECT * FROM request_interactive_runtime_legacy"
+        ).fetchall()
+        for row in legacy_rows:
+            row_dict = dict(row)
+            request_id = row_dict.get("request_id")
+            if not isinstance(request_id, str) or not request_id:
+                continue
+            timeout_obj = row_dict.get("effective_session_timeout_sec")
+            timeout_value: int | None = None
+            if timeout_obj is not None:
+                try:
+                    timeout_value = int(timeout_obj)
+                except Exception:
+                    timeout_value = None
+            if timeout_value is None:
+                profile_raw = row_dict.get("profile_json")
+                if isinstance(profile_raw, str) and profile_raw:
+                    try:
+                        profile = json.loads(profile_raw)
+                    except Exception:
+                        profile = {}
+                    timeout_from_profile = profile.get("session_timeout_sec")
+                    if timeout_from_profile is not None:
+                        try:
+                            timeout_value = int(timeout_from_profile)
+                        except Exception:
+                            timeout_value = None
+            if timeout_value is None:
+                timeout_value = int(config.SYSTEM.SESSION_TIMEOUT_SEC)
+            handle_obj = row_dict.get("session_handle_json")
+            handle_json = handle_obj if isinstance(handle_obj, str) else None
+            updated_at_obj = row_dict.get("updated_at")
+            updated_at = updated_at_obj if isinstance(updated_at_obj, str) and updated_at_obj else now
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO request_interactive_runtime (
+                    request_id, effective_session_timeout_sec, session_handle_json, updated_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (request_id, timeout_value, handle_json, updated_at),
+            )
+        conn.execute("DROP TABLE request_interactive_runtime_legacy")
 
     def create_request(
         self,
@@ -476,10 +536,9 @@ class RunStore:
                     run.recovery_state AS recovery_state,
                     run.recovered_at AS recovered_at,
                     run.recovery_reason AS recovery_reason,
-                    ir.profile_json AS profile_json,
+                    ir.effective_session_timeout_sec AS effective_session_timeout_sec,
                     ir.session_handle_json AS session_handle_json,
-                    ir.wait_deadline_at AS wait_deadline_at,
-                    ir.process_binding_json AS process_binding_json
+                    ir.updated_at AS interactive_runtime_updated_at
                 FROM requests req
                 JOIN runs run ON req.run_id = run.run_id
                 LEFT JOIN request_interactive_runtime ir ON req.request_id = ir.request_id
@@ -491,25 +550,25 @@ class RunStore:
         for row in rows:
             item = dict(row)
             runtime_options_json = item.pop("runtime_options_json", "{}")
-            profile_json = item.pop("profile_json", None)
             session_handle_json = item.pop("session_handle_json", None)
-            process_binding_json = item.pop("process_binding_json", None)
+            timeout_obj = item.get("effective_session_timeout_sec")
             try:
                 item["runtime_options"] = json.loads(runtime_options_json or "{}")
             except Exception:
                 item["runtime_options"] = {}
-            try:
-                item["interactive_profile"] = json.loads(profile_json) if profile_json else None
-            except Exception:
-                item["interactive_profile"] = None
+            if timeout_obj is None:
+                item["interactive_session_config"] = None
+            else:
+                try:
+                    item["interactive_session_config"] = {
+                        "session_timeout_sec": int(timeout_obj)
+                    }
+                except Exception:
+                    item["interactive_session_config"] = None
             try:
                 item["session_handle"] = json.loads(session_handle_json) if session_handle_json else None
             except Exception:
                 item["session_handle"] = None
-            try:
-                item["process_binding"] = json.loads(process_binding_json) if process_binding_json else None
-            except Exception:
-                item["process_binding"] = None
             records.append(item)
         return records
 
@@ -584,18 +643,14 @@ class RunStore:
         self,
         request_id: str,
         *,
-        profile_json: Optional[str] = None,
         effective_session_timeout_sec: Optional[int] = None,
         session_handle_json: Optional[str] = None,
-        wait_deadline_at: Optional[str] = None,
-        process_binding_json: Optional[str] = None,
     ) -> None:
         now = datetime.utcnow().isoformat()
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT profile_json, effective_session_timeout_sec, session_handle_json,
-                       wait_deadline_at, process_binding_json
+                SELECT effective_session_timeout_sec, session_handle_json
                 FROM request_interactive_runtime
                 WHERE request_id = ?
                 """,
@@ -605,14 +660,12 @@ class RunStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO request_interactive_runtime (
-                    request_id, profile_json, effective_session_timeout_sec, session_handle_json,
-                    wait_deadline_at, process_binding_json, updated_at
+                    request_id, effective_session_timeout_sec, session_handle_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
                 (
                     request_id,
-                    profile_json if profile_json is not None else current.get("profile_json"),
                     (
                         effective_session_timeout_sec
                         if effective_session_timeout_sec is not None
@@ -621,21 +674,15 @@ class RunStore:
                     session_handle_json
                     if session_handle_json is not None
                     else current.get("session_handle_json"),
-                    wait_deadline_at
-                    if wait_deadline_at is not None
-                    else current.get("wait_deadline_at"),
-                    process_binding_json
-                    if process_binding_json is not None
-                    else current.get("process_binding_json"),
                     now,
                 ),
             )
 
     def set_interactive_profile(self, request_id: str, profile: Dict[str, Any]) -> None:
-        self._upsert_interactive_runtime(
-            request_id,
-            profile_json=json.dumps(profile, sort_keys=True),
-        )
+        timeout = profile.get("session_timeout_sec")
+        if timeout is None:
+            timeout = config.SYSTEM.SESSION_TIMEOUT_SEC
+        self._upsert_interactive_runtime(request_id, effective_session_timeout_sec=int(timeout))
 
     def set_effective_session_timeout(self, request_id: str, timeout_sec: int) -> None:
         self._upsert_interactive_runtime(
@@ -644,18 +691,10 @@ class RunStore:
         )
 
     def get_interactive_profile(self, request_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT profile_json
-                FROM request_interactive_runtime
-                WHERE request_id = ?
-                """,
-                (request_id,),
-            ).fetchone()
-        if not row or row["profile_json"] is None:
+        timeout = self.get_effective_session_timeout(request_id)
+        if timeout is None:
             return None
-        return json.loads(row["profile_json"])
+        return {"session_timeout_sec": int(timeout)}
 
     def get_effective_session_timeout(self, request_id: str) -> Optional[int]:
         with self._connect() as conn:
@@ -698,50 +737,6 @@ class RunStore:
                 """
                 UPDATE request_interactive_runtime
                 SET session_handle_json = NULL, updated_at = ?
-                WHERE request_id = ?
-                """,
-                (now, request_id),
-            )
-
-    def set_sticky_wait_runtime(
-        self,
-        request_id: str,
-        wait_deadline_at: str,
-        process_binding: Dict[str, Any],
-    ) -> None:
-        self._upsert_interactive_runtime(
-            request_id,
-            wait_deadline_at=wait_deadline_at,
-            process_binding_json=json.dumps(process_binding, sort_keys=True),
-        )
-
-    def get_sticky_wait_runtime(self, request_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT wait_deadline_at, process_binding_json
-                FROM request_interactive_runtime
-                WHERE request_id = ?
-                """,
-                (request_id,),
-            ).fetchone()
-        if not row:
-            return None
-        process_binding = None
-        if row["process_binding_json"] is not None:
-            process_binding = json.loads(row["process_binding_json"])
-        return {
-            "wait_deadline_at": row["wait_deadline_at"],
-            "process_binding": process_binding,
-        }
-
-    def clear_sticky_wait_runtime(self, request_id: str) -> None:
-        now = datetime.utcnow().isoformat()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE request_interactive_runtime
-                SET wait_deadline_at = NULL, process_binding_json = NULL, updated_at = ?
                 WHERE request_id = ?
                 """,
                 (now, request_id),

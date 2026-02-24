@@ -136,7 +136,7 @@ def test_interactive_runtime_roundtrip(tmp_path):
     store.set_effective_session_timeout("req-1", 1200)
     store.set_interactive_profile(
         "req-1",
-        {"kind": "resumable", "reason": "probe_ok", "session_timeout_sec": 1200},
+        {"reason": "probe_ok", "session_timeout_sec": 1200},
     )
     store.set_engine_session_handle(
         "req-1",
@@ -147,22 +147,13 @@ def test_interactive_runtime_roundtrip(tmp_path):
             "created_at_turn": 1,
         },
     )
-    store.set_sticky_wait_runtime(
-        "req-1",
-        "2026-02-16T00:00:00",
-        {"run_id": "run-1", "alive": True},
-    )
     profile = store.get_interactive_profile("req-1")
     handle = store.get_engine_session_handle("req-1")
-    sticky = store.get_sticky_wait_runtime("req-1")
     effective_timeout = store.get_effective_session_timeout("req-1")
     assert profile is not None
-    assert profile["kind"] == "resumable"
+    assert profile["session_timeout_sec"] == 1200
     assert handle is not None
     assert handle["handle_value"] == "thread-1"
-    assert sticky is not None
-    assert sticky["wait_deadline_at"] == "2026-02-16T00:00:00"
-    assert sticky["process_binding"]["alive"] is True
     assert effective_timeout == 1200
 
 
@@ -260,7 +251,7 @@ def test_recovery_metadata_and_incomplete_scan_roundtrip(tmp_path):
     store.update_request_run_id("req-1", "run-1")
     store.set_interactive_profile(
         "req-1",
-        {"kind": "resumable", "reason": "probe_ok", "session_timeout_sec": 1200},
+        {"reason": "probe_ok", "session_timeout_sec": 1200},
     )
     store.set_engine_session_handle(
         "req-1",
@@ -270,11 +261,6 @@ def test_recovery_metadata_and_incomplete_scan_roundtrip(tmp_path):
             "handle_value": "thread-1",
             "created_at_turn": 1,
         },
-    )
-    store.set_sticky_wait_runtime(
-        "req-1",
-        "2099-01-01T00:00:00",
-        {"run_id": "run-1", "alive": True},
     )
     store.set_recovery_info(
         "run-1",
@@ -291,13 +277,66 @@ def test_recovery_metadata_and_incomplete_scan_roundtrip(tmp_path):
     rows = store.list_incomplete_runs()
     assert len(rows) == 1
     assert rows[0]["run_status"] == "waiting_user"
-    assert rows[0]["interactive_profile"]["kind"] == "resumable"
+    assert rows[0]["interactive_session_config"]["session_timeout_sec"] == 1200
     assert rows[0]["session_handle"]["handle_value"] == "thread-1"
 
     store.clear_engine_session_handle("req-1")
     assert store.get_engine_session_handle("req-1") is None
-    store.clear_sticky_wait_runtime("req-1")
-    sticky = store.get_sticky_wait_runtime("req-1")
-    assert sticky is not None
-    assert sticky["wait_deadline_at"] is None
-    assert sticky["process_binding"] is None
+
+
+def test_migrate_legacy_interactive_runtime_table(tmp_path):
+    db_path = tmp_path / "runs.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE request_interactive_runtime (
+                request_id TEXT PRIMARY KEY,
+                profile_json TEXT,
+                effective_session_timeout_sec INTEGER,
+                session_handle_json TEXT,
+                wait_deadline_at TEXT,
+                process_binding_json TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO request_interactive_runtime (
+                request_id, profile_json, effective_session_timeout_sec,
+                session_handle_json, wait_deadline_at, process_binding_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "req-legacy",
+                '{"kind":"sticky_process","session_timeout_sec":900}',
+                None,
+                '{"engine":"codex","handle_type":"session_id","handle_value":"thread-1","created_at_turn":1}',
+                "2099-01-01T00:00:00",
+                '{"run_id":"run-1","alive":true}',
+                "2026-02-23T00:00:00",
+            ),
+        )
+        conn.commit()
+
+    store = RunStore(db_path=db_path)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(request_interactive_runtime)").fetchall()
+        }
+        row = conn.execute(
+            "SELECT request_id, effective_session_timeout_sec, session_handle_json FROM request_interactive_runtime WHERE request_id = ?",
+            ("req-legacy",),
+        ).fetchone()
+
+    assert cols == {
+        "request_id",
+        "effective_session_timeout_sec",
+        "session_handle_json",
+        "updated_at",
+    }
+    assert row["request_id"] == "req-legacy"
+    assert row["effective_session_timeout_sec"] == 900
+    assert '"handle_value":"thread-1"' in row["session_handle_json"]

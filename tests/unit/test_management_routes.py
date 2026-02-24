@@ -288,12 +288,20 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
         "server.services.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.list_interaction_history",
+        lambda _request_id: [],
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_effective_session_timeout",
+        lambda _request_id: None,
+    )
 
     response = await _request("GET", "/v1/management/runs/req-events/events")
     assert response.status_code == 200
     assert "event: snapshot" in response.text
-    assert "event: end" in response.text
-    assert "\"reason\": \"terminal\"" in response.text
+    assert "event: chat_event" in response.text
+    assert "event: end" not in response.text
 
 
 @pytest.mark.asyncio

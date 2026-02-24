@@ -107,8 +107,6 @@ class BackendClient:
         *,
         run_source: RunSource = RUN_SOURCE_INSTALLED,
         cursor: int = 0,
-        stdout_from: int = 0,
-        stderr_from: int = 0,
     ) -> AsyncIterator[bytes]:
         raise NotImplementedError
 
@@ -263,10 +261,8 @@ class HttpBackendClient(BackendClient):
         *,
         run_source: RunSource = RUN_SOURCE_INSTALLED,
         cursor: int = 0,
-        stdout_from: int = 0,
-        stderr_from: int = 0,
     ) -> AsyncIterator[bytes]:
-        params = {"cursor": cursor, "stdout_from": stdout_from, "stderr_from": stderr_from}
+        params = {"cursor": cursor}
         path = f"{self._run_base_path(request_id, run_source=run_source)}/events"
         url = f"{self._base_url}{path}"
         async with httpx.AsyncClient(timeout=None) as client:

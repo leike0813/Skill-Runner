@@ -390,16 +390,12 @@ async def stream_temp_skill_run_events(
     request_id: str,
     request: Request,
     cursor: int = Query(default=0, ge=0),
-    stdout_from: int = Query(default=0, ge=0),
-    stderr_from: int = Query(default=0, ge=0),
 ):
     return await run_read_facade.stream_events(
         source_adapter=temp_source_adapter,
         request_id=request_id,
         request=request,
         cursor=cursor,
-        stdout_from=stdout_from,
-        stderr_from=stderr_from,
     )
 
 

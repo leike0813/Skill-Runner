@@ -581,9 +581,9 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
     assert "/v1/management/runs/${requestId}/reply" in response.text
     assert "/v1/management/runs/${requestId}/cancel" in response.text
     assert "/v1/management/runs/${requestId}/logs/range" in response.text
-    assert "stdout_from=${stdoutOffset}" in response.text
-    assert "stderr_from=${stderrOffset}" in response.text
     assert "cursor=${cursor}" in response.text
+    assert "stdout_from=${stdoutOffset}" not in response.text
+    assert "stderr_from=${stderrOffset}" not in response.text
     assert 'id="stdout-log"' in response.text
     assert 'id="stderr-log"' in response.text
     assert 'id="diagnostic-log"' in response.text

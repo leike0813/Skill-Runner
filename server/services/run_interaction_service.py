@@ -9,7 +9,6 @@ from fastapi import BackgroundTasks, HTTPException  # type: ignore[import-not-fo
 
 from ..models import (
     ExecutionMode,
-    InteractiveErrorCode,
     InteractionPendingResponse,
     InteractionReplyRequest,
     InteractionReplyResponse,
@@ -20,6 +19,7 @@ from .concurrency_manager import concurrency_manager
 from .job_orchestrator import job_orchestrator
 from .run_source_adapter import RunSourceAdapter, get_request_and_run_dir, require_capability
 from .run_store import run_store
+from .session_statechart import waiting_reply_target_status
 
 
 class RunInteractionService:
@@ -109,71 +109,7 @@ class RunInteractionService:
         if reply_state == "stale":
             raise HTTPException(status_code=409, detail="stale interaction")
 
-        profile = run_store_backend.get_interactive_profile(request_id) or {}
-        if profile.get("kind") == "sticky_process":
-            sticky_runtime = run_store_backend.get_sticky_wait_runtime(request_id)
-            if not sticky_runtime:
-                await _mark_run_failed(
-                    source_adapter=source_adapter,
-                    request_id=request_id,
-                    request_record=request_record,
-                    run_dir=run_dir,
-                    code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                    message="Sticky process runtime missing",
-                    run_store_backend=run_store_backend,
-                )
-                raise HTTPException(status_code=409, detail="sticky process lost")
-            deadline_raw = sticky_runtime.get("wait_deadline_at")
-            process_binding = sticky_runtime.get("process_binding") or {}
-            if not deadline_raw:
-                await _mark_run_failed(
-                    source_adapter=source_adapter,
-                    request_id=request_id,
-                    request_record=request_record,
-                    run_dir=run_dir,
-                    code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                    message="Sticky process deadline missing",
-                    run_store_backend=run_store_backend,
-                )
-                raise HTTPException(status_code=409, detail="sticky process lost")
-            try:
-                deadline = datetime.fromisoformat(str(deadline_raw))
-            except ValueError:
-                await _mark_run_failed(
-                    source_adapter=source_adapter,
-                    request_id=request_id,
-                    request_record=request_record,
-                    run_dir=run_dir,
-                    code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                    message="Sticky process deadline invalid",
-                    run_store_backend=run_store_backend,
-                )
-                raise HTTPException(status_code=409, detail="sticky process lost")
-            if datetime.utcnow() > deadline:
-                await _mark_run_failed(
-                    source_adapter=source_adapter,
-                    request_id=request_id,
-                    request_record=request_record,
-                    run_dir=run_dir,
-                    code=InteractiveErrorCode.INTERACTION_WAIT_TIMEOUT.value,
-                    message="Sticky process wait timeout",
-                    run_store_backend=run_store_backend,
-                )
-                raise HTTPException(status_code=409, detail="interaction wait timeout")
-            if process_binding.get("alive") is False:
-                await _mark_run_failed(
-                    source_adapter=source_adapter,
-                    request_id=request_id,
-                    request_record=request_record,
-                    run_dir=run_dir,
-                    code=InteractiveErrorCode.INTERACTION_PROCESS_LOST.value,
-                    message="Sticky process exited",
-                    run_store_backend=run_store_backend,
-                )
-                raise HTTPException(status_code=409, detail="sticky process lost")
-
-        is_sticky_profile = profile.get("kind") == "sticky_process"
-        next_status = RunStatus.RUNNING if is_sticky_profile else RunStatus.QUEUED
+        next_status = waiting_reply_target_status()
         _write_run_status(run_dir, next_status, warnings=warnings)
 
         run_id_obj = request_record.get("run_id")
@@ -187,13 +123,9 @@ class RunInteractionService:
                 "__interactive_reply_interaction_id": request.interaction_id,
                 "__interactive_resolution_mode": "user_reply",
             }
-            if is_sticky_profile:
-                merged_options["__sticky_slot_held"] = True
-                job_orchestrator.cancel_sticky_watchdog(request_id)
-            else:
-                admitted = await concurrency_manager.admit_or_reject()
-                if not admitted:
-                    raise HTTPException(status_code=429, detail="Job queue is full")
+            admitted = await concurrency_manager.admit_or_reject()
+            if not admitted:
+                raise HTTPException(status_code=429, detail="Job queue is full")
 
             temp_request_id = source_adapter.get_run_job_temp_request_id(request_id)
             background_tasks.add_task(
@@ -268,30 +200,6 @@ def _write_run_status(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-
-
-async def _mark_run_failed(
-    *,
-    source_adapter: RunSourceAdapter,
-    request_id: str,
-    request_record: dict[str, Any],
-    run_dir: Path,
-    code: str,
-    message: str,
-    run_store_backend: Any,
-) -> None:
-    error_payload = {"code": code, "message": message}
-    _write_run_status(
-        run_dir,
-        RunStatus.FAILED,
-        error=error_payload,
-        effective_session_timeout_sec=run_store_backend.get_effective_session_timeout(request_id),
-    )
-    run_id = request_record.get("run_id")
-    if run_id:
-        run_store_backend.update_run_status(run_id, RunStatus.FAILED)
-        await concurrency_manager.release_slot()
-    source_adapter.mark_failed(request_id, message)
 
 
 def _resolve_idempotent_replay(

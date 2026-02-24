@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from server.models import EngineInteractiveProfileKind
 from server.services.agent_cli_manager import AgentCliManager
 from server.services.agent_cli_manager import CommandResult
 from server.services.runtime_profile import RuntimeProfile
@@ -147,11 +146,11 @@ def test_probe_resume_capability_success_and_profile_mapping(tmp_path, monkeypat
     capability = manager.probe_resume_capability("gemini")
     assert capability.supported is True
     profile = manager.resolve_interactive_profile("gemini", 1200)
-    assert profile.kind == EngineInteractiveProfileKind.RESUMABLE
+    assert profile.reason == "resume_probe_ok"
     assert profile.session_timeout_sec == 1200
 
 
-def test_probe_resume_capability_failure_maps_to_sticky_profile(tmp_path, monkeypatch):
+def test_probe_resume_capability_failure_keeps_resumable_profile(tmp_path, monkeypatch):
     manager = AgentCliManager(_build_profile(tmp_path))
     manager.ensure_layout()
     monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
@@ -165,5 +164,5 @@ def test_probe_resume_capability_failure_maps_to_sticky_profile(tmp_path, monkey
     capability = manager.probe_resume_capability("iflow")
     assert capability.supported is False
     profile = manager.resolve_interactive_profile("iflow", 900)
-    assert profile.kind == EngineInteractiveProfileKind.STICKY_PROCESS
+    assert profile.reason == "forced_resumable:resume_flag_missing"
     assert profile.session_timeout_sec == 900

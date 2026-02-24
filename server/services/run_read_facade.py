@@ -109,8 +109,6 @@ class RunReadFacade:
         request_id: str,
         request: Request,
         cursor: int = 0,
-        stdout_from: int = 0,
-        stderr_from: int = 0,
     ) -> StreamingResponse:
         _request_record, run_dir = get_request_and_run_dir(source_adapter, request_id)
 
@@ -119,8 +117,6 @@ class RunReadFacade:
                 run_dir=run_dir,
                 request_id=request_id,
                 cursor=cursor,
-                stdout_from=stdout_from,
-                stderr_from=stderr_from,
                 is_disconnected=request.is_disconnected,
             ):
                 yield run_observability_service.format_sse_frame(

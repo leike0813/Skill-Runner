@@ -670,8 +670,6 @@ async def stream_run_events_api(
     request_id: str,
     source: str | None = None,
     cursor: int = 0,
-    stdout_from: int = 0,
-    stderr_from: int = 0,
     backend: BackendClient = Depends(get_backend_client),
     recordings: RecordingStore = Depends(get_recording_store),
 ):
@@ -682,8 +680,6 @@ async def stream_run_events_api(
                 request_id,
                 run_source=run_source,
                 cursor=cursor,
-                stdout_from=stdout_from,
-                stderr_from=stderr_from,
             ):
                 yield chunk
         except BackendApiError as exc:

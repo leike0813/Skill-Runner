@@ -28,6 +28,7 @@ RASP_EVENTS_FILE = "events.jsonl"
 PARSER_DIAGNOSTICS_FILE = "parser_diagnostics.jsonl"
 FCMP_EVENTS_FILE = "fcmp_events.jsonl"
 PROTOCOL_METRICS_FILE = "protocol_metrics.json"
+ORCHESTRATOR_EVENTS_FILE = "orchestrator_events.jsonl"
 
 
 class RunObservabilityService:
@@ -110,27 +111,16 @@ class RunObservabilityService:
         run_dir: Path,
         request_id: Optional[str],
         cursor: int = 0,
-        stdout_from: int = 0,
-        stderr_from: int = 0,
-        chunk_bytes: int = 8 * 1024,
         heartbeat_interval_sec: float = 5.0,
         poll_interval_sec: float = 0.2,
         is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
-        logs_dir = run_dir / "logs"
-        stdout_path = logs_dir / "stdout.txt"
-        stderr_path = logs_dir / "stderr.txt"
-        stdout_offset = max(0, int(stdout_from))
-        stderr_offset = max(0, int(stderr_from))
-
         status_payload = self._read_status_payload(run_dir)
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
             status = "queued"
         snapshot = {
             "status": status,
-            "stdout_offset": stdout_offset,
-            "stderr_offset": stderr_offset,
             "cursor": max(0, int(cursor)),
         }
         pending_id = self._read_pending_interaction_id(request_id)
@@ -138,23 +128,14 @@ class RunObservabilityService:
             snapshot["pending_interaction_id"] = pending_id
         yield {"event": "snapshot", "data": snapshot}
 
-        last_status = status
-        last_updated_at = status_payload.get("updated_at")
         last_heartbeat_at = time.monotonic()
-        last_run_event_seq = max(0, int(cursor))
-        last_chat_event_seq = 0
+        last_chat_event_seq = max(0, int(cursor))
 
         protocol_payload = self._materialize_protocol_stream(
             run_dir=run_dir,
             request_id=request_id,
             status_payload=status_payload,
         )
-        for event in protocol_payload["rasp_events"]:
-            seq_obj = event.get("seq")
-            if not isinstance(seq_obj, int) or seq_obj <= last_run_event_seq:
-                continue
-            yield {"event": "run_event", "data": event}
-            last_run_event_seq = seq_obj
         for event in protocol_payload["fcmp_events"]:
             seq_obj = event.get("seq")
             if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
@@ -164,57 +145,19 @@ class RunObservabilityService:
 
         while True:
             if is_disconnected is not None and await is_disconnected():
-                yield {"event": "end", "data": {"reason": "client_closed"}}
                 return
 
             emitted = False
-            stdout_evt = self.read_log_increment(stdout_path, stdout_offset, chunk_bytes)
-            if stdout_evt["to"] > stdout_offset:
-                stdout_offset = int(stdout_evt["to"])
-                yield {"event": "stdout", "data": stdout_evt}
-                emitted = True
-
-            stderr_evt = self.read_log_increment(stderr_path, stderr_offset, chunk_bytes)
-            if stderr_evt["to"] > stderr_offset:
-                stderr_offset = int(stderr_evt["to"])
-                yield {"event": "stderr", "data": stderr_evt}
-                emitted = True
 
             status_payload = self._read_status_payload(run_dir)
             status_obj = status_payload.get("status")
-            current_status = status_obj if isinstance(status_obj, str) and status_obj else last_status
-            updated_at_obj = status_payload.get("updated_at")
-            updated_at = updated_at_obj if isinstance(updated_at_obj, str) else None
-            error_payload = status_payload.get("error")
-            error_code = error_payload.get("code") if isinstance(error_payload, dict) else None
-            pending_id = self._read_pending_interaction_id(request_id)
-
-            should_emit_status = current_status != last_status
-            if should_emit_status:
-                status_event: Dict[str, Any] = {"status": current_status}
-                if updated_at:
-                    status_event["updated_at"] = updated_at
-                if isinstance(error_code, str) and error_code:
-                    status_event["error_code"] = error_code
-                if pending_id is not None:
-                    status_event["pending_interaction_id"] = pending_id
-                yield {"event": "status", "data": status_event}
-                emitted = True
-                last_status = current_status
-                last_updated_at = updated_at
+            current_status = status_obj if isinstance(status_obj, str) and status_obj else status
 
             protocol_payload = self._materialize_protocol_stream(
                 run_dir=run_dir,
                 request_id=request_id,
                 status_payload=status_payload,
             )
-            for event in protocol_payload["rasp_events"]:
-                seq_obj = event.get("seq")
-                if not isinstance(seq_obj, int) or seq_obj <= last_run_event_seq:
-                    continue
-                yield {"event": "run_event", "data": event}
-                emitted = True
-                last_run_event_seq = seq_obj
             for event in protocol_payload["fcmp_events"]:
                 seq_obj = event.get("seq")
                 if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
@@ -224,26 +167,8 @@ class RunObservabilityService:
                 last_chat_event_seq = seq_obj
 
             if current_status == "waiting_user":
-                if not should_emit_status:
-                    status_event = {"status": current_status}
-                    if updated_at:
-                        status_event["updated_at"] = updated_at
-                    if isinstance(error_code, str) and error_code:
-                        status_event["error_code"] = error_code
-                    if pending_id is not None:
-                        status_event["pending_interaction_id"] = pending_id
-                    yield {"event": "status", "data": status_event}
-                yield {"event": "end", "data": {"reason": "waiting_user"}}
                 return
             if current_status in TERMINAL_STATUSES:
-                if not should_emit_status:
-                    status_event = {"status": current_status}
-                    if updated_at:
-                        status_event["updated_at"] = updated_at
-                    if isinstance(error_code, str) and error_code:
-                        status_event["error_code"] = error_code
-                    yield {"event": "status", "data": status_event}
-                yield {"event": "end", "data": {"reason": "terminal"}}
                 return
 
             now = time.monotonic()
@@ -252,11 +177,6 @@ class RunObservabilityService:
                 last_heartbeat_at = now
             elif emitted:
                 last_heartbeat_at = now
-                if updated_at:
-                    last_updated_at = updated_at
-            else:
-                if updated_at and updated_at != last_updated_at:
-                    last_updated_at = updated_at
             await asyncio.sleep(poll_interval_sec)
 
     def list_event_history(
@@ -276,7 +196,7 @@ class RunObservabilityService:
             status_payload=status_payload,
         )
         paths = self._protocol_paths(run_dir)
-        rows = read_jsonl(paths["events"])
+        rows = read_jsonl(paths["fcmp"])
         return self._filter_events(
             rows=rows,
             from_seq=from_seq,
@@ -293,6 +213,7 @@ class RunObservabilityService:
             "diagnostics": audit_dir / PARSER_DIAGNOSTICS_FILE,
             "fcmp": audit_dir / FCMP_EVENTS_FILE,
             "metrics": audit_dir / PROTOCOL_METRICS_FILE,
+            "orchestrator": audit_dir / ORCHESTRATOR_EVENTS_FILE,
         }
 
     def _resolve_engine_name(self, request_id: Optional[str]) -> str:
@@ -386,6 +307,19 @@ class RunObservabilityService:
                     completion_payload = completion_obj
             except Exception:
                 completion_payload = None
+        interaction_history = (
+            run_store.list_interaction_history(request_id)
+            if request_id
+            else []
+        )
+        orchestrator_events = read_jsonl(self._protocol_paths(run_dir)["orchestrator"])
+        status_updated_at_obj = status_payload.get("updated_at")
+        status_updated_at = status_updated_at_obj if isinstance(status_updated_at_obj, str) else None
+        effective_session_timeout_sec = (
+            run_store.get_effective_session_timeout(request_id)
+            if request_id
+            else None
+        )
 
         rasp_models = build_rasp_events(
             run_id=run_id,
@@ -399,7 +333,16 @@ class RunObservabilityService:
             completion=completion_payload,
         )
         rasp_rows = [model.model_dump(mode="json") for model in rasp_models]
-        fcmp_models = build_fcmp_events(rasp_models)
+        fcmp_models = build_fcmp_events(
+            rasp_models,
+            status=status,
+            status_updated_at=status_updated_at,
+            pending_interaction=pending_interaction,
+            interaction_history=interaction_history,
+            orchestrator_events=orchestrator_events,
+            effective_session_timeout_sec=effective_session_timeout_sec,
+            completion=completion_payload,
+        )
         fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
         metrics_payload = compute_protocol_metrics(rasp_models)
 

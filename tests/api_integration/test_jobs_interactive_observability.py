@@ -377,9 +377,10 @@ async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch
 
     events = await _request("GET", "/v1/jobs/req-cancel/events")
     assert events.status_code == 200
-    assert "\"status\": \"canceled\"" in events.text
-    assert "\"error_code\": \"CANCELED_BY_USER\"" in events.text
-    assert "\"reason\": \"terminal\"" in events.text
+    assert "\"conversation.state.changed\"" in events.text
+    assert "\"to\": \"canceled\"" in events.text
+    assert "\"conversation.failed\"" in events.text
+    assert "\"code\": \"CANCELED\"" in events.text
 
 
 @pytest.mark.asyncio

@@ -248,3 +248,92 @@ def test_max_attempt_exceeded_maps_to_failed_conversation(tmp_path: Path):
         and event.data.get("code") == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
         for event in fcmp_events
     )
+
+
+def test_fcmp_emits_state_changed_for_waiting_user(tmp_path: Path):
+    run_dir = tmp_path / "run-state-wait"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending = {"interaction_id": 8, "kind": "open_text", "prompt": "next step"}
+
+    rasp_events = build_rasp_events(
+        run_id="run-state-wait",
+        engine="codex",
+        attempt_number=1,
+        status="waiting_user",
+        pending_interaction=pending,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_user",
+        status_updated_at="2026-02-24T00:00:00",
+        pending_interaction=pending,
+    )
+    assert any(
+        event.type == "conversation.state.changed" and event.data.get("to") == "waiting_user"
+        for event in fcmp_events
+    )
+    assert any(event.type == "user.input.required" for event in fcmp_events)
+
+
+def test_fcmp_emits_reply_and_auto_decide_events(tmp_path: Path):
+    run_dir = tmp_path / "run-state-reply"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    rasp_events = build_rasp_events(
+        run_id="run-state-reply",
+        engine="codex",
+        attempt_number=2,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    interaction_history = [
+        {
+            "interaction_id": 3,
+            "event_type": "reply",
+            "payload": {
+                "resolution_mode": "user_reply",
+                "resolved_at": "2026-02-24T00:00:01",
+            },
+            "created_at": "2026-02-24T00:00:01",
+        },
+        {
+            "interaction_id": 4,
+            "event_type": "reply",
+            "payload": {
+                "resolution_mode": "auto_decide_timeout",
+                "resolved_at": "2026-02-24T00:00:02",
+                "auto_decide_policy": "engine_judgement",
+            },
+            "created_at": "2026-02-24T00:00:02",
+        },
+    ]
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="running",
+        status_updated_at="2026-02-24T00:00:03",
+        interaction_history=interaction_history,
+        effective_session_timeout_sec=1200,
+    )
+    assert any(event.type == "interaction.reply.accepted" for event in fcmp_events)
+    assert any(event.type == "interaction.auto_decide.timeout" for event in fcmp_events)
+    assert any(
+        event.type == "conversation.state.changed"
+        and event.data.get("trigger") == "interaction.reply.accepted"
+        and event.data.get("to") == "queued"
+        for event in fcmp_events
+    )
+    assert any(
+        event.type == "conversation.state.changed"
+        and event.data.get("trigger") == "interaction.auto_decide.timeout"
+        and event.data.get("to") == "queued"
+        for event in fcmp_events
+    )

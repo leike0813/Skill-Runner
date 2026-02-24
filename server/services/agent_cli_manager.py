@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 
 from ..models import (
     EngineInteractiveProfile,
-    EngineInteractiveProfileKind,
     EngineResumeCapability,
 )
 from .runtime_profile import RuntimeProfile, get_runtime_profile
@@ -193,15 +192,11 @@ class AgentCliManager:
         session_timeout_sec: int,
     ) -> EngineInteractiveProfile:
         capability = self.probe_resume_capability(engine)
-        if capability.supported:
-            return EngineInteractiveProfile(
-                kind=EngineInteractiveProfileKind.RESUMABLE,
-                reason=capability.detail,
-                session_timeout_sec=session_timeout_sec,
-            )
+        reason = capability.detail or "resume_probe_unknown"
+        if not capability.supported:
+            reason = f"forced_resumable:{reason}"
         return EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.STICKY_PROCESS,
-            reason=capability.detail or "resume_probe_failed",
+            reason=reason,
             session_timeout_sec=session_timeout_sec,
         )
 

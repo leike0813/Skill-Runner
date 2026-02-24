@@ -1,34 +1,37 @@
 # interactive-run-restart-recovery Specification
 
 ## Purpose
-定义 orchestrator 重启后的 interactive run 启动恢复与状态收敛语义，确保非终态 run 不会长期处于“假活跃”状态，并且恢复结果可被外部系统观测。
+定义 orchestrator 重启后的 interactive 运行恢复语义，确保状态收敛可解释、可追踪。
+
 ## Requirements
-### Requirement: 系统 MUST 在启动时对非终态 run 执行恢复对账
-系统 MUST 在服务启动阶段扫描并收敛 `queued/running/waiting_user` run，避免状态与执行上下文漂移。
+### Requirement: 系统 MUST 在启动时收敛所有非终态 run
+系统 MUST 在服务启动阶段扫描并收敛 `queued/running/waiting_user` run。
 
-#### Scenario: 启动时扫描非终态 run
-- **WHEN** 服务完成基础启动并进入恢复阶段
-- **THEN** 系统扫描所有非终态 run
-- **AND** 对每个 run 记录恢复决策结果
+#### Scenario: 启动恢复扫描
+- **WHEN** 服务进入恢复阶段
+- **THEN** 系统扫描全部非终态 run
+- **AND** 为每个 run 写入恢复决策结果
 
-### Requirement: waiting_user 的恢复行为 MUST 按 interactive_profile 分流
-系统 MUST 对 `waiting_user` run 按 `resumable|sticky_process` 执行不同恢复策略。
+### Requirement: waiting_user 恢复 MUST 基于 pending 与 handle 有效性
+系统 MUST 对 `waiting_user` run 执行统一有效性校验。
 
-#### Scenario: resumable waiting_user 恢复
-- **GIVEN** run 为 `waiting_user` 且 `interactive_profile.kind=resumable`
-- **AND** run 持久化了有效 session handle 与 pending interaction
+#### Scenario: waiting_user 恢复保留
+- **GIVEN** run 为 `waiting_user`
+- **AND** run 持久化了有效 pending interaction 与 session handle
 - **WHEN** 服务重启完成
 - **THEN** run 保持 `waiting_user`
-- **AND** 后续可继续接受 reply 并恢复执行
+- **AND** `recovery_state=recovered_waiting`
 
-#### Scenario: sticky_process waiting_user 收敛
-- **GIVEN** run 为 `waiting_user` 且 `interactive_profile.kind=sticky_process`
+#### Scenario: waiting_user 恢复失败收敛
+- **GIVEN** run 为 `waiting_user`
+- **AND** pending interaction 或 session handle 缺失/无效
 - **WHEN** 服务重启完成
 - **THEN** run 进入 `failed`
-- **AND** `error.code=INTERACTION_PROCESS_LOST`
+- **AND** `error.code=SESSION_RESUME_FAILED`
+- **AND** `recovery_state=failed_reconciled`
 
-### Requirement: 运行中断状态 MUST 收敛为可解释终态
-系统 MUST 对无法恢复的 `queued/running` run 进行确定性终态收敛。
+### Requirement: queued/running 中断 MUST 收敛为确定性失败
+系统 MUST 对无法恢复上下文的 `queued/running` run 标记确定性失败。
 
 #### Scenario: queued/running 中断收敛
 - **GIVEN** run 状态为 `queued` 或 `running`

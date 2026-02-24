@@ -192,11 +192,9 @@
   - `runtime_options.execution_mode` 支持 `auto`（默认）与 `interactive`。
   - 会话超时统一键：`runtime_options.session_timeout_sec`（默认 `1200`）。
   - `interactive` 下可设置 `runtime_options.interactive_require_user_reply`：
-    - `true`（默认）：严格等待用户回复。
+    - `true`（默认）：严格等待用户回复，超时不自动失败。
     - `false`：等待超时后自动决策并继续执行。
-  - `interactive` 模式下会先进行引擎恢复能力探测，并写入 `interactive_profile.kind`：
-    - `resumable`: 等待阶段使用持久化会话句柄恢复。
-    - `sticky_process`: 进入驻留等待路径，按 `session_timeout_sec` 计算 `wait_deadline_at`。
+  - `interactive` 模式始终采用单一可恢复会话语义，内部保存会话句柄；对外不暴露 `interactive_profile.kind`。
   - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
   - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。
 - **缓存策略**:
@@ -255,7 +253,7 @@
 - `pending_interaction_id` 为空表示当前没有待决交互。
 - `interaction_count` 为当前 request 已记录的交互轮次计数。
 - `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
-- `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`INTERACTION_PROCESS_LOST`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
+- `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
 - interactive 双轨完成说明：
   - 解析到 `__SKILL_DONE__` 时按强条件完成；
   - 未解析到 marker 但输出通过 schema 时按软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
@@ -308,17 +306,13 @@
 ```
 
 说明：
-- `status` 可能为 `queued` 或 `running`：
-  - `resumable` 路径通常回到 `queued` 等待恢复执行；
-  - `sticky_process` 路径维持进程槽位并回到 `running`。
+- `status` 固定回到 `queued`，随后由调度器恢复执行下一回合。
 
 **错误语义**:
 - `400`: 当前请求不是 interactive 模式（`runtime_options.execution_mode != interactive`）。
 - `404`: `request_id` 或 `run` 不存在。
 - `409`: 非 `waiting_user` 状态提交、`interaction_id` 过期/不匹配、或 `idempotency_key` 冲突。
 - `SESSION_RESUME_FAILED`: `resumable` 路径下无法提取/使用会话句柄（Codex `thread_id`、Gemini `session_id`、iFlow `session-id`）。
-- `INTERACTION_WAIT_TIMEOUT`: `interactive_require_user_reply=true` 且 `sticky_process` 等待超时（超过 `wait_deadline_at`）。
-- `INTERACTION_PROCESS_LOST`: `sticky_process` 等待期检测到进程绑定丢失。
 
 ### 上传文件 (Upload File)
 `POST /v1/jobs/{request_id}/upload`
@@ -406,31 +400,24 @@
 ### 获取日志事件流 (SSE)
 `GET /v1/jobs/{request_id}/events`
 
-返回 `text/event-stream`，用于实时消费结构化运行事件（RASP）与对话事件（FCMP），并兼容 stdout/stderr 增量日志事件。
+返回 `text/event-stream`，用于实时消费 FCMP 单流对话事件。
 
 **Query 参数**:
-- `cursor`（可选，默认 `0`）：结构化事件续传游标（按 `run_event.seq`）。
-- `stdout_from`（可选，默认 `0`）：stdout 起始 offset。
-- `stderr_from`（可选，默认 `0`）：stderr 起始 offset。
+- `cursor`（可选，默认 `0`）：FCMP 续传游标（按 `chat_event.seq`）。
 
 **事件类型**:
-- `snapshot`：首帧快照，字段：`status`, `stdout_offset`, `stderr_offset`, `pending_interaction_id?`
-- `run_event`：RASP 结构化事件（`protocol_version=rasp/1.0`）
+- `snapshot`：首帧快照，字段：`status`, `cursor`, `pending_interaction_id?`
 - `chat_event`：FCMP 对话事件（`protocol_version=fcmp/1.0`）
-- `stdout`：stdout 增量，字段：`from`, `to`, `chunk`
-- `stderr`：stderr 增量，字段：`from`, `to`, `chunk`
-- `status`：状态变化，字段：`status`, `updated_at?`, `pending_interaction_id?`
 - `heartbeat`：保活事件，字段：`ts`
-- `end`：连接结束，字段：`reason`（`waiting_user` 或 `terminal`）
 
 **重连约定**:
-- 结构化续传：客户端记录最近 `run_event.seq`，重连时使用 `cursor`。
-- 文本续传：客户端记录 `stdout/stderr` 事件 `to`，重连时回传 `stdout_from/stderr_from`。
+- 客户端记录最近 `chat_event.seq`，重连时使用 `cursor`。
+- 历史补偿通过 `/events/history` 拉取 FCMP 序列。
 
 ### 获取结构化历史事件
 `GET /v1/jobs/{request_id}/events/history`
 
-按区间拉取 `run_event` 历史，适用于断线补偿与复盘。
+按区间拉取 FCMP 历史，适用于断线补偿与复盘。
 
 **Query 参数**:
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
@@ -467,7 +454,7 @@
 - 取消成功后：
   - `status = canceled`
   - `error.code = CANCELED_BY_USER`
-  - SSE 会推送 `status=canceled` 与 `end(reason=terminal)`
+  - SSE 会推送 `conversation.state.changed(to=canceled)` 与 `conversation.failed(error.code=CANCELED)`
 
 ### 清理运行记录 (Cleanup Runs)
 `POST /v1/jobs/cleanup`

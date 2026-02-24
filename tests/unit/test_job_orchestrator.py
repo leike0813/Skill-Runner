@@ -7,7 +7,6 @@ import pytest
 
 from server.models import (
     EngineInteractiveProfile,
-    EngineInteractiveProfileKind,
     RunCreateRequest,
     RunStatus,
     SkillManifest,
@@ -936,7 +935,6 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -965,7 +963,7 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
         assert handle["handle_value"] == "thread-1"
         profile = local_store.get_interactive_profile("req-interactive")
         assert profile is not None
-        assert profile["kind"] == "resumable"
+        assert profile["session_timeout_sec"] == int(config.SYSTEM.SESSION_TIMEOUT_SEC)
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1019,7 +1017,6 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskSessionInStderrAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -1095,7 +1092,6 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskMissingIdAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -1835,7 +1831,6 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveDirectStringInteractionAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -2003,7 +1998,6 @@ def _seed_recovery_run(
     profile: dict | None = None,
     pending: dict | None = None,
     session_handle: dict | None = None,
-    process_binding: dict | None = None,
 ) -> Path:
     store.create_request(
         request_id=request_id,
@@ -2035,12 +2029,6 @@ def _seed_recovery_run(
         store.set_pending_interaction(request_id, pending)
     if session_handle is not None:
         store.set_engine_session_handle(request_id, session_handle)
-    if process_binding is not None:
-        store.set_sticky_wait_runtime(
-            request_id=request_id,
-            wait_deadline_at="2099-01-01T00:00:00",
-            process_binding=process_binding,
-        )
     return run_dir
 
 
@@ -2071,7 +2059,6 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -2098,115 +2085,6 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
         status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
         assert status_data["status"] == "succeeded"
         assert events == ["acquire", "release", "acquire", "release"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_sticky_waiting_keeps_slot(monkeypatch, tmp_path):
-    events: list[str] = []
-
-    async def _acquire():
-        events.append("acquire")
-
-    async def _release():
-        events.append("release")
-
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.release_slot", _release)
-
-    skill = _build_interactive_skill(tmp_path)
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        local_store = RunStore(db_path=tmp_path / "runs.db")
-        _seed_interactive_request(local_store, run_id, skill.id)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
-        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.STICKY_PROCESS,
-            reason="probe_failed",
-            session_timeout_sec=1200,
-        )
-
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
-            await orchestrator.run_job(
-                run_id,
-                skill.id,
-                "codex",
-                options={"execution_mode": "interactive"},
-            )
-            orchestrator.cancel_sticky_watchdog("req-turn")
-
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
-        assert status_data["status"] == "waiting_user"
-        assert events == ["acquire"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_sticky_timeout_releases_slot(monkeypatch, tmp_path):
-    events: list[str] = []
-
-    async def _acquire():
-        events.append("acquire")
-
-    async def _release():
-        events.append("release")
-
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.release_slot", _release)
-
-    skill = _build_interactive_skill(tmp_path)
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        local_store = RunStore(db_path=tmp_path / "runs.db")
-        _seed_interactive_request(local_store, run_id, skill.id)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
-        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.STICKY_PROCESS,
-            reason="probe_failed",
-            session_timeout_sec=session_timeout_sec,
-        )
-
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
-            await orchestrator.run_job(
-                run_id,
-                skill.id,
-                "codex",
-                options={
-                    "execution_mode": "interactive",
-                    "interactive_wait_timeout_sec": 1,
-                },
-            )
-            await asyncio.sleep(1.2)
-
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
-        assert status_data["status"] == "failed"
-        assert status_data["error"]["code"] == "INTERACTION_WAIT_TIMEOUT"
-        assert status_data["effective_session_timeout_sec"] == 1
-        assert events == ["acquire", "release"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2256,7 +2134,6 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -2281,80 +2158,6 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
         assert stats["auto_decision_count"] == 1
         assert isinstance(stats["last_auto_decision_at"], str)
         assert events == ["acquire", "release", "acquire", "release"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_sticky_strict_false_auto_decides_and_continues(monkeypatch, tmp_path):
-    events: list[str] = []
-
-    async def _acquire():
-        events.append("acquire")
-
-    async def _release():
-        events.append("release")
-
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.release_slot", _release)
-
-    skill = _build_interactive_skill(tmp_path)
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
-            request_id="req-auto-sticky",
-            skill_id=skill.id,
-            engine="codex",
-            parameter={},
-            engine_options={},
-            runtime_options={
-                "execution_mode": "interactive",
-                "interactive_require_user_reply": False,
-                "session_timeout_sec": 1,
-            },
-            input_data={},
-        )
-        local_store.update_request_run_id("req-auto-sticky", run_id)
-        local_store.create_run(run_id, None, "queued")
-
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
-        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.STICKY_PROCESS,
-            reason="probe_failed",
-            session_timeout_sec=session_timeout_sec,
-        )
-
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
-            await orchestrator.run_job(
-                run_id,
-                skill.id,
-                "codex",
-                options={
-                    "execution_mode": "interactive",
-                    "interactive_require_user_reply": False,
-                    "session_timeout_sec": 1,
-                },
-            )
-            await asyncio.sleep(1.3)
-
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
-        assert status_data["status"] == "succeeded"
-        stats = local_store.get_auto_decision_stats("req-auto-sticky")
-        assert stats["auto_decision_count"] == 1
-        assert isinstance(stats["last_auto_decision_at"], str)
-        assert events == ["acquire", "release"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2408,7 +2211,6 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskMissingHandleAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            kind=EngineInteractiveProfileKind.RESUMABLE,
             reason="probe_ok",
             session_timeout_sec=session_timeout_sec,
         )
@@ -2434,7 +2236,7 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
 
 
 @pytest.mark.asyncio
-async def test_recover_resumable_waiting_user_keeps_waiting(tmp_path):
+async def test_recover_waiting_user_keeps_waiting_when_handle_valid(tmp_path):
     old_runs_dir = config.SYSTEM.RUNS_DIR
     old_runs_db = config.SYSTEM.RUNS_DB
     config.defrost()
@@ -2449,7 +2251,7 @@ async def test_recover_resumable_waiting_user_keeps_waiting(tmp_path):
             run_id="run-recover-resumable",
             status=RunStatus.WAITING_USER.value,
             runtime_options={"execution_mode": "interactive"},
-            profile={"kind": EngineInteractiveProfileKind.RESUMABLE.value, "session_timeout_sec": 1200},
+            profile={"session_timeout_sec": 1200},
             pending={"interaction_id": 1, "kind": "open_text", "prompt": "continue?"},
             session_handle={
                 "engine": "codex",
@@ -2478,7 +2280,7 @@ async def test_recover_resumable_waiting_user_keeps_waiting(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_recover_sticky_waiting_user_fails_with_process_lost(tmp_path):
+async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
     old_runs_dir = config.SYSTEM.RUNS_DIR
     old_runs_db = config.SYSTEM.RUNS_DB
     config.defrost()
@@ -2489,13 +2291,12 @@ async def test_recover_sticky_waiting_user_fails_with_process_lost(tmp_path):
         local_store = RunStore(db_path=tmp_path / "runs.db")
         run_dir = _seed_recovery_run(
             local_store,
-            request_id="req-recover-sticky",
-            run_id="run-recover-sticky",
+            request_id="req-recover-missing-handle",
+            run_id="run-recover-missing-handle",
             status=RunStatus.WAITING_USER.value,
             runtime_options={"execution_mode": "interactive"},
-            profile={"kind": EngineInteractiveProfileKind.STICKY_PROCESS.value, "session_timeout_sec": 1200},
+            profile={"session_timeout_sec": 1200},
             pending={"interaction_id": 1, "kind": "open_text", "prompt": "continue?"},
-            process_binding={"run_id": "run-recover-sticky", "alive": True},
         )
 
         orchestrator = JobOrchestrator()
@@ -2504,13 +2305,13 @@ async def test_recover_sticky_waiting_user_fails_with_process_lost(tmp_path):
 
         status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
         assert status_data["status"] == RunStatus.FAILED.value
-        assert status_data["error"]["code"] == "INTERACTION_PROCESS_LOST"
-        run_state = local_store.get_run("run-recover-sticky")
+        assert status_data["error"]["code"] == "SESSION_RESUME_FAILED"
+        run_state = local_store.get_run("run-recover-missing-handle")
         assert run_state is not None
         assert run_state["status"] == RunStatus.FAILED.value
-        recovery = local_store.get_recovery_info("run-recover-sticky")
+        recovery = local_store.get_recovery_info("run-recover-missing-handle")
         assert recovery["recovery_state"] == "failed_reconciled"
-        assert local_store.get_pending_interaction("req-recover-sticky") is None
+        assert local_store.get_pending_interaction("req-recover-missing-handle") is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2553,7 +2354,7 @@ async def test_recover_running_or_queued_fails_with_restart_interrupted(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_recover_orphan_cleanup_is_idempotent(tmp_path):
+async def test_recover_orphan_cleanup_is_noop_and_idempotent(tmp_path):
     class CountingCancelAdapter:
         def __init__(self) -> None:
             self.cancel_calls = 0
@@ -2576,9 +2377,8 @@ async def test_recover_orphan_cleanup_is_idempotent(tmp_path):
             run_id="run-recover-idempotent",
             status=RunStatus.WAITING_USER.value,
             runtime_options={"execution_mode": "interactive"},
-            profile={"kind": EngineInteractiveProfileKind.STICKY_PROCESS.value, "session_timeout_sec": 1200},
+            profile={"session_timeout_sec": 1200},
             pending={"interaction_id": 2, "kind": "open_text", "prompt": "continue?"},
-            process_binding={"run_id": "run-recover-idempotent", "alive": True},
         )
 
         adapter = CountingCancelAdapter()

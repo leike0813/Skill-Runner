@@ -221,15 +221,23 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
         "server.services.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.list_interaction_history",
+        lambda _request_id: [],
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_effective_session_timeout",
+        lambda _request_id: None,
+    )
 
     response = await _request("GET", "/v1/jobs/req-1/events")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in response.text
-    assert "event: stdout" in response.text
-    assert "event: stderr" in response.text
-    assert "event: end" in response.text
-    assert "\"reason\": \"terminal\"" in response.text
+    assert "event: chat_event" in response.text
+    assert "event: stdout" not in response.text
+    assert "event: stderr" not in response.text
+    assert "event: end" not in response.text
 
 
 @pytest.mark.asyncio
@@ -252,18 +260,30 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
         "server.routers.temp_skill_runs.workspace_manager.get_run_dir",
         lambda _run_id: run_dir,
     )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_pending_interaction",
+        lambda _request_id: {"interaction_id": 1, "kind": "open_text", "prompt": "continue"},
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.list_interaction_history",
+        lambda _request_id: [],
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_effective_session_timeout",
+        lambda _request_id: None,
+    )
 
     response = await _request("GET", "/v1/temp-skill-runs/temp-1/events")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in response.text
-    assert "event: status" in response.text
-    assert "event: end" in response.text
-    assert "\"reason\": \"waiting_user\"" in response.text
+    assert "event: chat_event" in response.text
+    assert "event: status" not in response.text
+    assert "event: end" not in response.text
 
 
 @pytest.mark.asyncio
-async def test_v1_jobs_events_reconnect_with_offsets_keeps_log_continuity(tmp_path, monkeypatch):
+async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-2"
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -291,13 +311,20 @@ async def test_v1_jobs_events_reconnect_with_offsets_keeps_log_continuity(tmp_pa
         "server.services.run_observability.run_store.get_pending_interaction",
         lambda _request_id: {"interaction_id": 1},
     )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.list_interaction_history",
+        lambda _request_id: [],
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_effective_session_timeout",
+        lambda _request_id: None,
+    )
 
-    first = await _request("GET", "/v1/jobs/req-2/events?stdout_from=0&stderr_from=0")
+    first = await _request("GET", "/v1/jobs/req-2/events")
     assert first.status_code == 200
-    assert "part-1\\n" in first.text
-    assert "\"reason\": \"waiting_user\"" in first.text
+    assert "event: chat_event" in first.text
+    assert "\"user.input.required\"" in first.text
 
-    resume_offset = len("part-1\n")
     stdout_path.write_text("part-1\npart-2\n", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:01"}),
@@ -306,12 +333,10 @@ async def test_v1_jobs_events_reconnect_with_offsets_keeps_log_continuity(tmp_pa
 
     second = await _request(
         "GET",
-        f"/v1/jobs/req-2/events?stdout_from={resume_offset}&stderr_from=0",
+        "/v1/jobs/req-2/events?cursor=999",
     )
     assert second.status_code == 200
-    assert "part-1\\n" not in second.text
-    assert "part-2\\n" in second.text
-    assert "\"reason\": \"terminal\"" in second.text
+    assert "event: chat_event" not in second.text
 
 
 @pytest.mark.asyncio
@@ -343,11 +368,19 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
         "server.services.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.list_interaction_history",
+        lambda _request_id: [],
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_effective_session_timeout",
+        lambda _request_id: None,
+    )
 
     response = await _request("GET", "/v1/jobs/req-canceled/events")
     assert response.status_code == 200
-    assert "\"status\": \"canceled\"" in response.text
-    assert "\"error_code\": \"CANCELED_BY_USER\"" in response.text
+    assert "\"conversation.failed\"" in response.text
+    assert "\"CANCELED\"" in response.text
 
 
 @pytest.mark.asyncio
