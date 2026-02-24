@@ -1,0 +1,121 @@
+version: 1
+
+canonical:
+  initial_state: queued
+  states:
+    - queued
+    - running
+    - waiting_user
+    - succeeded
+    - failed
+    - canceled
+  terminal_states:
+    - succeeded
+    - failed
+    - canceled
+
+transitions:
+  - id: TR-01
+    source: queued
+    event: turn.started
+    target: running
+  - id: TR-02
+    source: running
+    event: turn.needs_input
+    target: waiting_user
+  - id: TR-03
+    source: waiting_user
+    event: interaction.reply.accepted
+    target: queued
+  - id: TR-04
+    source: waiting_user
+    event: interaction.auto_decide.timeout
+    target: queued
+  - id: TR-05
+    source: running
+    event: turn.succeeded
+    target: succeeded
+  - id: TR-06
+    source: running
+    event: turn.failed
+    target: failed
+  - id: TR-07
+    source: waiting_user
+    event: run.canceled
+    target: canceled
+  - id: TR-08
+    source: queued
+    event: run.canceled
+    target: canceled
+  - id: TR-09
+    source: running
+    event: run.canceled
+    target: canceled
+  - id: TR-10
+    source: waiting_user
+    event: restart.preserve_waiting
+    target: waiting_user
+  - id: TR-11
+    source: waiting_user
+    event: restart.reconcile_failed
+    target: failed
+  - id: TR-12
+    source: queued
+    event: restart.reconcile_failed
+    target: failed
+  - id: TR-13
+    source: running
+    event: restart.reconcile_failed
+    target: failed
+
+fcmp_mapping:
+  state_changed:
+    - id: FM-01
+      source: queued
+      target: running
+      trigger: turn.started
+    - id: FM-02
+      source: running
+      target: waiting_user
+      trigger: turn.needs_input
+    - id: FM-03
+      source: waiting_user
+      target: queued
+      trigger: interaction.reply.accepted
+    - id: FM-04
+      source: waiting_user
+      target: queued
+      trigger: interaction.auto_decide.timeout
+    - id: FM-05
+      source: running
+      target: succeeded
+      trigger: turn.succeeded
+    - id: FM-06
+      source: running
+      target: failed
+      trigger: turn.failed
+    - id: FM-07
+      source: running
+      target: canceled
+      trigger: run.canceled
+  paired_events:
+    - id: PE-01
+      event_type: interaction.reply.accepted
+      required_state_change:
+        source: waiting_user
+        target: queued
+        trigger: interaction.reply.accepted
+    - id: PE-02
+      event_type: interaction.auto_decide.timeout
+      required_state_change:
+        source: waiting_user
+        target: queued
+        trigger: interaction.auto_decide.timeout
+
+ordering_rules:
+  - id: OR-01
+    rule: terminal_state_unique
+  - id: OR-02
+    rule: waiting_user_requires_input_event
+  - id: OR-03
+    rule: seq_monotonic_contiguous

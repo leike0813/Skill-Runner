@@ -105,3 +105,22 @@ stateDiagram-v2
 - 错误码：
   - `INTERACTION_WAIT_TIMEOUT`
   - `INTERACTION_PROCESS_LOST`
+
+## 8. Canonical Invariants
+
+为避免状态机文档与测试漂移，当前 canonical 不变量已收敛为机器可读合同文件：
+
+- `docs/contracts/session_fcmp_invariants.yaml`
+
+该合同覆盖：
+
+1. `canonical` 状态集合与初始/终态定义。
+2. `transitions` 状态机转移（与 `server/services/session_statechart.py` 对齐）。
+3. `fcmp_mapping`（状态迁移到 FCMP 事件的映射、配对规则）。
+4. `ordering_rules`（终态唯一性、waiting_user 输入配对、`seq` 连续递增）。
+
+测试锚点：
+
+- `tests/unit/test_session_invariant_contract.py`
+- `tests/unit/test_session_state_model_properties.py`
+- `tests/unit/test_fcmp_mapping_properties.py`

@@ -173,6 +173,7 @@ def test_start_passthrough_translate_and_attempt_artifacts(tmp_path: Path) -> No
     assert injected["options"] == {
         "__harness_mode": True,
         "__codex_profile_name": "skill-runner-harness",
+        "model": "gpt-5.1-codex-mini",
     }
     injected_skill = injected["skill"]
     assert hasattr(injected_skill, "id")
@@ -356,8 +357,13 @@ def test_harness_injects_project_and_fixture_skills(tmp_path: Path) -> None:
     fixture_target = run_dir / ".codex" / "skills" / "fixture-skill" / "SKILL.md"
     assert project_target.exists()
     assert fixture_target.exists()
-    assert "Runtime Completion Contract" in project_target.read_text(encoding="utf-8")
-    assert "Runtime Completion Contract" in fixture_target.read_text(encoding="utf-8")
+    project_content = project_target.read_text(encoding="utf-8")
+    fixture_content = fixture_target.read_text(encoding="utf-8")
+    assert "Runtime Enforcement (Injected by Skill Runner" in project_content
+    assert "## Output Format Contract" in project_content
+    assert "## Execution Mode: AUTO (Non-Interactive)" in project_content
+    assert "Runtime Enforcement (Injected by Skill Runner" in fixture_content
+    assert "## Output Format Contract" in fixture_content
 
     meta_path = run_dir / ".audit" / "meta.1.json"
     meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))

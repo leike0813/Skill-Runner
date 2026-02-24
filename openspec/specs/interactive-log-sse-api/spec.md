@@ -38,3 +38,35 @@
 - **WHEN** run 进入 `canceled`
 - **THEN** FCMP 输出 `conversation.state.changed(to=canceled)`
 - **AND** 输出 `conversation.failed(error.code=CANCELED)`
+
+### Requirement: `chat_event` 输出 MUST 满足 FCMP Schema
+系统 MUST 在 SSE 输出前执行 FCMP schema 校验。
+
+#### Scenario: chat_event 合法输出
+- **WHEN** 服务端输出 `event=chat_event`
+- **THEN** 事件满足 `fcmp_event_envelope` 合同
+
+### Requirement: history 读取 MUST 兼容旧脏数据
+系统 MUST 对历史中的不合规事件进行过滤，不得中断整体读取。
+
+#### Scenario: 旧事件不合规
+- **WHEN** history 中存在不满足 schema 的旧行
+- **THEN** 服务端忽略该行并继续返回其余合法事件
+
+### Requirement: 关键 FCMP 事件 MUST 满足配对不变量
+系统 MUST 保证 waiting/reply/auto-decide 对应的 FCMP 事件配对关系成立。
+
+#### Scenario: waiting_user 配对约束
+- **WHEN** 输出 `conversation.state.changed(to=waiting_user)`
+- **THEN** 同一事件序列中存在 `user.input.required`
+
+#### Scenario: reply/timeout 配对约束
+- **WHEN** 输出 `interaction.reply.accepted` 或 `interaction.auto_decide.timeout`
+- **THEN** 后续存在 `conversation.state.changed(waiting_user->queued)` 且 trigger 与该事件类型一致
+
+### Requirement: FCMP seq MUST 单调连续
+系统 MUST 保证单次 materialize 的 FCMP 事件 `seq` 从 1 开始严格递增且无空洞。
+
+#### Scenario: seq 连续
+- **WHEN** 客户端获取一组 FCMP 历史或流式事件
+- **THEN** `seq` 形成连续整数序列

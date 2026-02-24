@@ -11,11 +11,20 @@ from ..models import (
     FcmpEventType,
     RuntimeEventCategory,
     RuntimeEventEnvelope,
-    RuntimeEventIdentity,
     RuntimeEventRef,
     RuntimeEventSource,
 )
 from .engine_adapter_registry import engine_adapter_registry
+from .protocol_factories import (
+    make_diagnostic_warning_payload,
+    make_fcmp_auto_decide_timeout,
+    make_fcmp_event,
+    make_fcmp_reply_accepted,
+    make_fcmp_state_changed,
+    make_rasp_event,
+    make_terminal_failed_payload,
+)
+from .protocol_schema_registry import validate_fcmp_event, validate_rasp_event
 from .runtime_parse_utils import stream_lines_with_offsets, strip_runtime_script_envelope
 
 
@@ -113,19 +122,20 @@ def build_rasp_events(
         raw_row: Optional[Mapping[str, Any]] = None,
         correlation: Optional[Dict[str, Any]] = None,
     ) -> None:
-        events.append(
-            RuntimeEventEnvelope(
-                run_id=run_id,
-                seq=len(events) + 1,
-                ts=_now(),
-                source=source,
-                event=RuntimeEventIdentity(category=category, type=type_name),
-                data=data or {},
-                correlation=correlation or {},
-                attempt_number=attempt_number,
-                raw_ref=_build_ref(attempt_number=attempt_number, row=raw_row),
-            )
+        event_model = make_rasp_event(
+            run_id=run_id,
+            seq=len(events) + 1,
+            source=source,
+            category=category,
+            type_name=type_name,
+            data=data or {},
+            attempt_number=attempt_number,
+            raw_ref=_build_ref(attempt_number=attempt_number, row=raw_row),
+            correlation=correlation or {},
+            ts=_now(),
         )
+        validate_rasp_event(event_model.model_dump(mode="json"))
+        events.append(event_model)
 
     correlation: Dict[str, Any] = {}
     session_id = parsed.get("session_id")
@@ -305,18 +315,18 @@ def build_fcmp_events(
     fcmp_events: List[ConversationEventEnvelope] = []
 
     def push(type_name: str, data: Dict[str, Any], raw_ref: Optional[RuntimeEventRef] = None) -> None:
-        fcmp_events.append(
-            ConversationEventEnvelope(
-                run_id=run_id,
-                seq=len(fcmp_events) + 1,
-                ts=_now(),
-                engine=engine,
-                type=type_name,
-                data=data,
-                meta={"attempt": attempt_number},
-                raw_ref=raw_ref,
-            )
+        event_model = make_fcmp_event(
+            run_id=run_id,
+            seq=len(fcmp_events) + 1,
+            engine=engine,
+            type_name=type_name,
+            data=data,
+            attempt_number=attempt_number,
+            raw_ref=raw_ref,
+            ts=_now(),
         )
+        validate_fcmp_event(event_model.model_dump(mode="json"))
+        fcmp_events.append(event_model)
 
     session_id: Optional[str] = None
     for event in rasp_events:
@@ -453,43 +463,44 @@ def build_fcmp_events(
             else "user_reply"
         )
         if resolution_mode == "auto_decide_timeout":
-            timeout_payload = {
-                "interaction_id": interaction_id,
-                "resolution_mode": "auto_decide_timeout",
-                "accepted_at": resolved_at,
-                "policy": payload.get("auto_decide_policy") or "engine_judgement",
-            }
-            if isinstance(effective_session_timeout_sec, int) and effective_session_timeout_sec > 0:
-                timeout_payload["timeout_sec"] = effective_session_timeout_sec
+            timeout_payload = make_fcmp_auto_decide_timeout(
+                interaction_id=interaction_id,
+                accepted_at=resolved_at,
+                policy=str(payload.get("auto_decide_policy") or "engine_judgement"),
+                timeout_sec=(
+                    effective_session_timeout_sec
+                    if isinstance(effective_session_timeout_sec, int) and effective_session_timeout_sec > 0
+                    else None
+                ),
+            )
             push(FcmpEventType.INTERACTION_AUTO_DECIDE_TIMEOUT.value, timeout_payload)
             push(
                 FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-                {
-                    "from": "waiting_user",
-                    "to": "queued",
-                    "trigger": FcmpEventType.INTERACTION_AUTO_DECIDE_TIMEOUT.value,
-                    "updated_at": resolved_at,
-                    "pending_interaction_id": interaction_id,
-                },
+                make_fcmp_state_changed(
+                    source_state="waiting_user",
+                    target_state="queued",
+                    trigger=FcmpEventType.INTERACTION_AUTO_DECIDE_TIMEOUT.value,
+                    updated_at=resolved_at,
+                    pending_interaction_id=interaction_id,
+                ),
             )
             continue
         push(
             FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
-            {
-                "interaction_id": interaction_id,
-                "resolution_mode": "user_reply",
-                "accepted_at": resolved_at,
-            },
+            make_fcmp_reply_accepted(
+                interaction_id=interaction_id,
+                accepted_at=resolved_at,
+            ),
         )
         push(
             FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-            {
-                "from": "waiting_user",
-                "to": "queued",
-                "trigger": FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
-                "updated_at": resolved_at,
-                "pending_interaction_id": interaction_id,
-            },
+            make_fcmp_state_changed(
+                source_state="waiting_user",
+                target_state="queued",
+                trigger=FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
+                updated_at=resolved_at,
+                pending_interaction_id=interaction_id,
+            ),
         )
 
     pending_payload = pending_interaction if isinstance(pending_interaction, dict) else None
@@ -513,13 +524,13 @@ def build_fcmp_events(
         if type_name_obj == "lifecycle.run.started":
             push(
                 FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-                {
-                    "from": "queued",
-                    "to": "running",
-                    "trigger": "turn.started",
-                    "updated_at": row_ts,
-                    "pending_interaction_id": None,
-                },
+                make_fcmp_state_changed(
+                    source_state="queued",
+                    target_state="running",
+                    trigger="turn.started",
+                    updated_at=row_ts,
+                    pending_interaction_id=None,
+                ),
             )
             state_transition_events_emitted += 1
             continue
@@ -528,15 +539,27 @@ def build_fcmp_events(
             interaction_id = interaction_id_obj if isinstance(interaction_id_obj, int) else pending_interaction_id
             push(
                 FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-                {
-                    "from": "running",
-                    "to": "waiting_user",
-                    "trigger": "turn.needs_input",
-                    "updated_at": row_ts,
-                    "pending_interaction_id": interaction_id,
-                },
+                make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="waiting_user",
+                    trigger="turn.needs_input",
+                    updated_at=row_ts,
+                    pending_interaction_id=interaction_id,
+                ),
             )
             state_transition_events_emitted += 1
+            continue
+        if type_name_obj == "diagnostic.warning":
+            code_obj = row_data.get("code")
+            if isinstance(code_obj, str) and code_obj:
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code_obj,
+                        path=row_data.get("path") if isinstance(row_data.get("path"), str) else None,
+                        detail=row_data.get("detail") if isinstance(row_data.get("detail"), str) else None,
+                    ),
+                )
 
     if state_transition_events_emitted == 0 and effective_status in {"running", "waiting_user"}:
         source_state, trigger = (
@@ -546,13 +569,13 @@ def build_fcmp_events(
         )
         push(
             FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-            {
-                "from": source_state,
-                "to": effective_status,
-                "trigger": trigger,
-                "updated_at": status_updated_at,
-                "pending_interaction_id": pending_interaction_id,
-            },
+            make_fcmp_state_changed(
+                source_state=source_state,
+                target_state=effective_status,
+                trigger=trigger,
+                updated_at=status_updated_at,
+                pending_interaction_id=pending_interaction_id,
+            ),
         )
 
     terminal_state_trigger_map = {
@@ -563,13 +586,13 @@ def build_fcmp_events(
     if effective_status in terminal_state_trigger_map:
         push(
             FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-            {
-                "from": "running",
-                "to": effective_status,
-                "trigger": terminal_state_trigger_map[effective_status],
-                "updated_at": status_updated_at,
-                "pending_interaction_id": None,
-            },
+            make_fcmp_state_changed(
+                source_state="running",
+                target_state=effective_status,
+                trigger=terminal_state_trigger_map[effective_status],
+                updated_at=status_updated_at,
+                pending_interaction_id=None,
+            ),
         )
 
     if completion_state == "completed":
@@ -629,12 +652,7 @@ def build_fcmp_events(
     elif effective_status in {"failed", "canceled"}:
         push(
             FcmpEventType.CONVERSATION_FAILED.value,
-            {
-                "error": {
-                    "category": "runtime",
-                    "code": effective_status.upper(),
-                }
-            },
+            make_terminal_failed_payload(code=effective_status.upper()),
         )
     elif effective_status in {"queued", "running"}:
         pass

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,12 @@ from .runtime_event_protocol import (
     compute_protocol_metrics,
     read_jsonl,
     write_jsonl,
+)
+from .protocol_schema_registry import (
+    ProtocolSchemaViolation,
+    validate_fcmp_event,
+    validate_orchestrator_event,
+    validate_rasp_event,
 )
 from .workspace_manager import workspace_manager
 from .skill_browser import (
@@ -196,7 +203,10 @@ class RunObservabilityService:
             status_payload=status_payload,
         )
         paths = self._protocol_paths(run_dir)
-        rows = read_jsonl(paths["fcmp"])
+        rows = self._filter_valid_fcmp_rows(
+            rows=read_jsonl(paths["fcmp"]),
+            context=f"history:{request_id or run_dir.name}",
+        )
         return self._filter_events(
             rows=rows,
             from_seq=from_seq,
@@ -312,7 +322,10 @@ class RunObservabilityService:
             if request_id
             else []
         )
-        orchestrator_events = read_jsonl(self._protocol_paths(run_dir)["orchestrator"])
+        orchestrator_events = self._filter_valid_orchestrator_rows(
+            rows=read_jsonl(self._protocol_paths(run_dir)["orchestrator"]),
+            context=f"materialize:{request_id or run_id}",
+        )
         status_updated_at_obj = status_payload.get("updated_at")
         status_updated_at = status_updated_at_obj if isinstance(status_updated_at_obj, str) else None
         effective_session_timeout_sec = (
@@ -333,6 +346,8 @@ class RunObservabilityService:
             completion=completion_payload,
         )
         rasp_rows = [model.model_dump(mode="json") for model in rasp_models]
+        for row in rasp_rows:
+            validate_rasp_event(row)
         fcmp_models = build_fcmp_events(
             rasp_models,
             status=status,
@@ -344,6 +359,8 @@ class RunObservabilityService:
             completion=completion_payload,
         )
         fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
+        for row in fcmp_rows:
+            validate_fcmp_event(row)
         metrics_payload = compute_protocol_metrics(rasp_models)
 
         paths = self._protocol_paths(run_dir)
@@ -392,6 +409,33 @@ class RunObservabilityService:
             if from_ts_value is not None and ts_obj is not None and ts_obj < from_ts_value:
                 continue
             if to_ts_value is not None and ts_obj is not None and ts_obj > to_ts_value:
+                continue
+            filtered.append(row)
+        return filtered
+
+    def _filter_valid_fcmp_rows(self, *, rows: List[Dict[str, Any]], context: str) -> List[Dict[str, Any]]:
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                validate_fcmp_event(row)
+            except ProtocolSchemaViolation as exc:
+                logger.warning("Skip invalid FCMP row (%s): %s", context, str(exc))
+                continue
+            filtered.append(row)
+        return filtered
+
+    def _filter_valid_orchestrator_rows(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        context: str,
+    ) -> List[Dict[str, Any]]:
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                validate_orchestrator_event(row)
+            except ProtocolSchemaViolation as exc:
+                logger.warning("Skip invalid orchestrator row (%s): %s", context, str(exc))
                 continue
             filtered.append(row)
         return filtered
@@ -586,3 +630,4 @@ class RunObservabilityService:
 
 
 run_observability_service = RunObservabilityService()
+logger = logging.getLogger(__name__)

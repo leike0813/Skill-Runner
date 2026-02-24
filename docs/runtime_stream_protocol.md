@@ -137,3 +137,28 @@ FCMP 关键对齐：
   -> `conversation.state.changed(waiting_user -> queued)`
 
 `auto` 继续作为 `interactive` 子集策略，共享同一状态机与终态映射。
+
+## 9. Schema Contract
+
+协议 Schema SSOT：
+
+- `server/assets/schemas/protocol/runtime_contract.schema.json`
+
+核心 `$defs`：
+
+- `fcmp_event_envelope`
+- `rasp_event_envelope`
+- `orchestrator_event`
+- `pending_interaction`
+- `interaction_history_entry`
+- `interactive_resume_command`
+
+校验策略：
+
+- 写入路径（SSE 输出/审计落盘/交互存储）为硬校验；
+- 读取路径（history/旧审计）为兼容过滤；
+- 内部桥接失败记录 `diagnostic.warning(code=SCHEMA_INTERNAL_INVALID)`。
+
+错误码：
+
+- `PROTOCOL_SCHEMA_VIOLATION`

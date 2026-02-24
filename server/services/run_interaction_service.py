@@ -17,6 +17,8 @@ from ..models import (
 )
 from .concurrency_manager import concurrency_manager
 from .job_orchestrator import job_orchestrator
+from .protocol_factories import make_resume_command
+from .protocol_schema_registry import ProtocolSchemaViolation, validate_resume_command
 from .run_source_adapter import RunSourceAdapter, get_request_and_run_dir, require_capability
 from .run_store import run_store
 from .session_statechart import waiting_reply_target_status
@@ -116,12 +118,27 @@ class RunInteractionService:
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id:
             run_store_backend.update_run_status(run_id, next_status)
+            resume_command = make_resume_command(
+                interaction_id=request.interaction_id,
+                response=request.response,
+                resolution_mode="user_reply",
+            )
+            try:
+                validate_resume_command(resume_command)
+            except ProtocolSchemaViolation as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "PROTOCOL_SCHEMA_VIOLATION",
+                        "message": str(exc),
+                    },
+                ) from exc
             merged_options = {
                 **request_record.get("engine_options", {}),
                 **request_record.get("runtime_options", {}),
-                "__interactive_reply_payload": request.response,
-                "__interactive_reply_interaction_id": request.interaction_id,
-                "__interactive_resolution_mode": "user_reply",
+                "__interactive_reply_payload": resume_command["response"],
+                "__interactive_reply_interaction_id": resume_command["interaction_id"],
+                "__interactive_resolution_mode": resume_command["resolution_mode"],
             }
             admitted = await concurrency_manager.admit_or_reject()
             if not admitted:

@@ -40,6 +40,7 @@ from .storage import (
 SUPPORTED_ENGINES = {"codex", "gemini", "iflow", "opencode"}
 TRUST_ENGINES = {"codex", "gemini"}
 HARNESS_CODEX_PROFILE_NAME = "skill-runner-harness"
+HARNESS_CODEX_DEFAULT_MODEL = "gpt-5.1-codex-mini"
 logger = logging.getLogger(__name__)
 
 
@@ -181,6 +182,7 @@ class HarnessRuntime:
         options: dict[str, Any] = {"__harness_mode": True}
         if engine == "codex":
             options["__codex_profile_name"] = HARNESS_CODEX_PROFILE_NAME
+            options["model"] = HARNESS_CODEX_DEFAULT_MODEL
         try:
             config_path_obj = adapter._construct_config(skill, run_dir, options)
         except Exception as exc:

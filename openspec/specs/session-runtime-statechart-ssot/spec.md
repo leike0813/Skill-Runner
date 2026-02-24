@@ -63,3 +63,29 @@
 - **WHEN** 触发 `interaction.auto_decide.timeout`
 - **THEN** FCMP 输出 `interaction.auto_decide.timeout`
 - **AND** 输出 `conversation.state.changed(from=waiting_user,to=queued,trigger=interaction.auto_decide.timeout)`
+
+### Requirement: 状态与回复事件 payload MUST 满足固定字段合同
+系统 MUST 对关键状态与交互事件 payload 执行 schema 校验。
+
+#### Scenario: state.changed 字段完整
+- **WHEN** 输出 `conversation.state.changed`
+- **THEN** payload 包含 `from`、`to`、`trigger`、`updated_at`
+
+#### Scenario: reply.accepted 字段完整
+- **WHEN** 输出 `interaction.reply.accepted`
+- **THEN** payload 包含 `interaction_id`、`resolution_mode=user_reply`、`accepted_at`
+
+#### Scenario: auto_decide.timeout 字段完整
+- **WHEN** 输出 `interaction.auto_decide.timeout`
+- **THEN** payload 包含 `interaction_id`、`resolution_mode=auto_decide_timeout`、`policy`
+
+### Requirement: canonical 状态机不变量 MUST 合同化并由模型测试守护
+系统 MUST 将 canonical 状态/转移不变量沉淀为机器可读合同，并由模型测试校验实现一致性。
+
+#### Scenario: 合同-实现转移一致
+- **WHEN** 执行状态机模型测试
+- **THEN** 合同转移集合与实现转移集合双向等价
+
+#### Scenario: 有限序列等价
+- **WHEN** 对有限事件序列进行模型回放
+- **THEN** 合同模型与实现模型得到相同的状态结果

@@ -45,3 +45,17 @@ TBD - created by archiving change interactive-30-observability-tests-and-doc-syn
 - **WHEN** 审查通用协议层实现
 - **THEN** 不存在按引擎名称分支的专用解析函数实现
 
+### Requirement: 观测层落盘 MUST 进行协议 Schema 校验
+系统 MUST 在写入 `events.jsonl` 与 `fcmp_events.jsonl` 前执行 schema 校验。
+
+#### Scenario: FCMP 落盘校验
+- **WHEN** 观测层写入 FCMP 事件
+- **THEN** 每条事件通过 `fcmp_event_envelope` 校验
+
+### Requirement: 历史读取 MUST 采用“读兼容”策略
+系统 MUST 在读取历史时过滤旧不合规行并记录诊断日志。
+
+#### Scenario: 旧历史兼容
+- **WHEN** 历史文件中存在不合规行
+- **THEN** 该行被跳过
+- **AND** 合规行继续对外返回

@@ -1,8 +1,15 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from server.services import runtime_event_protocol
 from server.services.runtime_event_protocol import build_fcmp_events, build_rasp_events
+from server.services.protocol_schema_registry import (
+    ProtocolSchemaViolation,
+    validate_fcmp_event,
+    validate_rasp_event,
+)
 
 
 def test_fcmp_suppresses_duplicate_raw_echo_blocks(tmp_path: Path):
@@ -337,3 +344,62 @@ def test_fcmp_emits_reply_and_auto_decide_events(tmp_path: Path):
         and event.data.get("to") == "queued"
         for event in fcmp_events
     )
+
+
+def test_runtime_protocol_outputs_are_schema_valid(tmp_path: Path):
+    run_dir = tmp_path / "run-schema-valid"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending = {"interaction_id": 5, "kind": "open_text", "prompt": "continue?"}
+
+    rasp_events = build_rasp_events(
+        run_id="run-schema-valid",
+        engine="codex",
+        attempt_number=1,
+        status="waiting_user",
+        pending_interaction=pending,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_user",
+        status_updated_at="2026-02-24T00:00:00",
+        pending_interaction=pending,
+    )
+
+    for event in rasp_events:
+        validate_rasp_event(event.model_dump(mode="json"))
+    for event in fcmp_events:
+        validate_fcmp_event(event.model_dump(mode="json"))
+
+
+def test_build_fcmp_events_raises_on_schema_violation(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-schema-invalid"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    rasp_events = build_rasp_events(
+        run_id="run-schema-invalid",
+        engine="codex",
+        attempt_number=1,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    monkeypatch.setattr(
+        runtime_event_protocol,
+        "make_fcmp_state_changed",
+        lambda **_kwargs: {"to": "running"},
+    )
+    with pytest.raises(ProtocolSchemaViolation):
+        build_fcmp_events(
+            rasp_events,
+            status="running",
+            status_updated_at="2026-02-24T00:00:00",
+        )

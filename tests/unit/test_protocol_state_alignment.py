@@ -3,6 +3,7 @@ from pathlib import Path
 
 from server.services.runtime_event_protocol import build_fcmp_events, build_rasp_events
 from server.services.session_statechart import SessionEvent, build_transition_index
+from tests.common.session_invariant_contract import fcmp_state_changed_tuples
 
 
 def _write_logs(logs_dir: Path) -> tuple[Path, Path]:
@@ -15,6 +16,7 @@ def _write_logs(logs_dir: Path) -> tuple[Path, Path]:
 
 
 def test_waiting_user_protocol_events_align_with_state_transition(tmp_path: Path) -> None:
+    mapped_state_changed = fcmp_state_changed_tuples()
     transitions = build_transition_index()
     assert ("running", SessionEvent.TURN_NEEDS_INPUT) in transitions
     assert transitions[("running", SessionEvent.TURN_NEEDS_INPUT)].target == "waiting_user"
@@ -43,13 +45,19 @@ def test_waiting_user_protocol_events_align_with_state_transition(tmp_path: Path
     )
     assert any(event.event.type == "interaction.user_input.required" for event in rasp_events)
     assert any(event.type == "user.input.required" for event in fcmp_events)
-    assert any(
-        event.type == "conversation.state.changed" and event.data.get("to") == "waiting_user"
+    waiting_state_changes = [
+        event
         for event in fcmp_events
-    )
+        if event.type == "conversation.state.changed" and event.data.get("to") == "waiting_user"
+    ]
+    assert waiting_state_changes
+    for event in waiting_state_changes:
+        triple = (event.data.get("from"), event.data.get("to"), event.data.get("trigger"))
+        assert triple in mapped_state_changed
 
 
 def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -> None:
+    mapped_state_changed = fcmp_state_changed_tuples()
     transitions = build_transition_index()
     assert ("running", SessionEvent.TURN_SUCCEEDED) in transitions
     assert ("running", SessionEvent.TURN_FAILED) in transitions
@@ -72,10 +80,15 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         status_updated_at="2026-02-24T00:00:00",
     )
     assert any(event.type == "conversation.completed" for event in succeeded_fcmp)
-    assert any(
-        event.type == "conversation.state.changed" and event.data.get("to") == "succeeded"
+    succeeded_state_changes = [
+        event
         for event in succeeded_fcmp
-    )
+        if event.type == "conversation.state.changed" and event.data.get("to") == "succeeded"
+    ]
+    assert succeeded_state_changes
+    for event in succeeded_state_changes:
+        triple = (event.data.get("from"), event.data.get("to"), event.data.get("trigger"))
+        assert triple in mapped_state_changed
 
     failed_stdout, failed_stderr = _write_logs(tmp_path / "run-failed" / "logs")
     failed_stderr.write_text(json.dumps({"error": "boom"}), encoding="utf-8")
@@ -94,7 +107,12 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         status_updated_at="2026-02-24T00:00:00",
     )
     assert any(event.type == "conversation.failed" for event in failed_fcmp)
-    assert any(
-        event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    failed_state_changes = [
+        event
         for event in failed_fcmp
-    )
+        if event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    ]
+    assert failed_state_changes
+    for event in failed_state_changes:
+        triple = (event.data.get("from"), event.data.get("to"), event.data.get("trigger"))
+        assert triple in mapped_state_changed

@@ -113,3 +113,19 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 - **THEN** run 必须进入 `failed`
 - **AND** 不得回退为 `waiting_user`
 
+### Requirement: 运行时 skill patch 注入 MUST 模块化且顺序固定
+系统 MUST 按固定模块顺序注入运行时 patch 到 `SKILL.md`。
+
+#### Scenario: patch 顺序固定
+- **WHEN** 运行时执行 skill patch
+- **THEN** 注入顺序为：
+  1. runtime enforcement
+  2. artifact redirection（若存在 artifacts）
+  3. output format contract
+  4. output schema specification（若 output schema 可用）
+  5. mode patch（auto 或 interactive）
+
+#### Scenario: mode 注入互斥
+- **WHEN** execution_mode=`interactive`
+- **THEN** 仅注入 interactive mode patch
+- **AND** 不注入 auto mode patch

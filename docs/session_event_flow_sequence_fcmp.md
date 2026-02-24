@@ -4,6 +4,8 @@
 
 ## 1) 主执行流（queued -> running -> terminal）
 
+不变量锚点：`TR-01`、`TR-05`、`TR-06`、`TR-09`、`FM-01`、`FM-05`、`FM-06`、`FM-07`、`OR-01`。
+
 ```mermaid
 sequenceDiagram
     participant C as Client(UI)
@@ -33,6 +35,8 @@ sequenceDiagram
 
 ## 2) 交互回复流（waiting_user -> queued -> running）
 
+不变量锚点：`TR-02`、`TR-03`、`FM-02`、`FM-03`、`PE-01`、`OR-02`。
+
 ```mermaid
 sequenceDiagram
     participant C as Client(UI)
@@ -56,6 +60,8 @@ sequenceDiagram
 
 ## 3) strict=false 超时自动决策流
 
+不变量锚点：`TR-02`、`TR-04`、`FM-02`、`FM-04`、`PE-02`、`OR-02`。
+
 ```mermaid
 sequenceDiagram
     participant Timer as Timeout Watcher
@@ -78,6 +84,8 @@ sequenceDiagram
 
 ## 4) 重启恢复流（preserve / reconcile）
 
+不变量锚点：`TR-10`、`TR-11`、`TR-12`、`TR-13`。
+
 ```mermaid
 sequenceDiagram
     participant Boot as Orchestrator Startup
@@ -98,6 +106,8 @@ sequenceDiagram
 ```
 
 ## 5) Statechart 映射说明
+
+不变量锚点：`FM-01` ~ `FM-07`、`PE-01`、`PE-02`、`OR-03`。
 
 - `turn.started` -> `conversation.state.changed(... to=running)`
 - `turn.needs_input` -> `conversation.state.changed(... to=waiting_user)` + `user.input.required`

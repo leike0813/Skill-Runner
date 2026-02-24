@@ -153,6 +153,39 @@ def test_parse_output_invalid_ask_user_payload_returns_error():
     assert result.outcome == AdapterTurnOutcome.ERROR
 
 
+def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
+    adapter = IFlowAdapter()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (skill_dir / "output.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"output": "output.schema.json"},
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config_path = run_dir / ".iflow" / "settings.json"
+
+    with patch(
+        "server.adapters.iflow_adapter.skill_patcher.load_output_schema",
+        return_value={"type": "object"},
+    ) as mock_load, patch(
+        "server.adapters.iflow_adapter.skill_patcher.patch_skill_md"
+    ) as mock_patch:
+        target = adapter._setup_environment(skill, run_dir, config_path, options={})
+
+    assert target == run_dir / ".iflow" / "skills" / "test-skill"
+    mock_load.assert_called_once_with(
+        skill_path=skill.path,
+        output_schema_relpath="output.schema.json",
+    )
+    _, kwargs = mock_patch.call_args
+    assert kwargs["execution_mode"] == "auto"
+    assert kwargs["output_schema"] == {"type": "object"}
+
+
 @pytest.mark.asyncio
 async def test_execute_resume_command_contains_resume_flag(tmp_path):
     adapter = IFlowAdapter()

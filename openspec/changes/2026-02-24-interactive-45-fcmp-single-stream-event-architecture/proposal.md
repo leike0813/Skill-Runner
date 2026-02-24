@@ -39,3 +39,7 @@
 
 - 代码：`server/services/runtime_event_protocol.py`, `server/services/run_observability.py`, `server/routers/*`, `server/assets/templates/ui/run_detail.html`, `e2e_client/templates/run_observe.html`
 - 文档：`docs/runtime_stream_protocol.md`, `docs/session_event_flow_sequence_fcmp.md`, `docs/api_reference.md`, `docs/dev_guide.md`
+
+## Follow-up
+
+- 后续合同化变更：`2026-02-24-interactive-46-event-command-schema-contract`

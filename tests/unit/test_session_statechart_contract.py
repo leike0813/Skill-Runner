@@ -1,5 +1,6 @@
 from server.models import RunStatus
 from server.services import session_statechart
+from tests.common.session_invariant_contract import canonical_states, terminal_states
 
 
 def test_transition_keys_are_unique() -> None:
@@ -22,22 +23,18 @@ def test_state_reachability_from_queued() -> None:
         visited.add(state)
         frontier.extend(adjacency.get(state, set()) - visited)
 
-    assert {"queued", "running", "waiting_user", "succeeded", "failed", "canceled"} <= visited
+    assert canonical_states() <= visited
 
 
 def test_terminal_states_are_mutually_exclusive_and_have_no_outgoing_edges() -> None:
     transitions = tuple(session_statechart.transition_rows())
-    terminal_states = {
-        RunStatus.SUCCEEDED.value,
-        RunStatus.FAILED.value,
-        RunStatus.CANCELED.value,
-    }
+    terminals = terminal_states()
 
     for status in RunStatus:
-        expected = status.value in terminal_states
+        expected = status.value in terminals
         assert session_statechart.assert_terminal_status_exclusive(status) is expected
 
-    outgoing_from_terminal = [row for row in transitions if row.source in terminal_states]
+    outgoing_from_terminal = [row for row in transitions if row.source in terminals]
     assert outgoing_from_terminal == []
 
 

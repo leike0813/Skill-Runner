@@ -165,10 +165,20 @@ class CodexAdapter(EngineAdapter):
         
         # Always patch runtime contract/mode semantics; artifacts patch is optional.
         from ..services.skill_patcher import skill_patcher
+        output_schema_relpath = (
+            str(skill.schemas.get("output"))
+            if isinstance(skill.schemas, dict) and isinstance(skill.schemas.get("output"), str)
+            else None
+        )
+        output_schema = skill_patcher.load_output_schema(
+            skill_path=skill.path,
+            output_schema_relpath=output_schema_relpath,
+        )
         skill_patcher.patch_skill_md(
             skills_target_dir,
             skill.artifacts or [],
             execution_mode=self._resolve_execution_mode(options),
+            output_schema=output_schema,
         )
                 
         return skills_target_dir

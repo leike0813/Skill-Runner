@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
-from server.services.skill_patcher import COMPLETION_CONTRACT_MARKER, skill_patcher
+from server.models import ManifestArtifact
+from server.services.manifest_artifact_inference import infer_manifest_artifacts
+from server.services.skill_patcher import skill_patcher
 
 
 AGENT_SKILL_ROOTS: dict[str, Path] = {
@@ -22,25 +26,7 @@ class InjectedSkillRecord:
     source_directory: Path
     target_directory: Path
     target_skill_path: Path
-    appended_completion_contract: bool
-
-
-def _append_completion_contract_if_missing(skill_md_path: Path) -> bool:
-    if not skill_md_path.exists():
-        return False
-    current = skill_md_path.read_text(encoding="utf-8")
-    if COMPLETION_CONTRACT_MARKER in current:
-        return False
-    completion_patch = skill_patcher.generate_completion_contract_patch().strip()
-    if not completion_patch:
-        return False
-    updated = current.rstrip()
-    if updated:
-        updated = f"{updated}\n\n{completion_patch}\n"
-    else:
-        updated = f"{completion_patch}\n"
-    skill_md_path.write_text(updated, encoding="utf-8")
-    return True
+    patched: bool
 
 
 def _iter_skill_directories(source_root: Path) -> list[Path]:
@@ -56,6 +42,30 @@ def _iter_skill_directories(source_root: Path) -> list[Path]:
             continue
         skill_dirs.append(entry)
     return skill_dirs
+
+
+def _load_manifest_artifacts(skill_dir: Path) -> List[ManifestArtifact]:
+    runner_path = skill_dir / "assets" / "runner.json"
+    if not runner_path.exists() or not runner_path.is_file():
+        return []
+    try:
+        payload = json.loads(runner_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("Failed to parse runner manifest for skill injection: %s", runner_path)
+        return []
+    if not isinstance(payload, dict):
+        return []
+    enriched = infer_manifest_artifacts(payload, skill_dir)
+    artifacts_raw = enriched.get("artifacts")
+    if not isinstance(artifacts_raw, list):
+        return []
+    artifacts: List[ManifestArtifact] = []
+    for item in artifacts_raw:
+        try:
+            artifacts.append(ManifestArtifact.model_validate(item))
+        except Exception:
+            logger.warning("Ignore invalid artifact entry in %s: %r", runner_path, item)
+    return artifacts
 
 
 def inject_all_skill_packages(
@@ -75,7 +85,7 @@ def inject_all_skill_packages(
             "skill_count": 0,
             "skills": [],
             "injected_skills": [],
-            "appended_completion_contract_count": 0,
+            "patched_skill_count": 0,
         }
 
     source_roots = [
@@ -86,7 +96,7 @@ def inject_all_skill_packages(
     target_root.mkdir(parents=True, exist_ok=True)
 
     injected: list[InjectedSkillRecord] = []
-    appended_count = 0
+    patched_count = 0
     for source_root in source_roots:
         for source_dir in _iter_skill_directories(source_root):
             target_dir = target_root / source_dir.name
@@ -94,16 +104,20 @@ def inject_all_skill_packages(
                 shutil.rmtree(target_dir)
             shutil.copytree(source_dir, target_dir)
             target_skill_path = target_dir / "SKILL.md"
-            appended = _append_completion_contract_if_missing(target_skill_path)
-            if appended:
-                appended_count += 1
+            patched = skill_patcher.patch_skill_md(
+                target_dir,
+                artifacts=_load_manifest_artifacts(target_dir),
+                execution_mode="auto",
+            )
+            if patched:
+                patched_count += 1
             injected.append(
                 InjectedSkillRecord(
                     skill_name=source_dir.name,
                     source_directory=source_dir,
                     target_directory=target_dir,
                     target_skill_path=target_skill_path,
-                    appended_completion_contract=appended,
+                    patched=patched,
                 )
             )
 
@@ -121,9 +135,12 @@ def inject_all_skill_packages(
                 "source_directory": str(item.source_directory),
                 "target_directory": str(item.target_directory),
                 "target_skill_path": str(item.target_skill_path),
-                "appended_completion_contract": item.appended_completion_contract,
+                "patched": item.patched,
             }
             for item in injected
         ],
-        "appended_completion_contract_count": appended_count,
+        "patched_skill_count": patched_count,
     }
+
+
+logger = logging.getLogger(__name__)

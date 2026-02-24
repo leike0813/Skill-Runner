@@ -45,3 +45,10 @@ Temporary run endpoints MUST follow the same error code semantics as jobs API fo
 - **WHEN** temporary package or input validation fails
 - **THEN** the endpoint returns HTTP 400
 
+### Requirement: Temporary skill injection MUST reuse unified patch pipeline
+Temporary skill execution MUST use the same modular `SkillPatcher` pipeline as regular job execution.
+
+#### Scenario: Shared patch entrypoint
+- **WHEN** temporary skill package is copied into run workspace
+- **THEN** runtime patching uses unified `patch_skill_md` flow
+- **AND** does not use a separate completion-only injection branch

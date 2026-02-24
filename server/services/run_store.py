@@ -1,10 +1,17 @@
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import config
+from ..models import InteractiveErrorCode
+from .protocol_schema_registry import (
+    ProtocolSchemaViolation,
+    validate_interaction_history_entry,
+    validate_pending_interaction,
+)
 
 
 class RunStore:
@@ -750,6 +757,18 @@ class RunStore:
         payload: Dict[str, Any],
     ) -> None:
         now = datetime.utcnow().isoformat()
+        entry = {
+            "interaction_id": int(interaction_id),
+            "event_type": event_type,
+            "payload": payload,
+            "created_at": now,
+        }
+        try:
+            validate_interaction_history_entry(entry)
+        except ProtocolSchemaViolation as exc:
+            raise ValueError(
+                f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value}: {exc}"
+            ) from exc
         with self._connect() as conn:
             conn.execute(
                 """
@@ -792,17 +811,41 @@ class RunStore:
             ).fetchall()
         history: List[Dict[str, Any]] = []
         for row in rows:
-            history.append(
-                {
-                    "interaction_id": row["interaction_id"],
-                    "event_type": row["event_type"],
-                    "payload": json.loads(row["payload_json"]),
-                    "created_at": row["created_at"],
-                }
-            )
+            try:
+                payload = json.loads(row["payload_json"])
+            except Exception:
+                logger.warning(
+                    "Skipping interaction history row with invalid JSON: request_id=%s interaction_id=%s",
+                    request_id,
+                    row["interaction_id"],
+                )
+                continue
+            item = {
+                "interaction_id": row["interaction_id"],
+                "event_type": row["event_type"],
+                "payload": payload,
+                "created_at": row["created_at"],
+            }
+            try:
+                validate_interaction_history_entry(item)
+            except ProtocolSchemaViolation as exc:
+                logger.warning(
+                    "Skipping incompatible interaction history row: request_id=%s interaction_id=%s detail=%s",
+                    request_id,
+                    row["interaction_id"],
+                    str(exc),
+                )
+                continue
+            history.append(item)
         return history
 
     def set_pending_interaction(self, request_id: str, payload: Dict[str, Any]) -> None:
+        try:
+            validate_pending_interaction(payload)
+        except ProtocolSchemaViolation as exc:
+            raise ValueError(
+                f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value}: {exc}"
+            ) from exc
         interaction_id = int(payload["interaction_id"])
         now = datetime.utcnow().isoformat()
         with self._connect() as conn:
@@ -840,7 +883,21 @@ class RunStore:
             ).fetchone()
         if not row:
             return None
-        return json.loads(row["payload_json"])
+        try:
+            payload = json.loads(row["payload_json"])
+        except Exception:
+            logger.warning("Invalid pending interaction JSON ignored: request_id=%s", request_id)
+            return None
+        try:
+            validate_pending_interaction(payload)
+        except ProtocolSchemaViolation as exc:
+            logger.warning(
+                "Invalid pending interaction payload ignored: request_id=%s detail=%s",
+                request_id,
+                str(exc),
+            )
+            return None
+        return payload
 
     def get_interaction_count(self, request_id: str) -> int:
         with self._connect() as conn:
@@ -972,3 +1029,4 @@ class RunStore:
 
 
 run_store = RunStore()
+logger = logging.getLogger(__name__)

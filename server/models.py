@@ -44,6 +44,7 @@ class InteractiveErrorCode(str, Enum):
     SESSION_RESUME_FAILED = "SESSION_RESUME_FAILED"
     INTERACTIVE_MAX_ATTEMPT_EXCEEDED = "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
     ORCHESTRATOR_RESTART_INTERRUPTED = "ORCHESTRATOR_RESTART_INTERRUPTED"
+    PROTOCOL_SCHEMA_VIOLATION = "PROTOCOL_SCHEMA_VIOLATION"
 
 
 class RecoveryState(str, Enum):
@@ -561,6 +562,28 @@ class FcmpEventType(str, Enum):
     DIAGNOSTIC_WARNING = "diagnostic.warning"
     RAW_STDOUT = "raw.stdout"
     RAW_STDERR = "raw.stderr"
+
+
+class OrchestratorEventType(str, Enum):
+    """Canonical orchestrator event names persisted to audit trail."""
+    LIFECYCLE_RUN_STARTED = "lifecycle.run.started"
+    LIFECYCLE_RUN_TERMINAL = "lifecycle.run.terminal"
+    LIFECYCLE_RUN_CANCELED = "lifecycle.run.canceled"
+    INTERACTION_USER_INPUT_REQUIRED = "interaction.user_input.required"
+    ERROR_RUN_FAILED = "error.run.failed"
+    DIAGNOSTIC_WARNING = "diagnostic.warning"
+
+
+class InteractionHistoryEventType(str, Enum):
+    """Interaction history event names persisted in run store."""
+    ASK_USER = "ask_user"
+    REPLY = "reply"
+
+
+class InteractiveResolutionMode(str, Enum):
+    """Resolution mode for resume command and reply history."""
+    USER_REPLY = "user_reply"
+    AUTO_DECIDE_TIMEOUT = "auto_decide_timeout"
 
 
 class InteractionKind(str, Enum):

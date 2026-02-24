@@ -11,7 +11,9 @@ from ..models import (
     EngineSessionHandle,
     EngineInteractiveProfile,
     ExecutionMode,
+    InteractiveResolutionMode,
     InteractiveErrorCode,
+    OrchestratorEventType,
     RunStatus,
     SkillManifest,
 )
@@ -31,6 +33,17 @@ from ..services.session_statechart import (
     timeout_requires_auto_decision,
     waiting_recovery_event,
     waiting_reply_target_status,
+)
+from .protocol_factories import (
+    make_diagnostic_warning_payload,
+    make_orchestrator_event,
+    make_resume_command,
+)
+from .protocol_schema_registry import (
+    ProtocolSchemaViolation,
+    validate_orchestrator_event,
+    validate_pending_interaction,
+    validate_resume_command,
 )
 from ..config import config
 
@@ -172,7 +185,7 @@ class JobOrchestrator:
             run_dir=run_dir,
             attempt_number=attempt_number,
             category="lifecycle",
-            type_name="lifecycle.run.started",
+            type_name=OrchestratorEventType.LIFECYCLE_RUN_STARTED.value,
             data={"status": RunStatus.RUNNING.value},
         )
         self._update_latest_run_id(run_id)
@@ -511,13 +524,14 @@ class JobOrchestrator:
                 ),
             )
             run_store.update_run_status(run_id, final_status, str(result_path))
-            self._append_orchestrator_event(
-                run_dir=run_dir,
-                attempt_number=attempt_number,
-                category="lifecycle",
-                type_name="lifecycle.run.terminal",
-                data={"status": final_status.value},
-            )
+            if final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}:
+                self._append_orchestrator_event(
+                    run_dir=run_dir,
+                    attempt_number=attempt_number,
+                    category="lifecycle",
+                    type_name=OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
+                    data={"status": final_status.value},
+                )
             if cache_key and final_status == RunStatus.SUCCEEDED:
                 if temp_request_id:
                     run_store.record_temp_cache_entry(cache_key, run_id)
@@ -550,7 +564,7 @@ class JobOrchestrator:
                     run_dir=run_dir,
                     attempt_number=attempt_number,
                     category="lifecycle",
-                    type_name="lifecycle.run.canceled",
+                    type_name=OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value,
                     data={"status": RunStatus.CANCELED.value},
                 )
         except Exception as e:
@@ -579,7 +593,7 @@ class JobOrchestrator:
                     run_dir=run_dir,
                     attempt_number=attempt_number,
                     category="error",
-                    type_name="error.run.failed",
+                    type_name=OrchestratorEventType.ERROR_RUN_FAILED.value,
                     data={"message": normalized_error_message or "unknown"},
                 )
         finally:
@@ -1141,16 +1155,42 @@ class JobOrchestrator:
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         event_path = audit_dir / "orchestrator_events.jsonl"
-        payload = {
-            "ts": datetime.utcnow().isoformat(),
-            "attempt_number": max(1, int(attempt_number)),
-            "category": category,
-            "type": type_name,
-            "data": data,
-        }
+        payload = make_orchestrator_event(
+            attempt_number=attempt_number,
+            category=category,
+            type_name=type_name,
+            data=data,
+            ts=datetime.utcnow().isoformat(),
+        )
+        try:
+            validate_orchestrator_event(payload)
+        except ProtocolSchemaViolation as exc:
+            raise RuntimeError(
+                f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value}: {exc}"
+            ) from exc
         with event_path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False))
             fp.write("\n")
+
+    def _append_internal_schema_warning(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        schema_path: str,
+        detail: str,
+    ) -> None:
+        self._append_orchestrator_event(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            category="diagnostic",
+            type_name=OrchestratorEventType.DIAGNOSTIC_WARNING.value,
+            data=make_diagnostic_warning_payload(
+                code="SCHEMA_INTERNAL_INVALID",
+                path=schema_path,
+                detail=detail,
+            ),
+        )
 
     def _resolve_session_timeout_seconds(self, options: Dict[str, Any]) -> int:
         return resolve_session_timeout(
@@ -1207,26 +1247,60 @@ class JobOrchestrator:
             interaction_id = int(interaction_id_raw)
         except Exception:
             interaction_id = 0
-        if interaction_id > 0:
-            resolution_mode_raw = options.get("__interactive_resolution_mode", "user_reply")
-            resolution_mode = (
-                str(resolution_mode_raw).strip() if resolution_mode_raw else "user_reply"
+        resolution_mode_raw = options.get(
+            "__interactive_resolution_mode",
+            InteractiveResolutionMode.USER_REPLY.value,
+        )
+        resolution_mode = (
+            str(resolution_mode_raw).strip()
+            if resolution_mode_raw
+            else InteractiveResolutionMode.USER_REPLY.value
+        )
+        resume_command = make_resume_command(
+            interaction_id=max(1, interaction_id),
+            response=options.get("__interactive_reply_payload"),
+            resolution_mode=resolution_mode,
+            auto_decide_reason=(
+                str(options.get("__interactive_auto_reason"))
+                if isinstance(options.get("__interactive_auto_reason"), str)
+                else None
+            ),
+            auto_decide_policy=(
+                str(options.get("__interactive_auto_policy"))
+                if isinstance(options.get("__interactive_auto_policy"), str)
+                else None
+            ),
+        )
+        try:
+            validate_resume_command(resume_command)
+        except ProtocolSchemaViolation as exc:
+            self._append_internal_schema_warning(
+                run_dir=run_dir,
+                attempt_number=self._resolve_attempt_number(request_id=request_id, is_interactive=True),
+                schema_path="interactive_resume_command",
+                detail=str(exc),
             )
+            resume_command = make_resume_command(
+                interaction_id=max(1, interaction_id),
+                response=options.get("__interactive_reply_payload"),
+                resolution_mode=InteractiveResolutionMode.USER_REPLY.value,
+            )
+        if interaction_id > 0:
             run_store.append_interaction_history(
                 request_id=request_id,
                 interaction_id=interaction_id,
                 event_type="reply",
                 payload={
-                    "response": options.get("__interactive_reply_payload"),
-                    "resolution_mode": resolution_mode,
+                    "response": resume_command["response"],
+                    "resolution_mode": resume_command["resolution_mode"],
                     "resolved_at": datetime.utcnow().isoformat(),
-                    "auto_decide_reason": options.get("__interactive_auto_reason"),
-                    "auto_decide_policy": options.get("__interactive_auto_policy"),
+                    "auto_decide_reason": resume_command.get("auto_decide_reason"),
+                    "auto_decide_policy": resume_command.get("auto_decide_policy"),
                 },
             )
             run_store.consume_interaction_reply(request_id, interaction_id)
         options["__prompt_override"] = self._build_reply_prompt(
-            options.get("__interactive_reply_payload")
+            resume_command.get("response")
         )
         handle = run_store.get_engine_session_handle(request_id)
         if not handle:
@@ -1503,6 +1577,24 @@ class JobOrchestrator:
             request_id=request_id,
             is_interactive=True,
         )
+        try:
+            validate_pending_interaction(pending_interaction)
+        except ProtocolSchemaViolation as exc:
+            self._append_internal_schema_warning(
+                run_dir=run_dir,
+                attempt_number=attempt_number,
+                schema_path="pending_interaction",
+                detail=str(exc),
+            )
+            pending_interaction = {
+                "interaction_id": int(pending_interaction.get("interaction_id", attempt_number)),
+                "kind": "open_text",
+                "prompt": "Provide next user turn",
+                "options": [],
+                "ui_hints": {},
+                "default_decision_policy": "engine_judgement",
+                "required_fields": [],
+            }
         run_store.set_pending_interaction(request_id, pending_interaction)
         run_store.set_interactive_profile(request_id, profile.model_dump(mode="json"))
         run_store.append_interaction_history(
@@ -1515,7 +1607,7 @@ class JobOrchestrator:
             run_dir=run_dir,
             attempt_number=attempt_number,
             category="interaction",
-            type_name="interaction.user_input.required",
+            type_name=OrchestratorEventType.INTERACTION_USER_INPUT_REQUIRED.value,
             data={
                 "interaction_id": int(pending_interaction["interaction_id"]),
                 "kind": str(pending_interaction.get("kind", "open_text")),
@@ -1643,10 +1735,31 @@ class JobOrchestrator:
                 "based on the current context."
             ),
         }
+        resume_command = make_resume_command(
+            interaction_id=interaction_id,
+            response=auto_reply_payload,
+            resolution_mode=InteractiveResolutionMode.AUTO_DECIDE_TIMEOUT.value,
+            auto_decide_reason="user_no_reply",
+            auto_decide_policy=default_policy,
+        )
+        try:
+            validate_resume_command(resume_command)
+        except ProtocolSchemaViolation as exc:
+            self._append_internal_schema_warning(
+                run_dir=workspace_manager.get_run_dir(run_id) or Path(config.SYSTEM.RUNS_DIR) / run_id,
+                attempt_number=self._resolve_attempt_number(request_id=request_id, is_interactive=True),
+                schema_path="interactive_resume_command",
+                detail=str(exc),
+            )
+            resume_command = make_resume_command(
+                interaction_id=interaction_id,
+                response=auto_reply_payload,
+                resolution_mode=InteractiveResolutionMode.USER_REPLY.value,
+            )
         reply_state = run_store.submit_interaction_reply(
             request_id=request_id,
             interaction_id=interaction_id,
-            response=auto_reply_payload,
+            response=resume_command["response"],
             idempotency_key=f"auto-timeout:{interaction_id}",
         )
         if reply_state not in {"accepted", "idempotent"}:
@@ -1666,11 +1779,11 @@ class JobOrchestrator:
         options = {
             **request_record.get("engine_options", {}),
             **request_record.get("runtime_options", {}),
-            "__interactive_reply_payload": auto_reply_payload,
-            "__interactive_reply_interaction_id": interaction_id,
-            "__interactive_resolution_mode": "auto_decide_timeout",
-            "__interactive_auto_reason": "user_no_reply",
-            "__interactive_auto_policy": default_policy,
+            "__interactive_reply_payload": resume_command["response"],
+            "__interactive_reply_interaction_id": resume_command["interaction_id"],
+            "__interactive_resolution_mode": resume_command["resolution_mode"],
+            "__interactive_auto_reason": resume_command.get("auto_decide_reason"),
+            "__interactive_auto_policy": resume_command.get("auto_decide_policy"),
         }
         await self.run_job(
             run_id=run_id,
@@ -1795,10 +1908,18 @@ class JobOrchestrator:
         return json.dumps(response, ensure_ascii=False)
 
     def _error_from_exception(self, exc: Exception) -> Dict[str, Any]:
+        if isinstance(exc, ProtocolSchemaViolation):
+            return {
+                "code": InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value,
+                "message": (
+                    f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value}: {exc}"
+                ),
+            }
         text = str(exc)
         for code in (
             InteractiveErrorCode.SESSION_RESUME_FAILED.value,
             InteractiveErrorCode.ORCHESTRATOR_RESTART_INTERRUPTED.value,
+            InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value,
         ):
             if text.startswith(code):
                 return {"code": code, "message": text}

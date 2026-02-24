@@ -73,6 +73,63 @@ def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
     assert chunk3 == {"from": 5, "to": 6, "chunk": "f"}
 
 
+def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-history"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_path = audit_dir / "fcmp_events.jsonl"
+    fcmp_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "protocol_version": "fcmp/1.0",
+                        "run_id": "run-history",
+                        "seq": 1,
+                        "ts": "2026-02-24T00:00:00",
+                        "engine": "codex",
+                        "type": "conversation.state.changed",
+                        "data": {
+                            "from": "queued",
+                            "to": "running",
+                            "trigger": "turn.started",
+                            "updated_at": "2026-02-24T00:00:00",
+                            "pending_interaction_id": None,
+                        },
+                        "meta": {"attempt": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "protocol_version": "fcmp/1.0",
+                        "run_id": "run-history",
+                        "seq": 2,
+                        "ts": "2026-02-24T00:00:01",
+                        "engine": "codex",
+                        "type": "conversation.state.changed",
+                        "data": {"to": "running"},
+                        "meta": {"attempt": 1},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.RunObservabilityService._read_status_payload",
+        lambda self, _run_dir: {"status": "succeeded"},
+    )
+    service = RunObservabilityService()
+    rows = service.list_event_history(run_dir=run_dir, request_id="req-hist")
+    assert len(rows) == 1
+    assert rows[0]["seq"] == 1
+
+
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
     monkeypatch.setattr(
         "server.services.run_observability.run_store.get_pending_interaction",

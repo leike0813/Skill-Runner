@@ -1,6 +1,8 @@
 from pathlib import Path
 import sqlite3
 
+import pytest
+
 from server.services.run_store import RunStore
 
 
@@ -186,7 +188,12 @@ def test_interaction_history_and_consume_reply(tmp_path):
         request_id="req-1",
         interaction_id=2,
         event_type="ask_user",
-        payload={"prompt": "Pick one"},
+        payload={
+            "interaction_id": 2,
+            "kind": "choose_one",
+            "prompt": "Pick one",
+            "options": [],
+        },
     )
     accepted = store.submit_interaction_reply(
         request_id="req-1",
@@ -209,6 +216,7 @@ def test_auto_decision_stats(tmp_path):
         interaction_id=1,
         event_type="reply",
         payload={
+            "response": {"answer": "a"},
             "resolution_mode": "auto_decide_timeout",
             "resolved_at": "2026-02-16T00:00:01",
         },
@@ -218,6 +226,7 @@ def test_auto_decision_stats(tmp_path):
         interaction_id=2,
         event_type="reply",
         payload={
+            "response": {"answer": "b"},
             "resolution_mode": "user_reply",
             "resolved_at": "2026-02-16T00:00:02",
         },
@@ -227,6 +236,7 @@ def test_auto_decision_stats(tmp_path):
         interaction_id=3,
         event_type="reply",
         payload={
+            "response": {"answer": "c"},
             "resolution_mode": "auto_decide_timeout",
             "resolved_at": "2026-02-16T00:00:03",
         },
@@ -340,3 +350,79 @@ def test_migrate_legacy_interactive_runtime_table(tmp_path):
     assert row["request_id"] == "req-legacy"
     assert row["effective_session_timeout_sec"] == 900
     assert '"handle_value":"thread-1"' in row["session_handle_json"]
+
+
+def test_set_pending_interaction_rejects_invalid_payload(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    with pytest.raises(ValueError, match="PROTOCOL_SCHEMA_VIOLATION"):
+        store.set_pending_interaction(
+            "req-invalid",
+            {
+                "interaction_id": 1,
+                "kind": "open_text",
+            },
+        )
+
+
+def test_list_interaction_history_skips_legacy_invalid_rows(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO request_interaction_history (
+                request_id, interaction_id, event_type, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "req-legacy",
+                1,
+                "ask_user",
+                '{"prompt":"legacy-only"}',
+                "2026-02-24T00:00:00",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO request_interaction_history (
+                request_id, interaction_id, event_type, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "req-legacy",
+                2,
+                "reply",
+                '{"response":{"ok":true},"resolution_mode":"user_reply","resolved_at":"2026-02-24T00:00:01"}',
+                "2026-02-24T00:00:01",
+            ),
+        )
+        conn.commit()
+
+    rows = store.list_interaction_history("req-legacy")
+    assert len(rows) == 1
+    assert rows[0]["interaction_id"] == 2
+
+
+def test_get_pending_interaction_ignores_invalid_legacy_payload(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    with sqlite3.connect(store.db_path) as conn:
+        now = "2026-02-24T00:00:00"
+        conn.execute(
+            """
+            INSERT INTO request_interactions (
+                request_id, interaction_id, payload_json, state,
+                idempotency_key, reply_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "req-legacy",
+                5,
+                '{"interaction_id":5,"prompt":"legacy-missing-kind"}',
+                "pending",
+                None,
+                None,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    assert store.get_pending_interaction("req-legacy") is None

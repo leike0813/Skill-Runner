@@ -1,0 +1,1337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-runner.local/schemas/protocol/runtime_contract.schema.json",
+  "title": "Runtime Event and Command Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "raw_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stream": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byte_from": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "byte_to": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "encoding": {
+          "type": "string",
+          "const": "utf-8"
+        }
+      },
+      "required": [
+        "attempt_number",
+        "stream",
+        "byte_from",
+        "byte_to",
+        "encoding"
+      ]
+    },
+    "pending_interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interaction_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "choose_one",
+            "confirm",
+            "fill_fields",
+            "open_text",
+            "risk_ack"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": true
+            },
+            "required": [
+              "label",
+              "value"
+            ]
+          },
+          "default": []
+        },
+        "ui_hints": {
+          "type": "object",
+          "default": {}
+        },
+        "default_decision_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "context": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "interaction_id",
+        "kind",
+        "prompt"
+      ]
+    },
+    "interactive_resume_command": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interaction_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "response": true,
+        "resolution_mode": {
+          "type": "string",
+          "enum": [
+            "user_reply",
+            "auto_decide_timeout"
+          ]
+        },
+        "auto_decide_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auto_decide_policy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "interaction_id",
+        "response",
+        "resolution_mode"
+      ]
+    },
+    "interaction_history_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interaction_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "ask_user",
+            "reply"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "event_type",
+        "payload",
+        "created_at"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event_type": {
+                "const": "ask_user"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/pending_interaction"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event_type": {
+                "const": "reply"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "response": true,
+                  "resolution_mode": {
+                    "type": "string",
+                    "enum": [
+                      "user_reply",
+                      "auto_decide_timeout"
+                    ]
+                  },
+                  "resolved_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "auto_decide_reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "auto_decide_policy": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "response",
+                  "resolution_mode"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "orchestrator_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "lifecycle",
+            "interaction",
+            "error",
+            "diagnostic"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "lifecycle.run.started",
+            "lifecycle.run.terminal",
+            "lifecycle.run.canceled",
+            "interaction.user_input.required",
+            "error.run.failed",
+            "diagnostic.warning"
+          ]
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "ts",
+        "attempt_number",
+        "category",
+        "type",
+        "data"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lifecycle.run.started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "running"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lifecycle.run.terminal"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lifecycle.run.canceled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "canceled"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.user_input.required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "interaction_id",
+                  "kind"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "error.run.failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.warning"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "rasp_event_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "string",
+          "const": "rasp/1.0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "engine": {
+              "type": "string",
+              "minLength": 1
+            },
+            "parser": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "engine",
+            "confidence"
+          ]
+        },
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "category": {
+              "type": "string",
+              "enum": [
+                "lifecycle",
+                "agent",
+                "interaction",
+                "diagnostic",
+                "raw"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "lifecycle.run.status",
+                "lifecycle.completion.state",
+                "agent.message.final",
+                "diagnostic.warning",
+                "raw.stdout",
+                "raw.stderr",
+                "interaction.user_input.required",
+                "lifecycle.run.terminal"
+              ]
+            }
+          },
+          "required": [
+            "category",
+            "type"
+          ]
+        },
+        "data": {
+          "type": "object"
+        },
+        "correlation": {
+          "type": "object"
+        },
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "raw_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/raw_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "run_id",
+        "seq",
+        "ts",
+        "source",
+        "event",
+        "data",
+        "correlation",
+        "attempt_number"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "lifecycle.run.status"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting_user",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "lifecycle.completion.state"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "interrupted",
+                      "awaiting_user_input",
+                      "unknown"
+                    ]
+                  },
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "diagnostics": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "agent.message.final"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "message_id",
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "diagnostic.warning"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "suppressed_count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "raw.stdout",
+                      "raw.stderr"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "line": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "line"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "interaction.user_input.required"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "lifecycle.run.terminal"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fcmp_event_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "string",
+          "const": "fcmp/1.0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "conversation.started",
+            "conversation.state.changed",
+            "assistant.message.final",
+            "user.input.required",
+            "interaction.reply.accepted",
+            "interaction.auto_decide.timeout",
+            "conversation.completed",
+            "conversation.failed",
+            "diagnostic.warning",
+            "raw.stdout",
+            "raw.stderr"
+          ]
+        },
+        "data": {
+          "type": "object"
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "attempt"
+          ]
+        },
+        "raw_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/raw_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "run_id",
+        "seq",
+        "ts",
+        "engine",
+        "type",
+        "data",
+        "meta"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "conversation.started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "session_id"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "conversation.state.changed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting_user",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "to": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting_user",
+                      "succeeded",
+                      "failed",
+                      "canceled"
+                    ]
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "updated_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "pending_interaction_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "from",
+                  "to",
+                  "trigger",
+                  "updated_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assistant.message.final"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "message_id",
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "user.input.required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.reply.accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "resolution_mode": {
+                    "type": "string",
+                    "const": "user_reply"
+                  },
+                  "accepted_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "interaction_id",
+                  "resolution_mode",
+                  "accepted_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.auto_decide.timeout"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "resolution_mode": {
+                    "type": "string",
+                    "const": "auto_decide_timeout"
+                  },
+                  "accepted_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "policy": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "timeout_sec": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "interaction_id",
+                  "resolution_mode",
+                  "accepted_at",
+                  "policy"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "conversation.completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "state",
+                  "reason_code"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "conversation.failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "error": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "category": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "code": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "code"
+                    ]
+                  }
+                },
+                "required": [
+                  "error"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.warning"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "suppressed_count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "raw.stdout",
+                  "raw.stderr"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "line": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "line"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

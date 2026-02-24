@@ -31,13 +31,20 @@ def mock_skill(tmp_path):
     
     (skill_dir / "input.schema.json").write_text(json.dumps(input_schema))
     (skill_dir / "parameter.schema.json").write_text(json.dumps(param_schema))
+    output_schema = {
+        "type": "object",
+        "required": ["value"],
+        "properties": {"value": {"type": "integer"}},
+    }
+    (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
     
     return SkillManifest(
         id="test-skill",
         path=skill_dir,
         schemas={
             "input": "input.schema.json",
-            "parameter": "parameter.schema.json"
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json",
         }
     )
 
@@ -102,6 +109,10 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
             # parameter.divisor should be 5
             assert "divisor: 5" in prompt_content
             assert mock_patch.call_count == 1
+            _, kwargs = mock_patch.call_args
+            assert "output_schema" in kwargs
+            assert isinstance(kwargs["output_schema"], dict)
+            assert kwargs["output_schema"]["type"] == "object"
     finally:
         config.defrost()
         config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
@@ -151,6 +162,9 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
             with pytest.raises(ValueError, match="Missing required input files"):
                 await adapter.run(mock_skill, input_data, run_dir, options)
             assert mock_patch.call_count == 1
+            _, kwargs = mock_patch.call_args
+            assert "output_schema" in kwargs
+            assert isinstance(kwargs["output_schema"], dict)
     finally:
         config.defrost()
         config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template

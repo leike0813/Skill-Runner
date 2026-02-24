@@ -7,6 +7,7 @@ import pytest
 
 from server.models import (
     EngineInteractiveProfile,
+    InteractiveErrorCode,
     RunCreateRequest,
     RunStatus,
     SkillManifest,
@@ -2397,3 +2398,17 @@ async def test_recover_orphan_cleanup_is_noop_and_idempotent(tmp_path):
         config.SYSTEM.RUNS_DIR = old_runs_dir
         config.SYSTEM.RUNS_DB = old_runs_db
         config.freeze()
+
+
+def test_append_orchestrator_event_schema_violation_raises_runtime_error(tmp_path):
+    run_dir = tmp_path / "run-schema-error"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    orchestrator = JobOrchestrator()
+    with pytest.raises(RuntimeError, match=InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value):
+        orchestrator._append_orchestrator_event(
+            run_dir=run_dir,
+            attempt_number=1,
+            category="lifecycle",
+            type_name="lifecycle.run.started",
+            data={"status": "queued"},
+        )
