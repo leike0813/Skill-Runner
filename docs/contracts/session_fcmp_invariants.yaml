@@ -119,3 +119,5 @@ ordering_rules:
     rule: waiting_user_requires_input_event
   - id: OR-03
     rule: seq_monotonic_contiguous
+  - id: OR-04
+    rule: reply_accepted_precedes_resumed_assistant

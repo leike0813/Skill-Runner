@@ -8,10 +8,11 @@ from server.services.run_observability import RunObservabilityService
 
 def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
-    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
+    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
-    (run_dir / "logs" / "stdout.txt").write_text("line1\nline2\n", encoding="utf-8")
-    (run_dir / "logs" / "stderr.txt").write_text("err1\n", encoding="utf-8")
+    (run_dir / ".audit" / "meta.1.json").write_text("{}", encoding="utf-8")
+    (run_dir / ".audit" / "stdout.1.log").write_text("line1\nline2\n", encoding="utf-8")
+    (run_dir / ".audit" / "stderr.1.log").write_text("err1\n", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -77,7 +78,7 @@ def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Pat
     run_dir = tmp_path / "run-history"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    fcmp_path = audit_dir / "fcmp_events.jsonl"
+    fcmp_path = audit_dir / "fcmp_events.1.jsonl"
     fcmp_path.write_text(
         "\n".join(
             [
@@ -128,6 +129,37 @@ def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Pat
     rows = service.list_event_history(run_dir=run_dir, request_id="req-hist")
     assert len(rows) == 1
     assert rows[0]["seq"] == 1
+
+
+def test_list_event_history_delegates_to_fcmp_protocol_history(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-history-delegate"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    service = RunObservabilityService()
+    captured: dict[str, object] = {}
+
+    def _list_protocol_history(**kwargs):
+        captured.update(kwargs)
+        return {"events": [{"seq": 9}], "attempt": 1, "available_attempts": [1]}
+
+    monkeypatch.setattr(service, "list_protocol_history", _list_protocol_history)
+    rows = service.list_event_history(run_dir=run_dir, request_id="req-1", from_seq=None, to_seq=None)
+    assert rows == [{"seq": 1, "meta": {"local_seq": 9}}]
+    assert captured["stream"] == "fcmp"
+    assert captured["request_id"] == "req-1"
+    assert captured["from_seq"] is None
+    assert captured["to_seq"] is None
+
+
+def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
+    run_dir = tmp_path / "run-history-invalid-stream"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    service = RunObservabilityService()
+    with pytest.raises(ValueError, match="stream must be one of"):
+        service.list_protocol_history(
+            run_dir=run_dir,
+            request_id="req-1",
+            stream="unknown",
+        )
 
 
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
@@ -322,7 +354,7 @@ def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     assert all(2 <= row["seq"] <= 4 for row in rows)
     assert all(row["protocol_version"] == "fcmp/1.0" for row in rows)
 
-    metrics_path = run_dir / ".audit" / "protocol_metrics.json"
+    metrics_path = run_dir / ".audit" / "protocol_metrics.1.json"
     assert metrics_path.exists()
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert metrics["event_count"] >= 1

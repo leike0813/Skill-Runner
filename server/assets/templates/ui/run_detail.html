@@ -8,7 +8,8 @@
     <style>
         body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
         .layout { max-width: 1280px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
-        .row { display: grid; grid-template-columns: 38% 62%; gap: 16px; }
+        .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
         .meta { color: #6b7280; font-size: 13px; margin-top: 6px; }
         .tree-line { font-size: 13px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -23,23 +24,33 @@
         .danger { background: #b91c1c; }
         .danger:hover { background: #991b1b; }
         .pane-scroll { max-height: 340px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
-        .conversation-window { min-height: 220px; max-height: 360px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .conversation-window { min-height: 220px; max-height: 380px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
         .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
         .chat-item.system { background: #f3f4f6; }
-        .chat-item .meta { margin-top: 4px; }
-        .badge-low-confidence { display: inline-block; margin-left: 8px; color: #92400e; font-size: 11px; border: 1px solid #fbbf24; border-radius: 999px; padding: 1px 6px; background: #fef3c7; }
-        .reply-box { margin-top: 10px; border-top: 1px solid #e5e7eb; padding-top: 10px; }
-        .reply-textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; box-sizing: border-box; }
-        .stderr-window { max-height: 220px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
-        .diagnostic-window { max-height: 220px; overflow: auto; background: #fff9f2; border: 1px solid #f59e0b; border-radius: 8px; padding: 8px; font-size: 12px; }
-        .relation-window { max-height: 220px; overflow: auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; font-size: 12px; }
-        .raw-ref-window { max-height: 180px; overflow: auto; background: #f8fafc; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; font-size: 12px; }
-        .link-btn { border: 0; background: none; color: #0f766e; cursor: pointer; padding: 0; font-size: 12px; text-decoration: underline; }
+        .chat-item.user { background: #e8f5ec; }
+        .stderr-window, .protocol-window, .raw-ref-window {
+            max-height: 220px;
+            overflow: auto;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .link-btn {
+            border: 0;
+            background: none;
+            color: #0f766e;
+            cursor: pointer;
+            padding: 0;
+            font-size: 12px;
+            text-decoration: underline;
+        }
         @media (max-width: 960px) {
-            .row { grid-template-columns: 1fr; }
-            .pane-scroll { max-height: 260px; }
-            .conversation-window { max-height: 300px; }
-            .stderr-window { max-height: 180px; }
+            .row, .row.three { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -86,36 +97,50 @@
         </div>
     </div>
 
-    <div class="card">
-        <h3 style="margin:0 0 8px;">对话区（FCMP）</h3>
-        <div id="stdout-log" class="conversation-window"></div>
-        <div class="reply-box">
-            <div id="pending-state" class="meta">当前状态非 waiting_user，输入框已禁用。</div>
-            <div id="pending-prompt" class="meta"></div>
-            <form id="pending-reply-form" style="margin-top: 10px;">
-                <input id="pending-interaction-id" type="hidden" value="">
-                <textarea id="pending-reply-input" class="reply-textarea" rows="3" placeholder="等待待决交互..."></textarea>
-                <div style="margin-top:8px;">
-                    <button id="pending-reply-submit" type="submit">Submit Reply</button>
-                </div>
-            </form>
+    <div class="row">
+        <div class="card">
+            <h3 style="margin:0 0 8px;">对话区（FCMP）</h3>
+            <div id="stdout-log" class="conversation-window"></div>
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">raw_ref 回跳预览</h3>
+            <pre id="raw-ref-preview" class="raw-ref-window"></pre>
         </div>
     </div>
 
     <div class="card">
-        <h3 style="margin:0 0 8px;">错误输出（stderr）</h3>
-        <pre id="stderr-log" class="stderr-window"></pre>
-        <h3 style="margin:12px 0 8px;">诊断信息</h3>
-        <div id="diagnostic-log" class="diagnostic-window"></div>
-        <h3 style="margin:12px 0 8px;">事件关联视图</h3>
-        <div id="relation-view" class="relation-window"></div>
-        <h3 style="margin:12px 0 8px;">raw_ref 回跳预览</h3>
-        <div id="raw-ref-preview" class="raw-ref-window"></div>
+        <div class="meta" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <strong>Attempt:</strong>
+            <button id="attempt-prev-btn" type="button">←</button>
+            <span id="attempt-label">-</span>
+            <button id="attempt-next-btn" type="button">→</button>
+        </div>
     </div>
 
-    <div class="card">
-        <h3 style="margin:0 0 8px;">Run Actions</h3>
-        <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
+    <div class="row three">
+        <div class="card">
+            <h3 style="margin:0 0 8px;">FCMP Audit Stream</h3>
+            <pre id="fcmp-audit-log" class="protocol-window"></pre>
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">RASP Audit Stream</h3>
+            <pre id="rasp-audit-log" class="protocol-window"></pre>
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">Orchestrator Audit Stream</h3>
+            <pre id="orchestrator-audit-log" class="protocol-window"></pre>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="card">
+            <h3 style="margin:0 0 8px;">Raw stderr</h3>
+            <pre id="stderr-log" class="stderr-window"></pre>
+        </div>
+        <div class="card">
+            <h3 style="margin:0 0 8px;">Run Actions</h3>
+            <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
+        </div>
     </div>
 </div>
 
@@ -128,36 +153,25 @@
     const interactionCountEl = document.getElementById("run-interaction-count");
     const stdoutEl = document.getElementById("stdout-log");
     const stderrEl = document.getElementById("stderr-log");
-    const diagnosticEl = document.getElementById("diagnostic-log");
-    const relationEl = document.getElementById("relation-view");
     const rawRefPreviewEl = document.getElementById("raw-ref-preview");
-    const pendingStateEl = document.getElementById("pending-state");
-    const pendingPromptEl = document.getElementById("pending-prompt");
-    const pendingInteractionIdEl = document.getElementById("pending-interaction-id");
-    const pendingReplyForm = document.getElementById("pending-reply-form");
-    const pendingReplyInput = document.getElementById("pending-reply-input");
-    const pendingReplySubmit = document.getElementById("pending-reply-submit");
+    const fcmpAuditEl = document.getElementById("fcmp-audit-log");
+    const raspAuditEl = document.getElementById("rasp-audit-log");
+    const orchestratorAuditEl = document.getElementById("orchestrator-audit-log");
+    const attemptPrevBtn = document.getElementById("attempt-prev-btn");
+    const attemptNextBtn = document.getElementById("attempt-next-btn");
+    const attemptLabelEl = document.getElementById("attempt-label");
     const cancelBtn = document.getElementById("cancel-run-btn");
+
+    const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
+    const renderedChatSeq = new Set();
+    const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
+    const availableAttempts = [];
 
     let cursor = 0;
     let source = null;
     let reconnectTimer = null;
-    let terminal = ["succeeded", "failed", "canceled"].includes(statusEl.textContent || "");
-    const renderedChatSeq = new Set();
-
-    function setReplyEnabled(enabled, stateText, promptText) {
-        pendingReplyInput.disabled = !enabled;
-        pendingReplySubmit.disabled = !enabled;
-        if (stateText !== undefined) {
-            pendingStateEl.textContent = stateText || "";
-        }
-        if (promptText !== undefined) {
-            pendingPromptEl.textContent = promptText || "";
-        }
-        pendingReplyInput.placeholder = enabled
-            ? "输入给 Agent 的回复内容"
-            : "等待待决交互...";
-    }
+    let terminal = terminalStatuses.has(statusEl.textContent || "");
+    let currentAttempt = 1;
 
     function appendLog(target, chunk) {
         if (!chunk) return;
@@ -165,79 +179,90 @@
         target.scrollTop = target.scrollHeight;
     }
 
-    function appendDiagnostic(text) {
-        if (!text) return;
-        const line = document.createElement("div");
-        line.textContent = text;
-        diagnosticEl.appendChild(line);
-        diagnosticEl.scrollTop = diagnosticEl.scrollHeight;
+    function appendProtocolRows(target, rows) {
+        if (!Array.isArray(rows) || !rows.length) return;
+        for (const row of rows) {
+            appendLog(target, `${JSON.stringify(row, null, 2)}\n`);
+        }
     }
 
-    function renderRelationView() {
-        relationEl.textContent = "FCMP 单流模式：run_event 关系视图已停用。";
-    }
-
-    function lookupConfidence(rawRef) {
-        if (!rawRef) return 1.0;
-        return 1.0;
+    function extractRawRef(event) {
+        const candidate = event && event.raw_ref;
+        if (!candidate || typeof candidate !== "object") return null;
+        if (typeof candidate.stream !== "string") return null;
+        const from = Number(candidate.byte_from || 0);
+        const to = Number(candidate.byte_to || 0);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return null;
+        const attemptNumber = Number(candidate.attempt_number || currentAttempt);
+        return {
+            stream: candidate.stream,
+            byte_from: Math.max(0, Math.floor(from)),
+            byte_to: Math.max(0, Math.floor(to)),
+            attempt_number: Number.isFinite(attemptNumber) && attemptNumber > 0
+                ? Math.floor(attemptNumber)
+                : currentAttempt,
+        };
     }
 
     async function previewRawRef(rawRef) {
-        if (!rawRef || typeof rawRef.stream !== "string") return;
-        const from = Number(rawRef.byte_from || 0);
-        const to = Number(rawRef.byte_to || 0);
-        rawRefPreviewEl.textContent = `loading ${rawRef.stream}[${from}, ${to}] ...`;
-        try {
-            const query = new URLSearchParams({
-                stream: rawRef.stream,
-                byte_from: String(from),
-                byte_to: String(to),
-            });
-            const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
-            if (!res.ok) {
-                rawRefPreviewEl.textContent = `raw_ref preview unavailable: HTTP ${res.status}`;
-                return;
-            }
-            const payload = await res.json();
-            const chunk = payload.chunk || "";
-            rawRefPreviewEl.textContent = `${payload.stream}[${payload.byte_from}, ${payload.byte_to}]\n\n${chunk}`;
-        } catch (err) {
-            rawRefPreviewEl.textContent = `raw_ref preview unavailable: ${String(err)}`;
+        if (!rawRef) return;
+        const query = new URLSearchParams({
+            stream: rawRef.stream,
+            byte_from: String(rawRef.byte_from),
+            byte_to: String(rawRef.byte_to),
+            attempt: String(rawRef.attempt_number || currentAttempt),
+        });
+        rawRefPreviewEl.textContent = `loading ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}] ...`;
+        const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
+        if (!res.ok) {
+            rawRefPreviewEl.textContent = `raw_ref preview unavailable: HTTP ${res.status}`;
+            return;
         }
+        const payload = await res.json();
+        rawRefPreviewEl.textContent = `${payload.stream}[${payload.byte_from}, ${payload.byte_to}]\n\n${payload.chunk || ""}`;
     }
 
-    function appendChatEvent(type, text, seq, rawRef) {
-        if (seq && renderedChatSeq.has(seq)) return;
-        if (seq) renderedChatSeq.add(seq);
+    function eventAttempt(event) {
+        const attemptObj = event && event.meta && event.meta.attempt;
+        const attempt = Number(attemptObj || event?.data?.attempt_number || 0);
+        return Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : currentAttempt;
+    }
+
+    function appendChatEvent(role, text, event, rawRef) {
+        const seq = typeof event?.seq === "number" ? event.seq : 0;
+        const localSeqObj = event && event.meta && event.meta.local_seq;
+        const localSeq = Number(localSeqObj || 0);
+        const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : seq;
+        const attempt = eventAttempt(event);
+        const key = `${attempt}:${seq}:${event?.type || ""}:${role}:${text || ""}`;
+        if (renderedChatSeq.has(key)) return;
+        renderedChatSeq.add(key);
         const item = document.createElement("div");
-        item.className = `chat-item${type === "system" ? " system" : ""}`;
-        if (seq) item.setAttribute("data-chat-seq", String(seq));
-        const confidence = rawRef ? lookupConfidence(rawRef) : 1.0;
-        const title = type === "assistant" ? "Agent" : "System";
+        item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
         const header = document.createElement("div");
-        const strong = document.createElement("strong");
-        strong.textContent = title;
-        header.appendChild(strong);
-        if (confidence < 0.7) {
-            const badge = document.createElement("span");
-            badge.className = "badge-low-confidence";
-            badge.textContent = "low confidence";
-            header.appendChild(badge);
-        }
+        const title = document.createElement("strong");
+        title.textContent = role === "assistant" ? "Agent" : role === "user" ? "User" : "System";
+        header.appendChild(title);
+        item.appendChild(header);
+
         const pre = document.createElement("pre");
         pre.textContent = text || "";
-        item.appendChild(header);
         item.appendChild(pre);
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `attempt ${attempt}${displaySeq ? ` · seq ${displaySeq}` : ""}`;
+        item.appendChild(meta);
+
         if (rawRef) {
-            const meta = document.createElement("div");
-            meta.className = "meta";
+            const refMeta = document.createElement("div");
+            refMeta.className = "meta";
             const btn = document.createElement("button");
             btn.className = "link-btn";
             btn.type = "button";
-            btn.textContent = `raw_ref ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+            btn.textContent = `raw_ref a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
             btn.addEventListener("click", () => previewRawRef(rawRef));
-            meta.appendChild(btn);
-            item.appendChild(meta);
+            refMeta.appendChild(btn);
+            item.appendChild(refMeta);
         }
         stdoutEl.appendChild(item);
         stdoutEl.scrollTop = stdoutEl.scrollHeight;
@@ -250,25 +275,34 @@
         }
     }
 
+    function stripAskUserBlocks(text) {
+        if (typeof text !== "string" || !text.trim()) return "";
+        let normalized = text;
+        normalized = normalized.replace(
+            /<ASK_USER_YAML>\s*[\s\S]*?\s*<\/ASK_USER_YAML>/gim,
+            "\n",
+        );
+        normalized = normalized.replace(
+            /```(?:ask_user_yaml|ask-user-yaml)\s*[\s\S]*?```/gim,
+            "\n",
+        );
+        normalized = normalized.replace(/\n{3,}/g, "\n\n");
+        return normalized.trim();
+    }
+
     function updateStatus(payload) {
-        if (!payload) return;
-        if (payload.status) {
+        if (!payload || typeof payload !== "object") return;
+        if (typeof payload.status === "string" && payload.status) {
             statusEl.textContent = payload.status;
-            terminal = ["succeeded", "failed", "canceled"].includes(payload.status);
+            terminal = terminalStatuses.has(payload.status);
             if (terminal) {
                 closeStream();
-                setReplyEnabled(false, `Run 已进入终态：${payload.status}`, "");
-            } else if (payload.status === "running") {
-                setReplyEnabled(false, "Run 运行中，等待下一次待决交互。", "");
-            } else if (payload.status === "waiting_user") {
-                setReplyEnabled(false, "检测到 waiting_user，正在加载待决交互...", "");
-                loadPending().catch(() => {});
             }
         }
-        if (payload.updated_at) {
+        if (typeof payload.updated_at === "string" && payload.updated_at) {
             updatedAtEl.textContent = payload.updated_at;
         }
-            if (payload.pending_interaction_id !== undefined) {
+        if (payload.pending_interaction_id !== undefined) {
             pendingIdEl.textContent = payload.pending_interaction_id === null ? "-" : String(payload.pending_interaction_id);
         }
         if (payload.interaction_count !== undefined && payload.interaction_count !== null) {
@@ -283,23 +317,179 @@
         updateStatus(data);
     }
 
-    async function loadPending() {
-        const res = await fetch(`/v1/management/runs/${requestId}/pending`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data.pending) {
-            pendingInteractionIdEl.value = "";
-            setReplyEnabled(false, "当前无待决交互。", "");
+    function updateAttemptPager() {
+        if (!availableAttempts.length) {
+            attemptLabelEl.textContent = "-";
+            attemptPrevBtn.disabled = true;
+            attemptNextBtn.disabled = true;
             return;
         }
-        const nextId = Number(data.pending.interaction_id || 0);
-        pendingInteractionIdEl.value = nextId > 0 ? String(nextId) : "";
-        pendingIdEl.textContent = nextId > 0 ? String(nextId) : "-";
-        setReplyEnabled(
-            nextId > 0,
-            nextId > 0 ? "待决交互已就绪，请输入回复后提交。" : "待决交互信息无效。",
-            data.pending.prompt || "",
-        );
+        const idx = availableAttempts.indexOf(currentAttempt);
+        attemptLabelEl.textContent = `${currentAttempt} / ${availableAttempts[availableAttempts.length - 1]}`;
+        attemptPrevBtn.disabled = idx <= 0;
+        attemptNextBtn.disabled = idx < 0 || idx >= availableAttempts.length - 1;
+    }
+
+    async function fetchProtocolHistory(streamName, attempt, fromSeq = null) {
+        const query = new URLSearchParams({ stream: streamName });
+        if (attempt !== null && attempt !== undefined) {
+            query.set("attempt", String(attempt));
+        }
+        if (typeof fromSeq === "number" && fromSeq > 0) {
+            query.set("from_seq", String(fromSeq));
+        }
+        const res = await fetch(`/v1/management/runs/${requestId}/protocol/history?${query.toString()}`);
+        if (!res.ok) {
+            return null;
+        }
+        return await res.json();
+    }
+
+    function updateAvailableAttempts(candidates) {
+        if (!Array.isArray(candidates) || !candidates.length) {
+            if (!availableAttempts.length) {
+                availableAttempts.push(currentAttempt);
+            }
+            return;
+        }
+        availableAttempts.length = 0;
+        for (const value of candidates) {
+            const attempt = Number(value);
+            if (!Number.isFinite(attempt) || attempt <= 0) continue;
+            availableAttempts.push(Math.floor(attempt));
+        }
+        availableAttempts.sort((a, b) => a - b);
+    }
+
+    async function refreshProtocolHistory(streamName, targetEl) {
+        const fromSeq = auditCursor[streamName] > 0 ? auditCursor[streamName] + 1 : null;
+        const payload = await fetchProtocolHistory(streamName, currentAttempt, fromSeq);
+        if (!payload) return;
+        const rows = Array.isArray(payload.events) ? payload.events : [];
+        if (Array.isArray(payload.available_attempts)) {
+            updateAvailableAttempts(payload.available_attempts);
+            updateAttemptPager();
+        }
+        for (const row of rows) {
+            const seq = Number(row && row.seq);
+            if (Number.isFinite(seq)) {
+                auditCursor[streamName] = Math.max(auditCursor[streamName], Math.floor(seq));
+            }
+        }
+        appendProtocolRows(targetEl, rows);
+    }
+
+    async function loadProtocolPanel(streamName, targetEl) {
+        targetEl.textContent = "";
+        auditCursor[streamName] = 0;
+        const payload = await fetchProtocolHistory(streamName, currentAttempt);
+        if (!payload) return;
+        if (Array.isArray(payload.available_attempts)) {
+            updateAvailableAttempts(payload.available_attempts);
+            updateAttemptPager();
+        }
+        const rows = Array.isArray(payload.events) ? payload.events : [];
+        appendProtocolRows(targetEl, rows);
+        for (const row of rows) {
+            const seq = Number(row && row.seq);
+            if (Number.isFinite(seq)) {
+                auditCursor[streamName] = Math.max(auditCursor[streamName], Math.floor(seq));
+            }
+        }
+    }
+
+    async function loadStderrForAttempt() {
+        const query = new URLSearchParams({
+            stream: "stderr",
+            byte_from: "0",
+            byte_to: String(4 * 1024 * 1024),
+            attempt: String(currentAttempt),
+        });
+        const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
+        if (!res.ok) {
+            stderrEl.textContent = "";
+            return;
+        }
+        const payload = await res.json();
+        stderrEl.textContent = payload.chunk || "";
+    }
+
+    async function loadConversationHistory() {
+        stdoutEl.textContent = "";
+        renderedChatSeq.clear();
+        for (const attempt of availableAttempts) {
+            const payload = await fetchProtocolHistory("fcmp", attempt);
+            if (!payload) continue;
+            const events = Array.isArray(payload.events) ? payload.events : [];
+            for (const event of events) {
+                const type = typeof event.type === "string" ? event.type : "";
+                const rawRef = extractRawRef(event);
+                if (type === "assistant.message.final") {
+                    const text = stripAskUserBlocks(event.data ? event.data.text : "");
+                    if (text) {
+                        appendChatEvent("assistant", text, event, rawRef);
+                    }
+                } else if (type === "user.input.required") {
+                    // Control event only; avoid duplicate chat content.
+                } else if (type === "interaction.reply.accepted") {
+                    const preview = event.data && typeof event.data.response_preview === "string"
+                        ? event.data.response_preview.trim()
+                        : "";
+                    if (preview) {
+                        appendChatEvent("user", preview, event, rawRef);
+                    } else {
+                        appendChatEvent("system", "Reply accepted, run resumed.", event, rawRef);
+                    }
+                } else if (type === "interaction.auto_decide.timeout") {
+                    appendChatEvent("system", "Timeout auto decision applied.", event, rawRef);
+                } else if (type === "conversation.completed") {
+                    appendChatEvent("system", "任务已完成。", event, rawRef);
+                } else if (type === "conversation.failed") {
+                    appendChatEvent("system", "任务执行失败。", event, rawRef);
+                } else if (type === "conversation.state.changed") {
+                    updateStatus({
+                        status: event.data && event.data.to ? event.data.to : undefined,
+                        updated_at: event.data && event.data.updated_at ? event.data.updated_at : undefined,
+                        pending_interaction_id: event.data && event.data.pending_interaction_id !== undefined
+                            ? event.data.pending_interaction_id
+                            : undefined,
+                    });
+                }
+            }
+            if (attempt === currentAttempt) {
+                for (const event of events) {
+                    const seqObj = event && event.seq;
+                    if (typeof seqObj === "number") {
+                        cursor = Math.max(cursor, seqObj);
+                    }
+                }
+            }
+        }
+    }
+
+    async function bootstrapAttemptsAndPanels() {
+        const latestPayload = await fetchProtocolHistory("fcmp", null);
+        if (!latestPayload) {
+            currentAttempt = 1;
+            updateAvailableAttempts([1]);
+            updateAttemptPager();
+            return;
+        }
+        updateAvailableAttempts(latestPayload.available_attempts);
+        const selectedAttempt = Number(latestPayload.attempt || 0);
+        if (Number.isFinite(selectedAttempt) && selectedAttempt > 0) {
+            currentAttempt = Math.floor(selectedAttempt);
+        } else if (availableAttempts.length) {
+            currentAttempt = availableAttempts[availableAttempts.length - 1];
+        } else {
+            currentAttempt = 1;
+        }
+        updateAttemptPager();
+        await loadConversationHistory();
+        await loadProtocolPanel("fcmp", fcmpAuditEl);
+        await loadProtocolPanel("rasp", raspAuditEl);
+        await loadProtocolPanel("orchestrator", orchestratorAuditEl);
+        await loadStderrForAttempt();
     }
 
     function scheduleReconnect() {
@@ -313,8 +503,7 @@
     function connectEvents() {
         if (terminal) return;
         closeStream();
-        const url = `/v1/management/runs/${requestId}/events?cursor=${cursor}`;
-        source = new EventSource(url);
+        source = new EventSource(`/v1/management/runs/${requestId}/events?cursor=${cursor}`);
 
         source.addEventListener("snapshot", (evt) => {
             const data = JSON.parse(evt.data || "{}");
@@ -326,72 +515,60 @@
 
         source.addEventListener("chat_event", (evt) => {
             const data = JSON.parse(evt.data || "{}");
-            const type = data.type || "";
+            const type = typeof data.type === "string" ? data.type : "";
             const seq = typeof data.seq === "number" ? data.seq : 0;
+            const rawRef = extractRawRef(data);
             if (seq > 0) {
                 cursor = Math.max(cursor, seq);
             }
             if (type === "conversation.state.changed") {
-                const to = data.data && data.data.to ? data.data.to : "";
-                const updatedAt = data.data && data.data.updated_at ? data.data.updated_at : null;
-                const pendingId = data.data && data.data.pending_interaction_id !== undefined
-                    ? data.data.pending_interaction_id
-                    : undefined;
                 updateStatus({
-                    status: to || undefined,
-                    updated_at: updatedAt || undefined,
-                    pending_interaction_id: pendingId,
+                    status: data.data && data.data.to ? data.data.to : undefined,
+                    updated_at: data.data && data.data.updated_at ? data.data.updated_at : undefined,
+                    pending_interaction_id: data.data && data.data.pending_interaction_id !== undefined
+                        ? data.data.pending_interaction_id
+                        : undefined,
                 });
-                if (to === "waiting_user") {
-                    loadPending().catch(() => {});
-                }
-                if (to === "running") {
-                    setReplyEnabled(false, "Run 运行中，等待下一次待决交互。", "");
-                }
-                return;
-            }
-            if (type === "interaction.reply.accepted") {
-                setReplyEnabled(false, "回复已接受，正在恢复执行。", "");
-                pendingIdEl.textContent = "-";
-                return;
-            }
-            if (type === "interaction.auto_decide.timeout") {
-                appendChatEvent("system", "已触发超时自动决策并继续执行。", seq, data.raw_ref || null);
-                pendingIdEl.textContent = "-";
                 return;
             }
             if (type === "assistant.message.final") {
-                appendChatEvent("assistant", data.data ? data.data.text : "", seq, data.raw_ref || null);
+                const text = stripAskUserBlocks(data.data ? data.data.text : "");
+                if (text) {
+                    appendChatEvent("assistant", text, data, rawRef);
+                }
                 return;
             }
             if (type === "user.input.required") {
-                const prompt = data.data && data.data.prompt ? data.data.prompt : "Provide next user turn";
-                appendChatEvent("system", `等待用户输入: ${prompt}`, seq, data.raw_ref || null);
-                pendingPromptEl.textContent = prompt;
-                setReplyEnabled(true, "待决交互已就绪，请输入回复后提交。", prompt);
+                // Control event only; avoid duplicate chat content.
+                return;
+            }
+            if (type === "interaction.reply.accepted") {
+                const preview = data.data && typeof data.data.response_preview === "string"
+                    ? data.data.response_preview.trim()
+                    : "";
+                if (preview) {
+                    appendChatEvent("user", preview, data, rawRef);
+                } else {
+                    appendChatEvent("system", "Reply accepted, run resumed.", data, rawRef);
+                }
+                return;
+            }
+            if (type === "interaction.auto_decide.timeout") {
+                appendChatEvent("system", "Timeout auto decision applied.", data, rawRef);
                 return;
             }
             if (type === "conversation.completed") {
-                appendChatEvent("system", "任务已完成。", seq, data.raw_ref || null);
-                updateStatus({status: "succeeded"});
+                appendChatEvent("system", "任务已完成。", data, rawRef);
+                updateStatus({ status: "succeeded" });
                 return;
             }
             if (type === "conversation.failed") {
-                appendChatEvent("system", "任务执行失败。", seq, data.raw_ref || null);
-                updateStatus({status: "failed"});
-                return;
-            }
-            if (type === "diagnostic.warning") {
-                const code = data.data && data.data.code ? data.data.code : "UNKNOWN";
-                appendDiagnostic(`[${code}] ${JSON.stringify(data.data || {})}`);
+                appendChatEvent("system", "任务执行失败。", data, rawRef);
+                updateStatus({ status: "failed" });
                 return;
             }
             if (type === "raw.stderr") {
                 appendLog(stderrEl, `${data.data && data.data.line ? data.data.line : ""}\n`);
-                return;
-            }
-            if (type === "raw.stdout") {
-                appendDiagnostic(`[raw.stdout] ${data.data && data.data.line ? data.data.line : ""}`);
             }
         });
 
@@ -403,48 +580,47 @@
         };
     }
 
-    pendingReplyForm.addEventListener("submit", async (evt) => {
-        evt.preventDefault();
-        const interactionId = Number(pendingInteractionIdEl.value);
-        if (!interactionId) return;
-        const payload = {
-            interaction_id: interactionId,
-            response: {
-                text: pendingReplyInput.value || "",
-            },
-        };
-        const res = await fetch(`/v1/management/runs/${requestId}/reply`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) return;
-        pendingReplyInput.value = "";
-        pendingInteractionIdEl.value = "";
-        setReplyEnabled(false, "回复已提交，等待后端继续执行。", "");
-        pendingIdEl.textContent = "-";
-        terminal = false;
-        await refreshState();
-        connectEvents();
-    });
-
     cancelBtn.addEventListener("click", async () => {
         cancelBtn.disabled = true;
-        await fetch(`/v1/management/runs/${requestId}/cancel`, {method: "POST"});
+        await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
         await refreshState();
         closeStream();
     });
 
-    if (statusEl.textContent === "waiting_user") {
-        setReplyEnabled(false, "检测到 waiting_user，正在加载待决交互...", "");
-        loadPending().catch(() => {});
-    } else if (terminal) {
-        setReplyEnabled(false, `Run 已进入终态：${statusEl.textContent}`, "");
-    } else {
-        setReplyEnabled(false, "Run 运行中，等待下一次待决交互。", "");
+    attemptPrevBtn.addEventListener("click", async () => {
+        const idx = availableAttempts.indexOf(currentAttempt);
+        if (idx <= 0) return;
+        currentAttempt = availableAttempts[idx - 1];
+        updateAttemptPager();
+        await loadProtocolPanel("fcmp", fcmpAuditEl);
+        await loadProtocolPanel("rasp", raspAuditEl);
+        await loadProtocolPanel("orchestrator", orchestratorAuditEl);
+        await loadStderrForAttempt();
+    });
+
+    attemptNextBtn.addEventListener("click", async () => {
+        const idx = availableAttempts.indexOf(currentAttempt);
+        if (idx < 0 || idx >= availableAttempts.length - 1) return;
+        currentAttempt = availableAttempts[idx + 1];
+        updateAttemptPager();
+        await loadProtocolPanel("fcmp", fcmpAuditEl);
+        await loadProtocolPanel("rasp", raspAuditEl);
+        await loadProtocolPanel("orchestrator", orchestratorAuditEl);
+        await loadStderrForAttempt();
+    });
+
+    setInterval(() => {
+        loadStderrForAttempt().catch(() => {});
+        refreshProtocolHistory("fcmp", fcmpAuditEl).catch(() => {});
+        refreshProtocolHistory("rasp", raspAuditEl).catch(() => {});
+        refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});
+    }, 3000);
+
+    bootstrapAttemptsAndPanels().catch(() => {});
+
+    if (!terminal) {
         connectEvents();
     }
-    renderRelationView();
 })();
 </script>
 </body>

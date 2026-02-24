@@ -32,6 +32,24 @@ def test_validate_fcmp_event_accepts_state_changed_payload():
     assert validate_fcmp_event(payload) == payload
 
 
+def test_validate_fcmp_event_accepts_local_seq_meta() -> None:
+    payload = {
+        "protocol_version": "fcmp/1.0",
+        "run_id": "run-1",
+        "seq": 4,
+        "ts": "2026-02-24T00:00:04",
+        "engine": "codex",
+        "type": "assistant.message.final",
+        "data": {
+            "message_id": "m-1",
+            "text": "hello",
+        },
+        "meta": {"attempt": 2, "local_seq": 1},
+        "raw_ref": None,
+    }
+    assert validate_fcmp_event(payload) == payload
+
+
 def test_validate_fcmp_event_rejects_missing_trigger():
     payload = {
         "protocol_version": "fcmp/1.0",
@@ -79,6 +97,7 @@ def test_validate_orchestrator_event_accepts_diagnostic_warning():
     payload = {
         "ts": "2026-02-24T00:00:00",
         "attempt_number": 2,
+        "seq": 1,
         "category": "diagnostic",
         "type": "diagnostic.warning",
         "data": {

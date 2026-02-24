@@ -1905,6 +1905,77 @@ class InteractiveTwoTurnAdapter:
         )
 
 
+def test_extract_pending_interaction_accepts_hint_without_prompt():
+    orchestrator = JobOrchestrator()
+    payload = {
+        "ask_user": {
+            "interaction_id": 2,
+            "kind": "open_text",
+            "ui_hints": {"hint": "请先简要介绍你的情况。"},
+        }
+    }
+    extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=2)
+    assert extracted is not None
+    assert extracted["interaction_id"] == 2
+    assert extracted["prompt"] == "请先简要介绍你的情况。"
+    assert extracted["ui_hints"]["hint"] == "请先简要介绍你的情况。"
+
+
+def test_extract_pending_interaction_accepts_direct_payload_with_hint():
+    orchestrator = JobOrchestrator()
+    payload = {
+        "interaction_id": 3,
+        "kind": "open_text",
+        "ui_hints": {"hint": "请补充你的核心诉求。"},
+    }
+    extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=3)
+    assert extracted is not None
+    assert extracted["interaction_id"] == 3
+    assert extracted["prompt"] == "请补充你的核心诉求。"
+
+
+class EscapedNdjsonAdapterForHint:
+    def parse_runtime_stream(self, stdout_raw, stderr_raw, pty_raw):
+        _ = stdout_raw
+        _ = stderr_raw
+        _ = pty_raw
+        return {
+            "assistant_messages": [
+                {
+                    "text": (
+                        "先收集一点信息。\n\n"
+                        "<ASK_USER_YAML>\n"
+                        "ask_user:\n"
+                        "  kind: open_text\n"
+                        "  ui_hints:\n"
+                        "    type: string\n"
+                        "    hint: \"例如：男，38，工程师\"\n"
+                        "</ASK_USER_YAML>"
+                    )
+                }
+            ]
+        }
+
+
+def test_extract_pending_interaction_from_stream_prefers_parser_text_for_hint():
+    orchestrator = JobOrchestrator()
+    raw_stdout = (
+        '{"type":"item.completed","item":{"type":"agent_message","text":"'
+        '先收集一点信息。\\n\\n<ASK_USER_YAML>\\nask_user:\\n  kind: open_text\\n  ui_hints:\\n'
+        '    type: string\\n    hint: \\"例如：男，38，工程师\\"\\n</ASK_USER_YAML>"}}'
+    )
+    extracted = orchestrator._extract_pending_interaction_from_stream(
+        adapter=EscapedNdjsonAdapterForHint(),
+        raw_stdout=raw_stdout,
+        raw_stderr="",
+        fallback_interaction_id=5,
+    )
+    assert extracted is not None
+    assert extracted["interaction_id"] == 5
+    assert extracted["prompt"] == "例如：男，38，工程师"
+    assert extracted["ui_hints"]["hint"] == "例如：男，38，工程师"
+
+
 def _build_interactive_skill(tmp_path: Path) -> SkillManifest:
     skill_dir = tmp_path / "skill-interactive"
     skill_dir.mkdir()

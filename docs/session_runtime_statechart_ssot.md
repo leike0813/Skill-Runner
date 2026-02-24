@@ -117,7 +117,7 @@ stateDiagram-v2
 1. `canonical` 状态集合与初始/终态定义。
 2. `transitions` 状态机转移（与 `server/services/session_statechart.py` 对齐）。
 3. `fcmp_mapping`（状态迁移到 FCMP 事件的映射、配对规则）。
-4. `ordering_rules`（终态唯一性、waiting_user 输入配对、`seq` 连续递增）。
+4. `ordering_rules`（终态唯一性、waiting_user 输入配对、`seq` 连续递增、续跑 reply 先于 assistant 输出）。
 
 测试锚点：
 

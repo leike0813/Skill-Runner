@@ -423,6 +423,7 @@ async def get_temp_skill_run_log_range(
     stream: str = Query(...),
     byte_from: int = Query(default=0, ge=0),
     byte_to: int = Query(default=0, ge=0),
+    attempt: int | None = Query(default=None, ge=1),
 ):
     return run_read_facade.read_log_range(
         source_adapter=temp_source_adapter,
@@ -430,6 +431,7 @@ async def get_temp_skill_run_log_range(
         stream=stream,
         byte_from=byte_from,
         byte_to=byte_to,
+        attempt=attempt,
     )
 
 

@@ -22,6 +22,9 @@ class BackendClient:
     async def list_management_engines(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def list_management_runs(self) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def list_skills(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -93,6 +96,14 @@ class BackendClient:
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def get_run_final_summary(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def get_run_bundle(
         self,
         request_id: str,
@@ -140,6 +151,9 @@ class HttpBackendClient(BackendClient):
 
     async def list_management_engines(self) -> dict[str, Any]:
         return await self._request_json("GET", "/v1/management/engines")
+
+    async def list_management_runs(self) -> dict[str, Any]:
+        return await self._request_json("GET", "/v1/management/runs")
 
     async def list_skills(self) -> dict[str, Any]:
         return await self._request_json("GET", "/v1/management/skills")
@@ -244,6 +258,20 @@ class HttpBackendClient(BackendClient):
         if run_source == RUN_SOURCE_TEMP:
             return await self._request_json("GET", f"/v1/temp-skill-runs/{request_id}/artifacts")
         return await self._request_json("GET", f"/v1/jobs/{request_id}/artifacts")
+
+    async def get_run_final_summary(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        result_payload = await self.get_run_result(request_id, run_source=run_source)
+        artifacts_payload = await self.get_run_artifacts(request_id, run_source=run_source)
+        return {
+            "request_id": request_id,
+            "result": result_payload.get("result"),
+            "artifacts": artifacts_payload.get("artifacts"),
+        }
 
     async def get_run_bundle(
         self,

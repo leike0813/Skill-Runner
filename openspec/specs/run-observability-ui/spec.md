@@ -54,25 +54,46 @@ TBD - created by archiving change run-observability-streaming-and-timeout. Updat
 - **THEN** 展示字段语义与通用管理 API 保持一致
 - **AND** 不引入仅 UI 可见的私有状态定义
 
-### Requirement: Run 页面 MUST 支持对话窗口式管理体验
-The Run page MUST activate waiting-user interactions from status and pending/protocol events, and MUST NOT depend on ask_user JSON blocks embedded in assistant text.
+### Requirement: Run 页面 MUST 聚焦审计与排障
+Run 管理页面 MUST 作为观测/审计工具，不承担终端用户交互回复职责。
 
-#### Scenario: waiting_user 交互来源稳定
-- **WHEN** Run 状态进入 `waiting_user`
-- **THEN** 页面通过 pending 接口或 `user.input.required` 事件激活输入框
-- **AND** 不要求 assistant 消息中出现结构化 ask_user 文本
+#### Scenario: 管理页不提供 reply 输入
+- **WHEN** 用户访问 `/ui/runs/{request_id}`
+- **THEN** 页面不渲染 pending reply 输入框和提交按钮
+- **AND** 页面保留 cancel 等运维动作
 
-#### Scenario: assistant 文本中的 ask_user 块仅作展示
-- **WHEN** assistant 消息正文包含 ask_user-like JSON 文本
-- **THEN** 页面将其视为普通消息内容
-- **AND** 不据此单独驱动交互状态机
+#### Scenario: 审计视图完整
+- **WHEN** 用户在 run 详情页审计执行过程
+- **THEN** 页面展示 FCMP 对话流
+- **AND** 展示 FCMP/RASP/orchestrator 审计事件面板
+- **AND** 支持 raw stderr 与 raw_ref 片段回跳预览
 
-#### Scenario: 软条件完成告警可见
-- **WHEN** 后端以软条件完成 interactive run
-- **THEN** 页面展示 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER` 诊断告警
-- **AND** 不影响 completed 状态展示
+### Requirement: 管理页审计面板 MUST 支持按 attempt 翻页
+系统 MUST 提供按轮次切换审计内容的能力，避免多轮运行日志互相覆盖。
 
-#### Scenario: 超轮次失败原因可见
-- **WHEN** interactive run 因 `max_attempt` 触发失败
-- **THEN** 页面展示 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED` 失败原因
+#### Scenario: 审计面板按轮次切换
+- **WHEN** 用户在 run 详情页点击左右箭头切换 attempt
+- **THEN** FCMP/RASP/orchestrator/raw stderr 同步切换到目标轮次
+- **AND** 页内显示当前轮次与可用轮次范围
+- **AND** 轮次切换控件位于对话回放区与流观测区之间
+- **AND** 对话区序号优先显示 `meta.local_seq`
 
+#### Scenario: 重进页面可见历史
+- **WHEN** 用户重新打开 `/ui/runs/{request_id}`
+- **THEN** 页面先加载历史审计与对话
+- **AND** 再接入实时 SSE 增量事件
+
+#### Scenario: 对话回放不重复展示问询正文
+- **WHEN** FCMP 同时出现 `assistant.message.final` 与 `user.input.required`
+- **THEN** 对话区优先展示 assistant 正文
+- **AND** `user.input.required` 仅作为控制语义，不重复生成同文气泡
+
+#### Scenario: 用户回复可回放
+- **WHEN** FCMP `interaction.reply.accepted` 包含 `response_preview`
+- **THEN** 管理页对话区展示 User 气泡
+- **AND** 重进页面后可按历史顺序回放
+
+#### Scenario: raw_ref 与 stderr 位置优化
+- **WHEN** 用户在 run 详情页审计协议与 raw 日志
+- **THEN** `raw_ref` 预览窗口位于对话区旁
+- **AND** `Raw stderr` 位于下方审计操作区，便于联动查看

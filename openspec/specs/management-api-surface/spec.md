@@ -67,3 +67,38 @@ TBD - created by archiving change interactive-27-unified-management-api-surface.
 - **THEN** 管理接口将系统支持引擎减去 `unsupported_engines` 后作为 `effective_engines` 返回
 - **AND** 前端无需自行推断默认引擎集合
 
+### Requirement: Run 管理 MUST 支持协议审计历史读取
+系统 MUST 提供可按协议流查询 run 历史事件的管理接口，支持审计和排障场景。
+
+#### Scenario: 读取协议历史
+- **WHEN** 客户端调用 `GET /v1/management/runs/{request_id}/protocol/history`
+- **AND** 提供 `stream=fcmp|rasp|orchestrator`
+- **THEN** 响应包含 `request_id`、`stream`、`attempt`、`available_attempts`、`count`、`events`
+- **AND** `events` 仅包含对应协议流记录
+
+#### Scenario: 应用历史过滤参数
+- **WHEN** 客户端提供 `from_seq/to_seq/from_ts/to_ts`
+- **THEN** 接口按过滤条件返回事件子集
+
+#### Scenario: 按 attempt 切换审计历史
+- **WHEN** 客户端调用 `GET /v1/management/runs/{request_id}/protocol/history` 并提供 `attempt`
+- **THEN** 系统返回该轮次事件
+- **AND** 返回 `available_attempts` 供前端翻页
+- **AND** 对 `stream=fcmp`，`events[].seq` 使用全局序号，attempt 本地序号位于 `events[].meta.local_seq`
+- **AND** 对 `stream=rasp|orchestrator`，`events[].seq` 仍表示该 attempt 内本地序号
+
+#### Scenario: orchestrator 旧数据缺失 seq 仍可读取
+- **WHEN** 旧审计文件中的 orchestrator 事件缺失 `seq`
+- **THEN** 系统按文件顺序回填序号后返回
+- **AND** 不因缺失 `seq` 导致事件被静默过滤
+
+#### Scenario: 非法 stream 参数被拒绝
+- **WHEN** `stream` 参数不在 `fcmp|rasp|orchestrator` 中
+- **THEN** 接口返回 `400`
+
+### Requirement: 管理日志区间读取 MUST 支持按 attempt 定位
+系统 MUST 在 `GET /v1/management/runs/{request_id}/logs/range` 支持 `attempt` 参数，以保障 raw_ref 回跳和轮次审计一致。
+
+#### Scenario: 指定 attempt 读取日志片段
+- **WHEN** 客户端调用 `logs/range` 并提供 `attempt`
+- **THEN** 系统从 `.audit/*.{attempt}.log` 读取并返回区间内容

@@ -11,7 +11,6 @@ httpx = pytest.importorskip("httpx")
 
 from e2e_client.app import create_app
 from e2e_client.backend import RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP
-from e2e_client.recording import RecordingStore
 from e2e_client.routes import get_backend_client, get_settings
 
 
@@ -32,6 +31,29 @@ class FakeBackend:
                 {"engine": "gemini"},
                 {"engine": "codex"},
                 {"engine": "iflow"},
+            ]
+        }
+
+    async def list_management_runs(self) -> dict[str, Any]:
+        return {
+            "runs": [
+                {
+                    "request_id": "req-e2e-1",
+                    "run_id": "run-e2e-1",
+                    "status": "waiting_user",
+                    "skill_id": "demo-skill",
+                    "engine": "gemini",
+                    "updated_at": "2026-02-24T00:00:00",
+                },
+                {
+                    "request_id": "req-temp-1",
+                    "run_id": "run-temp-1",
+                    "status": "waiting_user",
+                    "skill_id": "demo-prime-number",
+                    "engine": "gemini",
+                    "updated_at": "2026-02-24T00:01:00",
+                    "run_source": "temp",
+                },
             ]
         }
 
@@ -233,13 +255,13 @@ class FakeBackend:
         *,
         run_source: str = RUN_SOURCE_INSTALLED,
         cursor: int = 0,
-        stdout_from: int = 0,
-        stderr_from: int = 0,
     ):
-        del request_id, run_source, cursor, stdout_from, stderr_from
-        yield b'event: snapshot\ndata: {"status":"running"}\n\n'
-        yield b'event: stdout\ndata: {"chunk":"hello"}\n\n'
-        yield b'event: end\ndata: {"reason":"waiting_user"}\n\n'
+        del request_id, run_source, cursor
+        yield b'event: snapshot\ndata: {"status":"waiting_user","cursor":2}\n\n'
+        yield (
+            b'event: chat_event\ndata: {"seq":2,"type":"user.input.required",'
+            b'"data":{"interaction_id":7,"kind":"open_text","prompt":"Please confirm"}}\n\n'
+        )
 
     async def get_run_event_history(
         self,
@@ -295,6 +317,20 @@ class FakeBackend:
             "content": "sample-log",
         }
 
+    async def get_run_final_summary(
+        self,
+        request_id: str,
+        *,
+        run_source: str = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        result_payload = await self.get_run_result(request_id, run_source=run_source)
+        artifacts_payload = await self.get_run_artifacts(request_id, run_source=run_source)
+        return {
+            "request_id": request_id,
+            "result": result_payload.get("result"),
+            "artifacts": artifacts_payload.get("artifacts"),
+        }
+
 
 class FakeBackendEffectiveEnginesOnly(FakeBackend):
     async def list_skills(self) -> dict[str, Any]:
@@ -323,6 +359,26 @@ class FakeBackendEffectiveEnginesOnly(FakeBackend):
         }
 
 
+class FakeBackendFailedSummary(FakeBackend):
+    async def get_run_result(
+        self,
+        request_id: str,
+        *,
+        run_source: str = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        del request_id, run_source
+        return {
+            "request_id": "req-e2e-failed",
+            "result": {
+                "status": "failed",
+                "error": {
+                    "code": "AUTH_REQUIRED",
+                    "message": "AUTH_REQUIRED: engine authentication is required or expired",
+                },
+            },
+        }
+
+
 async def _request(app, method: str, path: str, **kwargs):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -348,7 +404,6 @@ def _install_backend_override(app, backend: FakeBackend) -> None:
 async def test_e2e_example_client_full_flow(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         home = await _request(app, "GET", "/")
@@ -390,17 +445,15 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
 
         runs = await _request(app, "GET", "/runs")
         assert runs.status_code == 200
-        assert "Open Observation" in runs.text
+        assert "Details" in runs.text
         assert "/runs/req-e2e-1" in runs.text
 
         observe_page = await _request(app, "GET", "/runs/req-e2e-1?source=installed")
         assert observe_page.status_code == 200
-        assert "Event Relations" in observe_page.text
-        assert "Raw Ref Preview" in observe_page.text
-
-        recordings_redirect = await _request(app, "GET", "/recordings", follow_redirects=False)
-        assert recordings_redirect.status_code == 307
-        assert recordings_redirect.headers.get("location") == "/runs"
+        assert "Pending Input Request" in observe_page.text
+        assert "Ctrl+Enter / Cmd+Enter to send" in observe_page.text
+        assert "Event Relations" not in observe_page.text
+        assert "Raw Ref Preview" not in observe_page.text
 
         state = await _request(app, "GET", "/api/runs/req-e2e-1")
         assert state.status_code == 200
@@ -442,34 +495,19 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert logs_range.json()["run_source"] == RUN_SOURCE_INSTALLED
         assert fake_backend.log_range_requests[-1]["byte_to"] == 20
 
-        observe_summary = await _request(
+        final_summary = await _request(
             app,
-            "POST",
-            "/api/runs/req-e2e-1/observe-summary",
-            json={
-                "cursor": 12,
-                "last_chat_event": {
-                    "seq": 12,
-                    "type": "assistant.message.final",
-                    "role": "assistant",
-                    "text_preview": "hello world",
-                },
-                "key_events": [
-                    {"seq": 10, "type": "assistant.message.final", "correlation": "abc", "confidence": 0.68}
-                ],
-                "raw_refs": [
-                    {"stream": "stdout", "byte_from": 3, "byte_to": 30}
-                ],
-            },
+            "GET",
+            "/api/runs/req-e2e-1/final-summary",
         )
-        assert observe_summary.status_code == 200
-        assert observe_summary.json()["ok"] is True
+        assert final_summary.status_code == 200
+        assert final_summary.json()["has_result"] is True
+        assert final_summary.json()["has_artifacts"] is True
+        assert final_summary.json()["artifacts"] == ["artifacts/out.txt"]
+        assert "answer" in final_summary.json()["result_preview"]
 
         result = await _request(app, "GET", "/runs/req-e2e-1/result")
-        assert result.status_code == 200
-        assert "artifacts/out.txt" in result.text
-        assert "Run File Tree (Read-only)" in result.text
-        assert "result.json" in result.text
+        assert result.status_code == 404
 
         preview = await _request(
             app,
@@ -489,17 +527,6 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert "result/result.json" in preview_partial.text
         assert "answer" in preview_partial.text
 
-        recording = await _request(app, "GET", "/api/recordings/req-e2e-1")
-        assert recording.status_code == 200
-        payload = recording.json()
-        steps = payload["steps"]
-        actions = [item["action"] for item in steps]
-        assert "create_run" in actions
-        assert "upload" in actions
-        assert "reply" in actions
-        assert "result_read" in actions
-        assert payload["observation_summary"]["cursor"] == 12
-        assert payload["observation_summary"]["raw_refs"][0]["stream"] == "stdout"
     finally:
         app.dependency_overrides.clear()
 
@@ -508,7 +535,6 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
 async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         home = await _request(app, "GET", "/")
@@ -577,17 +603,39 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         assert logs_range.status_code == 200
         assert logs_range.json()["run_source"] == RUN_SOURCE_TEMP
 
-        result = await _request(app, "GET", "/runs/req-temp-1/result?source=temp")
-        assert result.status_code == 200
-        assert "artifacts/temp-out.txt" in result.text
+        final_summary = await _request(
+            app,
+            "GET",
+            "/api/runs/req-temp-1/final-summary?source=temp",
+        )
+        assert final_summary.status_code == 200
+        assert final_summary.json()["has_result"] is True
+        assert final_summary.json()["has_artifacts"] is True
+        assert final_summary.json()["artifacts"] == ["artifacts/temp-out.txt"]
 
-        recording = await _request(app, "GET", "/api/recordings/req-temp-1")
-        assert recording.status_code == 200
-        payload = recording.json()
-        assert payload["run_source"] == "temp"
-        actions = [item["action"] for item in payload["steps"]]
-        assert "create_temp_run" in actions
-        assert "upload_temp_skill_package" in actions
+        result = await _request(app, "GET", "/runs/req-temp-1/result?source=temp")
+        assert result.status_code == 404
+
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_final_summary_exposes_failed_result_status():
+    app = create_app()
+    fake_backend = FakeBackendFailedSummary()
+    _install_backend_override(app, fake_backend)
+    try:
+        final_summary = await _request(
+            app,
+            "GET",
+            "/api/runs/req-e2e-failed/final-summary",
+        )
+        assert final_summary.status_code == 200
+        body = final_summary.json()
+        assert body["result_status"] == "failed"
+        assert body["result_error_code"] == "AUTH_REQUIRED"
+        assert "AUTH_REQUIRED" in body["result_error_message"]
     finally:
         app.dependency_overrides.clear()
 
@@ -596,7 +644,6 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
 async def test_e2e_example_client_fixture_fallbacks_to_management_engines_when_omitted(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         run_form = await _request(app, "GET", "/fixtures/demo-auto-skill/run")
@@ -623,7 +670,6 @@ async def test_e2e_example_client_fixture_fallbacks_to_management_engines_when_o
 async def test_e2e_example_client_rejects_invalid_execution_mode(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         response = await _request(
@@ -651,7 +697,6 @@ async def test_e2e_example_client_rejects_invalid_execution_mode(tmp_path: Path)
 async def test_e2e_example_client_rejects_invalid_model_for_engine(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         response = await _request(
@@ -680,7 +725,6 @@ async def test_e2e_example_client_rejects_invalid_model_for_engine(tmp_path: Pat
 async def test_e2e_example_client_uses_effective_engines_when_declared_engines_empty(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackendEffectiveEnginesOnly()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         home = await _request(app, "GET", "/")
@@ -713,10 +757,9 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
 
 
 @pytest.mark.asyncio
-async def test_e2e_example_client_rejects_non_object_observe_summary_payload(tmp_path: Path):
+async def test_e2e_example_client_observe_summary_route_removed(tmp_path: Path):
     app = create_app()
     fake_backend = FakeBackend()
-    app.state.recording_store = RecordingStore(tmp_path / "recordings")
     _install_backend_override(app, fake_backend)
     try:
         response = await _request(
@@ -726,7 +769,6 @@ async def test_e2e_example_client_rejects_non_object_observe_summary_payload(tmp
             content="[]",
             headers={"content-type": "application/json"},
         )
-        assert response.status_code == 400
-        assert "summary payload must be an object" in response.text
+        assert response.status_code == 404
     finally:
         app.dependency_overrides.clear()

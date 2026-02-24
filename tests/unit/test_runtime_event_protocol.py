@@ -284,10 +284,12 @@ def test_fcmp_emits_state_changed_for_waiting_user(tmp_path: Path):
         event.type == "conversation.state.changed" and event.data.get("to") == "waiting_user"
         for event in fcmp_events
     )
-    assert any(event.type == "user.input.required" for event in fcmp_events)
+    user_required = next(event for event in fcmp_events if event.type == "user.input.required")
+    assert user_required.data.get("prompt") == "next step"
+    assert user_required.data.get("prompt") != "Provide next user turn"
 
 
-def test_fcmp_emits_reply_and_auto_decide_events(tmp_path: Path):
+def test_fcmp_emits_only_current_attempt_reply_event(tmp_path: Path):
     run_dir = tmp_path / "run-state-reply"
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -304,16 +306,17 @@ def test_fcmp_emits_reply_and_auto_decide_events(tmp_path: Path):
     )
     interaction_history = [
         {
-            "interaction_id": 3,
+            "interaction_id": 1,
             "event_type": "reply",
             "payload": {
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:01",
+                "response": {"text": "user answer"},
             },
             "created_at": "2026-02-24T00:00:01",
         },
         {
-            "interaction_id": 4,
+            "interaction_id": 2,
             "event_type": "reply",
             "payload": {
                 "resolution_mode": "auto_decide_timeout",
@@ -331,19 +334,15 @@ def test_fcmp_emits_reply_and_auto_decide_events(tmp_path: Path):
         effective_session_timeout_sec=1200,
     )
     assert any(event.type == "interaction.reply.accepted" for event in fcmp_events)
-    assert any(event.type == "interaction.auto_decide.timeout" for event in fcmp_events)
+    assert not any(event.type == "interaction.auto_decide.timeout" for event in fcmp_events)
     assert any(
         event.type == "conversation.state.changed"
         and event.data.get("trigger") == "interaction.reply.accepted"
         and event.data.get("to") == "queued"
         for event in fcmp_events
     )
-    assert any(
-        event.type == "conversation.state.changed"
-        and event.data.get("trigger") == "interaction.auto_decide.timeout"
-        and event.data.get("to") == "queued"
-        for event in fcmp_events
-    )
+    accepted = next(event for event in fcmp_events if event.type == "interaction.reply.accepted")
+    assert accepted.data.get("response_preview") == "user answer"
 
 
 def test_runtime_protocol_outputs_are_schema_valid(tmp_path: Path):

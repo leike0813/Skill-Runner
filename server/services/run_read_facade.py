@@ -91,15 +91,16 @@ class RunReadFacade:
         request_id: str,
     ) -> RunLogsResponse:
         _request_record, run_dir = get_request_and_run_dir(source_adapter, request_id)
-        logs_dir = run_dir / "logs"
-        if not logs_dir.exists():
+        latest_attempt = _latest_attempt_from_audit(run_dir)
+        if latest_attempt <= 0:
             return RunLogsResponse(request_id=request_id)
+        audit_dir = run_dir / ".audit"
 
         return RunLogsResponse(
             request_id=request_id,
-            prompt=_read_log(logs_dir / "prompt.txt"),
-            stdout=_read_log(logs_dir / "stdout.txt"),
-            stderr=_read_log(logs_dir / "stderr.txt"),
+            prompt=None,
+            stdout=_read_log(audit_dir / f"stdout.{latest_attempt}.log"),
+            stderr=_read_log(audit_dir / f"stderr.{latest_attempt}.log"),
         )
 
     async def stream_events(
@@ -164,18 +165,23 @@ class RunReadFacade:
         stream: str,
         byte_from: int,
         byte_to: int,
+        attempt: int | None = None,
     ) -> dict[str, Any]:
         require_capability(source_adapter, capability="supports_log_range")
         _request_record, run_dir = get_request_and_run_dir(source_adapter, request_id)
         if byte_to > 0 and byte_to < byte_from:
             raise HTTPException(status_code=400, detail="byte_to must be greater than or equal to byte_from")
-        return run_observability_service.read_log_range(
-            run_dir=run_dir,
-            request_id=request_id,
-            stream=stream,
-            byte_from=byte_from,
-            byte_to=byte_to,
-        )
+        try:
+            return run_observability_service.read_log_range(
+                run_dir=run_dir,
+                request_id=request_id,
+                stream=stream,
+                byte_from=byte_from,
+                byte_to=byte_to,
+                attempt=attempt,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     async def cancel_run(
         self,
@@ -235,6 +241,24 @@ def _read_log(path: Path) -> str | None:
     if path.exists():
         return path.read_text(encoding="utf-8")
     return None
+
+
+def _latest_attempt_from_audit(run_dir: Path) -> int:
+    audit_dir = run_dir / ".audit"
+    if not audit_dir.exists() or not audit_dir.is_dir():
+        return 0
+    latest = 0
+    for path in audit_dir.glob("meta.*.json"):
+        parts = path.name.split(".")
+        if len(parts) != 3:
+            continue
+        try:
+            attempt = int(parts[1])
+        except Exception:
+            continue
+        if attempt > latest:
+            latest = attempt
+    return latest
 
 
 run_read_facade = RunReadFacade()

@@ -33,6 +33,7 @@ from ..services.run_store import run_store
 from ..services.skill_browser import list_skill_entries, resolve_skill_file_path
 from ..services.engine_policy import resolve_skill_engine_policy
 from ..services.skill_registry import skill_registry
+from ..services.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
 
@@ -264,19 +265,84 @@ async def list_management_run_event_history(
     )
 
 
+@router.get("/runs/{request_id}/protocol/history")
+async def list_management_run_protocol_history(
+    request_id: str,
+    stream: str = Query(...),
+    from_seq: int | None = Query(default=None, ge=0),
+    to_seq: int | None = Query(default=None, ge=0),
+    from_ts: str | None = Query(default=None),
+    to_ts: str | None = Query(default=None),
+    attempt: int | None = Query(default=None, ge=1),
+):
+    request_record = run_store.get_request(request_id)
+    if not request_record:
+        raise HTTPException(status_code=404, detail="Request not found")
+    run_id_obj = request_record.get("run_id")
+    if not isinstance(run_id_obj, str) or not run_id_obj:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    if not run_dir or not run_dir.exists():
+        raise HTTPException(status_code=404, detail="Run directory not found")
+
+    normalized_stream = stream.strip().lower()
+    if normalized_stream not in {"fcmp", "rasp", "orchestrator"}:
+        raise HTTPException(status_code=400, detail="stream must be one of: fcmp, rasp, orchestrator")
+
+    try:
+        payload = run_observability_service.list_protocol_history(
+            run_dir=run_dir,
+            request_id=request_id,
+            stream=normalized_stream,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            attempt=attempt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if isinstance(payload, dict):
+        rows_obj = payload.get("events")
+        rows = rows_obj if isinstance(rows_obj, list) else []
+        payload_attempt = payload.get("attempt")
+        payload_attempts = payload.get("available_attempts") or []
+    elif isinstance(payload, list):
+        rows = payload
+        payload_attempt = attempt
+        payload_attempts = [attempt] if attempt is not None else []
+    else:
+        rows = []
+        payload_attempt = attempt
+        payload_attempts = [attempt] if attempt is not None else []
+    return {
+        "request_id": request_id,
+        "stream": normalized_stream,
+        "attempt": payload_attempt,
+        "available_attempts": payload_attempts,
+        "count": len(rows),
+        "events": rows,
+    }
+
+
 @router.get("/runs/{request_id}/logs/range")
 async def get_management_run_log_range(
     request_id: str,
     stream: str = Query(...),
     byte_from: int = Query(default=0, ge=0),
     byte_to: int = Query(default=0, ge=0),
+    attempt: int | None = Query(default=None, ge=1),
 ):
-    return await jobs_router.get_run_log_range(
-        request_id=request_id,
-        stream=stream,
-        byte_from=byte_from,
-        byte_to=byte_to,
-    )
+    kwargs = {
+        "request_id": request_id,
+        "stream": stream,
+        "byte_from": byte_from,
+        "byte_to": byte_to,
+    }
+    if attempt is not None:
+        kwargs["attempt"] = attempt
+    return await jobs_router.get_run_log_range(**kwargs)
 
 
 @router.get("/runs/{request_id}/pending", response_model=InteractionPendingResponse)

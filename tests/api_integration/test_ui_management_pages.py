@@ -76,7 +76,13 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
     assert run_detail.status_code == 200
     assert "/v1/management/runs/${requestId}/events" in run_detail.text
     assert "对话区（FCMP）" in run_detail.text
-    assert "错误输出（stderr）" in run_detail.text
+    assert "Raw stderr" in run_detail.text
+    assert "raw_ref 回跳预览" in run_detail.text
+    assert "FCMP Audit Stream" in run_detail.text
+    assert run_detail.text.index("raw_ref 回跳预览") < run_detail.text.index("Attempt:")
+    assert run_detail.text.index("对话区（FCMP）") < run_detail.text.index("Attempt:")
+    assert run_detail.text.index("Attempt:") < run_detail.text.index("FCMP Audit Stream")
+    assert run_detail.text.rindex("Raw stderr") > run_detail.text.index("FCMP Audit Stream")
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,6 @@ from .backend import (
     RunSource,
 )
 from .config import E2EClientSettings
-from .recording import RecordingStore
 
 
 TEMPLATE_ROOT = Path(__file__).parent / "templates"
@@ -43,8 +42,6 @@ TEXT_DECODE_CANDIDATES = (
     "big5",
 )
 VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
-OBSERVE_SUMMARY_EVENT_LIMIT = 30
-OBSERVE_SUMMARY_REF_LIMIT = 30
 
 
 def get_settings(request: Request) -> E2EClientSettings:
@@ -58,13 +55,6 @@ def get_backend_client(
     settings: E2EClientSettings = Depends(get_settings),
 ) -> BackendClient:
     return HttpBackendClient(settings.backend_base_url)
-
-
-def get_recording_store(request: Request) -> RecordingStore:
-    store = getattr(request.app.state, "recording_store", None)
-    if not isinstance(store, RecordingStore):
-        raise RuntimeError("Recording store is not configured")
-    return store
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -165,7 +155,6 @@ async def submit_run(
     request: Request,
     skill_id: str,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
     detail, schemas = await _load_skill_bundle(backend, skill_id)
     engine_models_by_engine = await _load_engine_models(backend, detail)
@@ -217,13 +206,6 @@ async def submit_run(
     if not isinstance(request_id_raw, str) or not request_id_raw:
         raise HTTPException(status_code=502, detail="Missing request_id in backend response")
     request_id = request_id_raw
-    recordings.append_step(
-        request_id,
-        action="create_run",
-        run_source=RUN_SOURCE_INSTALLED,
-        request_summary=create_payload,
-        response_summary=create_response,
-    )
 
     uploaded_files = cast(dict[str, bytes], submission["uploaded_files"])
     if uploaded_files:
@@ -231,22 +213,8 @@ async def submit_run(
         try:
             upload_response = await backend.upload_run_file(request_id, zip_bytes)
         except BackendApiError as exc:
-            recordings.append_step(
-                request_id,
-                action="upload",
-                run_source=RUN_SOURCE_INSTALLED,
-                request_summary={"files": sorted(uploaded_files.keys())},
-                response_summary={"detail": exc.detail},
-                status="error",
-            )
             raise HTTPException(status_code=exc.status_code, detail=exc.detail)
-        recordings.append_step(
-            request_id,
-            action="upload",
-            run_source=RUN_SOURCE_INSTALLED,
-            request_summary={"files": sorted(uploaded_files.keys())},
-            response_summary=upload_response,
-        )
+        _ = upload_response
 
     return RedirectResponse(
         url=f"/runs/{request_id}?source={RUN_SOURCE_INSTALLED}",
@@ -260,7 +228,6 @@ async def submit_fixture_run(
     fixture_skill_id: str,
     settings: E2EClientSettings = Depends(get_settings),
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
     supported_engines = await _load_supported_engines(backend)
     detail, schemas = _load_fixture_skill_bundle(
@@ -315,13 +282,6 @@ async def submit_fixture_run(
     if not isinstance(request_id_raw, str) or not request_id_raw:
         raise HTTPException(status_code=502, detail="Missing request_id in backend response")
     request_id = request_id_raw
-    recordings.append_step(
-        request_id,
-        action="create_temp_run",
-        run_source=RUN_SOURCE_TEMP,
-        request_summary={"fixture_skill_id": fixture_skill_id, **create_payload},
-        response_summary=create_response,
-    )
 
     skill_package_zip = _build_fixture_skill_package_zip(settings, fixture_skill_id)
     uploaded_files = cast(dict[str, bytes], submission["uploaded_files"])
@@ -333,30 +293,8 @@ async def submit_fixture_run(
             input_zip=input_zip,
         )
     except BackendApiError as exc:
-        recordings.append_step(
-            request_id,
-            action="upload_temp_skill_package",
-            run_source=RUN_SOURCE_TEMP,
-            request_summary={
-                "fixture_skill_id": fixture_skill_id,
-                "has_input_zip": bool(input_zip),
-                "files": sorted(uploaded_files.keys()),
-            },
-            response_summary={"detail": exc.detail},
-            status="error",
-        )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
-    recordings.append_step(
-        request_id,
-        action="upload_temp_skill_package",
-        run_source=RUN_SOURCE_TEMP,
-        request_summary={
-            "fixture_skill_id": fixture_skill_id,
-            "has_input_zip": bool(input_zip),
-            "files": sorted(uploaded_files.keys()),
-        },
-        response_summary=upload_response,
-    )
+    _ = upload_response
 
     return RedirectResponse(
         url=f"/runs/{request_id}?source={RUN_SOURCE_TEMP}",
@@ -369,9 +307,8 @@ async def run_observe_page(
     request: Request,
     request_id: str,
     source: str | None = None,
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     return templates.TemplateResponse(
         request=request,
         name="run_observe.html",
@@ -383,38 +320,33 @@ async def run_observe_page(
 async def list_runs_page(
     request: Request,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    rows = recordings.list_recordings()
+    try:
+        payload = await backend.list_management_runs()
+    except BackendApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    raw_runs = payload.get("runs", [])
+    rows = raw_runs if isinstance(raw_runs, list) else []
     run_rows: list[dict[str, Any]] = []
     for row in rows:
         request_id = str(row.get("request_id") or "")
         run_source = _resolve_run_source(
             source=row.get("run_source"),
             request_id=request_id,
-            recordings=recordings,
         )
         summary = {
-            "status": "unknown",
-            "run_id": "-",
-            "skill_id": "-",
-            "engine": "-",
+            "status": str(row.get("status") or "unknown"),
+            "run_id": str(row.get("run_id") or "-"),
+            "skill_id": str(row.get("skill_id") or "-"),
+            "engine": str(row.get("engine") or "-"),
             "state_error": None,
         }
-        if request_id:
-            try:
-                state = await backend.get_run_state(request_id, run_source=run_source)
-            except BackendApiError as exc:
-                summary["status"] = "unavailable"
-                summary["state_error"] = str(exc.detail)
-            else:
-                summary = _summarize_run_state(state)
         run_rows.append(
             {
                 "request_id": request_id,
                 "run_source": run_source,
                 "updated_at": row.get("updated_at"),
-                "step_count": row.get("step_count", 0),
+                "step_count": 0,
                 **summary,
             }
         )
@@ -425,117 +357,13 @@ async def list_runs_page(
     )
 
 
-@router.get("/runs/{request_id}/result", response_class=HTMLResponse)
-async def run_result_page(
-    request: Request,
-    request_id: str,
-    source: str | None = None,
-    backend: BackendClient = Depends(get_backend_client),
-    settings: E2EClientSettings = Depends(get_settings),
-    recordings: RecordingStore = Depends(get_recording_store),
-):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
-    try:
-        result_payload = await backend.get_run_result(request_id, run_source=run_source)
-        artifacts_payload = await backend.get_run_artifacts(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
-    bundle_entries: list[dict[str, Any]] = []
-    bundle_error: str | None = None
-    try:
-        bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
-        bundle_entries = _list_bundle_entries(bundle_bytes)
-    except BackendApiError as exc:
-        bundle_error = f"Unable to read bundle: {exc.detail}"
-    except Exception:
-        bundle_error = "Unable to parse bundle content"
-
-    recordings.append_step(
-        request_id,
-        action="result_read",
-        run_source=run_source,
-        request_summary={"request_id": request_id},
-        response_summary={
-            "has_result": bool(result_payload.get("result")),
-            "artifact_count": len(artifacts_payload.get("artifacts", [])),
-        },
-    )
-    return templates.TemplateResponse(
-        request=request,
-        name="result.html",
-        context={
-            "request_id": request_id,
-            "run_source": run_source,
-            "artifacts_download_base": _build_artifacts_download_base(
-                settings.backend_base_url,
-                request_id=request_id,
-                run_source=run_source,
-            ),
-            "result_payload": result_payload,
-            "artifacts_payload": artifacts_payload,
-            "bundle_entries": bundle_entries,
-            "bundle_error": bundle_error,
-            "result_json": json.dumps(
-                result_payload.get("result", {}),
-                ensure_ascii=False,
-                indent=2,
-            ),
-        },
-    )
-
-
-@router.get("/recordings", response_class=HTMLResponse)
-async def list_recordings_page(
-    request: Request,
-):
-    del request
-    return RedirectResponse(
-        url="/runs",
-        status_code=307,
-    )
-
-
-@router.get("/recordings/{request_id}", response_class=HTMLResponse)
-async def recording_detail_page(
-    request: Request,
-    request_id: str,
-    recordings: RecordingStore = Depends(get_recording_store),
-):
-    try:
-        payload = recordings.get_recording(request_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Recording not found")
-    return templates.TemplateResponse(
-        request=request,
-        name="recording_detail.html",
-        context={
-            "request_id": request_id,
-            "step_count": len(payload.get("steps", []))
-            if isinstance(payload.get("steps"), list)
-            else 0,
-        },
-    )
-
-
-@router.get("/api/recordings/{request_id}")
-async def get_recording_payload(
-    request_id: str,
-    recordings: RecordingStore = Depends(get_recording_store),
-):
-    try:
-        return recordings.get_recording(request_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Recording not found")
-
-
 @router.get("/api/runs/{request_id}")
 async def get_run_state_api(
     request_id: str,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_state(request_id, run_source=run_source)
     except BackendApiError as exc:
@@ -547,9 +375,8 @@ async def get_run_pending_api(
     request_id: str,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_pending(request_id, run_source=run_source)
     except BackendApiError as exc:
@@ -561,9 +388,8 @@ async def get_run_bundle_entries_api(
     request_id: str,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
     except BackendApiError as exc:
@@ -581,9 +407,8 @@ async def get_run_bundle_file_api(
     path: str,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
     except BackendApiError as exc:
@@ -606,9 +431,8 @@ async def get_run_bundle_file_view(
     path: str,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
     except BackendApiError as exc:
@@ -637,31 +461,15 @@ async def post_run_reply_api(
     request: Request,
     source: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Reply payload must be an object")
     try:
         reply = await backend.post_run_reply(request_id, payload, run_source=run_source)
     except BackendApiError as exc:
-        recordings.append_step(
-            request_id,
-            action="reply",
-            run_source=run_source,
-            request_summary=payload,
-            response_summary={"detail": exc.detail},
-            status="error",
-        )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
-    recordings.append_step(
-        request_id,
-        action="reply",
-        run_source=run_source,
-        request_summary=payload,
-        response_summary=reply,
-    )
     return reply
 
 
@@ -671,9 +479,8 @@ async def stream_run_events_api(
     source: str | None = None,
     cursor: int = 0,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     async def _stream():
         try:
             async for chunk in backend.stream_run_events(
@@ -707,9 +514,8 @@ async def get_run_events_history_api(
     from_ts: str | None = None,
     to_ts: str | None = None,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_event_history(
             request_id,
@@ -731,9 +537,8 @@ async def get_run_logs_range_api(
     byte_from: int = 0,
     byte_to: int = 0,
     backend: BackendClient = Depends(get_backend_client),
-    recordings: RecordingStore = Depends(get_recording_store),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
+    run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_log_range(
             request_id,
@@ -746,24 +551,46 @@ async def get_run_logs_range_api(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
-@router.post("/api/runs/{request_id}/observe-summary")
-async def post_run_observe_summary_api(
+@router.get("/api/runs/{request_id}/final-summary")
+async def get_run_final_summary_api(
     request_id: str,
-    request: Request,
     source: str | None = None,
-    recordings: RecordingStore = Depends(get_recording_store),
+    backend: BackendClient = Depends(get_backend_client),
 ):
-    run_source = _resolve_run_source(source=source, request_id=request_id, recordings=recordings)
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="summary payload must be an object")
-    summary = _normalize_observe_summary_payload(payload)
-    recordings.update_observation_summary(
-        request_id,
-        run_source=run_source,
-        summary=summary,
-    )
-    return {"request_id": request_id, "run_source": run_source, "ok": True}
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+    try:
+        payload = await backend.get_run_final_summary(request_id, run_source=run_source)
+    except BackendApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    artifacts_raw = payload.get("artifacts")
+    artifacts = artifacts_raw if isinstance(artifacts_raw, list) else []
+    result_obj = payload.get("result")
+    result_preview = _build_result_preview(result_obj)
+    result_status = ""
+    result_error_code = ""
+    result_error_message = ""
+    if isinstance(result_obj, dict):
+        status_obj = result_obj.get("status")
+        if isinstance(status_obj, str) and status_obj.strip():
+            result_status = status_obj.strip().lower()
+        error_obj = result_obj.get("error")
+        if isinstance(error_obj, dict):
+            code_obj = error_obj.get("code")
+            if isinstance(code_obj, str) and code_obj.strip():
+                result_error_code = code_obj.strip()
+            message_obj = error_obj.get("message")
+            if isinstance(message_obj, str) and message_obj.strip():
+                result_error_message = message_obj.strip()
+    return {
+        "request_id": request_id,
+        "has_result": bool(result_obj),
+        "has_artifacts": bool(artifacts),
+        "artifacts": artifacts,
+        "result_preview": result_preview,
+        "result_status": result_status,
+        "result_error_code": result_error_code,
+        "result_error_message": result_error_message,
+    }
 
 
 async def _load_skill_bundle(
@@ -1068,32 +895,24 @@ def _resolve_run_source(
     *,
     source: Any,
     request_id: str,
-    recordings: RecordingStore | None,
 ) -> RunSource:
+    del request_id
     requested = _normalize_run_source(source)
     if requested is not None:
         return requested
-    if recordings is not None and request_id:
-        try:
-            payload = recordings.get_recording(request_id)
-        except FileNotFoundError:
-            pass
-        else:
-            recorded = _normalize_run_source(payload.get("run_source"))
-            if recorded is not None:
-                return recorded
     return RUN_SOURCE_INSTALLED
 
 
-def _build_artifacts_download_base(
-    backend_base_url: str,
-    *,
-    request_id: str,
-    run_source: RunSource,
-) -> str:
-    if run_source == RUN_SOURCE_TEMP:
-        return f"{backend_base_url}/v1/temp-skill-runs/{request_id}"
-    return f"{backend_base_url}/v1/jobs/{request_id}"
+def _build_result_preview(result: Any) -> str:
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result[:600]
+    try:
+        serialized = json.dumps(result, ensure_ascii=False)
+    except Exception:
+        return str(result)[:600]
+    return serialized[:600]
 
 
 def _build_run_form_context(
@@ -1201,20 +1020,6 @@ def _build_field_meta(
     }
 
 
-def _summarize_run_state(state: Mapping[str, Any]) -> dict[str, Any]:
-    status = str(state.get("status") or "unknown")
-    run_id = str(state.get("run_id") or "-")
-    skill_id = str(state.get("skill_id") or "-")
-    engine = str(state.get("engine") or "-")
-    return {
-        "status": status,
-        "run_id": run_id,
-        "skill_id": skill_id,
-        "engine": engine,
-        "state_error": None,
-    }
-
-
 def _resolve_engine(selected: str, detail: Mapping[str, Any]) -> str:
     engines = _extract_engines(detail)
     if selected and selected in engines:
@@ -1260,96 +1065,6 @@ def _resolve_model(
     if selected in allowed_models:
         return selected, None
     return selected, f"model '{selected}' is not available for selected engine"
-
-
-def _normalize_observe_summary_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {}
-    cursor = _coerce_non_negative_int(payload.get("cursor"))
-    if cursor > 0:
-        summary["cursor"] = cursor
-
-    last_chat = payload.get("last_chat_event")
-    if isinstance(last_chat, dict):
-        compact = {
-            "seq": _coerce_non_negative_int(last_chat.get("seq")),
-            "type": str(last_chat.get("type") or ""),
-            "role": str(last_chat.get("role") or ""),
-            "text_preview": str(last_chat.get("text_preview") or ""),
-        }
-        summary["last_chat_event"] = compact
-
-    key_events: list[dict[str, Any]] = []
-    for row in _coerce_dict_rows(payload.get("key_events"))[-OBSERVE_SUMMARY_EVENT_LIMIT:]:
-        key_events.append(
-            {
-                "seq": _coerce_non_negative_int(row.get("seq")),
-                "type": str(row.get("type") or ""),
-                "correlation": str(row.get("correlation") or ""),
-                "confidence": _coerce_optional_float(row.get("confidence")),
-            }
-        )
-    summary["key_events"] = key_events
-
-    raw_refs: list[dict[str, Any]] = []
-    for row in _coerce_dict_rows(payload.get("raw_refs"))[-OBSERVE_SUMMARY_REF_LIMIT:]:
-        raw_refs.append(
-            {
-                "stream": str(row.get("stream") or ""),
-                "byte_from": _coerce_non_negative_int(row.get("byte_from")),
-                "byte_to": _coerce_non_negative_int(row.get("byte_to")),
-            }
-        )
-    summary["raw_refs"] = raw_refs
-    return summary
-
-
-def _coerce_dict_rows(raw: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw, list):
-        return []
-    rows: list[dict[str, Any]] = []
-    for item in raw:
-        if isinstance(item, dict):
-            rows.append(item)
-    return rows
-
-
-def _coerce_non_negative_int(raw: Any) -> int:
-    if isinstance(raw, bool):
-        return 0
-    if isinstance(raw, int):
-        return raw if raw >= 0 else 0
-    if isinstance(raw, float):
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            return 0
-        return value if value >= 0 else 0
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return 0
-        try:
-            value = int(text)
-        except ValueError:
-            return 0
-        return value if value >= 0 else 0
-    return 0
-
-
-def _coerce_optional_float(raw: Any) -> float | None:
-    if isinstance(raw, bool):
-        return None
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return None
-    return None
 
 
 def _extract_engines(detail: Mapping[str, Any]) -> list[str]:

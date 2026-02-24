@@ -84,12 +84,16 @@ def make_fcmp_reply_accepted(
     *,
     interaction_id: Optional[int],
     accepted_at: Optional[str],
+    response_preview: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    payload: Dict[str, Any] = {
         "interaction_id": interaction_id,
         "resolution_mode": "user_reply",
         "accepted_at": accepted_at,
     }
+    if isinstance(response_preview, str):
+        payload["response_preview"] = response_preview
+    return payload
 
 
 def make_fcmp_auto_decide_timeout(
@@ -127,6 +131,7 @@ def make_diagnostic_warning_payload(
 def make_orchestrator_event(
     *,
     attempt_number: int,
+    seq: int,
     category: str,
     type_name: str,
     data: Dict[str, Any],
@@ -135,6 +140,7 @@ def make_orchestrator_event(
     return {
         "ts": ts or datetime.utcnow().isoformat(),
         "attempt_number": max(1, int(attempt_number)),
+        "seq": max(1, int(seq)),
         "category": category,
         "type": type_name,
         "data": data,

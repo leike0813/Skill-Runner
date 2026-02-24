@@ -93,7 +93,7 @@ class JobOrchestrator:
             
         Side Effects:
             - Updates 'status.json' in run_dir.
-            - Writes 'logs/stdout.txt', 'logs/stderr.txt'.
+            - Writes '.audit/stdout.{attempt}.log', '.audit/stderr.{attempt}.log'.
             - Writes 'result/result.json'.
         """
         slot_acquired = False
@@ -321,6 +321,7 @@ class JobOrchestrator:
                     fallback_interaction_id=attempt_number,
                 )
                 stream_pending_interaction = self._extract_pending_interaction_from_stream(
+                    adapter=adapter,
                     raw_stdout=result.raw_stdout,
                     raw_stderr=result.raw_stderr,
                     fallback_interaction_id=attempt_number,
@@ -870,12 +871,18 @@ class JobOrchestrator:
 
     def _capture_filesystem_snapshot(self, run_dir: Path) -> Dict[str, Dict[str, Any]]:
         snapshot: Dict[str, Dict[str, Any]] = {}
-        audit_prefix = ".audit/"
+        ignored_prefixes = (
+            ".audit/",
+            "interactions/",
+            ".codex/",
+            ".gemini/",
+            ".iflow/",
+        )
         for path in run_dir.rglob("*"):
             if not path.is_file():
                 continue
             rel_path = path.relative_to(run_dir).as_posix()
-            if rel_path.startswith(audit_prefix):
+            if rel_path.startswith(ignored_prefixes):
                 continue
             snapshot[rel_path] = {
                 "size": path.stat().st_size,
@@ -1049,19 +1056,9 @@ class JobOrchestrator:
         fs_before_path = audit_dir / f"fs-before{suffix}.json"
         fs_after_path = audit_dir / f"fs-after{suffix}.json"
         fs_diff_path = audit_dir / f"fs-diff{suffix}.json"
-
-        logs_dir = run_dir / "logs"
-        live_stdout_path = logs_dir / "stdout.txt"
-        live_stderr_path = logs_dir / "stderr.txt"
-        live_pty_output_path = logs_dir / "pty-output.txt"
-
-        stdout_text = live_stdout_path.read_text(encoding="utf-8") if live_stdout_path.exists() else process_raw_stdout
-        stderr_text = live_stderr_path.read_text(encoding="utf-8") if live_stderr_path.exists() else process_raw_stderr
-        pty_text = (
-            live_pty_output_path.read_text(encoding="utf-8")
-            if live_pty_output_path.exists()
-            else f"{stdout_text}{stderr_text}"
-        )
+        stdout_text = process_raw_stdout
+        stderr_text = process_raw_stderr
+        pty_text = f"{stdout_text}{stderr_text}"
         stdin_payload = options.get("__interactive_reply_payload")
         if stdin_payload is None:
             stdin_text = ""
@@ -1154,9 +1151,11 @@ class JobOrchestrator:
     ) -> None:
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
-        event_path = audit_dir / "orchestrator_events.jsonl"
+        event_path = audit_dir / f"orchestrator_events.{attempt_number}.jsonl"
+        event_seq = self._next_orchestrator_event_seq(event_path)
         payload = make_orchestrator_event(
             attempt_number=attempt_number,
+            seq=event_seq,
             category=category,
             type_name=type_name,
             data=data,
@@ -1171,6 +1170,32 @@ class JobOrchestrator:
         with event_path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False))
             fp.write("\n")
+
+    def _next_orchestrator_event_seq(self, event_path: Path) -> int:
+        if not event_path.exists() or not event_path.is_file():
+            return 1
+        max_seq = 0
+        fallback_count = 0
+        try:
+            with event_path.open("r", encoding="utf-8") as fp:
+                for line in fp:
+                    if not line.strip():
+                        continue
+                    fallback_count += 1
+                    try:
+                        payload = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    seq_obj = payload.get("seq")
+                    if isinstance(seq_obj, int) and seq_obj > max_seq:
+                        max_seq = seq_obj
+        except Exception:
+            return max(1, fallback_count + 1)
+        if max_seq > 0:
+            return max_seq + 1
+        return max(1, fallback_count + 1)
 
     def _append_internal_schema_warning(
         self,
@@ -1342,8 +1367,23 @@ class JobOrchestrator:
         if interaction_payload is None:
             return None
 
-        prompt = interaction_payload.get("prompt") or interaction_payload.get("question")
-        if not isinstance(prompt, str) or not prompt.strip():
+        ui_hints_raw = interaction_payload.get("ui_hints")
+        ui_hints = ui_hints_raw if isinstance(ui_hints_raw, dict) else {}
+        hint_obj = ui_hints.get("hint")
+        hint_text = (
+            self._normalize_interaction_prompt(hint_obj)
+            if isinstance(hint_obj, str) and hint_obj.strip()
+            else ""
+        )
+        prompt_obj = interaction_payload.get("prompt") or interaction_payload.get("question")
+        prompt = (
+            self._normalize_interaction_prompt(prompt_obj)
+            if isinstance(prompt_obj, str) and prompt_obj.strip()
+            else ""
+        )
+        if not prompt and hint_text:
+            prompt = hint_text
+        if not prompt:
             return None
         interaction_id = 0
         interaction_id_source = "payload"
@@ -1374,8 +1414,6 @@ class JobOrchestrator:
         required_fields = interaction_payload.get("required_fields")
         if not isinstance(required_fields, list):
             required_fields = []
-        ui_hints_raw = interaction_payload.get("ui_hints")
-        ui_hints = ui_hints_raw if isinstance(ui_hints_raw, dict) else {}
         default_decision_policy_raw = interaction_payload.get("default_decision_policy")
         default_decision_policy = (
             default_decision_policy_raw.strip()
@@ -1397,7 +1435,7 @@ class JobOrchestrator:
         return {
             "interaction_id": interaction_id,
             "kind": kind,
-            "prompt": prompt.strip(),
+            "prompt": prompt,
             "options": options_normalized,
             "ui_hints": ui_hints,
             "default_decision_policy": default_decision_policy,
@@ -1425,10 +1463,17 @@ class JobOrchestrator:
         if fallback_interaction_id <= 0:
             return None
         prompt_obj = payload.get("prompt") or payload.get("question")
+        ui_hints_obj = payload.get("ui_hints")
+        hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
+        hint = (
+            self._normalize_interaction_prompt(hint_obj)
+            if isinstance(hint_obj, str) and hint_obj.strip()
+            else ""
+        )
         prompt = (
-            prompt_obj.strip()
+            self._normalize_interaction_prompt(prompt_obj)
             if isinstance(prompt_obj, str) and prompt_obj.strip()
-            else "Provide next user turn"
+            else hint or "Please provide your reply to continue."
         )
         return {
             "interaction_id": int(fallback_interaction_id),
@@ -1468,7 +1513,7 @@ class JobOrchestrator:
                 continue
             text_obj = item.get("text")
             if isinstance(text_obj, str) and text_obj.strip():
-                latest_text = text_obj.strip()
+                latest_text = self._normalize_interaction_prompt(text_obj)
                 break
         if not latest_text:
             return None
@@ -1482,6 +1527,27 @@ class JobOrchestrator:
             "required_fields": [],
             "context": {"inferred_from": "runtime_stream_assistant_message"},
         }
+
+    def _strip_prompt_yaml_blocks(self, text: str) -> str:
+        normalized = text
+        tag_pattern = re.compile(
+            r"<ASK_USER_YAML>\s*[\s\S]*?\s*</ASK_USER_YAML>",
+            re.IGNORECASE,
+        )
+        fence_pattern = re.compile(
+            r"```(?:ask_user_yaml|ask-user-yaml)\s*[\s\S]*?```",
+            re.IGNORECASE,
+        )
+        normalized = tag_pattern.sub("\n", normalized)
+        normalized = fence_pattern.sub("\n", normalized)
+        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+        return normalized
+
+    def _normalize_interaction_prompt(self, raw_prompt: Any) -> str:
+        if not isinstance(raw_prompt, str):
+            return ""
+        normalized = self._strip_prompt_yaml_blocks(raw_prompt).strip()
+        return normalized
 
     def _normalize_interaction_kind_name(self, raw_kind: Any) -> str:
         kind_name = str(raw_kind or "").strip().lower()
@@ -1500,7 +1566,11 @@ class JobOrchestrator:
         if not isinstance(payload, dict):
             return False
         prompt_obj = payload.get("prompt") or payload.get("question")
-        if not isinstance(prompt_obj, str) or not prompt_obj.strip():
+        ui_hints_obj = payload.get("ui_hints")
+        hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
+        has_prompt = isinstance(prompt_obj, str) and bool(prompt_obj.strip())
+        has_hint = isinstance(hint_obj, str) and bool(hint_obj.strip())
+        if not has_prompt and not has_hint:
             return False
         if "interaction_id" in payload:
             return True
@@ -1513,39 +1583,68 @@ class JobOrchestrator:
     def _extract_pending_interaction_from_stream(
         self,
         *,
+        adapter: Any,
         raw_stdout: str,
         raw_stderr: str,
         fallback_interaction_id: Optional[int],
     ) -> Optional[Dict[str, Any]]:
-        stream_text = "\n".join(
-            part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str)
-        )
+        def _extract_from_text(text: str) -> Optional[Dict[str, Any]]:
+            if not text.strip():
+                return None
+            snippets: List[str] = []
+            tag_pattern = re.compile(
+                r"<ASK_USER_YAML>\s*(.*?)\s*</ASK_USER_YAML>",
+                re.IGNORECASE | re.DOTALL,
+            )
+            snippets.extend(match.group(1) for match in tag_pattern.finditer(text))
+            fence_pattern = re.compile(
+                r"```(?:ask_user_yaml|ask-user-yaml)\s*(.*?)```",
+                re.IGNORECASE | re.DOTALL,
+            )
+            snippets.extend(match.group(1) for match in fence_pattern.finditer(text))
+            for snippet in snippets:
+                try:
+                    parsed = yaml.safe_load(snippet)
+                except Exception:
+                    continue
+                if not isinstance(parsed, dict):
+                    continue
+                extracted = self._extract_pending_interaction(
+                    parsed,
+                    fallback_interaction_id=fallback_interaction_id,
+                )
+                if extracted is not None:
+                    return extracted
+            return None
+
+        # Prefer parser-extracted assistant text (decoded), because raw NDJSON logs
+        # can contain escaped newlines that are not valid YAML for direct parsing.
+        try:
+            parsed = adapter.parse_runtime_stream(
+                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
+                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
+                pty_raw=b"",
+            )
+            messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
+            if isinstance(messages, list):
+                for item in reversed(messages):
+                    if not isinstance(item, dict):
+                        continue
+                    text_obj = item.get("text")
+                    if not isinstance(text_obj, str) or not text_obj.strip():
+                        continue
+                    extracted = _extract_from_text(text_obj)
+                    if extracted is not None:
+                        return extracted
+        except Exception:
+            pass
+
+        stream_text = "\n".join(part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str))
         if not stream_text.strip():
             return None
-        snippets: List[str] = []
-        tag_pattern = re.compile(
-            r"<ASK_USER_YAML>\s*(.*?)\s*</ASK_USER_YAML>",
-            re.IGNORECASE | re.DOTALL,
-        )
-        snippets.extend(match.group(1) for match in tag_pattern.finditer(stream_text))
-        fence_pattern = re.compile(
-            r"```(?:ask_user_yaml|ask-user-yaml)\s*(.*?)```",
-            re.IGNORECASE | re.DOTALL,
-        )
-        snippets.extend(match.group(1) for match in fence_pattern.finditer(stream_text))
-        for snippet in snippets:
-            try:
-                parsed = yaml.safe_load(snippet)
-            except Exception:
-                continue
-            if not isinstance(parsed, dict):
-                continue
-            extracted = self._extract_pending_interaction(
-                parsed,
-                fallback_interaction_id=fallback_interaction_id,
-            )
-            if extracted is not None:
-                return extracted
+        extracted = _extract_from_text(stream_text)
+        if extracted is not None:
+            return extracted
         return None
 
     def _strip_done_marker_for_output_validation(
@@ -1589,7 +1688,18 @@ class JobOrchestrator:
             pending_interaction = {
                 "interaction_id": int(pending_interaction.get("interaction_id", attempt_number)),
                 "kind": "open_text",
-                "prompt": "Provide next user turn",
+                "prompt": (
+                    self._normalize_interaction_prompt(pending_interaction.get("prompt"))
+                    if isinstance(pending_interaction.get("prompt"), str)
+                    else ""
+                )
+                or (
+                    self._normalize_interaction_prompt(pending_interaction.get("ui_hints", {}).get("hint"))
+                    if isinstance(pending_interaction.get("ui_hints"), dict)
+                    and isinstance(pending_interaction.get("ui_hints", {}).get("hint"), str)
+                    else ""
+                )
+                or "Please provide your reply to continue.",
                 "options": [],
                 "ui_hints": {},
                 "default_decision_policy": "engine_judgement",

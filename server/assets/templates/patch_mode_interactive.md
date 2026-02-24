@@ -22,7 +22,7 @@ ask_user:
     type: "<expected data type: string | integer | float | boolean | enum>"
     min: <minimum value, if applicable>
     max: <maximum value, if applicable>
-    placeholder: "<input placeholder hint>"
+    hint: "<input reply hint>"
 </ASK_USER_YAML>
 ```
 

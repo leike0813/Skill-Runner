@@ -21,7 +21,8 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
   "type": "assistant.message.final",
   "data": {},
   "meta": {
-    "attempt": 2
+    "attempt": 2,
+    "local_seq": 3
   },
   "raw_ref": null
 }
@@ -63,10 +64,16 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
   "data": {
     "interaction_id": 7,
     "resolution_mode": "user_reply",
-    "accepted_at": "2026-02-24T12:35:10.000000"
+    "accepted_at": "2026-02-24T12:35:10.000000",
+    "response_preview": "用户回复文本摘要"
   }
 }
 ```
+
+说明：
+
+- `user.input.required.data.prompt` 保留为语义化提示文本；
+- 不应写入无意义占位值（例如 `"Provide next user turn"`）。
 
 ### 3.3 `interaction.auto_decide.timeout`
 
@@ -102,9 +109,15 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 
 ## 5. Cursor & History
 
-- `cursor`：基于 `chat_event.seq`（FCMP seq）。
+- `cursor`：基于 `chat_event.seq`（跨 attempt 全局 FCMP seq）。
 - `GET /v1/jobs/{request_id}/events/history` 返回 FCMP 历史。
 - `GET /v1/management/runs/{request_id}/events/history` 返回 FCMP 历史。
+
+约束：
+
+- `seq` 在同一 run 内跨 attempt 全局连续递增；
+- attempt 内局部序号通过 `meta.local_seq` 保留；
+- 续跑 attempt 中 `interaction.reply.accepted` 先于该轮 `assistant.message.final`。
 
 ## 6. Raw Evidence Jump
 
@@ -115,13 +128,13 @@ FCMP `raw_ref` 可回跳日志字节区间：
 
 ## 7. Audit Files
 
-`data/runs/<run_id>/.audit/`：
+`data/runs/<run_id>/.audit/`（按 attempt 分片）：
 
-- `events.jsonl`（RASP 审计）
-- `fcmp_events.jsonl`（FCMP 对外事件）
-- `parser_diagnostics.jsonl`
-- `protocol_metrics.json`
-- `orchestrator_events.jsonl`（编排事件事实）
+- `events.{attempt}.jsonl`（RASP 审计）
+- `fcmp_events.{attempt}.jsonl`（FCMP 对外事件，`seq` 全局，`meta.local_seq` 本地）
+- `parser_diagnostics.{attempt}.jsonl`
+- `protocol_metrics.{attempt}.json`
+- `orchestrator_events.{attempt}.jsonl`（编排事件事实）
 
 ## 8. Statechart Alignment
 

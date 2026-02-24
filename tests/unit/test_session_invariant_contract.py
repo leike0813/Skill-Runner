@@ -56,4 +56,5 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "terminal_state_unique",
         "waiting_user_requires_input_event",
         "seq_monotonic_contiguous",
+        "reply_accepted_precedes_resumed_assistant",
     }

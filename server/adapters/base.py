@@ -197,32 +197,21 @@ class EngineAdapter(ABC):
 
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
-        logs_dir = run_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        stdout_log = logs_dir / "stdout.txt"
-        stderr_log = logs_dir / "stderr.txt"
-        # Truncate old logs before streaming new output.
-        stdout_log.write_text("", encoding="utf-8")
-        stderr_log.write_text("", encoding="utf-8")
 
-        async def read_stream(stream, chunks, log_path: Path, tag, should_print):
-            with open(log_path, "a", encoding="utf-8") as log_file:
-                while True:
-                    chunk = await stream.read(1024)
-                    if not chunk:
-                        break
-                    decoded_chunk = chunk.decode("utf-8", errors="replace")
-                    chunks.append(decoded_chunk)
-                    log_file.write(decoded_chunk)
-                    log_file.flush()
-                    if should_print:
-                        logger.info("[%s]%s", tag, decoded_chunk.rstrip())
+        async def read_stream(stream, chunks, tag, should_print):
+            while True:
+                chunk = await stream.read(1024)
+                if not chunk:
+                    break
+                decoded_chunk = chunk.decode("utf-8", errors="replace")
+                chunks.append(decoded_chunk)
+                if should_print:
+                    logger.info("[%s]%s", tag, decoded_chunk.rstrip())
 
         stdout_task = asyncio.create_task(
             read_stream(
                 proc.stdout,
                 stdout_chunks,
-                stdout_log,
                 f"{prefix} OUT ",
                 verbose_level >= 1,
             )
@@ -231,7 +220,6 @@ class EngineAdapter(ABC):
             read_stream(
                 proc.stderr,
                 stderr_chunks,
-                stderr_log,
                 f"{prefix} ERR ",
                 verbose_level >= 2,
             )

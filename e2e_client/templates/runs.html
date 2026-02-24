@@ -32,9 +32,7 @@
                 <td>{{ row.updated_at or "-" }}</td>
                 <td>{{ row.step_count }}</td>
                 <td>
-                    <a class="btn secondary" href="/runs/{{ row.request_id }}?source={{ row.run_source }}">Open Observation</a>
-                    <a class="btn secondary" href="/runs/{{ row.request_id }}/result?source={{ row.run_source }}">Result</a>
-                    <a class="btn secondary" href="/recordings/{{ row.request_id }}">Replay</a>
+                    <a class="btn secondary" href="/runs/{{ row.request_id }}?source={{ row.run_source }}">Details</a>
                 </td>
             </tr>
         {% endfor %}

@@ -253,6 +253,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
         "category": {
           "type": "string",
           "enum": [
@@ -280,6 +284,7 @@
       "required": [
         "ts",
         "attempt_number",
+        "seq",
         "category",
         "type",
         "data"
@@ -904,6 +909,10 @@
             "attempt": {
               "type": "integer",
               "minimum": 1
+            },
+            "local_seq": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -1123,6 +1132,12 @@
                       "null"
                     ],
                     "format": "date-time"
+                  },
+                  "response_preview": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [

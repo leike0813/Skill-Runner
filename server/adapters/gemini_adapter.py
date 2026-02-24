@@ -177,12 +177,6 @@ class GeminiAdapter(EngineAdapter):
             skill_dir=str(gemini_config_dir / "skills" / skill.id)
         )
         
-        # Log Prompt
-        logs_dir = run_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        with open(logs_dir / "prompt.txt", "w") as f:
-            f.write(prompt)
-            
         return prompt
 
     async def _execute_process(

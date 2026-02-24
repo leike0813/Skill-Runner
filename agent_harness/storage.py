@@ -97,20 +97,27 @@ def resolve_next_attempt_paths(run_dir: Path) -> AttemptPaths:
         fs_after=audit_dir / f"fs-after{suffix}.json",
         fs_diff=audit_dir / f"fs-diff{suffix}.json",
         rasp_events=audit_dir / f"events{suffix}.jsonl",
-        fcmp_events=audit_dir / f"fcmp-events{suffix}.jsonl",
-        parser_diagnostics=audit_dir / f"parser-diagnostics{suffix}.jsonl",
-        protocol_metrics=audit_dir / f"protocol-metrics{suffix}.json",
-        conformance_report=audit_dir / f"conformance-report{suffix}.json",
+        fcmp_events=audit_dir / f"fcmp_events{suffix}.jsonl",
+        parser_diagnostics=audit_dir / f"parser_diagnostics{suffix}.jsonl",
+        protocol_metrics=audit_dir / f"protocol_metrics{suffix}.json",
+        conformance_report=audit_dir / f"conformance_report{suffix}.json",
     )
 
 
 def snapshot_filesystem(run_dir: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    ignored_prefixes = (
+        ".audit/",
+        "interactions/",
+        ".codex/",
+        ".gemini/",
+        ".iflow/",
+    )
     for path in sorted(run_dir.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(run_dir).as_posix()
-        if rel.startswith(".audit/"):
+        if rel.startswith(ignored_prefixes):
             continue
         content = path.read_bytes()
         rows.append(

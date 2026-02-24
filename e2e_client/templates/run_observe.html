@@ -6,49 +6,263 @@
         <div style="flex: 1 1 200px;"><strong>Status:</strong> <span id="run-status">loading</span></div>
         <div style="flex: 1 1 200px;"><strong>Pending ID:</strong> <span id="pending-id">-</span></div>
         <div style="flex: 1 1 200px;"><strong>Source:</strong> <span id="run-source">{{ run_source }}</span></div>
-        <div style="flex: 1 1 220px;"><strong>Cursor:</strong> <span id="run-cursor">0</span></div>
+        <div style="flex: 1 1 200px;"><strong>Cursor:</strong> <span id="run-cursor">0</span></div>
         <div style="flex: 1 1 220px;">
             <a class="btn secondary" href="/runs">Runs</a>
-            <a class="btn secondary" href="/runs/{{ request_id }}/result?source={{ run_source }}">Result</a>
-            <a class="btn secondary" href="/recordings/{{ request_id }}">Replay</a>
+        </div>
+    </div>
+    <div id="thinking-card" class="thinking-card hidden" role="status" aria-live="polite">
+        <div class="thinking-dots" aria-hidden="true">
+            <span></span><span></span><span></span>
+        </div>
+        <div>
+            <div class="thinking-title">Agent is thinking</div>
+            <div class="thinking-desc">Running inference and preparing the next response...</div>
         </div>
     </div>
 </section>
 
-<section class="row" style="margin-top: 16px;">
-    <div class="card" style="flex: 2 1 540px;">
-        <h3 style="margin-top: 0;">Conversation (FCMP)</h3>
-        <div id="stdout-panel" style="height: 360px; overflow: auto; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8;"></div>
-        <div style="margin-top: 12px; border-top: 1px solid #e1ece5; padding-top: 12px;">
-            <div class="muted" id="pending-prompt">Waiting for pending interaction...</div>
-            <form id="reply-form" style="margin-top: 8px;">
-                <input type="hidden" id="interaction-id" value="">
-                <textarea id="reply-text" rows="3" style="width:100%; border-radius:8px; border:1px solid #c9ddce; padding:8px;" placeholder="Reply text"></textarea>
-                <div style="margin-top: 8px;">
-                    <button class="btn" id="reply-submit" type="submit" disabled>Submit Reply</button>
-                </div>
-            </form>
+<section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">Conversation</h3>
+    <div id="chat-panel" class="chat-panel"></div>
+
+    <div id="prompt-card" class="prompt-card hidden">
+        <div style="font-weight: 700; margin-bottom: 6px;">Pending Input Request</div>
+        <div id="prompt-card-text"></div>
+        <div class="prompt-meta">
+            <span>interaction_id: <code id="prompt-card-id">-</code></span>
+            <span>kind: <code id="prompt-card-kind">-</code></span>
         </div>
+        <div id="prompt-card-options" class="prompt-list hidden"></div>
+        <div id="prompt-card-required" class="prompt-list hidden"></div>
     </div>
-    <div class="card" style="flex: 1 1 320px;">
-        <h3 style="margin-top: 0;">Errors (stderr)</h3>
-        <div id="stderr-panel" style="height: 220px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f1d2d2; border-radius:8px; padding:10px; background:#fff8f8;"></div>
-        <h3 style="margin-top: 12px;">Diagnostics</h3>
-        <div id="diagnostic-panel" style="height: 140px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #f0d9a4; border-radius:8px; padding:10px; background:#fffbf2;"></div>
+
+    <form id="reply-form" class="reply-box">
+        <input type="hidden" id="interaction-id" value="">
+        <textarea id="reply-text" rows="3" placeholder="Reply to agent..." disabled></textarea>
+        <div class="reply-actions">
+            <button class="btn" id="reply-submit" type="submit" disabled>Send Reply</button>
+            <span class="muted" id="reply-shortcut-hint">Ctrl+Enter / Cmd+Enter to send</span>
+        </div>
+    </form>
+</section>
+
+<section class="card" style="margin-top: 16px;">
+    <div class="reply-actions" style="justify-content: space-between;">
+        <h3 style="margin: 0;">Run File Tree</h3>
+        <button class="btn secondary" id="file-tree-toggle" type="button">Show Files</button>
+    </div>
+    <div id="file-tree-section" class="hidden" style="margin-top: 10px;">
+        <div class="file-tree-layout">
+            <div id="file-tree-panel" class="chat-panel file-panel"></div>
+            <div id="file-preview-panel" class="chat-panel file-panel preview-panel"></div>
+        </div>
     </div>
 </section>
 
-<section class="row" style="margin-top: 16px;">
-    <div class="card" style="flex: 1 1 420px;">
-        <h3 style="margin-top: 0;">Event Relations</h3>
-        <div id="relation-panel" style="height: 220px; overflow: auto; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f9fcfa;"></div>
-    </div>
-    <div class="card" style="flex: 1 1 420px;">
-        <h3 style="margin-top: 0;">Raw Ref Preview</h3>
-        <div id="rawref-meta" class="muted">No raw reference selected.</div>
-        <div id="rawref-panel" style="height: 220px; overflow: auto; white-space: pre-wrap; font-family: monospace; border:1px solid #d8e6dd; border-radius:8px; padding:10px; background:#f7fbf8; margin-top: 8px;"></div>
-    </div>
-</section>
+<style>
+    .chat-panel {
+        height: 420px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        background: linear-gradient(180deg, #f9fbfa 0%, #f4f8f6 100%);
+    }
+    .chat-row {
+        display: flex;
+        margin-bottom: 10px;
+    }
+    .chat-row.agent {
+        justify-content: flex-start;
+    }
+    .chat-row.user {
+        justify-content: flex-end;
+    }
+    .chat-bubble {
+        max-width: min(78%, 760px);
+        border-radius: 14px;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+        line-height: 1.5;
+        border: 1px solid var(--line);
+        box-shadow: 0 4px 14px rgba(20, 100, 59, 0.08);
+    }
+    .chat-bubble.agent {
+        background: #ffffff;
+        color: var(--fg);
+    }
+    .chat-bubble.user {
+        background: #dff4e8;
+        color: #0e3b25;
+        border-color: #b8e1c8;
+    }
+    .chat-role {
+        display: block;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        opacity: 0.72;
+        letter-spacing: 0.02em;
+    }
+    .prompt-card {
+        margin-top: 12px;
+        border: 1px solid #c7dece;
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: #edf7f1;
+    }
+    .prompt-card.hidden {
+        display: none;
+    }
+    .thinking-card {
+        margin-top: 12px;
+        border: 1px solid #bed8cb;
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: #eff8f3;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .thinking-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e5138;
+    }
+    .thinking-desc {
+        font-size: 12px;
+        color: #55776a;
+    }
+    .thinking-dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+    .thinking-dots span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2f7257;
+        opacity: 0.25;
+        animation: thinkingPulse 1.2s ease-in-out infinite;
+    }
+    .thinking-dots span:nth-child(2) {
+        animation-delay: 0.2s;
+    }
+    .thinking-dots span:nth-child(3) {
+        animation-delay: 0.4s;
+    }
+    @keyframes thinkingPulse {
+        0%, 80%, 100% {
+            transform: translateY(0);
+            opacity: 0.25;
+        }
+        40% {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+    }
+    .hidden {
+        display: none;
+    }
+    .prompt-meta {
+        margin-top: 8px;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 12px;
+        color: var(--muted);
+    }
+    .prompt-list {
+        margin-top: 8px;
+        font-size: 13px;
+        color: var(--muted);
+    }
+    .prompt-list.hidden {
+        display: none;
+    }
+    .reply-box {
+        margin-top: 12px;
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+    }
+    .reply-box textarea {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        padding: 10px;
+        background: #fff;
+        font: inherit;
+    }
+    .reply-actions {
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .file-entry {
+        margin-bottom: 6px;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .file-entry button {
+        border: 0;
+        background: none;
+        color: var(--accent);
+        text-align: left;
+        cursor: pointer;
+        padding: 0;
+        font: inherit;
+    }
+    .file-tree-layout {
+        display: grid;
+        grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+        gap: 12px;
+    }
+    .file-panel {
+        height: 320px;
+        min-width: 0;
+    }
+    .preview-panel {
+        background: #fff;
+        overflow: hidden;
+        padding: 10px 12px;
+    }
+    .preview-title {
+        margin-bottom: 8px;
+        color: #374151;
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .preview-meta {
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 12px;
+    }
+    .preview-content {
+        margin: 0;
+        white-space: pre;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.45;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .preview-empty {
+        color: var(--muted);
+        font-size: 13px;
+    }
+    @media (max-width: 960px) {
+        .file-tree-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
 
 <script>
 (() => {
@@ -57,57 +271,54 @@
     const statusEl = document.getElementById("run-status");
     const pendingIdEl = document.getElementById("pending-id");
     const cursorEl = document.getElementById("run-cursor");
-    const stdoutEl = document.getElementById("stdout-panel");
-    const stderrEl = document.getElementById("stderr-panel");
-    const diagnosticEl = document.getElementById("diagnostic-panel");
-    const relationEl = document.getElementById("relation-panel");
-    const rawRefMetaEl = document.getElementById("rawref-meta");
-    const rawRefEl = document.getElementById("rawref-panel");
+    const chatEl = document.getElementById("chat-panel");
     const replyForm = document.getElementById("reply-form");
-    const replyText = document.getElementById("reply-text");
-    const replySubmit = document.getElementById("reply-submit");
-    const promptEl = document.getElementById("pending-prompt");
     const interactionIdEl = document.getElementById("interaction-id");
+    const replyTextEl = document.getElementById("reply-text");
+    const replySubmitEl = document.getElementById("reply-submit");
+    const thinkingCardEl = document.getElementById("thinking-card");
+    const promptCardEl = document.getElementById("prompt-card");
+    const promptTextEl = document.getElementById("prompt-card-text");
+    const promptIdEl = document.getElementById("prompt-card-id");
+    const promptKindEl = document.getElementById("prompt-card-kind");
+    const promptOptionsEl = document.getElementById("prompt-card-options");
+    const promptRequiredEl = document.getElementById("prompt-card-required");
+    const fileTreeToggleEl = document.getElementById("file-tree-toggle");
+    const fileTreeSectionEl = document.getElementById("file-tree-section");
+    const fileTreePanelEl = document.getElementById("file-tree-panel");
+    const filePreviewPanelEl = document.getElementById("file-preview-panel");
+
+    let cursor = 0;
     let stream = null;
     let reconnectTimer = null;
     let reconnectAttempts = 0;
-    let cursor = 0;
-    const renderedChatKeys = new Set();
-    const renderedRunKeys = new Set();
-    const relationRows = [];
     let currentStatus = "loading";
-    let observeSummaryDirty = false;
-    let observeSummaryInflight = false;
-    const observationSummary = {
-        cursor: 0,
-        last_chat_event: {},
-        key_events: [],
-        raw_refs: [],
-    };
+    let finalSummaryLoaded = false;
+    let finalSummaryAttempts = 0;
+    let finalSummaryRetryTimer = null;
+    let historyLoaded = false;
+    let fileTreeLoaded = false;
+    let fileTreeExpanded = false;
+    const renderedChatKeys = new Set();
+    const renderedPromptKeys = new Set();
 
     function apiUrl(path) {
         const separator = path.includes("?") ? "&" : "?";
         return `${path}${separator}source=${encodeURIComponent(runSource)}`;
     }
 
-    function appendChunk(el, text) {
-        if (!text) return;
-        el.textContent += text;
-        el.scrollTop = el.scrollHeight;
+    function safeText(value) {
+        return typeof value === "string" ? value : "";
     }
 
-    function appendDiagnostic(text) {
-        if (!text) return;
-        appendChunk(diagnosticEl, `${text}\n`);
-    }
-
-    function setReplyEnabled(enabled, prompt) {
-        replyText.disabled = !enabled;
-        replySubmit.disabled = !enabled;
-        if (!enabled) {
-            interactionIdEl.value = "";
+    function normalizeList(raw) {
+        if (!Array.isArray(raw)) return [];
+        const values = [];
+        for (const item of raw) {
+            const text = safeText(item).trim();
+            if (text) values.push(text);
         }
-        promptEl.textContent = prompt || (enabled ? "Pending response required." : "Current run is not waiting for user input.");
+        return values;
     }
 
     function updateCursor(next) {
@@ -115,501 +326,458 @@
         if (next <= cursor) return;
         cursor = next;
         cursorEl.textContent = String(cursor);
-        if (cursor > observationSummary.cursor) {
-            observationSummary.cursor = cursor;
-            markObserveSummaryDirty();
-        }
     }
 
-    function markObserveSummaryDirty() {
-        observeSummaryDirty = true;
+    function isTerminal(status) {
+        return ["succeeded", "failed", "canceled"].includes(status);
     }
 
-    function coerceNumber(raw) {
-        if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-        if (typeof raw === "string" && raw.trim()) {
-            const value = Number(raw);
-            return Number.isFinite(value) ? value : null;
-        }
-        return null;
+    function setReplyEnabled(enabled) {
+        replyTextEl.disabled = !enabled;
+        replySubmitEl.disabled = !enabled;
     }
 
-    function toObject(raw) {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-        return raw;
+    function updateThinkingCard(status) {
+        if (!thinkingCardEl) return;
+        const show = safeText(status).trim() === "running";
+        thinkingCardEl.classList.toggle("hidden", !show);
     }
 
-    function safeText(raw) {
-        return typeof raw === "string" ? raw : "";
-    }
-
-    function parseConfidence(payload) {
-        const checks = [
-            payload?.source?.confidence,
-            payload?.data?.source?.confidence,
-            payload?.event?.source?.confidence,
-            payload?.confidence,
-            payload?.data?.confidence,
-            payload?.event?.confidence,
-        ];
-        for (const candidate of checks) {
-            const value = coerceNumber(candidate);
-            if (value != null) return value;
-        }
-        return null;
-    }
-
-    function parseCorrelation(payload) {
-        const checks = [
-            payload?.correlation?.id,
-            payload?.correlation_id,
-            payload?.data?.correlation?.id,
-            payload?.data?.correlation_id,
-            payload?.event?.correlation?.id,
-            payload?.event?.correlation_id,
-        ];
-        for (const candidate of checks) {
-            const text = safeText(candidate).trim();
-            if (text) return text;
-        }
-        return "";
-    }
-
-    function parseAttempt(payload) {
-        const checks = [
-            payload?.attempt_number,
-            payload?.meta?.attempt,
-            payload?.data?.meta?.attempt,
-            payload?.event?.attempt_number,
-            payload?.attempt,
-        ];
-        for (const candidate of checks) {
-            const value = coerceNumber(candidate);
-            if (value != null && value > 0) return Math.floor(value);
-        }
-        return 1;
-    }
-
-    function normalizeRawRef(raw) {
-        const obj = toObject(raw);
-        if (!obj) return null;
-        const stream = safeText(
-            obj.stream || obj.channel || obj.name
-        ).trim();
-        if (!stream) return null;
-        const byteFrom = coerceNumber(
-            obj.byte_from ?? obj.from ?? obj.start ?? obj.start_byte
-        );
-        const byteTo = coerceNumber(
-            obj.byte_to ?? obj.to ?? obj.end ?? obj.end_byte
-        );
-        if (byteFrom == null || byteTo == null) return null;
-        if (byteTo < byteFrom) return null;
-        return {
-            stream,
-            byte_from: Math.max(0, Math.floor(byteFrom)),
-            byte_to: Math.max(0, Math.floor(byteTo)),
-        };
-    }
-
-    function extractRawRefs(payload) {
-        const candidates = [
-            payload?.raw_ref,
-            payload?.raw_refs,
-            payload?.data?.raw_ref,
-            payload?.data?.raw_refs,
-            payload?.event?.raw_ref,
-            payload?.event?.raw_refs,
-            payload?.refs,
-            payload?.data?.refs,
-        ];
-        const refs = [];
-        const seen = new Set();
-        for (const candidate of candidates) {
-            if (candidate == null) continue;
-            const rows = Array.isArray(candidate) ? candidate : [candidate];
-            for (const row of rows) {
-                const ref = normalizeRawRef(row);
-                if (!ref) continue;
-                const identity = `${ref.stream}|${ref.byte_from}|${ref.byte_to}`;
-                if (seen.has(identity)) continue;
-                seen.add(identity);
-                refs.push(ref);
-            }
-        }
-        return refs;
-    }
-
-    function trackRawRef(ref) {
-        if (!ref) return;
-        const list = observationSummary.raw_refs;
-        const identity = `${ref.stream}|${ref.byte_from}|${ref.byte_to}`;
-        if (!list.some((item) => `${item.stream}|${item.byte_from}|${item.byte_to}` === identity)) {
-            list.push(ref);
-            if (list.length > 30) {
-                list.splice(0, list.length - 30);
-            }
-            markObserveSummaryDirty();
-        }
-    }
-
-    function trackKeyEvent(entry) {
-        const list = observationSummary.key_events;
-        const identity = `${entry.seq}|${entry.type}|${entry.correlation || ""}`;
-        if (!list.some((item) => `${item.seq}|${item.type}|${item.correlation || ""}` === identity)) {
-            list.push(entry);
-            if (list.length > 30) {
-                list.splice(0, list.length - 30);
-            }
-            markObserveSummaryDirty();
-        }
-    }
-
-    function addRelationRow(entry) {
-        const identity = `${entry.kind}|${entry.seq}|${entry.type}|${entry.correlation || ""}`;
-        if (relationRows.some((item) => item.identity === identity)) return;
-        relationRows.push({ identity, ...entry });
-        if (relationRows.length > 120) {
-            relationRows.splice(0, relationRows.length - 120);
-        }
-        renderRelations();
-    }
-
-    function renderRelations() {
-        relationEl.textContent = "";
-        if (!relationRows.length) {
-            relationEl.textContent = "No relation data yet.";
-            return;
-        }
-        for (const row of relationRows) {
-            const line = document.createElement("div");
-            line.style.marginBottom = "8px";
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "btn secondary";
-            button.style.padding = "6px 8px";
-            button.style.marginRight = "8px";
-            const confidenceText = row.confidence != null ? ` conf=${Number(row.confidence).toFixed(2)}` : "";
-            const corrText = row.correlation ? ` corr=${row.correlation}` : "";
-            button.textContent = `[${row.seq}] ${row.kind}:${row.type}${corrText}${confidenceText}`;
-            button.addEventListener("click", () => {
-                if (Array.isArray(row.rawRefs) && row.rawRefs.length) {
-                    previewRawRef(row.rawRefs[0], true);
-                } else {
-                    rawRefMetaEl.textContent = "No raw_ref attached to selected relation.";
-                    rawRefEl.textContent = "";
-                }
-            });
-            line.appendChild(button);
-            if (row.lowConfidence) {
-                const badge = document.createElement("span");
-                badge.textContent = "low-confidence";
-                badge.style.color = "#8f2323";
-                badge.style.fontWeight = "700";
-                line.appendChild(badge);
-            }
-            relationEl.appendChild(line);
-        }
-        relationEl.scrollTop = relationEl.scrollHeight;
-    }
-
-    function appendConversationRow(role, text, options = {}) {
+    function appendChatBubble(role, text, key) {
+        const normalizedText = safeText(text).trim();
+        if (!normalizedText) return;
+        if (key && renderedChatKeys.has(key)) return;
+        if (key) renderedChatKeys.add(key);
         const row = document.createElement("div");
-        row.style.borderBottom = "1px solid #e7efe9";
-        row.style.padding = "8px 2px";
-        const header = document.createElement("div");
-        header.style.display = "flex";
-        header.style.alignItems = "center";
-        header.style.gap = "8px";
-        const roleEl = document.createElement("strong");
-        roleEl.textContent = role;
-        header.appendChild(roleEl);
-        if (options.lowConfidence) {
-            const badge = document.createElement("span");
-            badge.textContent = "low-confidence";
-            badge.style.color = "#8f2323";
-            badge.style.fontWeight = "700";
-            header.appendChild(badge);
-        }
-        row.appendChild(header);
+        row.className = `chat-row ${role}`;
 
-        const textEl = document.createElement("div");
-        textEl.style.whiteSpace = "pre-wrap";
-        textEl.textContent = text || "";
-        row.appendChild(textEl);
+        const bubble = document.createElement("div");
+        bubble.className = `chat-bubble ${role}`;
 
-        if (Array.isArray(options.rawRefs) && options.rawRefs.length) {
-            const refsWrap = document.createElement("div");
-            refsWrap.style.marginTop = "6px";
-            refsWrap.style.display = "flex";
-            refsWrap.style.flexWrap = "wrap";
-            refsWrap.style.gap = "6px";
-            for (const ref of options.rawRefs) {
-                const refButton = document.createElement("button");
-                refButton.type = "button";
-                refButton.className = "btn secondary";
-                refButton.style.padding = "4px 8px";
-                refButton.textContent = `raw_ref ${ref.stream}:${ref.byte_from}-${ref.byte_to}`;
-                refButton.addEventListener("click", () => previewRawRef(ref, true));
-                refsWrap.appendChild(refButton);
-            }
-            row.appendChild(refsWrap);
-        }
+        const roleEl = document.createElement("span");
+        roleEl.className = "chat-role";
+        roleEl.textContent = role === "user" ? "You" : "Agent";
+        bubble.appendChild(roleEl);
 
-        stdoutEl.appendChild(row);
-        stdoutEl.scrollTop = stdoutEl.scrollHeight;
+        const content = document.createElement("div");
+        content.textContent = normalizedText;
+        bubble.appendChild(content);
+
+        row.appendChild(bubble);
+        chatEl.appendChild(row);
+        chatEl.scrollTop = chatEl.scrollHeight;
     }
 
-    async function previewRawRef(ref, track) {
-        const streamName = encodeURIComponent(ref.stream);
-        const from = encodeURIComponent(String(ref.byte_from));
-        const to = encodeURIComponent(String(ref.byte_to));
-        rawRefMetaEl.textContent = `${ref.stream} [${ref.byte_from}, ${ref.byte_to}]`;
-        rawRefEl.textContent = "Loading...";
-        const path = `/api/runs/${requestId}/logs/range?stream=${streamName}&byte_from=${from}&byte_to=${to}`;
-        const res = await fetch(apiUrl(path));
-        if (!res.ok) {
-            rawRefEl.textContent = "Unable to load raw reference segment.";
-            return;
-        }
-        const payload = await res.json();
-        const content = safeText(payload.content || payload.text || payload.chunk);
-        rawRefEl.textContent = content || JSON.stringify(payload, null, 2);
-        if (track) {
-            trackRawRef(ref);
-        }
+    function clearPromptCard() {
+        promptCardEl.classList.add("hidden");
+        promptTextEl.textContent = "";
+        promptIdEl.textContent = "-";
+        promptKindEl.textContent = "-";
+        promptOptionsEl.textContent = "";
+        promptRequiredEl.textContent = "";
+        promptOptionsEl.classList.add("hidden");
+        promptRequiredEl.classList.add("hidden");
+        interactionIdEl.value = "";
+        pendingIdEl.textContent = "-";
     }
 
-    function updateLastChatSummary(data, text) {
-        const seq = typeof data.seq === "number" ? data.seq : 0;
-        const type = safeText(data.type);
-        const role = type.startsWith("assistant.") ? "assistant" : type.startsWith("user.") ? "user" : "system";
-        observationSummary.last_chat_event = {
-            seq,
-            type,
-            role,
-            text_preview: (text || "").slice(0, 160),
-        };
-        markObserveSummaryDirty();
-    }
+    function renderPromptCard(payload) {
+        const prompt = safeText(payload.prompt).trim();
+        const hint = safeText(payload.ui_hints?.hint || payload.hint).trim();
+        const interactionId = Number(payload.interaction_id || 0);
+        const kind = safeText(payload.kind).trim() || "open_text";
+        const key = `${interactionId || 0}|${hint || prompt}`;
+        renderedPromptKeys.add(key);
 
-    function handleRunEventPayload(data) {
-        const seq = typeof data.seq === "number" ? data.seq : 0;
-        const attempt = parseAttempt(data);
-        const eventType = safeText(data?.event?.type || data?.type || "unknown");
-        const runKey = `${attempt}:${seq}:${eventType}`;
-        if (seq && renderedRunKeys.has(runKey)) return;
-        if (seq) renderedRunKeys.add(runKey);
-        if (seq) updateCursor(seq);
-        const confidence = parseConfidence(data);
-        const correlation = parseCorrelation(data);
-        const rawRefs = extractRawRefs(data);
-        for (const ref of rawRefs) {
-            trackRawRef(ref);
-        }
-        if (eventType === "diagnostic.warning") {
-            const code = safeText(data?.data?.code || "UNKNOWN");
-            appendDiagnostic(`[${code}] ${JSON.stringify(data?.data || {})}`);
-        }
-        addRelationRow({
-            kind: "run_event",
-            seq: seq || 0,
-            type: eventType || "unknown",
-            correlation,
-            confidence,
-            lowConfidence: confidence != null && confidence < 0.7,
-            rawRefs,
-        });
-        trackKeyEvent({
-            seq: seq || 0,
-            type: eventType || "unknown",
-            correlation,
-            confidence,
-        });
-    }
-
-    function handleChatEventPayload(data) {
-        const type = safeText(data.type);
-        const seq = typeof data.seq === "number" ? data.seq : 0;
-        const attempt = parseAttempt(data);
-        const chatKey = `${attempt}:${seq}:${type}`;
-        if (seq && renderedChatKeys.has(chatKey)) return;
-        if (seq) renderedChatKeys.add(chatKey);
-        if (seq) updateCursor(seq);
-
-        const rawRefs = extractRawRefs(data);
-        const confidence = parseConfidence(data);
-        const lowConfidence = confidence != null && confidence < 0.7;
-        const correlation = parseCorrelation(data);
-        if (rawRefs.length) {
-            for (const ref of rawRefs) {
-                trackRawRef(ref);
-            }
-        }
-        addRelationRow({
-            kind: "chat_event",
-            seq: seq || 0,
-            type: type || "unknown",
-            correlation,
-            confidence,
-            lowConfidence,
-            rawRefs,
-        });
-        trackKeyEvent({
-            seq: seq || 0,
-            type: type || "unknown",
-            correlation,
-            confidence,
-        });
-
-        if (type === "conversation.state.changed") {
-            const to = safeText(data?.data?.to || currentStatus);
-            currentStatus = to || currentStatus;
-            statusEl.textContent = currentStatus;
-            if (data?.data?.pending_interaction_id != null) {
-                pendingIdEl.textContent = String(data.data.pending_interaction_id);
-            }
-            if (currentStatus === "waiting_user") {
-                refreshPending().catch(() => {});
-            }
-            if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
-                setReplyEnabled(false, "");
-            }
-            return;
-        }
-        if (type === "interaction.reply.accepted") {
-            setReplyEnabled(false, "Reply accepted, resuming...");
-            pendingIdEl.textContent = "-";
-            return;
-        }
-        if (type === "interaction.auto_decide.timeout") {
-            appendConversationRow("System", "等待超时，系统已自动决策并继续执行。", { lowConfidence, rawRefs });
-            pendingIdEl.textContent = "-";
-            return;
-        }
-
-        if (type === "assistant.message.final") {
-            const text = safeText(data?.data?.text);
-            appendConversationRow("Agent", text, { lowConfidence, rawRefs });
-            updateLastChatSummary(data, text);
-            return;
-        }
-        if (type === "user.input.required") {
-            const prompt = safeText(data?.data?.prompt || "Pending interaction");
-            appendConversationRow("System", prompt, { lowConfidence, rawRefs });
-            setReplyEnabled(true, prompt);
-            updateLastChatSummary(data, prompt);
-            return;
-        }
-        if (type === "conversation.completed") {
-            appendConversationRow("System", "任务完成", { lowConfidence, rawRefs });
-            updateLastChatSummary(data, "任务完成");
-            return;
-        }
-        if (type === "conversation.failed") {
-            appendConversationRow("System", "任务失败", { lowConfidence, rawRefs });
-            updateLastChatSummary(data, "任务失败");
-            return;
-        }
-        if (type === "diagnostic.warning") {
-            const code = safeText(data?.data?.code || "UNKNOWN");
-            appendDiagnostic(`[${code}] ${JSON.stringify(data?.data || {})}`);
-            return;
-        }
-        if (type === "raw.stderr") {
-            appendChunk(stderrEl, `${safeText(data?.data?.line)}\n`);
-            return;
-        }
-    }
-
-    function consumeHistoryEvent(item) {
-        const row = toObject(item);
-        if (!row) return;
-        const rowType = safeText(row.type);
-        if (rowType === "run_event" && toObject(row.event)) {
-            handleRunEventPayload(row.event);
-            return;
-        }
-        if (rowType === "chat_event" && toObject(row.event)) {
-            handleChatEventPayload(row.event);
-            return;
-        }
-        if (toObject(row.event) && typeof row.event.seq === "number") {
-            handleRunEventPayload(row.event);
-            return;
-        }
-        if (safeText(row.type).includes(".") || safeText(row.type).startsWith("assistant") || safeText(row.type).startsWith("user")) {
-            handleChatEventPayload(row);
-            return;
-        }
-        const payload = toObject(row.payload);
-        if (payload && rowType === "run_event") {
-            handleRunEventPayload(payload);
-            return;
-        }
-        if (payload && rowType === "chat_event") {
-            handleChatEventPayload(payload);
-        }
-    }
-
-    async function replayHistory(fromSeq) {
-        if (typeof fromSeq !== "number" || fromSeq <= 0) return;
-        const res = await fetch(apiUrl(`/api/runs/${requestId}/events/history?from_seq=${fromSeq}`));
-        if (!res.ok) return;
-        const payload = await res.json();
-        const rows = Array.isArray(payload.events) ? payload.events : [];
-        for (const row of rows) {
-            consumeHistoryEvent(row);
-        }
-    }
-
-    async function refreshState() {
-        const res = await fetch(apiUrl(`/api/runs/${requestId}`));
-        if (!res.ok) return;
-        const data = await res.json();
-        currentStatus = safeText(data.status || "unknown");
-        statusEl.textContent = currentStatus;
-        pendingIdEl.textContent = data.pending_interaction_id == null ? "-" : String(data.pending_interaction_id);
-        if (currentStatus === "waiting_user") {
-            await refreshPending();
+        promptCardEl.classList.remove("hidden");
+        if (hint) {
+            promptTextEl.textContent = hint;
+            promptTextEl.classList.remove("hidden");
         } else {
-            setReplyEnabled(false, "");
+            promptTextEl.textContent = "";
+            promptTextEl.classList.add("hidden");
         }
-        if (["succeeded", "failed", "canceled"].includes(currentStatus)) {
-            if (stream) {
-                stream.close();
-                stream = null;
+        promptIdEl.textContent = interactionId > 0 ? String(interactionId) : "-";
+        promptKindEl.textContent = kind;
+        interactionIdEl.value = interactionId > 0 ? String(interactionId) : "";
+        pendingIdEl.textContent = interactionId > 0 ? String(interactionId) : "-";
+
+        const options = normalizeList(payload.options);
+        if (options.length) {
+            promptOptionsEl.classList.remove("hidden");
+            promptOptionsEl.textContent = `options: ${options.join(" | ")}`;
+        } else {
+            promptOptionsEl.classList.add("hidden");
+            promptOptionsEl.textContent = "";
+        }
+
+        const requiredFields = normalizeList(payload.required_fields);
+        if (requiredFields.length) {
+            promptRequiredEl.classList.remove("hidden");
+            promptRequiredEl.textContent = `required_fields: ${requiredFields.join(", ")}`;
+        } else {
+            promptRequiredEl.classList.add("hidden");
+            promptRequiredEl.textContent = "";
+        }
+    }
+
+    function cleanYamlScalar(raw) {
+        const value = safeText(raw).trim();
+        if (!value) return "";
+        if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
+            return value.slice(1, -1).trim();
+        }
+        return value;
+    }
+
+    function parseYamlScalar(block, key) {
+        const regex = new RegExp(`^\\s*${key}:\\s*(.+)$`, "mi");
+        const matched = block.match(regex);
+        if (!matched) return "";
+        return cleanYamlScalar(matched[1]);
+    }
+
+    function parseYamlList(block, key) {
+        const lines = block.split(/\r?\n/);
+        let startIndex = -1;
+        let baseIndent = 0;
+        for (let idx = 0; idx < lines.length; idx += 1) {
+            const line = lines[idx];
+            const matched = line.match(/^(\s*)([A-Za-z_][\w-]*):\s*$/);
+            if (!matched) continue;
+            if (matched[2] !== key) continue;
+            startIndex = idx;
+            baseIndent = matched[1].length;
+            break;
+        }
+        if (startIndex < 0) {
+            const inlineRaw = parseYamlScalar(block, key);
+            if (!inlineRaw.startsWith("[") || !inlineRaw.endsWith("]")) return [];
+            return inlineRaw
+                .slice(1, -1)
+                .split(",")
+                .map((item) => cleanYamlScalar(item))
+                .filter((item) => item);
+        }
+        const values = [];
+        for (let idx = startIndex + 1; idx < lines.length; idx += 1) {
+            const line = lines[idx];
+            if (!line.trim()) continue;
+            const indent = (line.match(/^(\s*)/) || ["", ""])[1].length;
+            if (indent <= baseIndent) break;
+            const itemMatched = line.match(/^\s*-\s*(.+)\s*$/);
+            if (!itemMatched) continue;
+            const value = cleanYamlScalar(itemMatched[1]);
+            if (value) values.push(value);
+        }
+        return values;
+    }
+
+    function extractAskUserBlocks(text) {
+        const source = safeText(text);
+        const patterns = [
+            /<ASK_USER_YAML>\s*([\s\S]*?)\s*<\/ASK_USER_YAML>/gim,
+            /```(?:ask_user_yaml|ask-user-yaml)\s*([\s\S]*?)```/gim,
+        ];
+        const blocks = [];
+        let stripped = source;
+        for (const pattern of patterns) {
+            const matches = Array.from(stripped.matchAll(pattern));
+            if (!matches.length) continue;
+            for (const matched of matches) {
+                const body = safeText(matched[1]).trim();
+                if (body) blocks.push(body);
             }
-            await flushObserveSummary();
+            stripped = stripped.replace(pattern, " ").trim();
         }
+        return { blocks, stripped: stripped.trim() };
+    }
+
+    function parseAskUserYaml(block) {
+        if (!block) return null;
+        const scoped = block.includes("ask_user:") ? block.split(/ask_user:\s*/i)[1] || block : block;
+        const prompt = parseYamlScalar(scoped, "prompt");
+        const interactionRaw = parseYamlScalar(scoped, "interaction_id");
+        const interactionId = interactionRaw ? Number(interactionRaw) : 0;
+        const kind = parseYamlScalar(scoped, "kind") || "open_text";
+        const hint = parseYamlScalar(scoped, "hint");
+        const uiHints = {};
+        if (hint) {
+            uiHints.hint = hint;
+        }
+        return {
+            interaction_id: Number.isFinite(interactionId) ? interactionId : 0,
+            kind,
+            prompt,
+            options: parseYamlList(scoped, "options"),
+            required_fields: parseYamlList(scoped, "required_fields"),
+            ui_hints: uiHints,
+            hint,
+        };
+    }
+
+    function parseAskUserBlocks(blocks) {
+        if (!Array.isArray(blocks) || !blocks.length) return null;
+        for (const block of blocks) {
+            const parsed = parseAskUserYaml(block);
+            if (parsed) return parsed;
+        }
+        return null;
+    }
+
+    function isStructuredDoneMessage(text) {
+        const trimmed = safeText(text).trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+        try {
+            const payload = JSON.parse(trimmed);
+            return Boolean(payload && typeof payload === "object" && payload.__SKILL_DONE__ === true);
+        } catch (_err) {
+            return false;
+        }
+    }
+
+    function parseResultStatusFromPreview(preview) {
+        const raw = safeText(preview).trim();
+        if (!raw || !raw.startsWith("{")) return "";
+        try {
+            const payload = JSON.parse(raw);
+            const status = safeText(payload?.status).trim().toLowerCase();
+            return status;
+        } catch (_err) {
+            return "";
+        }
+    }
+
+    function applyPendingPrompt(payload) {
+        const prompt = safeText(payload.prompt).trim();
+        const hint = safeText(payload.ui_hints?.hint || payload.hint).trim();
+        const interactionId = Number(payload.interaction_id || 0);
+        const key = `${interactionId || 0}|${hint || prompt}`;
+        renderPromptCard(payload);
+        if (!renderedPromptKeys.has(key)) {
+            renderedPromptKeys.add(key);
+        }
+        setReplyEnabled(interactionId > 0);
+    }
+
+    async function maybeAppendFinalSummary() {
+        if (finalSummaryLoaded) return;
+        if (!isTerminal(currentStatus)) return;
+        finalSummaryAttempts += 1;
+        try {
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/final-summary`));
+            if (!res.ok) {
+                scheduleFinalSummaryRetry();
+                return;
+            }
+            const payload = await res.json();
+            if (!payload) {
+                scheduleFinalSummaryRetry();
+                return;
+            }
+            let resultStatus = safeText(payload.result_status).trim().toLowerCase();
+            if (!resultStatus) {
+                resultStatus = parseResultStatusFromPreview(payload.result_preview);
+            }
+            if (resultStatus && resultStatus !== "success") {
+                finalSummaryLoaded = true;
+                if (finalSummaryRetryTimer) {
+                    clearTimeout(finalSummaryRetryTimer);
+                    finalSummaryRetryTimer = null;
+                }
+                return;
+            }
+            const hasResult = payload.has_result === true;
+            const hasArtifacts = payload.has_artifacts === true;
+            if (!hasResult && !hasArtifacts) {
+                scheduleFinalSummaryRetry();
+                return;
+            }
+            const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
+            const preview = safeText(payload.result_preview).trim();
+            const previewLine = preview ? `\nresult_preview: ${preview}` : "";
+            const artifactLine = artifacts.length
+                ? `\nartifacts: ${artifacts.slice(0, 8).join(", ")}`
+                : "";
+            appendChatBubble(
+                "agent",
+                `任务完成。${hasResult ? "\n已生成结构化结果。" : ""}${artifactLine}${previewLine}`,
+                `final-summary:${hasResult ? 1 : 0}:${artifacts.length}:${preview}`,
+            );
+            finalSummaryLoaded = true;
+            if (finalSummaryRetryTimer) {
+                clearTimeout(finalSummaryRetryTimer);
+                finalSummaryRetryTimer = null;
+            }
+        } catch (_err) {
+            scheduleFinalSummaryRetry();
+        }
+    }
+
+    function scheduleFinalSummaryRetry() {
+        if (finalSummaryLoaded) return;
+        if (!isTerminal(currentStatus)) return;
+        if (finalSummaryAttempts >= 6) return;
+        if (finalSummaryRetryTimer) return;
+        const delayMs = Math.min(2000, 400 * finalSummaryAttempts + 400);
+        finalSummaryRetryTimer = setTimeout(async () => {
+            finalSummaryRetryTimer = null;
+            await maybeAppendFinalSummary();
+        }, delayMs);
+    }
+
+    async function loadFileTree() {
+        if (fileTreeLoaded) return;
+        fileTreeLoaded = true;
+        fileTreePanelEl.textContent = "Loading...";
+        filePreviewPanelEl.innerHTML = '<div class="preview-empty">选择左侧文件查看内容。</div>';
+
+        function renderFilePreview(relativePath, preview) {
+            filePreviewPanelEl.textContent = "";
+            const titleEl = document.createElement("div");
+            titleEl.className = "preview-title";
+            titleEl.textContent = relativePath;
+            filePreviewPanelEl.appendChild(titleEl);
+
+            const mode = safeText(preview?.mode);
+            if (mode === "text") {
+                const metaEl = document.createElement("div");
+                metaEl.className = "preview-meta";
+                metaEl.textContent = safeText(preview?.meta || "text");
+                filePreviewPanelEl.appendChild(metaEl);
+                const pre = document.createElement("pre");
+                pre.className = "preview-content";
+                pre.textContent = safeText(preview?.content);
+                filePreviewPanelEl.appendChild(pre);
+                return;
+            }
+            if (mode === "too_large") {
+                const warn = document.createElement("div");
+                warn.className = "preview-empty";
+                warn.textContent = "文件过大不可预览";
+                filePreviewPanelEl.appendChild(warn);
+                const metaEl = document.createElement("div");
+                metaEl.className = "preview-meta";
+                metaEl.textContent = `${Number(preview?.size || 0)} bytes`;
+                filePreviewPanelEl.appendChild(metaEl);
+                return;
+            }
+            const unsupported = document.createElement("div");
+            unsupported.className = "preview-empty";
+            unsupported.textContent = "不可预览";
+            filePreviewPanelEl.appendChild(unsupported);
+            const metaEl = document.createElement("div");
+            metaEl.className = "preview-meta";
+            metaEl.textContent = safeText(preview?.meta || "无信息");
+            filePreviewPanelEl.appendChild(metaEl);
+        }
+
+        try {
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/bundle/entries`));
+            if (!res.ok) {
+                fileTreePanelEl.textContent = "File tree unavailable.";
+                return;
+            }
+            const payload = await res.json();
+            const entries = Array.isArray(payload.entries) ? payload.entries : [];
+            fileTreePanelEl.textContent = "";
+            if (!entries.length) {
+                fileTreePanelEl.textContent = "No files.";
+                return;
+            }
+            for (const entry of entries) {
+                const row = document.createElement("div");
+                row.className = "file-entry";
+                const depth = Number(entry.depth || 0);
+                row.style.paddingLeft = `${Math.max(0, depth) * 14}px`;
+                const name = safeText(entry.name || entry.path);
+                if (entry.is_dir) {
+                    row.textContent = `📁 ${name}/`;
+                } else {
+                    const btn = document.createElement("button");
+                    btn.type = "button";
+                    btn.textContent = `📄 ${name}`;
+                    btn.addEventListener("click", async () => {
+                        const path = encodeURIComponent(safeText(entry.path));
+                        const previewRes = await fetch(apiUrl(`/api/runs/${requestId}/bundle/file?path=${path}`));
+                        if (!previewRes.ok) {
+                            filePreviewPanelEl.innerHTML = `<div class="preview-empty">读取失败: HTTP ${previewRes.status}</div>`;
+                            return;
+                        }
+                        const previewPayload = await previewRes.json();
+                        renderFilePreview(safeText(entry.path), previewPayload.preview || {});
+                    });
+                    row.appendChild(btn);
+                }
+                fileTreePanelEl.appendChild(row);
+            }
+        } catch (_err) {
+            fileTreePanelEl.textContent = "File tree unavailable.";
+        }
+    }
+
+    async function maybeLoadFileTreeOnTerminal() {
+        if (!isTerminal(currentStatus)) return;
+        if (!fileTreeExpanded) return;
+        await loadFileTree();
     }
 
     async function refreshPending() {
         const res = await fetch(apiUrl(`/api/runs/${requestId}/pending`));
         if (!res.ok) {
-            setReplyEnabled(false, "Unable to read pending interaction.");
+            setReplyEnabled(false);
+            clearPromptCard();
             return;
         }
-        const data = await res.json();
-        const pending = toObject(data.pending);
+        const payload = await res.json();
+        const pending = payload && typeof payload.pending === "object" ? payload.pending : null;
         if (!pending) {
-            setReplyEnabled(false, "No pending interaction available.");
+            setReplyEnabled(false);
+            clearPromptCard();
             return;
         }
-        interactionIdEl.value = String(pending.interaction_id || "");
-        pendingIdEl.textContent = String(pending.interaction_id || "-");
-        const inferredFrom = safeText(pending?.context?.inferred_from);
-        const pendingPrompt = safeText(pending.prompt || "Pending interaction");
-        if (inferredFrom === "runtime_stream_assistant_message") {
-            setReplyEnabled(true, "Pending interaction available. Please reply below.");
+        applyPendingPrompt({
+            interaction_id: Number(pending.interaction_id || 0),
+            kind: safeText(pending.kind || "open_text"),
+            prompt: safeText(pending.prompt),
+            options: Array.isArray(pending.options) ? pending.options : [],
+            required_fields: Array.isArray(pending.required_fields) ? pending.required_fields : [],
+            ui_hints: pending.ui_hints && typeof pending.ui_hints === "object" ? pending.ui_hints : {},
+        });
+    }
+
+    async function refreshState() {
+        const res = await fetch(apiUrl(`/api/runs/${requestId}`));
+        if (!res.ok) return;
+        const payload = await res.json();
+        currentStatus = safeText(payload.status || "unknown");
+        statusEl.textContent = currentStatus;
+        updateThinkingCard(currentStatus);
+        pendingIdEl.textContent = payload.pending_interaction_id == null ? "-" : String(payload.pending_interaction_id);
+        if (typeof payload.cursor === "number") updateCursor(payload.cursor);
+
+        if (currentStatus === "waiting_user") {
+            await refreshPending();
         } else {
-            setReplyEnabled(true, pendingPrompt);
+            setReplyEnabled(false);
+            if (currentStatus !== "waiting_user") {
+                clearPromptCard();
+            }
+        }
+        if (isTerminal(currentStatus)) {
+            if (stream) {
+                stream.close();
+                stream = null;
+            }
+            setReplyEnabled(false);
+            clearPromptCard();
+            await maybeAppendFinalSummary();
+            await maybeLoadFileTreeOnTerminal();
         }
     }
 
-    async function scheduleReconnect() {
-        if (reconnectTimer) return;
-        if (currentStatus === "waiting_user" || ["succeeded", "failed", "canceled"].includes(currentStatus)) return;
+    function scheduleReconnect() {
+        if (reconnectTimer || currentStatus === "waiting_user" || isTerminal(currentStatus)) return;
         const delay = Math.min(1000 * (2 ** reconnectAttempts), 10000);
         reconnectAttempts += 1;
         reconnectTimer = setTimeout(async () => {
@@ -619,105 +787,202 @@
         }, delay);
     }
 
+    function handleConversationStateChanged(event) {
+        const data = event && typeof event.data === "object" ? event.data : {};
+        const nextStatus = safeText(data.to || currentStatus);
+        if (!nextStatus) return;
+        currentStatus = nextStatus;
+        statusEl.textContent = currentStatus;
+        updateThinkingCard(currentStatus);
+        if (data.pending_interaction_id != null) {
+            pendingIdEl.textContent = String(data.pending_interaction_id);
+        }
+        if (nextStatus === "waiting_user") {
+            refreshPending().catch(() => {});
+            return;
+        }
+        if (isTerminal(nextStatus)) {
+            setReplyEnabled(false);
+            clearPromptCard();
+            maybeAppendFinalSummary().catch(() => {});
+            maybeLoadFileTreeOnTerminal().catch(() => {});
+        }
+    }
+
+    function handleAssistantMessageFinal(event) {
+        const text = safeText(event?.data?.text);
+        const parsed = extractAskUserBlocks(text);
+        const cleaned = parsed.stripped;
+        if (cleaned && !isStructuredDoneMessage(cleaned)) {
+            appendChatBubble(
+                "agent",
+                cleaned,
+                `assistant.message.final:${event.seq || 0}:${cleaned}`,
+            );
+        }
+        const askPayload = parseAskUserBlocks(parsed.blocks);
+        if (askPayload) {
+            applyPendingPrompt(askPayload);
+        }
+    }
+
+    function handleUserInputRequired(event) {
+        const payload = {
+            interaction_id: Number(event?.data?.interaction_id || 0),
+            kind: safeText(event?.data?.kind || "open_text"),
+            prompt: safeText(event?.data?.prompt),
+            options: Array.isArray(event?.data?.options) ? event.data.options : [],
+            required_fields: Array.isArray(event?.data?.required_fields) ? event.data.required_fields : [],
+            ui_hints: event?.data?.ui_hints && typeof event.data.ui_hints === "object" ? event.data.ui_hints : {},
+        };
+        applyPendingPrompt(payload);
+    }
+
+    function handleChatEvent(event) {
+        const type = safeText(event.type);
+        if (typeof event.seq === "number") {
+            updateCursor(event.seq);
+        }
+        if (!type) return;
+        if (type === "conversation.state.changed") {
+            handleConversationStateChanged(event);
+            return;
+        }
+        if (type === "interaction.reply.accepted") {
+            clearPromptCard();
+            setReplyEnabled(false);
+            const interactionId = Number(event?.data?.interaction_id || 0);
+            const preview = safeText(event?.data?.response_preview).trim();
+            if (preview) {
+                appendChatBubble("user", preview, `user.reply:${interactionId}:${preview}`);
+            } else {
+                appendChatBubble("agent", "已收到你的回复，继续处理中。", `reply.accepted:${event.seq || 0}`);
+            }
+            return;
+        }
+        if (type === "interaction.auto_decide.timeout") {
+            clearPromptCard();
+            setReplyEnabled(false);
+            appendChatBubble("agent", "等待超时，系统已自动决策并继续执行。", `auto.timeout:${event.seq || 0}`);
+            return;
+        }
+        if (type === "assistant.message.final") {
+            handleAssistantMessageFinal(event);
+            return;
+        }
+        if (type === "user.input.required") {
+            handleUserInputRequired(event);
+            return;
+        }
+        if (type === "conversation.completed") {
+            maybeAppendFinalSummary().catch(() => {});
+            maybeLoadFileTreeOnTerminal().catch(() => {});
+            return;
+        }
+        if (type === "conversation.failed") {
+            const code = safeText(event?.data?.error?.code || "");
+            const message = code ? `任务失败（${code}）。` : "任务失败。";
+            appendChatBubble("agent", message, `conversation.failed:${event.seq || 0}:${code}`);
+        }
+    }
+
+    async function loadHistory() {
+        if (historyLoaded) return;
+        historyLoaded = true;
+        try {
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/events/history`));
+            if (!res.ok) return;
+            const payload = await res.json();
+            const events = Array.isArray(payload.events) ? payload.events : [];
+            for (const event of events) {
+                handleChatEvent(event);
+            }
+        } catch (_err) {
+            // Keep running even if history loading fails.
+        }
+    }
+
     async function startStream() {
         if (stream) {
             stream.close();
+            stream = null;
         }
-        stream = new EventSource(
-            apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}`)
-        );
+        stream = new EventSource(apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}`));
         stream.addEventListener("snapshot", (evt) => {
             reconnectAttempts = 0;
-            const data = JSON.parse(evt.data || "{}");
-            currentStatus = safeText(data.status || "unknown");
+            const payload = JSON.parse(evt.data || "{}");
+            currentStatus = safeText(payload.status || currentStatus);
             statusEl.textContent = currentStatus;
-            if (data.pending_interaction_id != null) {
-                pendingIdEl.textContent = String(data.pending_interaction_id);
+            updateThinkingCard(currentStatus);
+            if (payload.pending_interaction_id != null) {
+                pendingIdEl.textContent = String(payload.pending_interaction_id);
             }
-            if (typeof data.cursor === "number") updateCursor(data.cursor);
+            if (typeof payload.cursor === "number") {
+                updateCursor(payload.cursor);
+            }
         });
         stream.addEventListener("chat_event", (evt) => {
             reconnectAttempts = 0;
-            const data = JSON.parse(evt.data || "{}");
-            handleChatEventPayload(data);
+            const payload = JSON.parse(evt.data || "{}");
+            handleChatEvent(payload);
         });
-        stream.addEventListener("error", async () => {
-            if (currentStatus === "waiting_user") {
-                if (stream) {
-                    stream.close();
-                    stream = null;
-                }
-                return;
-            }
-            setReplyEnabled(false, "Event stream disconnected. Reconnecting...");
+        stream.addEventListener("error", () => {
             if (stream) {
                 stream.close();
                 stream = null;
             }
-            await scheduleReconnect();
+            scheduleReconnect();
         });
     }
 
-    async function flushObserveSummary() {
-        if (!observeSummaryDirty || observeSummaryInflight) return;
-        observeSummaryInflight = true;
-        try {
-            const payload = {
-                cursor: observationSummary.cursor,
-                last_chat_event: observationSummary.last_chat_event,
-                key_events: observationSummary.key_events,
-                raw_refs: observationSummary.raw_refs,
-            };
-            const res = await fetch(apiUrl(`/api/runs/${requestId}/observe-summary`), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-            if (res.ok) {
-                observeSummaryDirty = false;
-            }
-        } catch (err) {
-            appendDiagnostic(`[observe-summary] ${String(err)}`);
-        } finally {
-            observeSummaryInflight = false;
-        }
-    }
-
-    replyForm.addEventListener("submit", async (evt) => {
-        evt.preventDefault();
+    async function submitReply() {
         const interactionId = Number(interactionIdEl.value || "0");
+        const text = safeText(replyTextEl.value).trim();
         if (!interactionId) return;
         const payload = {
             interaction_id: interactionId,
-            response: { text: replyText.value || "" },
+            response: { text },
         };
         const res = await fetch(apiUrl(`/api/runs/${requestId}/reply`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
         });
-        if (!res.ok) {
-            promptEl.textContent = "Reply rejected.";
-            return;
-        }
-        replyText.value = "";
-        setReplyEnabled(false, "Reply accepted, resuming...");
-        await flushObserveSummary();
+        if (!res.ok) return;
+        appendChatBubble("user", text || "(empty reply)", `user.reply:${interactionId}:${text}`);
+        replyTextEl.value = "";
+        clearPromptCard();
+        setReplyEnabled(false);
         setTimeout(async () => {
             await startStream();
             await refreshState();
-        }, 200);
+        }, 150);
+    }
+
+    replyForm.addEventListener("submit", async (evt) => {
+        evt.preventDefault();
+        await submitReply();
     });
 
-    setInterval(() => {
-        flushObserveSummary();
-    }, 5000);
+    replyTextEl.addEventListener("keydown", async (evt) => {
+        const isSendHotkey = (evt.ctrlKey || evt.metaKey) && evt.key === "Enter";
+        if (!isSendHotkey) return;
+        evt.preventDefault();
+        if (replySubmitEl.disabled) return;
+        await submitReply();
+    });
 
-    window.addEventListener("beforeunload", () => {
-        flushObserveSummary();
+    fileTreeToggleEl.addEventListener("click", async () => {
+        fileTreeExpanded = !fileTreeExpanded;
+        fileTreeSectionEl.classList.toggle("hidden", !fileTreeExpanded);
+        fileTreeToggleEl.textContent = fileTreeExpanded ? "Hide Files" : "Show Files";
+        if (fileTreeExpanded) {
+            await maybeLoadFileTreeOnTerminal();
+        }
     });
 
     (async () => {
+        await loadHistory();
         await startStream();
         await refreshState();
     })();

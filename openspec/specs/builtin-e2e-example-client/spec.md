@@ -59,67 +59,76 @@ TBD - created by archiving change interactive-33-builtin-e2e-example-client. Upd
 - **AND** 页面跳转到运行观测视图
 
 ### Requirement: 示例客户端 MUST 支持交互式对话直到终态
-The example client MUST treat backend lifecycle state as the single source of truth for interaction progression and MUST NOT parse assistant ask_user JSON text as control state.
+The example client MUST present a product-style chat experience while preserving FCMP interaction semantics.
 
 #### Scenario: waiting_user 时从 pending 驱动 reply
 - **WHEN** 运行进入 `waiting_user`
 - **THEN** 客户端通过 pending 接口获取 `interaction_id/prompt`
 - **AND** 用户提交 reply 后继续推进运行
 
-#### Scenario: assistant ask_user 文本不驱动状态机
-- **WHEN** assistant 消息包含 ask_user-like JSON 文本
-- **THEN** 客户端仅将其展示在对话区
-- **AND** 不把其当作 reply 表单数据来源
+#### Scenario: assistant ask_user YAML 转提示卡
+- **WHEN** `assistant.message.final` 文本包含 `<ASK_USER_YAML>` 或 fenced `ask_user_yaml`
+- **THEN** 客户端将其解析为提示卡（prompt/interaction_id/kind/options/required_fields）
+- **AND** YAML 原文不渲染为聊天气泡
 
-#### Scenario: 客户端展示软完成告警
-- **WHEN** interactive run 通过“无 done marker 但 schema 通过”完成
-- **THEN** 客户端展示 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER` 诊断信息
+#### Scenario: user.input.required 作为 Agent 问询语义
+- **WHEN** 客户端接收 `user.input.required`
+- **THEN** 问询信息进入提示卡语义（非 System）
+- **AND** 不以独立 system 气泡重复展示
+- **AND** 与提示卡按 `interaction_id + prompt` 去重
 
-#### Scenario: 客户端展示 max_attempt 失败原因
-- **WHEN** interactive run 达到 `max_attempt` 且无完成证据
-- **THEN** 客户端展示 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED` 失败原因
+#### Scenario: reply.accepted 回放用户消息
+- **WHEN** 客户端接收 `interaction.reply.accepted` 且数据包含 `response_preview`
+- **THEN** 客户端按 user 侧气泡渲染该回复
+- **AND** 重进页面后仍可从 history 回放用户消息
+
+#### Scenario: 终态产物摘要追加
+- **WHEN** 运行进入终态且 `has_result=true` 或 `has_artifacts=true`
+- **THEN** 客户端在聊天区追加 Agent 侧最终摘要消息
+- **AND** `conversation.completed` 不渲染为独立聊天气泡
+- **AND** 若终态 `assistant.message.final` 为结构化 done 结果（`__SKILL_DONE__=true`），该原始消息不重复渲染
+- **AND** 若首次拉取 `final-summary` 未就绪，客户端重试直到成功或达到上限
+
+### Requirement: 示例客户端观察页 MUST 去除技术诊断噪音
+观察页 MUST 聚焦对话与基础状态，不展示后台诊断细节面板。
+
+#### Scenario: 页面不渲染技术面板
+- **WHEN** 用户访问 `/runs/{request_id}`
+- **THEN** 页面不展示 `stderr`、`diagnostics`、`Event Relations`、`Raw Ref Preview`
+- **AND** 页面仅保留对话区、提示卡、回复输入区与状态信息
+
+### Requirement: 示例客户端回复输入 MUST 支持快捷键发送
+观察页回复输入框 MUST 支持 `Ctrl+Enter`/`Cmd+Enter` 发送，并提示该快捷键。
+
+#### Scenario: 快捷键触发发送
+- **WHEN** 用户在回复输入框按下 `Ctrl+Enter` 或 `Cmd+Enter`
+- **THEN** 客户端执行与点击发送按钮等价的 reply 请求
+- **AND** 按钮右侧显示快捷键提示
 
 ### Requirement: 示例客户端 MUST 提供 run 实时观测的可重复进入入口
-示例客户端 MUST 为每个在客户端创建过的 run 提供稳定入口，允许用户在关闭页面后再次进入实时观测与对话页面。
+示例客户端 MUST 提供稳定的 runs 入口，允许用户在关闭页面后再次进入实时观测与对话页面。
 
 #### Scenario: 从客户端 UI 再次进入已创建 run
-- **WHEN** 用户在客户端中曾创建过某个 `request_id`
+- **WHEN** 用户访问客户端 runs 页面
 - **THEN** 用户可在客户端 Runs 入口找到该 `request_id`
-- **AND** 点击后可重新打开该 run 的实时观测页面
+- **AND** 点击 `Details` 后可重新打开该 run 的实时观测页面
 
-#### Scenario: 回放作为观测页子功能
-- **WHEN** 用户位于某个 run 的实时观测页面
-- **THEN** 页面提供 Replay 子功能入口
-- **AND** Replay 不作为再次进入 run 的唯一入口
+#### Scenario: Replay 路由下线
+- **WHEN** 客户端调用历史 Replay 路由（`/recordings*`、`/api/recordings*`、`/api/runs/{request_id}/observe-summary`）
+- **THEN** 系统不再提供该能力（路由移除）
 
 ### Requirement: 示例客户端 MUST 提供结果解包与可视化展示
-示例客户端 MUST 在终态后读取结果与产物信息，并以用户可读形式展示最终输出。
+示例客户端 MUST 在 Observation 页面内展示终态结果摘要与文件树预览能力，不再依赖独立 Result 页面。
 
-#### Scenario: 结果与产物展示
+#### Scenario: Observation 终态结果与产物展示
 - **WHEN** 运行进入终态且结果可读取
-- **THEN** 客户端展示结构化结果内容
-- **AND** 展示可访问的产物列表与下载入口（如有）
+- **THEN** 客户端在 Observation 对话区追加结构化结果摘要
+- **AND** 展示可访问的产物信息（如有）
 
-### Requirement: 结果页文件树与预览 MUST 复用管理 UI run 观测交互模式
-示例客户端结果页中的 bundle 文件树与文件预览 MUST 与内建管理 UI run 观测页保持同构交互（树结构、滚动容器、点击加载预览）。
-
-#### Scenario: 同构文件树/预览交互
-- **WHEN** 用户进入某个 run 的结果页
-- **THEN** 页面左侧展示可滚动的 bundle 文件树，右侧展示预览窗口
-- **AND** 点击文件节点后，预览区域按局部渲染方式加载对应文件内容/状态
-
-### Requirement: 示例客户端 MUST 提供录制回放 MVP 能力
-示例客户端 MUST 支持将关键执行链路请求/响应记录为结构化会话文件，并提供回放视图按步骤展示关键交互结果。
-
-#### Scenario: 录制关键交互会话
-- **WHEN** 用户执行一次完整或部分运行流程（创建/上传/pending/reply/结果读取）
-- **THEN** 客户端生成一份结构化录制文件
-- **AND** 录制内容包含时间戳、请求摘要、响应摘要与关键状态
-
-#### Scenario: 单步回放
-- **WHEN** 用户在回放视图加载一份已录制会话
-- **THEN** 客户端按步骤展示会话中的关键交互与状态变化
-- **AND** 用户可单步推进查看每一步结果
+#### Scenario: Observation 文件树/预览交互
+- **WHEN** 用户在 Observation 页展开文件树
+- **THEN** 页面展示固定双栏文件树与预览窗口
+- **AND** 点击文件节点后，预览区按局部渲染加载内容
 
 ### Requirement: 系统 MUST 提供 E2E 示例客户端 UI 设计参考文档
 系统 MUST 提供并维护示例客户端 UI 设计参考文档，用于约束信息架构、页面布局与交互状态表达。
@@ -128,4 +137,3 @@ The example client MUST treat backend lifecycle state as the single source of tr
 - **WHEN** 开发者查阅示例客户端设计约束
 - **THEN** 可以在 `docs/e2e_example_client_ui_reference.md` 获取页面结构、关键组件和状态说明
 - **AND** 文档内容可用于实现与测试对齐
-

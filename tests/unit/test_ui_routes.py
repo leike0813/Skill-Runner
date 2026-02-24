@@ -525,17 +525,25 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "Request: req-1" in detail_res.text
     assert "Run File Tree (Read-only)" in detail_res.text
     assert "对话区（FCMP）" in detail_res.text
-    assert "错误输出（stderr）" in detail_res.text
+    assert "Raw stderr" in detail_res.text
+    assert "raw_ref 回跳预览" in detail_res.text
+    assert "FCMP Audit Stream" in detail_res.text
+    assert "RASP Audit Stream" in detail_res.text
+    assert "Orchestrator Audit Stream" in detail_res.text
     assert 'id="run-file-tree-scroll"' in detail_res.text
     assert 'id="run-file-preview-scroll"' in detail_res.text
-    assert 'id="pending-state"' in detail_res.text
-    assert 'id="pending-reply-submit"' in detail_res.text
-    assert 'id="diagnostic-log"' in detail_res.text
-    assert 'id="relation-view"' in detail_res.text
+    assert 'id="fcmp-audit-log"' in detail_res.text
+    assert 'id="rasp-audit-log"' in detail_res.text
+    assert 'id="orchestrator-audit-log"' in detail_res.text
     assert 'id="raw-ref-preview"' in detail_res.text
     assert "/v1/management/runs/${requestId}/events" in detail_res.text
+    assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "connectEvents()" in detail_res.text
+    assert detail_res.text.index("raw_ref 回跳预览") < detail_res.text.index("Attempt:")
+    assert detail_res.text.index("对话区（FCMP）") < detail_res.text.index("Attempt:")
+    assert detail_res.text.index("Attempt:") < detail_res.text.index("FCMP Audit Stream")
+    assert detail_res.text.rindex("Raw stderr") > detail_res.text.index("FCMP Audit Stream")
 
     preview_res = await _request("GET", "/ui/runs/req-1/view?path=logs/stdout.txt")
     assert preview_res.status_code == 200
@@ -577,18 +585,15 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
     assert response.status_code == 200
     assert f">{status}<" in response.text
     assert "/v1/management/runs/${requestId}/events" in response.text
-    assert "/v1/management/runs/${requestId}/pending" in response.text
-    assert "/v1/management/runs/${requestId}/reply" in response.text
+    assert "/v1/management/runs/${requestId}/protocol/history?" in response.text
     assert "/v1/management/runs/${requestId}/cancel" in response.text
     assert "/v1/management/runs/${requestId}/logs/range" in response.text
     assert "cursor=${cursor}" in response.text
-    assert "stdout_from=${stdoutOffset}" not in response.text
-    assert "stderr_from=${stderrOffset}" not in response.text
     assert 'id="stdout-log"' in response.text
     assert 'id="stderr-log"' in response.text
-    assert 'id="diagnostic-log"' in response.text
-    assert 'id="relation-view"' in response.text
-    assert 'id="pending-state"' in response.text
+    assert 'id="fcmp-audit-log"' in response.text
+    assert 'id="rasp-audit-log"' in response.text
+    assert 'id="orchestrator-audit-log"' in response.text
     assert 'id="cancel-run-btn"' in response.text
 
 

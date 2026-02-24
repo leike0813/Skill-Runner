@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -36,6 +37,43 @@ def _read_bytes(path: Path) -> bytes:
     if not path.exists() or not path.is_file():
         return b""
     return path.read_bytes()
+
+
+ASK_USER_BLOCK_PATTERNS = (
+    re.compile(
+        r"<ASK_USER_YAML>\s*[\s\S]*?\s*</ASK_USER_YAML>",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"```(?:ask_user_yaml|ask-user-yaml)\s*[\s\S]*?```",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _strip_ask_user_yaml_blocks(text: str) -> str:
+    normalized = str(text or "")
+    for pattern in ASK_USER_BLOCK_PATTERNS:
+        normalized = pattern.sub("\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _normalize_prompt_text(text: str) -> str:
+    return _strip_ask_user_yaml_blocks(text).strip()
+
+
+def _extract_response_preview(payload: Mapping[str, Any]) -> Optional[str]:
+    response_obj = payload.get("response")
+    if isinstance(response_obj, dict):
+        text_obj = response_obj.get("text")
+        if isinstance(text_obj, str):
+            normalized = text_obj.strip()
+            return normalized or None
+    if isinstance(response_obj, str):
+        normalized = response_obj.strip()
+        return normalized or None
+    return None
 
 
 def parse_engine_logs(
@@ -165,10 +203,13 @@ def build_rasp_events(
                 correlation=correlation,
             )
 
+    latest_assistant_prompt = ""
     for index, msg in enumerate(parsed.get("assistant_messages", []), start=1):
         text = str(msg.get("text", ""))
+        text = _normalize_prompt_text(text) or text.strip()
         if not text.strip():
             continue
+        latest_assistant_prompt = text.strip()
         raw_ref_row = msg.get("raw_ref") if isinstance(msg, dict) else None
         push(
             RuntimeEventCategory.AGENT,
@@ -217,17 +258,19 @@ def build_rasp_events(
         if isinstance(pending_interaction, dict):
             prompt_obj = pending_interaction.get("prompt")
             if isinstance(prompt_obj, str):
-                prompt = prompt_obj
+                prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
             interaction_id_obj = pending_interaction.get("interaction_id")
             if isinstance(interaction_id_obj, int):
                 interaction_id = interaction_id_obj
+        if not prompt:
+            prompt = latest_assistant_prompt
         push(
             RuntimeEventCategory.INTERACTION,
             "interaction.user_input.required",
             data={
                 "interaction_id": interaction_id,
                 "kind": "free_text",
-                "prompt": prompt or "Provide next user turn",
+                "prompt": prompt or "User input is required to continue.",
             },
             correlation=correlation,
         )
@@ -337,24 +380,22 @@ def build_fcmp_events(
     if session_id:
         push(FcmpEventType.CONVERSATION_STARTED.value, {"session_id": session_id})
 
-    assistant_events = [
-        event for event in rasp_events if event.event.type == "agent.message.final"
-    ]
+    assistant_events = [event for event in rasp_events if event.event.type == "agent.message.final"]
     assistant_messages: List[str] = []
+    assistant_payloads: List[Tuple[str, str, Optional[RuntimeEventRef]]] = []
     for event in assistant_events:
         text = event.data.get("text")
         if not isinstance(text, str) or not text.strip():
             continue
-        assistant_messages.append(text)
-        message_id = event.data.get("message_id")
-        push(
-            FcmpEventType.ASSISTANT_MESSAGE_FINAL.value,
-            {
-                "message_id": message_id if isinstance(message_id, str) else f"m_{attempt_number}_{len(assistant_messages)}",
-                "text": text,
-            },
-            raw_ref=event.raw_ref,
+        normalized_text = _normalize_prompt_text(text) or text.strip()
+        assistant_messages.append(normalized_text)
+        message_id_obj = event.data.get("message_id")
+        message_id = (
+            message_id_obj
+            if isinstance(message_id_obj, str) and message_id_obj.strip()
+            else f"m_{attempt_number}_{len(assistant_messages)}"
         )
+        assistant_payloads.append((message_id, normalized_text, event.raw_ref))
 
     for event in rasp_events:
         if event.event.type != "diagnostic.warning":
@@ -364,11 +405,7 @@ def build_fcmp_events(
             continue
         push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code}, raw_ref=event.raw_ref)
 
-    raw_events = [
-        event
-        for event in rasp_events
-        if event.event.type in {"raw.stdout", "raw.stderr"}
-    ]
+    raw_events = [event for event in rasp_events if event.event.type in {"raw.stdout", "raw.stderr"}]
     assistant_line_set: set[str] = set()
     for text in assistant_messages:
         assistant_line_set.update(_extract_comparable_lines(text))
@@ -436,25 +473,30 @@ def build_fcmp_events(
                 )
 
     history_rows = interaction_history if isinstance(interaction_history, list) else []
+    current_reply_interaction_id = attempt_number - 1 if attempt_number > 1 else None
+    matched_reply_row: Optional[Dict[str, Any]] = None
     for row in history_rows:
         if not isinstance(row, dict):
             continue
         if row.get("event_type") != "reply":
             continue
         interaction_id_obj = row.get("interaction_id")
-        interaction_id: Optional[int]
-        if isinstance(interaction_id_obj, int) and interaction_id_obj > 0:
-            interaction_id = interaction_id_obj
-        else:
-            interaction_id = None
-        payload_obj = row.get("payload")
+        interaction_id = interaction_id_obj if isinstance(interaction_id_obj, int) and interaction_id_obj > 0 else None
+        if current_reply_interaction_id is None or interaction_id != current_reply_interaction_id:
+            continue
+        matched_reply_row = row
+
+    if matched_reply_row is not None:
+        interaction_id_obj = matched_reply_row.get("interaction_id")
+        interaction_id = interaction_id_obj if isinstance(interaction_id_obj, int) and interaction_id_obj > 0 else None
+        payload_obj = matched_reply_row.get("payload")
         payload = payload_obj if isinstance(payload_obj, dict) else {}
         resolved_at_obj = payload.get("resolved_at")
-        resolved_at: Optional[str] = None
+        resolved_at: Optional[str]
         if isinstance(resolved_at_obj, str) and resolved_at_obj:
             resolved_at = resolved_at_obj
         else:
-            created_at_obj = row.get("created_at")
+            created_at_obj = matched_reply_row.get("created_at")
             resolved_at = created_at_obj if isinstance(created_at_obj, str) and created_at_obj else None
         resolution_mode_obj = payload.get("resolution_mode")
         resolution_mode = (
@@ -484,24 +526,25 @@ def build_fcmp_events(
                     pending_interaction_id=interaction_id,
                 ),
             )
-            continue
-        push(
-            FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
-            make_fcmp_reply_accepted(
-                interaction_id=interaction_id,
-                accepted_at=resolved_at,
-            ),
-        )
-        push(
-            FcmpEventType.CONVERSATION_STATE_CHANGED.value,
-            make_fcmp_state_changed(
-                source_state="waiting_user",
-                target_state="queued",
-                trigger=FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
-                updated_at=resolved_at,
-                pending_interaction_id=interaction_id,
-            ),
-        )
+        else:
+            push(
+                FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
+                make_fcmp_reply_accepted(
+                    interaction_id=interaction_id,
+                    accepted_at=resolved_at,
+                    response_preview=_extract_response_preview(payload),
+                ),
+            )
+            push(
+                FcmpEventType.CONVERSATION_STATE_CHANGED.value,
+                make_fcmp_state_changed(
+                    source_state="waiting_user",
+                    target_state="queued",
+                    trigger=FcmpEventType.INTERACTION_REPLY_ACCEPTED.value,
+                    updated_at=resolved_at,
+                    pending_interaction_id=interaction_id,
+                ),
+            )
 
     pending_payload = pending_interaction if isinstance(pending_interaction, dict) else None
     pending_interaction_id: Optional[int] = None
@@ -578,6 +621,16 @@ def build_fcmp_events(
             ),
         )
 
+    for message_id, normalized_text, raw_ref in assistant_payloads:
+        push(
+            FcmpEventType.ASSISTANT_MESSAGE_FINAL.value,
+            {
+                "message_id": message_id,
+                "text": normalized_text,
+            },
+            raw_ref=raw_ref,
+        )
+
     terminal_state_trigger_map = {
         "succeeded": "turn.succeeded",
         "failed": "turn.failed",
@@ -615,29 +668,33 @@ def build_fcmp_events(
         for code in completion_diagnostics:
             push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif completion_state == "awaiting_user_input" or effective_status == "waiting_user":
-        prompt = "Provide next user turn"
+        prompt = ""
         waiting_interaction_id: Optional[int] = pending_interaction_id
         if pending_payload is not None:
             prompt_obj = pending_payload.get("prompt")
             if isinstance(prompt_obj, str) and prompt_obj.strip():
-                prompt = prompt_obj
+                prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
         else:
             for event in rasp_events:
                 if event.event.type != "interaction.user_input.required":
                     continue
                 prompt_obj = event.data.get("prompt")
                 if isinstance(prompt_obj, str) and prompt_obj.strip():
-                    prompt = prompt_obj
+                    prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
                 interaction_id_obj = event.data.get("interaction_id")
                 if isinstance(interaction_id_obj, int):
                     waiting_interaction_id = interaction_id_obj
                 break
+        if not prompt and assistant_messages:
+            latest_message = assistant_messages[-1]
+            if isinstance(latest_message, str) and latest_message.strip():
+                prompt = latest_message.strip()
         push(
             FcmpEventType.USER_INPUT_REQUIRED.value,
             {
                 "interaction_id": waiting_interaction_id,
                 "kind": "free_text",
-                "prompt": prompt,
+                "prompt": prompt or "User input is required to continue.",
             },
         )
         if completion_reason_code:

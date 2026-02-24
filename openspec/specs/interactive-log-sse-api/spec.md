@@ -64,9 +64,17 @@
 - **WHEN** 输出 `interaction.reply.accepted` 或 `interaction.auto_decide.timeout`
 - **THEN** 后续存在 `conversation.state.changed(waiting_user->queued)` 且 trigger 与该事件类型一致
 
-### Requirement: FCMP seq MUST 单调连续
-系统 MUST 保证单次 materialize 的 FCMP 事件 `seq` 从 1 开始严格递增且无空洞。
+### Requirement: FCMP seq MUST 跨 attempt 全局单调连续
+系统 MUST 保证同一 run 的 FCMP 事件 `seq` 在所有 attempt 上全局严格递增且无空洞；attempt 内局部序号 MUST 写入 `meta.local_seq`。
 
-#### Scenario: seq 连续
+#### Scenario: 全局 seq 连续
 - **WHEN** 客户端获取一组 FCMP 历史或流式事件
 - **THEN** `seq` 形成连续整数序列
+- **AND** 同一 attempt 内 `meta.local_seq` 从 1 开始递增
+
+### Requirement: resumed attempt 中 reply 事件 MUST 先于 assistant 输出
+系统 MUST 在续跑 attempt（`attempt > 1`）中先发 `interaction.reply.accepted`（或 auto-decide），再发该轮 `assistant.message.final`。
+
+#### Scenario: reply 优先
+- **WHEN** 续跑 attempt 产出 `interaction.reply.accepted` 与 `assistant.message.final`
+- **THEN** `interaction.reply.accepted.seq < assistant.message.final.seq`

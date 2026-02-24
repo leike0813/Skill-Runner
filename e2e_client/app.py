@@ -4,7 +4,6 @@ import uvicorn
 from fastapi import FastAPI  # type: ignore[import-not-found]
 
 from .config import load_settings
-from .recording import RecordingStore
 from .routes import router
 
 
@@ -16,7 +15,6 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
     app.state.settings = settings
-    app.state.recording_store = RecordingStore(settings.recordings_dir)
     app.include_router(router)
     return app
 
@@ -32,4 +30,3 @@ if __name__ == "__main__":
         port=settings.port,
         reload=False,
     )
-

@@ -35,7 +35,7 @@ sequenceDiagram
 
 ## 2) 交互回复流（waiting_user -> queued -> running）
 
-不变量锚点：`TR-02`、`TR-03`、`FM-02`、`FM-03`、`PE-01`、`OR-02`。
+不变量锚点：`TR-02`、`TR-03`、`FM-02`、`FM-03`、`PE-01`、`OR-02`、`OR-04`。
 
 ```mermaid
 sequenceDiagram
@@ -56,6 +56,8 @@ sequenceDiagram
 
     O->>P: turn.started
     P-->>C: chat_event(conversation.state.changed queued->running)
+    O->>P: assistant output parsed
+    P-->>C: chat_event(assistant.message.final)
 ```
 
 ## 3) strict=false 超时自动决策流
@@ -107,7 +109,7 @@ sequenceDiagram
 
 ## 5) Statechart 映射说明
 
-不变量锚点：`FM-01` ~ `FM-07`、`PE-01`、`PE-02`、`OR-03`。
+不变量锚点：`FM-01` ~ `FM-07`、`PE-01`、`PE-02`、`OR-03`、`OR-04`。
 
 - `turn.started` -> `conversation.state.changed(... to=running)`
 - `turn.needs_input` -> `conversation.state.changed(... to=waiting_user)` + `user.input.required`

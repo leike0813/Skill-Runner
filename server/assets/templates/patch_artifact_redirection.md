@@ -1,6 +1,6 @@
 ---
 
-# Runtime Output Overrides
+## Runtime Output Overrides
 
 The following output artifacts MUST be written to the specific paths listed below.
 IMPORTANT: Ignore any previous instructions regarding the file paths of these outputs.

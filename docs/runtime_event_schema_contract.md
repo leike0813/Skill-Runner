@@ -33,9 +33,10 @@ Schema 文件：
 
 1. `conversation.state.changed`
 - `from`, `to`, `trigger`, `updated_at`, `pending_interaction_id?`
+- FCMP envelope `meta` 至少包含 `attempt`，可包含 `local_seq`（attempt 内局部序号）
 
 2. `interaction.reply.accepted`
-- `interaction_id`, `resolution_mode=user_reply`, `accepted_at`
+- `interaction_id`, `resolution_mode=user_reply`, `accepted_at`, `response_preview?`
 
 3. `interaction.auto_decide.timeout`
 - `interaction_id`, `resolution_mode=auto_decide_timeout`, `policy`, `accepted_at`, `timeout_sec?`
