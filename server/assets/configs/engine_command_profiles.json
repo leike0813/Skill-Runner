@@ -32,7 +32,13 @@
     ]
   },
   "opencode": {
-    "start": [],
-    "resume": []
+    "start": [
+      "--format",
+      "json"
+    ],
+    "resume": [
+      "--format",
+      "json"
+    ]
   }
 }

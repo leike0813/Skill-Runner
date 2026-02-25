@@ -48,6 +48,45 @@ def mock_skill(tmp_path):
         }
     )
 
+
+def test_construct_config_includes_engine_default_layer(tmp_path):
+    adapter = GeminiAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_assets = skill_dir / "assets"
+    skill_assets.mkdir(parents=True)
+    (skill_assets / "gemini_settings.json").write_text(
+        json.dumps({"model": {"name": "gemini-skill-default"}}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(id="test-skill", path=skill_dir)
+
+    captured: dict[str, object] = {}
+
+    def _capture_generate_config(schema_name: str, config_layers, output_path: Path):
+        captured["schema_name"] = schema_name
+        captured["layers"] = config_layers
+        captured["output_path"] = output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("{}", encoding="utf-8")
+        return output_path
+
+    with patch("server.adapters.gemini_adapter.config_generator.generate_config", side_effect=_capture_generate_config):
+        adapter._construct_config(
+            skill,
+            run_dir,
+            options={"model": "gemini-runtime", "gemini_config": {"sandbox": {"enabled": False}}},
+        )
+
+    assert captured["schema_name"] == "gemini_settings_schema.json"
+    layers = captured["layers"]
+    assert isinstance(layers, list)
+    assert layers[0]["model"]["name"] == "gemini-2.5-flash"
+    assert layers[1]["model"]["name"] == "gemini-skill-default"
+    assert layers[2]["model"]["name"] == "gemini-runtime"
+    assert layers[3]["sandbox"]["enabled"] is False
+
 @pytest.mark.asyncio
 async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"
@@ -96,10 +135,9 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
             
             await adapter.run(mock_skill, input_data, run_dir, options)
             
-            # Check prompt log
-            prompt_path = run_dir / "logs" / "prompt.txt"
-            assert prompt_path.exists()
-            prompt_content = prompt_path.read_text()
+            # Check rendered prompt passed to Gemini CLI
+            args, _ = mock_exec.call_args
+            prompt_content = args[-1]
             
             # Verify Context injection
             # input.input_file should be absolute path

@@ -29,6 +29,8 @@ async def test_create_task_rejects_invalid_payload(tmp_path):
     with pytest.raises(EngineUpgradeValidationError):
         manager.create_task("single", "unknown")
 
+    assert manager._resolve_engines("single", "opencode") == ["opencode"]
+
 
 @pytest.mark.asyncio
 async def test_create_task_rejects_when_busy(tmp_path):

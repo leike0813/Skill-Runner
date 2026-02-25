@@ -15,11 +15,13 @@ async def lifespan(_app: FastAPI):
     from .services.temp_skill_cleanup_manager import temp_skill_cleanup_manager
     from .services.ui_auth import validate_ui_basic_auth_config
     from .services.job_orchestrator import job_orchestrator
+    from .services.opencode_model_catalog import opencode_model_catalog
 
     runtime_profile = get_runtime_profile()
     runtime_profile.ensure_directories()
     cli_manager = AgentCliManager(runtime_profile)
     cli_manager.ensure_layout()
+    opencode_model_catalog.start()
 
     validate_ui_basic_auth_config()
     concurrency_manager.start()
@@ -27,7 +29,10 @@ async def lifespan(_app: FastAPI):
     run_cleanup_manager.start()
     temp_skill_cleanup_manager.start()
     await job_orchestrator.recover_incomplete_runs_on_startup()
-    yield
+    try:
+        yield
+    finally:
+        opencode_model_catalog.stop()
 
 app = FastAPI(
     title="Agent Skill Runner",

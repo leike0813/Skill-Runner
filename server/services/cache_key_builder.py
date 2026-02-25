@@ -76,6 +76,8 @@ def compute_skill_fingerprint(skill: SkillManifest, engine: str) -> str:
         engine_cfg = skill.path / "assets" / "gemini_settings.json"
     elif engine == "iflow":
         engine_cfg = skill.path / "assets" / "iflow_settings.json"
+    elif engine == "opencode":
+        engine_cfg = skill.path / "assets" / "opencode_config.json"
     else:
         engine_cfg = skill.path / "assets" / "codex_config.toml"
 

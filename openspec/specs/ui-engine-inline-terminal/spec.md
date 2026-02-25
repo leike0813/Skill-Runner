@@ -16,7 +16,7 @@ TBD - created by archiving change engine-ui-inline-tui-terminal. Update Purpose 
 
 #### Scenario: 命令入口约束
 - **WHEN** 用户从 UI 启动会话
-- **THEN** 可选项仅为 `codex`、`gemini`、`iflow` 对应 TUI 命令
+- **THEN** 可选项仅为 `codex`、`gemini`、`iflow`、`opencode` 对应 TUI 命令
 - **AND** 系统拒绝任何非白名单命令 ID
 
 ### Requirement: 系统 MUST 对内嵌终端启用 fail-closed 沙箱策略

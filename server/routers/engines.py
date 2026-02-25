@@ -42,7 +42,7 @@ async def list_models(engine: str):
             engine=catalog.engine,
             cli_version_detected=catalog.cli_version_detected,
             snapshot_version_used=catalog.snapshot_version_used,
-            source="pinned_snapshot",
+            source=catalog.source,
             fallback_reason=catalog.fallback_reason,
             models=[
                 EngineModelInfo(
@@ -50,7 +50,9 @@ async def list_models(engine: str):
                     display_name=entry.display_name,
                     deprecated=entry.deprecated,
                     notes=entry.notes,
-                    supported_effort=entry.supported_effort
+                    supported_effort=entry.supported_effort,
+                    provider=entry.provider,
+                    model=entry.model,
                 )
                 for entry in catalog.models
             ]
@@ -92,6 +94,8 @@ async def get_manifest_view(engine: str):
                     deprecated=bool(model.get("deprecated", False)),
                     notes=model.get("notes"),
                     supported_effort=model.get("supported_effort"),
+                    provider=model.get("provider"),
+                    model=model.get("model"),
                 )
                 for model in view["models"]
             ],
@@ -127,12 +131,16 @@ async def add_manifest_snapshot(engine: str, body: EngineSnapshotCreateRequest):
                     deprecated=bool(model.get("deprecated", False)),
                     notes=model.get("notes"),
                     supported_effort=model.get("supported_effort"),
+                    provider=model.get("provider"),
+                    model=model.get("model"),
                 )
                 for model in view["models"]
             ],
         )
     except ValueError as e:
         detail = str(e)
+        if "does not support model snapshots" in detail:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         if "Snapshot already exists" in detail:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         if "CLI version not detected" in detail:

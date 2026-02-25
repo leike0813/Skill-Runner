@@ -5,7 +5,7 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Literal
 
 from server.models import ManifestArtifact
 from server.services.manifest_artifact_inference import infer_manifest_artifacts
@@ -73,6 +73,7 @@ def inject_all_skill_packages(
     project_root: Path,
     run_directory: Path,
     engine: str,
+    execution_mode: Literal["auto", "interactive"],
 ) -> dict[str, Any]:
     mapped = AGENT_SKILL_ROOTS.get(engine)
     if mapped is None:
@@ -107,7 +108,7 @@ def inject_all_skill_packages(
             patched = skill_patcher.patch_skill_md(
                 target_dir,
                 artifacts=_load_manifest_artifacts(target_dir),
-                execution_mode="auto",
+                execution_mode=execution_mode,
             )
             if patched:
                 patched_count += 1

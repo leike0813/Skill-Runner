@@ -445,6 +445,26 @@ async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_engine_models_add_snapshot_rejects_opencode(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+
+    response = await _request(
+        "POST",
+        "/ui/engines/opencode/models/snapshots",
+        data={
+            "id": ["openai/gpt-5"],
+            "display_name": ["OpenAI GPT-5"],
+            "deprecated": ["false"],
+            "notes": ["runtime_probe_cache"],
+            "supported_effort": [""],
+        },
+    )
+    assert response.status_code == 303
+    assert "does+not+support+model+snapshots" in response.headers["location"]
+
+
+@pytest.mark.asyncio
 async def test_ui_runs_page_and_table(monkeypatch):
     monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)

@@ -10,7 +10,7 @@ def _allow_test_skill(monkeypatch, tmp_path):
     skill = SkillManifest(
         id="test-skill",
         name="test-skill",
-        engines=["codex", "gemini", "iflow"],
+        engines=["codex", "gemini", "iflow", "opencode"],
         path=tmp_path
     )
 
@@ -46,7 +46,9 @@ def test_create_run_structure(tmp_path):
         run_dir = Path(config.SYSTEM.RUNS_DIR) / resp.run_id
         assert run_dir.exists()
         assert (run_dir / "input.json").exists()
-        assert (run_dir / "logs").exists()
+        assert (run_dir / "artifacts").exists()
+        assert (run_dir / "result").exists()
+        assert (run_dir / "interactions").exists()
         assert (run_dir / "uploads").exists() == False
         
     finally:

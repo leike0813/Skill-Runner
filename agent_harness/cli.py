@@ -20,6 +20,12 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="Start a harness attempt")
     start.add_argument("--run-dir", dest="run_selector", help="Run selector to reuse run folder")
     start.add_argument(
+        "--auto",
+        dest="auto_mode",
+        action="store_true",
+        help="Run in auto mode (default is interactive mode)",
+    )
+    start.add_argument(
         "--translate",
         type=int,
         default=0,
@@ -52,6 +58,12 @@ def _build_direct_parser() -> argparse.ArgumentParser:
         description="External runtime harness for Skill Runner engines",
     )
     parser.add_argument("--run-dir", dest="run_selector", help="Run selector to reuse run folder")
+    parser.add_argument(
+        "--auto",
+        dest="auto_mode",
+        action="store_true",
+        help="Run in auto mode (default is interactive mode)",
+    )
     parser.add_argument(
         "--translate",
         type=int,
@@ -88,6 +100,7 @@ def _run(argv: Sequence[str]) -> dict:
                 passthrough_args=_normalize_passthrough(list(parsed.passthrough_args)),
                 translate_level=int(parsed.translate),
                 run_selector=parsed.run_selector,
+                execution_mode="auto" if bool(parsed.auto_mode) else "interactive",
             )
             return runtime.start(start_request)
 
@@ -107,6 +120,7 @@ def _run(argv: Sequence[str]) -> dict:
         passthrough_args=_normalize_passthrough(list(parsed.passthrough_args)),
         translate_level=int(parsed.translate),
         run_selector=parsed.run_selector,
+        execution_mode="auto" if bool(parsed.auto_mode) else "interactive",
     )
     return runtime.start(start_request)
 

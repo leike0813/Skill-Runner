@@ -5,6 +5,7 @@ from pathlib import Path
 from server.adapters.codex_adapter import CodexAdapter
 from server.adapters.gemini_adapter import GeminiAdapter
 from server.adapters.iflow_adapter import IFlowAdapter
+from server.adapters.opencode_adapter import OpencodeAdapter
 
 
 def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
@@ -178,3 +179,74 @@ def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None
     ]
     assert "--yolo" not in command
     assert "--thinking" not in command
+
+
+def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> None:
+    adapter = OpencodeAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
+    monkeypatch.setattr(
+        "server.adapters.opencode_adapter.engine_command_profile.resolve_args",
+        lambda **_kwargs: ["--format", "json"],
+    )
+
+    command = adapter.build_start_command(
+        prompt="hello",
+        options={"model": "openai/gpt-5"},
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        "/usr/bin/opencode",
+        "run",
+        "--format",
+        "json",
+        "--model",
+        "openai/gpt-5",
+        "hello",
+    ]
+
+
+def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monkeypatch) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = OpencodeAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
+    monkeypatch.setattr(
+        "server.adapters.opencode_adapter.engine_command_profile.resolve_args",
+        lambda **_kwargs: ["--should-not-appear"],
+    )
+
+    command = adapter.build_resume_command(
+        prompt="next turn",
+        options={},
+        session_handle=EngineSessionHandle(
+            engine="opencode",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="ses-123",
+            created_at_turn=1,
+        ),
+        passthrough_args=[
+            "run",
+            "--session",
+            "old-session",
+            "--format",
+            "json",
+            "--custom-flag",
+            "--model",
+            "google/gemini-3.1-pro-preview",
+            "ignored-positional",
+        ],
+        use_profile_defaults=False,
+    )
+
+    assert command == [
+        "/usr/bin/opencode",
+        "run",
+        "--session=ses-123",
+        "--format",
+        "json",
+        "--custom-flag",
+        "--model",
+        "google/gemini-3.1-pro-preview",
+        "next turn",
+    ]

@@ -3,6 +3,7 @@ import json
 from server.adapters.gemini_adapter import GeminiAdapter
 from server.adapters.codex_adapter import CodexAdapter
 from server.adapters.iflow_adapter import IFlowAdapter
+from server.adapters.opencode_adapter import OpencodeAdapter
 from server.models import AdapterTurnOutcome
 
 
@@ -71,3 +72,12 @@ def test_gemini_parse_output_strict_json_without_repair():
     assert result.outcome == AdapterTurnOutcome.FINAL
     assert result.final_data == {"ok": True}
     assert result.repair_level == "none"
+
+
+def test_opencode_parse_output_from_stream_text_event():
+    adapter = OpencodeAdapter()
+    raw = '{"type":"text","part":{"text":"```json\\n{\\"ok\\": true}\\n```"}}\n'
+    result = adapter._parse_output(raw)
+    assert result.outcome == AdapterTurnOutcome.FINAL
+    assert result.final_data == {"ok": True}
+    assert result.repair_level == "deterministic_generic"

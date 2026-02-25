@@ -16,6 +16,7 @@ def test_harness_snapshot_ignores_internal_prefixes(tmp_path: Path):
     _write(run_dir / ".codex" / "config.toml", "x")
     _write(run_dir / ".gemini" / "settings.json", "x")
     _write(run_dir / ".iflow" / "settings.json", "x")
+    _write(run_dir / "opencode.json", "{}")
 
     rows = snapshot_filesystem(run_dir)
     paths = {row["path"] for row in rows}
@@ -26,3 +27,4 @@ def test_harness_snapshot_ignores_internal_prefixes(tmp_path: Path):
     assert ".codex/config.toml" not in paths
     assert ".gemini/settings.json" not in paths
     assert ".iflow/settings.json" not in paths
+    assert "opencode.json" not in paths

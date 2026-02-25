@@ -144,6 +144,8 @@ async def get_management_engine(engine: str):
             deprecated=entry.deprecated,
             notes=entry.notes,
             supported_effort=entry.supported_effort,
+            provider=entry.provider,
+            model=entry.model,
         )
         for entry in catalog.models
     ]
@@ -455,7 +457,7 @@ def _read_skill_schema_content(
 
 
 def _derive_sandbox_status(engine: str, auth_ready: bool) -> str:
-    if engine == "iflow":
+    if engine in {"iflow", "opencode"}:
         return "unsupported"
     if auth_ready:
         return "available"

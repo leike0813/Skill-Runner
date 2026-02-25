@@ -12,25 +12,33 @@ TBD - created by archiving change interactive-41-external-runtime-harness-confor
 - **AND** 主服务对外 API 路径与行为不因 harness 存在而改变
 
 ### Requirement: Harness CLI MUST 支持 start 与 passthrough 参数透传
-系统 MUST 支持 `start <engine> [passthrough-args...]`，并将除 harness 自身控制参数外的剩余参数按顺序透传至目标引擎命令。
+系统 MUST 支持 `start [--auto] <engine> [passthrough-args...]`。  
+当未指定 `--auto` 时，Harness MUST 使用 `execution_mode=interactive`；指定 `--auto` 时 MUST 使用 `execution_mode=auto`。  
+除 harness 自身控制参数外，剩余参数 MUST 按顺序透传至目标引擎命令。
 
-#### Scenario: 透传参数保持顺序与内容
-- **WHEN** 用户执行 `start codex --json --full-auto -p skill-runner-harness "hello"`
-- **THEN** harness 将 `--json --full-auto -p skill-runner-harness "hello"` 原样透传给 codex 命令
-- **AND** harness 控制参数不会混入引擎透传参数
+#### Scenario: start 默认 interactive
+- **WHEN** 用户执行 `agent_harness start codex --json --full-auto -p skill-runner-harness "hello"`
+- **THEN** harness 以 `execution_mode=interactive` 启动本次 attempt
+- **AND** `--json --full-auto -p skill-runner-harness "hello"` 原样透传给 codex 命令
+
+#### Scenario: start 使用 --auto 显式切换
+- **WHEN** 用户执行 `agent_harness start --auto codex --json --full-auto -p skill-runner-harness "hello"`
+- **THEN** harness 以 `execution_mode=auto` 启动本次 attempt
+- **AND** `--auto` 不出现在最终引擎命令参数中
 
 ### Requirement: Harness CLI MUST 支持“直接引擎语法”并与原生命令等价
-系统 MUST 支持 `<engine> [passthrough-args...]` 直接调用语法，并在 managed 运行环境中保持与直接执行引擎命令一致的参数语义。
+系统 MUST 支持 `[--auto] <engine> [passthrough-args...]` 直接调用语法，并在 managed 运行环境中保持与直接执行引擎命令一致的参数语义。  
+当未指定 `--auto` 时，Harness MUST 默认 `execution_mode=interactive`；指定 `--auto` 时 MUST 使用 `execution_mode=auto`。
 
-#### Scenario: 直接语法等价于原生命令执行
+#### Scenario: 直接语法默认 interactive
 - **WHEN** 用户执行 `agent_harness codex exec --json --skip-git-repo-check --full-auto "Hello."`
 - **THEN** harness 在 managed 环境中执行等价于 `codex exec --json --skip-git-repo-check --full-auto "Hello."` 的命令
-- **AND** 参数顺序与内容保持一致
+- **AND** 本次 attempt 的 execution mode 为 `interactive`
 
-#### Scenario: 直接语法支持无 passthrough 的引擎启动
-- **WHEN** 用户执行 `agent_harness codex`
-- **THEN** harness 启动等价于 `codex` 的会话
-- **AND** 仍写入 harness 审计工件与运行元数据
+#### Scenario: 直接语法使用 --auto
+- **WHEN** 用户执行 `agent_harness --auto codex exec --json --skip-git-repo-check --full-auto "Hello."`
+- **THEN** harness 在 managed 环境中执行等价于 `codex exec --json --skip-git-repo-check --full-auto "Hello."` 的命令
+- **AND** 本次 attempt 的 execution mode 为 `auto`
 
 ### Requirement: Harness CLI MUST 支持 translate 多级输出控制
 系统 MUST 支持 `--translate 0|1|2|3`，并将其仅作为 harness 输出渲染控制参数；该参数 MUST NOT 透传至引擎进程。
@@ -95,10 +103,19 @@ TBD - created by archiving change interactive-41-external-runtime-harness-confor
 - **AND** 不覆盖历史 attempt 工件
 
 ### Requirement: Harness CLI MUST 预留 opencode 引擎位并可能力降级
-系统 MUST 接受 `opencode` 作为合法引擎标识；当后端核心能力未提供 opencode 执行支持时，MUST 返回结构化能力不足错误而非静默失败。
+系统 MUST 接受 `opencode` 作为合法引擎标识，并提供与其他引擎同级的 start/resume 执行能力；当环境缺失 opencode CLI 时，MUST 返回安装或命令缺失错误而非静默降级。
 
-#### Scenario: opencode 能力缺失时显式报错
-- **WHEN** 用户执行 `start opencode ...` 且当前后端未接入 opencode
-- **THEN** harness 返回 `ENGINE_CAPABILITY_UNAVAILABLE` 类错误
-- **AND** 错误信息包含引擎名称与缺失能力描述
+#### Scenario: opencode start 走正式执行链路
+- **WHEN** 用户执行 `agent_harness start opencode ...`
+- **THEN** harness 通过 Adapter 生成并执行 opencode start 命令
+- **AND** 不返回 `ENGINE_CAPABILITY_UNAVAILABLE`
+
+#### Scenario: opencode resume 走正式执行链路
+- **WHEN** 用户执行 `agent_harness resume <handle> <message>` 且对应 run 引擎为 opencode
+- **THEN** harness 通过 Adapter resume 接口构建 `--session=<id>` 形态命令并继续执行
+
+#### Scenario: opencode CLI 缺失时显式报错
+- **WHEN** 用户执行 opencode start/resume 且运行环境缺失 opencode 可执行文件
+- **THEN** harness 返回结构化缺失错误并附带可诊断信息
+- **AND** MUST NOT 静默回退到其它引擎
 

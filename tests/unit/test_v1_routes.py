@@ -89,6 +89,7 @@ async def test_v1_engine_models_route_available(monkeypatch):
                 "engine": engine,
                 "cli_version_detected": "0.89.0",
                 "snapshot_version_used": "0.89.0",
+                "source": "pinned_snapshot",
                 "fallback_reason": None,
                 "models": [
                     type(
@@ -100,6 +101,8 @@ async def test_v1_engine_models_route_available(monkeypatch):
                             "deprecated": False,
                             "notes": "snapshot",
                             "supported_effort": ["low", "high"],
+                            "provider": None,
+                            "model": None,
                         },
                     )()
                 ],
@@ -111,6 +114,46 @@ async def test_v1_engine_models_route_available(monkeypatch):
     body = response.json()
     assert body["engine"] == "codex"
     assert body["models"][0]["id"] == "gpt-5.2-codex"
+    assert body["source"] == "pinned_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_models_route_opencode_runtime_probe_cache(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.model_registry.get_models",
+        lambda engine: type(
+            "Catalog",
+            (),
+            {
+                "engine": engine,
+                "cli_version_detected": "0.1.0",
+                "snapshot_version_used": "2026-02-25T00:00:00Z",
+                "source": "runtime_probe_cache",
+                "fallback_reason": None,
+                "models": [
+                    type(
+                        "Entry",
+                        (),
+                        {
+                            "id": "openai/gpt-5",
+                            "display_name": "OpenAI GPT-5",
+                            "deprecated": False,
+                            "notes": "runtime_probe_cache",
+                            "supported_effort": None,
+                            "provider": "openai",
+                            "model": "gpt-5",
+                        },
+                    )()
+                ],
+            },
+        )(),
+    )
+    response = await _request("GET", "/v1/engines/opencode/models")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "runtime_probe_cache"
+    assert body["models"][0]["provider"] == "openai"
+    assert body["models"][0]["model"] == "gpt-5"
 
 
 @pytest.mark.asyncio
@@ -553,5 +596,19 @@ async def test_v1_engine_snapshot_route_conflict(monkeypatch):
         "POST",
         "/v1/engines/codex/models/snapshots",
         json={"models": [{"id": "gpt-5.2-codex"}]},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_snapshot_route_opencode_not_supported(monkeypatch):
+    def _raise(_engine, _models):
+        raise ValueError("Engine 'opencode' does not support model snapshots")
+
+    monkeypatch.setattr("server.routers.engines.model_registry.add_snapshot_for_detected_version", _raise)
+    response = await _request(
+        "POST",
+        "/v1/engines/opencode/models/snapshots",
+        json={"models": [{"id": "openai/gpt-5"}]},
     )
     assert response.status_code == 409

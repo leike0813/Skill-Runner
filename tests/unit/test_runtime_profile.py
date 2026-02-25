@@ -41,3 +41,7 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     assert str(profile.npm_prefix) in env["PATH"]
     assert env["HOME"] == str(profile.agent_home)
     assert env["ZDOTDIR"] == str(profile.agent_home)
+    assert env["XDG_CONFIG_HOME"] == str(profile.agent_home / ".config")
+    assert env["XDG_DATA_HOME"] == str(profile.agent_home / ".local" / "share")
+    assert env["XDG_STATE_HOME"] == str(profile.agent_home / ".local" / "state")
+    assert env["XDG_CACHE_HOME"] == str(profile.agent_home / ".cache")

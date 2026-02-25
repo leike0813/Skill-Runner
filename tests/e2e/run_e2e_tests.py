@@ -43,7 +43,7 @@ def _setup_logging(verbose: int) -> None:
 
 
 def _ensure_cli_available(engine: str) -> None:
-    cmd = {"codex": "codex", "gemini": "gemini", "iflow": "iflow"}[engine]
+    cmd = {"codex": "codex", "gemini": "gemini", "iflow": "iflow", "opencode": "opencode"}[engine]
     result = subprocess.run([cmd, "--version"], capture_output=True)
     if result.returncode != 0:
         raise RuntimeError(f"{cmd} not available (exit {result.returncode})")
@@ -336,7 +336,7 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description="Skill Runner REST E2E Test Runner")
     parser.add_argument("-k", "--keyword", help="Filter test suites by keyword", default="")
     parser.add_argument("-c", "--case", help="Filter test cases by name", default="")
-    parser.add_argument("-e", "--engine", help="Override execution engine (codex/gemini/iflow)", default=None)
+    parser.add_argument("-e", "--engine", help="Override execution engine (codex/gemini/iflow/opencode)", default=None)
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output (-v, -vv)")
     parser.add_argument("--no-cache", action="store_true", help="Disable cache usage")
     parser.add_argument("--debug", action="store_true", help="Enable debug bundle (include full run dir)")

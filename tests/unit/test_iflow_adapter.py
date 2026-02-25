@@ -37,6 +37,38 @@ def test_construct_config_maps_model_and_merges_iflow_config(tmp_path):
     assert "verbose" not in args
 
 
+def test_construct_config_uses_engine_default_when_no_overrides(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+    adapter = IFlowAdapter()
+
+    config_path = adapter._construct_config(skill, run_dir, options={})
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert payload["modelName"] == "glm-5"
+
+
+def test_construct_config_skill_overrides_engine_default(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    skill_dir = tmp_path / "skill"
+    skill_assets = skill_dir / "assets"
+    skill_assets.mkdir(parents=True)
+    (skill_assets / "iflow_settings.json").write_text(
+        json.dumps({"modelName": "iflow-skill-model"}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(id="test-skill", path=skill_dir)
+    adapter = IFlowAdapter()
+
+    config_path = adapter._construct_config(skill, run_dir, options={})
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert payload["modelName"] == "iflow-skill-model"
+
+
 def test_extract_session_handle_from_execution_info():
     adapter = IFlowAdapter()
     raw_stdout = """

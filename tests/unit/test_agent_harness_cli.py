@@ -60,6 +60,7 @@ def test_cli_start_forwards_passthrough_without_translate(monkeypatch, tmp_path,
     assert exit_code == 0
     assert getattr(request, "translate_level") == 2
     assert getattr(request, "run_selector") == "reuse"
+    assert getattr(request, "execution_mode") == "interactive"
     assert getattr(request, "passthrough_args") == ["--json", "--full-auto"]
     assert "Run id: run-1" in captured.out
     assert "Start complete. exitCode=0" in captured.out
@@ -144,6 +145,7 @@ def test_cli_direct_engine_syntax_forwards_passthrough(monkeypatch, tmp_path, ca
 
     assert exit_code == 0
     assert getattr(request, "engine") == "codex"
+    assert getattr(request, "execution_mode") == "interactive"
     assert getattr(request, "passthrough_args") == ["exec", "--json", "--full-auto", "-p", "Hello."]
     assert "Run id: run-3" in captured.out
     assert "Start complete. exitCode=0" in captured.out
@@ -185,6 +187,47 @@ def test_cli_direct_engine_without_passthrough_is_valid(monkeypatch, tmp_path, c
 
     assert exit_code == 0
     assert getattr(request, "engine") == "codex"
+    assert getattr(request, "execution_mode") == "interactive"
     assert getattr(request, "passthrough_args") == []
     assert "Run id: run-4" in captured.out
     assert "Start complete. exitCode=0" in captured.out
+
+
+def test_cli_start_auto_flag_switches_to_auto_mode(monkeypatch, tmp_path, capsys) -> None:
+    calls: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def __init__(self, config: HarnessConfig) -> None:
+            calls["config"] = config
+
+        def start(self, request):
+            calls["start"] = request
+            return {
+                "ok": True,
+                "run_id": "run-5",
+                "run_dir": "/tmp/run-5",
+                "handle": None,
+                "session_id": None,
+                "status": "waiting_user",
+                "translate_level": request.translate_level,
+                "completion": {"state": "awaiting_user_input", "reason_code": "WAITING_USER_INPUT"},
+                "exit_code": 0,
+                "audit": {"meta": "/tmp/run-5/.audit/meta.1.json"},
+                "view": {"stdout": "", "stderr": ""},
+            }
+
+    monkeypatch.setattr(cli, "HarnessRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        cli,
+        "resolve_harness_config",
+        lambda: HarnessConfig(runtime_profile=_profile(tmp_path), run_root=tmp_path / "runs"),
+    )
+
+    exit_code = cli.main(["start", "--auto", "codex", "--", "--json"])
+    captured = capsys.readouterr()
+    request = calls["start"]
+
+    assert exit_code == 0
+    assert getattr(request, "execution_mode") == "auto"
+    assert getattr(request, "passthrough_args") == ["--json"]
+    assert "Run id: run-5" in captured.out

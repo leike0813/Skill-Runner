@@ -175,7 +175,7 @@ def test_rejects_empty_effective_engines_when_engines_omitted(tmp_path):
     zip_path.write_bytes(
         _build_skill_zip(
             include_engines=False,
-            unsupported_engines=["codex", "gemini", "iflow"],
+            unsupported_engines=["codex", "gemini", "iflow", "opencode"],
         )
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)

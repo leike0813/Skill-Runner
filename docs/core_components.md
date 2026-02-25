@@ -35,7 +35,7 @@
   1. 调用 `SkillRegistry` 获取技能定义。
   2. 验证当前 Run 的状态。
   3. **输入校验**: 使用 `SchemaValidator` 分别验证 `input` (files) 和 `parameter` (values)。
-  4. **适配器选择**: 根据请求中的 `engine` 参数选择对应的适配器 (如 `gemini` 或 `codex`)。
+  4. **适配器选择**: 根据请求中的 `engine` 参数选择对应的适配器 (如 `gemini` / `codex` / `iflow` / `opencode`)。
   5. 调用对应适配器 (`Adapter.run`) 执行实际任务。
   6. 捕获异常并更新 Run 状态 (SUCCESS/FAILURE)。
 
@@ -50,7 +50,7 @@
 **职责**: Codex CLI 执行适配器，支持非交互式指令执行。
 
 - **配置融合 (Config Fusion)**: 
-  - 结合 `SKILL_DEFAULTS` (assets/codex_settings.json)、`RUNTIME_CONFIG` (API 请求) 和 `ENFORCED_CONFIG` (系统强制配置)。
+  - 结合 `ENGINE_DEFAULT` (`server/assets/configs/codex/default.toml`)、`SKILL_DEFAULTS` (`assets/codex_config.toml`)、`RUNTIME_CONFIG`（API 请求）和 `ENFORCED_CONFIG`（系统强制配置）。
   - 动态生成/更新 `~/.codex/config.toml` 中的 `skill-runner` Profile。
 - **CLI 执行**: 调用 `codex exec` 命令。
 
@@ -81,7 +81,7 @@
 
 - **配置生成**: 
   - 生成 `.iflow/settings.json`。
-  - 融合 Skill Defaults、User Options (如 model) 和 Enforced Config (如 --yolo)。
+  - 融合 `engine_default -> skill default -> runtime options -> iflow_config -> enforced`。
   - 智能过滤非配置参数 (如 `verbose`)。
 - **环境隔离**:
   - 将技能复制到 `.iflow/skills/{id}` 以符合 iFlow 工作区标准。
@@ -90,3 +90,18 @@
   - 解析 stdout 中的 JSON 结果块。
 
 **注意**: 由于iFlow CLI目前不支持JSON流输出且对非交互模式支持较差，暂时不建议使用iflow引擎。
+
+## 10. OpencodeAdapter (`server/adapters/opencode_adapter.py`)
+**职责**: OpenCode CLI 执行适配器，支持 `run --format json` 与 session 续跑。
+
+- **配置生成**:
+  - 写入运行目录根 `opencode.json`（项目级配置）。
+  - 融合 `engine_default -> skill default -> runtime opencode_config -> enforced`。
+  - 按执行模式注入 `permission.question`：`auto=deny`，`interactive=allow`。
+- **环境隔离**:
+  - 将技能复制到 `.opencode/skills/{id}`。
+- **执行命令**:
+  - 首轮：`opencode run --format json --model <provider/model> <prompt>`
+  - 续跑：`opencode run --session=<session_id> --format json --model <provider/model> <message>`
+- **流解析**:
+  - 解析 OpenCode NDJSON（如 `step_start/tool_use/text/step_finish/error`），提取会话 ID 与最终助手文本。

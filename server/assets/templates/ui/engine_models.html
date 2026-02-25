@@ -56,6 +56,9 @@
         {% if view.fallback_reason %}
         <div class="muted">Fallback: {{ view.fallback_reason }}</div>
         {% endif %}
+        {% if not snapshots_supported %}
+        <div class="muted">Snapshots: not supported for {{ engine }} (runtime probe cache only).</div>
+        {% endif %}
         {% if error %}
         <div class="error" style="margin-top:8px;">{{ error }}</div>
         {% endif %}
@@ -75,6 +78,8 @@
             <thead>
                 <tr>
                     <th>id</th>
+                    <th>provider</th>
+                    <th>model</th>
                     <th>display_name</th>
                     <th>deprecated</th>
                     <th>notes</th>
@@ -85,6 +90,8 @@
             {% for model in view.models %}
                 <tr>
                     <td>{{ model.id }}</td>
+                    <td>{{ model.provider or "-" }}</td>
+                    <td>{{ model.model or "-" }}</td>
                     <td>{{ model.display_name or "-" }}</td>
                     <td>{{ model.deprecated }}</td>
                     <td>{{ model.notes or "-" }}</td>
@@ -95,6 +102,7 @@
         </table>
     </div>
 
+    {% if snapshots_supported %}
     <div class="card">
         <h2>新增当前版本快照（add-only）</h2>
         <form method="post" action="/ui/engines/{{ engine }}/models/snapshots">
@@ -125,6 +133,7 @@
             </div>
         </form>
     </div>
+    {% endif %}
 </div>
 </body>
 </html>

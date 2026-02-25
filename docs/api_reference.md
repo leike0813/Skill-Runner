@@ -163,7 +163,7 @@
 ```json
 {
   "skill_id": "demo-prime-number",
-  "engine": "gemini",          // 可选: "gemini" / "codex" / "iflow" (默认: codex)
+  "engine": "gemini",          // 可选: "gemini" / "codex" / "iflow" / "opencode" (默认: codex)
   "input": {
     "query": "some inline input payload"
   },
@@ -184,6 +184,7 @@
 - **模型字段**:
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
   - **Codex** 使用 `model_name@reasoning_effort` 格式（例如 `gpt-5.2-codex@high`）。
+  - **OpenCode** 使用 `provider/model` 格式（例如 `openai/gpt-5`），不支持 `@effort` 后缀。
   - **iFlow 运行时默认配置（托管环境）**：若未提供 `~/.iflow/settings.json`，服务会写入最小可用默认值：
     - `selectedAuthType = "oauth-iflow"`
     - `baseUrl = "https://apis.iflow.cn/v1"`
@@ -255,8 +256,9 @@
 - `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
 - `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
 - interactive 双轨完成说明：
-  - 解析到 `__SKILL_DONE__` 时按强条件完成；
+  - 在 assistant 回复内容中解析到 `__SKILL_DONE__` 时按强条件完成；
   - 未解析到 marker 但输出通过 schema 时按软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+  - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
   - ask_user 提示建议使用非 JSON 结构化格式（YAML，示例：`<ASK_USER_YAML>...</ASK_USER_YAML>`），避免被结果 JSON 误判。
   - ask_user 提示始终为可选 enrichment，不参与后端生命周期控制判定。
 
@@ -764,7 +766,8 @@
   "engines": [
     {"engine": "codex", "cli_version_detected": "0.89.0"},
     {"engine": "gemini", "cli_version_detected": "0.25.2"},
-    {"engine": "iflow", "cli_version_detected": "0.5.2"}
+    {"engine": "iflow", "cli_version_detected": "0.5.2"},
+    {"engine": "opencode", "cli_version_detected": "0.1.0"}
   ]
 }
 ```
@@ -780,6 +783,19 @@
 ```json
 {
   "engines": {
+    "opencode": {
+      "managed_present": true,
+      "managed_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/opencode",
+      "global_available": true,
+      "global_cli_path": "/usr/local/bin/opencode",
+      "effective_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/opencode",
+      "effective_path_source": "managed",
+      "credential_files": {
+        "auth.json": true,
+        "antigravity-accounts.json": false
+      },
+      "auth_ready": true
+    },
     "iflow": {
       "managed_present": true,
       "managed_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/iflow",
@@ -796,6 +812,10 @@
   }
 }
 ```
+
+说明（OpenCode）：
+- `auth_ready` 判定为：CLI 可用且 `auth.json` 存在。
+- `antigravity-accounts.json` 仅用于插件附加诊断，不作为 ready 必要条件。
 
 ### 获取引擎模型列表
 `GET /v1/engines/{engine}/models`
@@ -815,6 +835,28 @@
       "deprecated": false,
       "notes": "pinned snapshot",
       "supported_effort": ["low", "medium", "high", "xhigh"]
+    }
+  ]
+}
+```
+
+OpenCode 返回示例（动态探测缓存）：
+```json
+{
+  "engine": "opencode",
+  "cli_version_detected": "0.1.0",
+  "snapshot_version_used": "2026-02-25T00:00:00Z",
+  "source": "runtime_probe_cache",
+  "fallback_reason": null,
+  "models": [
+    {
+      "id": "openai/gpt-5",
+      "provider": "openai",
+      "model": "gpt-5",
+      "display_name": "OpenAI GPT-5",
+      "deprecated": false,
+      "notes": "runtime_probe_cache",
+      "supported_effort": null
     }
   ]
 }
@@ -847,6 +889,11 @@
 }
 ```
 
+OpenCode 兼容视图说明：
+- 返回动态缓存兼容结构（`manifest.dynamic=true`、`manifest.source=runtime_probe_cache`）。
+- `resolved_snapshot_file` 指向本地缓存文件名（默认 `opencode_models_cache.json`）。
+- 不要求存在 `server/assets/models/opencode/manifest.json` 快照文件。
+
 ### 新增当前版本模型快照（受 Basic Auth 保护）
 `POST /v1/engines/{engine}/models/snapshots`
 
@@ -869,6 +916,7 @@
 - 版本号固定使用服务端当前检测到的 `cli_version_detected`；
 - 若目标 `models_<version>.json` 已存在，则拒绝（不覆盖）；
 - 成功后立即刷新内存模型注册表。
+- `engine=opencode` 明确不支持该写接口，返回 `409 Conflict`。
 
 ### 创建引擎升级任务（受 Basic Auth 保护）
 `POST /v1/engines/upgrades`
@@ -904,7 +952,8 @@
   "results": {
     "codex": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null},
     "gemini": {"status": "failed", "stdout": "...", "stderr": "...", "error": "Upgrade command exited with code 1"},
-    "iflow": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null}
+    "iflow": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null},
+    "opencode": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null}
   },
   "created_at": "2026-02-12T10:00:00.000000",
   "updated_at": "2026-02-12T10:00:12.000000"

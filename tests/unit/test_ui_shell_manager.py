@@ -282,6 +282,24 @@ def test_ui_shell_manager_iflow_session_disables_shell_and_reports_non_sandbox(
     assert "ShellTool" in payload["excludeTools"]
 
 
+def test_ui_shell_manager_opencode_session_reports_non_sandbox(
+    tmp_path: Path,
+    patch_fake_popen,
+):
+    manager = _new_manager(tmp_path)
+    started = manager.start_session("opencode")
+    session_dir = Path(started["session_dir"])
+    popen_args, _ = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    assert command[0] == "/usr/bin/ttyd"
+    assert command[command.index("--") + 1] == sys.executable
+    assert started["sandbox_status"] == "unsupported"
+    assert "without sandbox" in started["sandbox_message"]
+    project_config_path = session_dir / "opencode.json"
+    payload = json.loads(project_config_path.read_text(encoding="utf-8"))
+    assert payload["permission"] == "deny"
+
+
 def test_ui_shell_manager_gemini_fallback_without_sandbox_runtime_still_disables_shell(
     tmp_path: Path,
     monkeypatch,
@@ -303,4 +321,3 @@ def test_ui_shell_manager_gemini_fallback_without_sandbox_runtime_still_disables
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
     assert payload["tools"]["sandbox"] is False
     assert "run_shell_command" in payload["tools"]["exclude"]
-

@@ -17,13 +17,15 @@ class CodexConfigManager:
     dedicated profile (`[profiles.skill-runner]`) into the user's config.
     
     The final profile is composed of:
-    1. Skill Defaults (from `assets/codex_settings.toml`)
-    2. Runtime Overrides (from API request)
-    3. Enforced Policy (security strictures)
+    1. Engine Defaults (from `server/assets/configs/codex/default.toml`)
+    2. Skill Defaults (from `assets/codex_config.toml`)
+    3. Runtime Overrides (from API request)
+    4. Enforced Policy (security strictures)
     """
     
     PROFILE_NAME = "skill-runner"
-    ENFORCED_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex_enforced.toml"
+    DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "default.toml"
+    ENFORCED_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "enforced.toml"
     SCHEMA_PATH = Path(__file__).parent.parent / "assets" / "schemas" / "codex_profile_schema.json"
     
     def __init__(self, config_path: Optional[Path] = None, profile_name: Optional[str] = None):
@@ -41,20 +43,24 @@ class CodexConfigManager:
     def generate_profile_settings(self, skill_defaults: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generates the final profile configuration by merging layers:
-        1. Skill Defaults (from assets/codex_settings.json)
-        2. Runtime Config (User overrides from API)
-        3. Enforced Config (Built-in mandatory defaults)
+        1. Engine Defaults (from assets/configs/codex/default.toml)
+        2. Skill Defaults (from assets/codex_config.toml)
+        3. Runtime Config (User overrides from API)
+        4. Enforced Config (Built-in mandatory defaults)
         
         Validation is applied to the final result.
         """
-        # 1. Start with Skill Defaults
-        # ensure deep copy if needed, but shallow copy is usually fine for top level
-        final_config = skill_defaults.copy()
+        # 1. Start with Engine Defaults (lowest precedence)
+        final_config: Dict[str, Any] = {}
+        self._deep_merge(final_config, self._load_default_profile_config())
         
-        # 2. Merge Runtime Config (User overrides)
+        # 2. Merge Skill Defaults
+        self._deep_merge(final_config, skill_defaults)
+
+        # 3. Merge Runtime Config (User overrides)
         self._deep_merge(final_config, runtime_config)
         
-        # 3. Merge Enforced Config (Mandatory overrides)
+        # 4. Merge Enforced Config (Mandatory overrides)
         enforced_config = self._load_enforced_config()
         # Prefer enforced section that matches current profile name.
         # Fallback to default profile to keep backward compatibility when custom
@@ -69,10 +75,31 @@ class CodexConfigManager:
             enforced_profile = {}
         self._deep_merge(final_config, enforced_profile)
         
-        # 4. Validate
+        # 5. Validate
         self._validate_config(final_config)
         
         return final_config
+
+    def _load_default_profile_config(self) -> Dict[str, Any]:
+        """Load engine-level default profile configuration."""
+        if not self.DEFAULT_CONFIG_PATH.exists():
+            return {}
+        try:
+            with open(self.DEFAULT_CONFIG_PATH, "r", encoding="utf-8") as f:
+                parsed = tomlkit.parse(f.read())
+            profiles_obj = parsed.get("profiles", {})
+            if isinstance(profiles_obj, dict):
+                profile_cfg = profiles_obj.get(self.profile_name)
+                if not isinstance(profile_cfg, dict):
+                    profile_cfg = profiles_obj.get(self.PROFILE_NAME)
+                if isinstance(profile_cfg, dict):
+                    return dict(profile_cfg)
+            if isinstance(parsed, dict):
+                return dict(parsed)
+            return {}
+        except Exception:
+            logger.exception("Error loading default codex config")
+            return {}
 
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """Validate configuration against the JSON schema."""

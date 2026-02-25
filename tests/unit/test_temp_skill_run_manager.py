@@ -131,4 +131,4 @@ def test_stage_missing_engines_defaults_to_all_supported(monkeypatch, temp_confi
         _build_skill_zip(include_engines=False),
     )
     assert manifest.engines == []
-    assert manifest.effective_engines == ["codex", "gemini", "iflow"]
+    assert manifest.effective_engines == ["codex", "gemini", "iflow", "opencode"]

@@ -4,12 +4,12 @@
 
 # Skill Runner
 
-Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemini CLI、iFlow CLI 等成熟 Agent 工具，
+Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemini CLI、iFlow CLI、OpenCode CLI 等成熟 Agent 工具，
 以“Skill”协议提供可复用、可验证的自动化能力。
 
 ## 功能概览
 
-- 多引擎执行：Codex / Gemini CLI / iFlow CLI
+- 多引擎执行：Codex / Gemini CLI / iFlow CLI / OpenCode CLI
 - Skill 协议：`runner.json` + `SKILL.md` + 输入/参数/输出 schema
 - 执行隔离：每次 run 独立工作目录
 - 结构化输出：JSON 结果 + artifacts + bundle
@@ -17,7 +17,7 @@ Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemi
 - Web 管理界面：`/ui` 查看技能并上传安装 Skill 包
 - Skill 浏览：`/ui/skills/{skill_id}` 可查看包结构并只读预览文件
 - Engine 管理：`/ui/engines` 查看引擎状态、触发升级、查看升级日志
-- Model Manifest 管理：`/ui/engines/{engine}/models` 查看并补录当前版本快照
+- Model 管理：`/ui/engines/{engine}/models` 查看引擎模型清单（OpenCode 使用 runtime probe cache，非快照）
 - 内嵌 TUI 终端：`/ui/engines` 页面内直接启动引擎 TUI（受控单会话）
 
 ## 构建与启动（容器）
@@ -220,11 +220,13 @@ docker exec -it <container_id> /bin/bash
 - Codex: `auth.json`
 - Gemini: `google_accounts.json`, `oauth_creds.json`
 - iFlow: `iflow_accounts.json`, `oauth_creds.json`
+- OpenCode: `auth.json`（必需）, `antigravity-accounts.json`（可选，插件凭据）
 
 复制到挂载目录：
 - `agent_config/codex/`
 - `agent_config/gemini/`
 - `agent_config/iflow/`
+- `agent_config/opencode/`
 
 > 启动时仅导入鉴权凭据文件，不导入 settings 配置文件（保证设置隔离）。
 
@@ -233,6 +235,7 @@ docker exec -it <container_id> /bin/bash
 - Codex CLI (`@openai/codex`)
 - Gemini CLI (`@google/gemini-cli`)
 - iFlow CLI (`@iflow-ai/iflow-cli`)
+- OpenCode CLI (`opencode-ai`)
 
 ## 免责声明（关于 Agent CLI 快速迭代）
 

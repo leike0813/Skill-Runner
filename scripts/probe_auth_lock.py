@@ -22,6 +22,7 @@ ENGINE_CREDENTIAL_FILES: Dict[str, List[str]] = {
     "codex": [".codex/auth.json"],
     "gemini": [".gemini/google_accounts.json", ".gemini/oauth_creds.json"],
     "iflow": [".iflow/iflow_accounts.json", ".iflow/oauth_creds.json"],
+    "opencode": [],
 }
 
 
@@ -39,6 +40,16 @@ def _build_command(engine: str, cli_path: Path, prompt: str) -> List[str]:
         return [str(cli_path), "exec", sandbox_flag, "--skip-git-repo-check", "--json", prompt]
     if engine == "iflow":
         return [str(cli_path), "--yolo", "-p", prompt]
+    if engine == "opencode":
+        return [
+            str(cli_path),
+            "run",
+            "--format",
+            "json",
+            "--model",
+            "openai/gpt-5",
+            prompt,
+        ]
     raise ValueError(f"Unsupported engine: {engine}")
 
 
@@ -153,8 +164,8 @@ async def main() -> int:
     parser.add_argument(
         "--engines",
         nargs="+",
-        default=["gemini", "codex", "iflow"],
-        choices=["gemini", "codex", "iflow"],
+        default=["gemini", "codex", "iflow", "opencode"],
+        choices=["gemini", "codex", "iflow", "opencode"],
         help="Engines to probe",
     )
     parser.add_argument("--timeout", type=int, default=45, help="Per-engine timeout seconds")

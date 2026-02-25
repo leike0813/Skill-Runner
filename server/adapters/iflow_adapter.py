@@ -46,7 +46,15 @@ class IFlowAdapter(EngineAdapter):
         Phase 1: Configuration Management
         Generates .iflow/settings.json in the run workspace.
         """
-        # 1. Base Defaults (Adapter Hardcoded)
+        # 1. Engine Defaults
+        engine_defaults: Dict[str, Any] = {}
+        default_config_path = Path(__file__).parent.parent / "assets" / "configs" / "iflow" / "default.json"
+        if default_config_path.exists():
+            try:
+                with open(default_config_path, "r", encoding="utf-8") as f:
+                    engine_defaults = json.load(f)
+            except Exception:
+                logger.exception("Failed to load iFlow engine defaults")
         
         # 2. Skill Defaults (assets/iflow_settings.json in skill repo)
         skill_defaults = {}
@@ -54,10 +62,10 @@ class IFlowAdapter(EngineAdapter):
             skill_settings_path = skill.path / "assets" / "iflow_settings.json"
             if skill_settings_path.exists():
                 try:
-                    with open(skill_settings_path, "r") as f:
+                    with open(skill_settings_path, "r", encoding="utf-8") as f:
                         skill_defaults = json.load(f)
                     logger.info("Loaded skill defaults from %s", skill_settings_path)
-                except Exception as e:
+                except Exception:
                     logger.exception("Failed to load skill defaults")
         
         # 3. User Overrides (runtime options)
@@ -71,18 +79,22 @@ class IFlowAdapter(EngineAdapter):
         # sandbox is a special case, often controlled by system but can be overridden if allowed?
         # gemini adapter doesn't map sandbox from options explicitly, mostly enforced.
         
-        # 4. System Enforced (server/assets/configs/iflow_enforced.json)
-        enforced_config = {}
-        enforced_path = Path(__file__).parent.parent / "assets" / "configs" / "iflow_enforced.json"
-        if enforced_path.exists():
-             with open(enforced_path, "r") as f:
-                enforced_config = json.load(f)
+        # 4. Runtime Engine Config Overlay
+        runtime_engine_overrides: Dict[str, Any] = {}
+        if isinstance(options.get("iflow_config"), dict):
+            runtime_engine_overrides = options["iflow_config"]
 
-        layers = [skill_defaults, user_overrides]
-        # Support explicit iflow config passed in options (similar to gemini_config)
-        if "iflow_config" in options:
-            layers.append(options["iflow_config"])
-            
+        # 5. System Enforced (server/assets/configs/iflow/enforced.json)
+        enforced_config = {}
+        enforced_path = Path(__file__).parent.parent / "assets" / "configs" / "iflow" / "enforced.json"
+        if enforced_path.exists():
+            try:
+                with open(enforced_path, "r", encoding="utf-8") as f:
+                    enforced_config = json.load(f)
+            except Exception:
+                logger.exception("Failed to load iFlow enforced config")
+
+        layers = [engine_defaults, skill_defaults, user_overrides, runtime_engine_overrides]
         layers.append(enforced_config)
         
         target_path = run_dir / ".iflow" / "settings.json"

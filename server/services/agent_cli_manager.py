@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -15,27 +16,41 @@ from .runtime_profile import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
+BOOTSTRAP_CONFIG_DIR = Path(__file__).resolve().parents[1] / "assets" / "configs"
+
 
 ENGINE_PACKAGES = {
     "codex": "@openai/codex",
     "gemini": "@google/gemini-cli",
     "iflow": "@iflow-ai/iflow-cli",
+    "opencode": "opencode-ai",
 }
 
 ENGINE_BINARY_CANDIDATES = {
     "codex": ["codex", "codex.cmd", "codex.exe"],
     "gemini": ["gemini", "gemini.cmd", "gemini.exe"],
     "iflow": ["iflow", "iflow.cmd", "iflow.exe"],
+    "opencode": ["opencode", "opencode.cmd", "opencode.exe"],
 }
 TTYD_BINARY_CANDIDATES = ["ttyd", "ttyd.exe", "ttyd.cmd"]
 
 CREDENTIAL_IMPORT_RULES = {
-    "codex": ["auth.json"],
-    "gemini": ["google_accounts.json", "oauth_creds.json"],
-    "iflow": ["iflow_accounts.json", "oauth_creds.json"],
+    "codex": (("auth.json", ".codex/auth.json"),),
+    "gemini": (
+        ("google_accounts.json", ".gemini/google_accounts.json"),
+        ("oauth_creds.json", ".gemini/oauth_creds.json"),
+    ),
+    "iflow": (
+        ("iflow_accounts.json", ".iflow/iflow_accounts.json"),
+        ("oauth_creds.json", ".iflow/oauth_creds.json"),
+    ),
+    "opencode": (
+        ("auth.json", ".local/share/opencode/auth.json"),
+        ("antigravity-accounts.json", ".config/opencode/antigravity-accounts.json"),
+    ),
 }
 
-DEFAULT_GEMINI_SETTINGS = {
+_DEFAULT_GEMINI_SETTINGS_FALLBACK = {
     "security": {
         "auth": {
             "selectedType": "oauth-personal",
@@ -43,12 +58,55 @@ DEFAULT_GEMINI_SETTINGS = {
     }
 }
 
-DEFAULT_IFLOW_SETTINGS = {
+_DEFAULT_IFLOW_SETTINGS_FALLBACK = {
     "selectedAuthType": "oauth-iflow",
     "baseUrl": "https://apis.iflow.cn/v1",
 }
 
-DEFAULT_CODEX_CONFIG = 'cli_auth_credentials_store = "file"\n'
+_DEFAULT_CODEX_CONFIG_FALLBACK = 'cli_auth_credentials_store = "file"\n'
+_DEFAULT_OPENCODE_CONFIG_FALLBACK = {
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": ["opencode-antigravity-auth"],
+}
+
+
+def _load_bootstrap_json(filename: str, fallback: Mapping[str, object]) -> Dict[str, Any]:
+    path = BOOTSTRAP_CONFIG_DIR / filename
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+        logger.warning("Bootstrap config is not a JSON object: %s", path)
+    except Exception:
+        logger.warning("Failed to load bootstrap config JSON: %s", path, exc_info=True)
+    return deepcopy(dict(fallback))
+
+
+def _load_bootstrap_text(filename: str, fallback: str) -> str:
+    path = BOOTSTRAP_CONFIG_DIR / filename
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        logger.warning("Failed to load bootstrap config text: %s", path, exc_info=True)
+    return fallback
+
+
+DEFAULT_GEMINI_SETTINGS = _load_bootstrap_json(
+    "gemini/bootstrap.json",
+    _DEFAULT_GEMINI_SETTINGS_FALLBACK,
+)
+DEFAULT_IFLOW_SETTINGS = _load_bootstrap_json(
+    "iflow/bootstrap.json",
+    _DEFAULT_IFLOW_SETTINGS_FALLBACK,
+)
+DEFAULT_CODEX_CONFIG = _load_bootstrap_text(
+    "codex/bootstrap.toml",
+    _DEFAULT_CODEX_CONFIG_FALLBACK,
+)
+DEFAULT_OPENCODE_CONFIG = _load_bootstrap_json(
+    "opencode/bootstrap.json",
+    _DEFAULT_OPENCODE_CONFIG_FALLBACK,
+)
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
 
@@ -56,6 +114,7 @@ RESUME_HELP_HINTS: Dict[str, tuple[str, ...]] = {
     "codex": ("resume",),
     "gemini": ("--resume",),
     "iflow": ("--resume", "--continue"),
+    "opencode": ("--session",),
 }
 
 
@@ -83,6 +142,11 @@ class AgentCliManager:
                 profile.agent_home / ".codex",
                 profile.agent_home / ".gemini",
                 profile.agent_home / ".iflow",
+                profile.agent_home / ".opencode",
+                profile.agent_home / ".config" / "opencode",
+                profile.agent_home / ".local" / "share" / "opencode",
+                profile.agent_home / ".local" / "state" / "opencode",
+                profile.agent_home / ".cache" / "opencode",
             ]
         )
         self._ensure_json_file(
@@ -99,6 +163,10 @@ class AgentCliManager:
         codex_config = profile.agent_home / ".codex" / "config.toml"
         if not codex_config.exists():
             codex_config.write_text(DEFAULT_CODEX_CONFIG, encoding="utf-8")
+        self._ensure_json_file(
+            profile.agent_home / ".config" / "opencode" / "opencode.json",
+            DEFAULT_OPENCODE_CONFIG,
+        )
 
     def ensure_ui_terminal_assets(self) -> Path:
         """
@@ -293,18 +361,17 @@ class AgentCliManager:
     def import_credentials(self, source_root: Path) -> Dict[str, list[str]]:
         source_root = source_root.resolve()
         copied: Dict[str, list[str]] = {}
-        for engine, filenames in CREDENTIAL_IMPORT_RULES.items():
+        for engine, mappings in CREDENTIAL_IMPORT_RULES.items():
             src_engine = source_root / engine
-            dst_engine = self.profile.agent_home / f".{engine}"
-            dst_engine.mkdir(parents=True, exist_ok=True)
             copied_files: list[str] = []
-            for filename in filenames:
-                src = src_engine / filename
+            for src_name, dst_relpath in mappings:
+                src = src_engine / src_name
                 if not src.exists():
                     continue
-                dst = dst_engine / filename
+                dst = self.profile.agent_home / dst_relpath
+                dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
-                copied_files.append(filename)
+                copied_files.append(src_name)
             copied[engine] = copied_files
         return copied
 
@@ -366,15 +433,14 @@ class AgentCliManager:
             elif global_cmd is not None:
                 effective_source = "global"
 
-            credential_files = {
-                filename: (self.profile.agent_home / f".{engine}" / filename).exists()
-                for filename in CREDENTIAL_IMPORT_RULES.get(engine, [])
-            }
+            credential_files = self._credential_status_paths(engine)
             auth_ready = bool(effective_cmd) and all(credential_files.values())
             if engine == "iflow":
                 auth_ready = auth_ready and self._is_iflow_settings_valid(
                     self.profile.agent_home / ".iflow" / "settings.json"
                 )
+            if engine == "opencode":
+                auth_ready = bool(effective_cmd) and self._is_opencode_auth_ready(credential_files)
 
             status[engine] = {
                 "managed_present": managed_cmd is not None,
@@ -387,6 +453,15 @@ class AgentCliManager:
                 "auth_ready": auth_ready,
             }
         return status
+
+    def _credential_status_paths(self, engine: str) -> Dict[str, bool]:
+        return {
+            src_name: (self.profile.agent_home / dst_relpath).exists()
+            for src_name, dst_relpath in CREDENTIAL_IMPORT_RULES.get(engine, ())
+        }
+
+    def _is_opencode_auth_ready(self, credential_files: Dict[str, bool]) -> bool:
+        return bool(credential_files.get("auth.json"))
 
     def _ensure_json_file(self, path: Path, payload: Mapping[str, object]) -> None:
         if path.exists():

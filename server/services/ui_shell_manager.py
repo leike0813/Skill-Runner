@@ -218,6 +218,12 @@ class UiShellManager:
                 "iflow",
                 (),
             ),
+            "opencode": CommandSpec(
+                "opencode-tui",
+                "OpenCode TUI",
+                "opencode",
+                (),
+            ),
         }
 
     def list_commands(self) -> list[Dict[str, str]]:
@@ -319,6 +325,11 @@ class UiShellManager:
                 "iFlow inline TUI runs without sandbox. iFlow sandbox requires Docker-image execution, "
                 "which is intentionally outside this inline TUI design.",
             )
+        if engine == "opencode":
+            return (
+                "unsupported",
+                "OpenCode inline TUI runs without sandbox.",
+            )
         return ("unknown", "Sandbox capability is unknown for this engine.")
 
     def _cleanup_stale_session_locked(self) -> None:
@@ -374,6 +385,15 @@ class UiShellManager:
                     "autoAccept": False,
                     "approvalMode": "default",
                     "excludeTools": ["ShellTool"],
+                },
+            )
+            return
+        if engine == "opencode":
+            # Project-level config for inline TUI: deny tool calls and external folder access.
+            self._write_json(
+                session_dir / "opencode.json",
+                {
+                    "permission": "deny",
                 },
             )
             return

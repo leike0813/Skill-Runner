@@ -28,10 +28,17 @@
             <div class="muted">Loaded from backend skill detail.</div>
         </div>
         <div style="margin-bottom: 14px;">
-            <label for="model"><strong>Model</strong></label><br>
-            <select id="model" name="model" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 280px;">
+            <label for="provider"><strong>Provider</strong></label><br>
+            <select id="provider" name="provider" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 200px;">
+            </select>
+            <div class="muted">For non-opencode engines this is a fixed display value.</div>
+        </div>
+        <div style="margin-bottom: 14px;">
+            <label for="model_value"><strong>Model</strong></label><br>
+            <select id="model_value" name="model_value" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 280px;">
                 <option value="">(Backend default)</option>
             </select>
+            <input type="hidden" id="model" name="model" value="{{ selected_model }}">
             <div class="muted">Models are loaded from management engine detail for selected engine.</div>
         </div>
 
@@ -140,24 +147,118 @@
 <script>
 (() => {
     const engineModels = {{ engine_models_by_engine | tojson }};
+    const selectedProvider = {{ selected_provider | tojson }};
     const selectedModel = {{ selected_model | tojson }};
+    const fixedProviders = {
+        codex: "openai",
+        gemini: "google",
+        iflow: "iflowcn",
+    };
     const engineSelect = document.getElementById("engine");
-    const modelSelect = document.getElementById("model");
+    const providerSelect = document.getElementById("provider");
+    const modelSelect = document.getElementById("model_value");
+    const modelHidden = document.getElementById("model");
+
+    function splitProviderModel(id) {
+        if (typeof id !== "string") return null;
+        const idx = id.indexOf("/");
+        if (idx <= 0 || idx >= id.length - 1) return null;
+        return { provider: id.slice(0, idx), model: id.slice(idx + 1) };
+    }
+
+    function providerFromRow(row) {
+        if (row && typeof row.provider === "string" && row.provider.trim()) {
+            return row.provider.trim();
+        }
+        const parsed = splitProviderModel(row && typeof row.id === "string" ? row.id.trim() : "");
+        return parsed ? parsed.provider : "";
+    }
+
+    function modelNameFromRow(row) {
+        if (row && typeof row.model === "string" && row.model.trim()) {
+            return row.model.trim();
+        }
+        const parsed = splitProviderModel(row && typeof row.id === "string" ? row.id.trim() : "");
+        return parsed ? parsed.model : "";
+    }
+
+    function normalizeRows(engine) {
+        const rows = Array.isArray(engineModels[engine]) ? engineModels[engine] : [];
+        return rows.filter((row) => row && typeof row.id === "string");
+    }
+
+    function renderProviders() {
+        const engine = engineSelect.value;
+        const rows = normalizeRows(engine);
+        let providers = [];
+        if (engine === "opencode") {
+            const seen = new Set();
+            for (const row of rows) {
+                const provider = providerFromRow(row);
+                if (!provider || seen.has(provider)) continue;
+                seen.add(provider);
+                providers.push(provider);
+            }
+            providers = providers.sort();
+            if (!providers.length && selectedProvider) {
+                providers.push(selectedProvider);
+            }
+        } else {
+            const fallbackProvider = fixedProviders[engine] || engine;
+            if (fallbackProvider) {
+                providers = [fallbackProvider];
+            }
+        }
+        providerSelect.innerHTML = "";
+        if (!providers.length) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "(N/A)";
+            providerSelect.appendChild(option);
+            return;
+        }
+        for (const provider of providers) {
+            const option = document.createElement("option");
+            option.value = provider;
+            option.textContent = provider;
+            providerSelect.appendChild(option);
+        }
+        const desired = providerSelect.value || selectedProvider || providers[0];
+        if ([...providerSelect.options].some((item) => item.value === desired)) {
+            providerSelect.value = desired;
+        } else {
+            providerSelect.value = providers[0];
+        }
+    }
 
     function renderModels() {
         const engine = engineSelect.value;
-        const rows = Array.isArray(engineModels[engine]) ? engineModels[engine] : [];
-        const current = modelSelect.value || selectedModel || "";
+        const rows = normalizeRows(engine);
+        const selectedProviderValue = providerSelect.value || "";
+        const current = modelHidden.value || selectedModel || "";
         modelSelect.innerHTML = "";
         const defaultOption = document.createElement("option");
         defaultOption.value = "";
         defaultOption.textContent = "(Backend default)";
         modelSelect.appendChild(defaultOption);
         for (const row of rows) {
-            if (!row || typeof row.id !== "string") continue;
+            const rowProvider = providerFromRow(row);
+            const rowModel = modelNameFromRow(row);
+            if (engine === "opencode" && selectedProviderValue && rowProvider !== selectedProviderValue) {
+                continue;
+            }
+            let modelId = typeof row.id === "string" ? row.id.trim() : "";
+            if (!modelId && rowProvider && rowModel) {
+                modelId = `${rowProvider}/${rowModel}`;
+            }
+            if (!modelId) continue;
             const option = document.createElement("option");
-            option.value = row.id;
-            option.textContent = row.display_name ? `${row.display_name} (${row.id})` : row.id;
+            option.value = modelId;
+            if (engine === "opencode") {
+                option.textContent = row.display_name ? `${row.display_name} (${rowModel || modelId})` : (rowModel || modelId);
+            } else {
+                option.textContent = row.display_name ? `${row.display_name} (${modelId})` : modelId;
+            }
             modelSelect.appendChild(option);
         }
         if ([...modelSelect.options].some((item) => item.value === current)) {
@@ -165,9 +266,21 @@
         } else {
             modelSelect.value = "";
         }
+        modelHidden.value = modelSelect.value || "";
     }
 
-    engineSelect.addEventListener("change", renderModels);
+    engineSelect.addEventListener("change", () => {
+        renderProviders();
+        renderModels();
+    });
+    providerSelect.addEventListener("change", () => {
+        renderModels();
+    });
+    modelSelect.addEventListener("change", () => {
+        modelHidden.value = modelSelect.value || "";
+    });
+
+    renderProviders();
     renderModels();
 })();
 </script>

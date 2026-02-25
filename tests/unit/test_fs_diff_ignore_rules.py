@@ -16,6 +16,7 @@ def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
     _write(run_dir / ".codex" / "config.toml", "x")
     _write(run_dir / ".gemini" / "settings.json", "x")
     _write(run_dir / ".iflow" / "settings.json", "x")
+    _write(run_dir / "opencode.json", "{}")
 
     orchestrator = JobOrchestrator()
     snapshot = orchestrator._capture_filesystem_snapshot(run_dir)
@@ -26,3 +27,4 @@ def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
     assert ".codex/config.toml" not in snapshot
     assert ".gemini/settings.json" not in snapshot
     assert ".iflow/settings.json" not in snapshot
+    assert "opencode.json" not in snapshot

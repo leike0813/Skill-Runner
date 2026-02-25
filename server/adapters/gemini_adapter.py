@@ -41,7 +41,15 @@ class GeminiAdapter(EngineAdapter):
         gemini_config_dir = run_dir / ".gemini"
         settings_path = gemini_config_dir / "settings.json"
         
-        # Layer 1: Base (Minimal)
+        # Layer 1: Engine Defaults
+        engine_defaults: Dict[str, Any] = {}
+        default_config_path = Path(__file__).parent.parent / "assets" / "configs" / "gemini" / "default.json"
+        if default_config_path.exists():
+            try:
+                with open(default_config_path, "r", encoding="utf-8") as f:
+                    engine_defaults = json.load(f)
+            except Exception:
+                logger.exception("Failed to load Gemini engine defaults")
         
         # Layer 2: Skill Defaults
         skill_defaults = {}
@@ -65,19 +73,22 @@ class GeminiAdapter(EngineAdapter):
         if "max_tokens" in options:
              user_overrides.setdefault("model", {})["maxOutputTokens"] = int(options["max_tokens"])
         
-        # Layer 4: System Enforced
-        enforced_config_path = Path(__file__).parent.parent / "assets" / "configs" / "gemini_enforced.json"
+        # Layer 4: Runtime Engine Config Overlay
+        runtime_engine_overrides: Dict[str, Any] = {}
+        if isinstance(options.get("gemini_config"), dict):
+            runtime_engine_overrides = options["gemini_config"]
+
+        # Layer 5: System Enforced
+        enforced_config_path = Path(__file__).parent.parent / "assets" / "configs" / "gemini" / "enforced.json"
         project_enforced = {}
         if enforced_config_path.exists():
              try:
-                with open(enforced_config_path, "r") as f:
+                with open(enforced_config_path, "r", encoding="utf-8") as f:
                     project_enforced = json.load(f)
-             except Exception as e:
+             except Exception:
                  logger.exception("Failed to load project enforced config")
         
-        layers = [skill_defaults, user_overrides]
-        if "gemini_config" in options:
-            layers.append(options["gemini_config"])
+        layers = [engine_defaults, skill_defaults, user_overrides, runtime_engine_overrides]
         layers.append(project_enforced)
 
         # Ensure directory exists (usually done by WorkspaceManager, but config_generator needs parent)

@@ -379,6 +379,39 @@ class FakeBackendFailedSummary(FakeBackend):
         }
 
 
+class FakeBackendOpencode(FakeBackend):
+    async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
+        assert skill_id == "demo-skill"
+        return {
+            "id": "demo-skill",
+            "name": "Demo Skill",
+            "version": "1.0.0",
+            "engines": ["opencode"],
+            "execution_modes": ["auto", "interactive"],
+        }
+
+    async def get_engine_detail(self, engine: str) -> dict[str, Any]:
+        if engine != "opencode":
+            return {"engine": engine, "models": []}
+        return {
+            "engine": "opencode",
+            "models": [
+                {
+                    "id": "openai/gpt-5",
+                    "provider": "openai",
+                    "model": "gpt-5",
+                    "display_name": "OpenAI GPT-5",
+                },
+                {
+                    "id": "anthropic/claude-sonnet-4.5",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4.5",
+                    "display_name": "Claude Sonnet 4.5",
+                },
+            ],
+        }
+
+
 async def _request(app, method: str, path: str, **kwargs):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -717,6 +750,42 @@ async def test_e2e_example_client_rejects_invalid_model_for_engine(tmp_path: Pat
         )
         assert response.status_code == 400
         assert "is not available for selected engine" in response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path):
+    app = create_app()
+    fake_backend = FakeBackendOpencode()
+    _install_backend_override(app, fake_backend)
+    try:
+        run_form = await _request(app, "GET", "/skills/demo-skill/run")
+        assert run_form.status_code == 200
+        assert "Provider" in run_form.text
+        assert "Model" in run_form.text
+        assert "openai" in run_form.text
+
+        create = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data={
+                "engine": "opencode",
+                "provider": "openai",
+                "model_value": "gpt-5",
+                "execution_mode": "auto",
+                "input__prompt": "hello",
+                "parameter__top_k": "3",
+            },
+            files={
+                "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
+            },
+            follow_redirects=False,
+        )
+        assert create.status_code == 303
+        assert fake_backend.create_payloads[-1]["engine"] == "opencode"
+        assert fake_backend.create_payloads[-1]["model"] == "openai/gpt-5"
     finally:
         app.dependency_overrides.clear()
 

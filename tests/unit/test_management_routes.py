@@ -128,27 +128,50 @@ async def test_management_skill_schemas_endpoint(monkeypatch, tmp_path: Path):
 async def test_management_engines_list_and_detail(monkeypatch):
     monkeypatch.setattr(
         "server.routers.management.model_registry.list_engines",
-        lambda: [{"engine": "codex", "cli_version_detected": "0.90.0"}],
+        lambda: [
+            {"engine": "codex", "cli_version_detected": "0.90.0"},
+            {"engine": "opencode", "cli_version_detected": "0.1.0"},
+        ],
     )
     monkeypatch.setattr(
         "server.routers.management.agent_cli_manager.collect_auth_status",
         lambda: {
             "codex": {"auth_ready": True},
+            "opencode": {"auth_ready": True},
         },
     )
     monkeypatch.setattr(
         "server.routers.management.model_registry.get_models",
-        lambda _engine: SimpleNamespace(
-            cli_version_detected="0.90.0",
-            models=[
-                SimpleNamespace(
-                    id="gpt-5.2-codex",
-                    display_name="GPT-5.2 Codex",
-                    deprecated=False,
-                    notes="snapshot",
-                    supported_effort=["low", "high"],
-                )
-            ],
+        lambda engine: (
+            SimpleNamespace(
+                cli_version_detected="0.1.0",
+                models=[
+                    SimpleNamespace(
+                        id="openai/gpt-5",
+                        display_name="OpenAI GPT-5",
+                        deprecated=False,
+                        notes="runtime_probe_cache",
+                        supported_effort=None,
+                        provider="openai",
+                        model="gpt-5",
+                    )
+                ],
+            )
+            if engine == "opencode"
+            else SimpleNamespace(
+                cli_version_detected="0.90.0",
+                models=[
+                    SimpleNamespace(
+                        id="gpt-5.2-codex",
+                        display_name="GPT-5.2 Codex",
+                        deprecated=False,
+                        notes="snapshot",
+                        supported_effort=["low", "high"],
+                        provider=None,
+                        model=None,
+                    )
+                ],
+            )
         ),
     )
 
@@ -165,6 +188,12 @@ async def test_management_engines_list_and_detail(monkeypatch):
     assert detail["engine"] == "codex"
     assert detail["models"][0]["id"] == "gpt-5.2-codex"
     assert "upgrade_status" in detail
+
+    opencode_detail_res = await _request("GET", "/v1/management/engines/opencode")
+    assert opencode_detail_res.status_code == 200
+    opencode_detail = opencode_detail_res.json()
+    assert opencode_detail["models"][0]["provider"] == "openai"
+    assert opencode_detail["models"][0]["model"] == "gpt-5"
 
 
 @pytest.mark.asyncio

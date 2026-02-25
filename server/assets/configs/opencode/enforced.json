@@ -1,0 +1,17 @@
+{
+  "permission": {
+    "skill": "allow",
+    "bash": "allow",
+    "edit": "allow",
+    "read": "allow",
+    "grep": "allow",
+    "glob": "allow",
+    "list": "allow",
+    "lsp": "allow",
+    "todowrite": "allow",
+    "todoread": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "external_directory": "deny"
+  }
+}

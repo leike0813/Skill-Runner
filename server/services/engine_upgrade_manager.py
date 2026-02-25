@@ -26,7 +26,7 @@ class EngineUpgradeValidationError(ValueError):
 class EngineUpgradeManager:
     """Background manager for engine upgrade tasks."""
 
-    SUPPORTED_ENGINES = ("codex", "gemini", "iflow")
+    SUPPORTED_ENGINES = ("codex", "gemini", "iflow", "opencode")
 
     def __init__(self) -> None:
         self._store = engine_upgrade_store

@@ -11,6 +11,12 @@
             <a class="btn secondary" href="/runs">Runs</a>
         </div>
     </div>
+</section>
+
+<section class="card" style="margin-top: 16px;">
+    <h3 style="margin-top: 0;">Conversation</h3>
+    <div id="chat-panel" class="chat-panel"></div>
+
     <div id="thinking-card" class="thinking-card hidden" role="status" aria-live="polite">
         <div class="thinking-dots" aria-hidden="true">
             <span></span><span></span><span></span>
@@ -20,11 +26,11 @@
             <div class="thinking-desc">Running inference and preparing the next response...</div>
         </div>
     </div>
-</section>
 
-<section class="card" style="margin-top: 16px;">
-    <h3 style="margin-top: 0;">Conversation</h3>
-    <div id="chat-panel" class="chat-panel"></div>
+    <div id="final-summary-card" class="prompt-card hidden" role="status" aria-live="polite">
+        <div style="font-weight: 700; margin-bottom: 6px;">Final Summary</div>
+        <div id="final-summary-text"></div>
+    </div>
 
     <div id="prompt-card" class="prompt-card hidden">
         <div style="font-weight: 700; margin-bottom: 6px;">Pending Input Request</div>
@@ -277,6 +283,8 @@
     const replyTextEl = document.getElementById("reply-text");
     const replySubmitEl = document.getElementById("reply-submit");
     const thinkingCardEl = document.getElementById("thinking-card");
+    const finalSummaryCardEl = document.getElementById("final-summary-card");
+    const finalSummaryTextEl = document.getElementById("final-summary-text");
     const promptCardEl = document.getElementById("prompt-card");
     const promptTextEl = document.getElementById("prompt-card-text");
     const promptIdEl = document.getElementById("prompt-card-id");
@@ -379,6 +387,17 @@
         promptRequiredEl.classList.add("hidden");
         interactionIdEl.value = "";
         pendingIdEl.textContent = "-";
+    }
+
+    function clearFinalSummaryCard() {
+        if (!finalSummaryCardEl || !finalSummaryTextEl) return;
+        finalSummaryCardEl.classList.add("hidden");
+        finalSummaryTextEl.textContent = "";
+        finalSummaryLoaded = false;
+        if (finalSummaryRetryTimer) {
+            clearTimeout(finalSummaryRetryTimer);
+            finalSummaryRetryTimer = null;
+        }
     }
 
     function renderPromptCard(payload) {
@@ -525,17 +544,6 @@
         return null;
     }
 
-    function isStructuredDoneMessage(text) {
-        const trimmed = safeText(text).trim();
-        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
-        try {
-            const payload = JSON.parse(trimmed);
-            return Boolean(payload && typeof payload === "object" && payload.__SKILL_DONE__ === true);
-        } catch (_err) {
-            return false;
-        }
-    }
-
     function parseResultStatusFromPreview(preview) {
         const raw = safeText(preview).trim();
         if (!raw || !raw.startsWith("{")) return "";
@@ -546,6 +554,24 @@
         } catch (_err) {
             return "";
         }
+    }
+
+    function buildFinalSummaryText(payload, resultStatus, preview, artifacts) {
+        const normalizedStatus = safeText(resultStatus).trim().toLowerCase();
+        if (normalizedStatus === "failed") {
+            const message = safeText(payload.result_error_message).trim() || "未知错误";
+            return `任务失败。\nerror_message: ${message}`;
+        }
+        if (normalizedStatus === "canceled") {
+            const message = safeText(payload.result_error_message).trim() || "用户取消";
+            return `任务已取消。\nerror_message: ${message}`;
+        }
+        const hasResult = payload.has_result === true;
+        const artifactLine = artifacts.length
+            ? `\nartifacts: ${artifacts.slice(0, 8).join(", ")}`
+            : "";
+        const previewLine = preview ? `\nresult_preview: ${preview}` : "";
+        return `任务完成。${hasResult ? "\n已生成结构化结果。" : ""}${artifactLine}${previewLine}`;
     }
 
     function applyPendingPrompt(payload) {
@@ -579,14 +605,6 @@
             if (!resultStatus) {
                 resultStatus = parseResultStatusFromPreview(payload.result_preview);
             }
-            if (resultStatus && resultStatus !== "success") {
-                finalSummaryLoaded = true;
-                if (finalSummaryRetryTimer) {
-                    clearTimeout(finalSummaryRetryTimer);
-                    finalSummaryRetryTimer = null;
-                }
-                return;
-            }
             const hasResult = payload.has_result === true;
             const hasArtifacts = payload.has_artifacts === true;
             if (!hasResult && !hasArtifacts) {
@@ -595,15 +613,15 @@
             }
             const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
             const preview = safeText(payload.result_preview).trim();
-            const previewLine = preview ? `\nresult_preview: ${preview}` : "";
-            const artifactLine = artifacts.length
-                ? `\nartifacts: ${artifacts.slice(0, 8).join(", ")}`
-                : "";
-            appendChatBubble(
-                "agent",
-                `任务完成。${hasResult ? "\n已生成结构化结果。" : ""}${artifactLine}${previewLine}`,
-                `final-summary:${hasResult ? 1 : 0}:${artifacts.length}:${preview}`,
-            );
+            if (finalSummaryCardEl && finalSummaryTextEl) {
+                finalSummaryTextEl.textContent = buildFinalSummaryText(
+                    payload,
+                    resultStatus,
+                    preview,
+                    artifacts,
+                );
+                finalSummaryCardEl.classList.remove("hidden");
+            }
             finalSummaryLoaded = true;
             if (finalSummaryRetryTimer) {
                 clearTimeout(finalSummaryRetryTimer);
@@ -757,11 +775,15 @@
         if (typeof payload.cursor === "number") updateCursor(payload.cursor);
 
         if (currentStatus === "waiting_user") {
+            clearFinalSummaryCard();
             await refreshPending();
         } else {
             setReplyEnabled(false);
             if (currentStatus !== "waiting_user") {
                 clearPromptCard();
+            }
+            if (!isTerminal(currentStatus)) {
+                clearFinalSummaryCard();
             }
         }
         if (isTerminal(currentStatus)) {
@@ -798,8 +820,12 @@
             pendingIdEl.textContent = String(data.pending_interaction_id);
         }
         if (nextStatus === "waiting_user") {
+            clearFinalSummaryCard();
             refreshPending().catch(() => {});
             return;
+        }
+        if (!isTerminal(nextStatus)) {
+            clearFinalSummaryCard();
         }
         if (isTerminal(nextStatus)) {
             setReplyEnabled(false);
@@ -813,7 +839,7 @@
         const text = safeText(event?.data?.text);
         const parsed = extractAskUserBlocks(text);
         const cleaned = parsed.stripped;
-        if (cleaned && !isStructuredDoneMessage(cleaned)) {
+        if (cleaned) {
             appendChatBubble(
                 "agent",
                 cleaned,

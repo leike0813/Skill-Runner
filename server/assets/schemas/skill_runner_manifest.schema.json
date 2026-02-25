@@ -82,7 +82,8 @@
       "enum": [
         "codex",
         "gemini",
-        "iflow"
+        "iflow",
+        "opencode"
       ]
     }
   }

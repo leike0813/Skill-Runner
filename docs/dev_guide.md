@@ -173,7 +173,7 @@ SKILL.md 的格式：
 {
   "id": "skill-name",                 // 必须等于 SKILL.md frontmatter.name 且等于目录名（标准要求 name 匹配目录）:contentReference[oaicite:14]{index=14}
   "version": "1.0.0",
-  "engines": ["codex", "gemini", "iflow"], // 可选：显式允许的引擎集合
+  "engines": ["codex", "gemini", "iflow", "opencode"], // 可选：显式允许的引擎集合
   "unsupported_engines": ["iflow"],        // 可选：显式不支持的引擎集合
   "execution_modes": ["auto", "interactive"], // 必填：允许的执行模式（仅 auto|interactive）
   "entrypoint": {
@@ -257,11 +257,15 @@ EngineAdapter.run(
 ) -> EngineRunResult
 
 配置加载逻辑（Config Loading）：
-1. 加载 Project Defaults（Runner 强制默认值）
-2. 加载 Skill Recommended Config（从 assets/<cli>_settings.json）
-3. 加载 User Options（API 调用参数：model + runtime_options）
-4. Merge & Validate（遵循 CLI 官方 Schema）
-5. 生成临时配置文件（如 settings.json）并通过 CLI 参数（-c/--config）或环境变量注入
+1. 加载 Engine Default（`server/assets/configs/<engine>/default.*`，最低优先级）
+2. 加载 Skill Recommended Config（从 `assets/<engine>_config.*` 或 `assets/<engine>_settings.json`）
+3. 加载 User Options（API 调用参数：`model` + `runtime_options` + `<engine>_config`）
+4. 加载 Enforced Config（`server/assets/configs/<engine>/enforced.*`，最高优先级）
+5. Merge & Validate（遵循 CLI 官方 Schema）
+6. 写入运行时配置：
+   - Codex：更新全局 `~/.codex/config.toml` 的 profile；
+   - Gemini / iFlow：写入 `run_dir/.<engine>/settings.json`；
+   - OpenCode：写入 `run_dir/opencode.json`，并按模式覆盖 `permission.question`（`auto=deny`，`interactive=allow`）。
 
 EngineRunResult 字段建议：
 - exit_code: int
@@ -280,9 +284,10 @@ Interactive 会话恢复约定（v0.3）：
   - `true`：保持人工回复门禁；`waiting_user` 不因会话超时自动失败。
   - `false`：等待超时触发自动决策并继续执行（统一回到 `queued` 再恢复）。
 - interactive 完成判定（双轨）：
-  - 强条件：检测到 `__SKILL_DONE__`。
+  - 强条件：在 assistant 回复内容中检测到 `__SKILL_DONE__`。
   - 软条件：未检测到 marker，但当轮输出通过 output schema。
   - 软条件完成会记录 warning：`INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+  - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
   - ask_user 提示建议采用 YAML（非 JSON）并包裹 `<ASK_USER_YAML>...</ASK_USER_YAML>`，降低与业务输出 JSON 混淆风险。
   - ask_user 提示仅用于 pending/UI enrichment，不参与生命周期门控判定。
 - 服务启动期恢复（startup reconciliation）：

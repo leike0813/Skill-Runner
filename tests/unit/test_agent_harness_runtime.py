@@ -54,8 +54,6 @@ class _DummyHarnessRuntime(HarnessRuntime):
             passthrough_args=None,
             use_profile_defaults=True,
         ):
-            if self.engine == "opencode":
-                raise RuntimeError("ENGINE_CAPABILITY_UNAVAILABLE: adapter.execute")
             args = list(passthrough_args or [])
             return [f"/usr/bin/{self.engine}", *args]
 
@@ -67,8 +65,6 @@ class _DummyHarnessRuntime(HarnessRuntime):
             passthrough_args=None,
             use_profile_defaults=True,
         ):
-            if self.engine == "opencode":
-                raise RuntimeError("ENGINE_CAPABILITY_UNAVAILABLE: adapter.execute")
             flags = [
                 token
                 for token in list(passthrough_args or [])
@@ -172,6 +168,7 @@ def test_start_passthrough_translate_and_attempt_artifacts(tmp_path: Path) -> No
     assert injected["engine"] == "codex"
     assert injected["options"] == {
         "__harness_mode": True,
+        "execution_mode": "interactive",
         "__codex_profile_name": "skill-runner-harness",
         "model": "gpt-5.1-codex-mini",
     }
@@ -180,6 +177,7 @@ def test_start_passthrough_translate_and_attempt_artifacts(tmp_path: Path) -> No
     assert getattr(injected_skill, "id") == "harness-config-bootstrap"
     assert getattr(injected_skill, "path") is None
     assert result["translate_level"] == 2
+    assert result["execution_mode"] == "interactive"
     assert result["status"] == "waiting_user"
     assert result["attempt_number"] == 1
     assert isinstance(result["handle"], str) and len(result["handle"]) == 8
@@ -361,12 +359,14 @@ def test_harness_injects_project_and_fixture_skills(tmp_path: Path) -> None:
     fixture_content = fixture_target.read_text(encoding="utf-8")
     assert "Runtime Enforcement (Injected by Skill Runner" in project_content
     assert "## Output Format Contract" in project_content
-    assert "## Execution Mode: AUTO (Non-Interactive)" in project_content
+    assert "## Execution Mode: INTERACTIVE" in project_content
     assert "Runtime Enforcement (Injected by Skill Runner" in fixture_content
     assert "## Output Format Contract" in fixture_content
 
     meta_path = run_dir / ".audit" / "meta.1.json"
     meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta_payload["launch"]["execution_mode"] == "interactive"
+    assert meta_payload["launch"]["payload"]["execution_mode"] == "interactive"
     injection = meta_payload.get("skill_injection")
     assert isinstance(injection, dict)
     assert injection.get("skill_count") == 2
@@ -377,15 +377,103 @@ def test_harness_injects_project_and_fixture_skills(tmp_path: Path) -> None:
     assert config_injection.get("profile_name") == "skill-runner-harness"
 
 
-def test_opencode_is_capability_gated(tmp_path: Path) -> None:
+def test_resume_inherits_auto_mode_from_handle_metadata(tmp_path: Path) -> None:
     config = HarnessConfig(
         runtime_profile=_build_profile(tmp_path),
         run_root=tmp_path / "harness_runs",
     )
     runtime = _DummyHarnessRuntime(config)
-    with pytest.raises(HarnessError) as exc:
-        runtime.start(HarnessLaunchRequest(engine="opencode", passthrough_args=[], translate_level=0))
-    assert exc.value.code == "ENGINE_CAPABILITY_UNAVAILABLE"
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-auto-mode"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n'
+    )
+    start_result = runtime.start(
+        HarnessLaunchRequest(
+            engine="codex",
+            passthrough_args=["exec", "--json", "--skip-git-repo-check", "-p", "first"],
+            translate_level=1,
+            execution_mode="auto",
+        )
+    )
+    handle = start_result["handle"]
+    assert isinstance(handle, str)
+
+    runtime.stdout = (
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}\n'
+        "__SKILL_DONE__\n"
+    )
+    resumed = runtime.resume(HarnessResumeRequest(handle=handle, message="second turn"))
+
+    assert resumed["execution_mode"] == "auto"
+    options_obj = runtime.config_injection_calls[-1]["options"]
+    assert isinstance(options_obj, dict)
+    assert options_obj["execution_mode"] == "auto"
+    meta_payload = json.loads((Path(resumed["run_dir"]) / ".audit" / "meta.2.json").read_text(encoding="utf-8"))
+    assert meta_payload["launch"]["execution_mode"] == "auto"
+    assert meta_payload["launch"]["payload"]["execution_mode"] == "auto"
+
+
+def test_resume_fallbacks_to_interactive_when_handle_mode_missing(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-fallback-mode"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n'
+    )
+    start_result = runtime.start(
+        HarnessLaunchRequest(
+            engine="codex",
+            passthrough_args=["exec", "--json", "--skip-git-repo-check", "-p", "first"],
+            translate_level=1,
+            execution_mode="auto",
+        )
+    )
+    handle = start_result["handle"]
+    assert isinstance(handle, str)
+
+    index_path = config.run_root / "interactive-handles.json"
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    handles = index_payload.get("handles", {})
+    assert isinstance(handles, dict)
+    record = handles.get(handle)
+    assert isinstance(record, dict)
+    record.pop("execution_mode", None)
+    index_path.write_text(json.dumps(index_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    runtime.stdout = (
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}\n'
+        "__SKILL_DONE__\n"
+    )
+    resumed = runtime.resume(HarnessResumeRequest(handle=handle, message="second turn"))
+
+    assert resumed["execution_mode"] == "interactive"
+    options_obj = runtime.config_injection_calls[-1]["options"]
+    assert isinstance(options_obj, dict)
+    assert options_obj["execution_mode"] == "interactive"
+
+
+def test_opencode_start_is_supported(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-opencode"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}\n'
+    )
+    result = runtime.start(
+        HarnessLaunchRequest(
+            engine="opencode",
+            passthrough_args=["run", "--format", "json", "--model", "openai/gpt-5", "hello"],
+            translate_level=1,
+        )
+    )
+    assert result["status"] == "waiting_user"
+    assert runtime.commands[0][:3] == ["/usr/bin/opencode", "run", "--format"]
 
 
 def test_engine_config_injection_failure_is_structured_error(tmp_path: Path) -> None:

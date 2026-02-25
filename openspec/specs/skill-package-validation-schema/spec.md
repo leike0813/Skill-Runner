@@ -21,23 +21,14 @@ TBD - created by archiving change interactive-34-skill-package-schema-and-engine
 
 ### Requirement: runner engine 声明合同 MUST 支持“允许 + 排除”组合语义
 `runner.json` 合同 MUST 支持 `engines`（可选）与 `unsupported_engines`（可选）联合声明，并满足：  
-1) 两字段中的 engine 值必须来自系统支持引擎枚举；  
+1) 两字段中的 engine 值必须来自系统支持引擎枚举（`codex/gemini/iflow/opencode`）；  
 2) 两字段同时存在时不得有重复项；  
 3) 缺失 `engines` 时，允许集合语义为“系统全量支持引擎”；  
 4) 最终有效引擎集合 `effective_engines` 必须非空。
 
-#### Scenario: 仅声明排除列表
-- **WHEN** `runner.json` 省略 `engines` 且声明 `unsupported_engines`
-- **THEN** 系统按“全量支持引擎减去排除列表”计算有效引擎集合
-- **AND** 该包通过 engine 合同校验（前提是结果非空）
-
-#### Scenario: 允许与排除声明重复
-- **WHEN** `engines` 与 `unsupported_engines` 同时存在且包含重复 engine
-- **THEN** 系统拒绝该 skill 包为合同无效
-
-#### Scenario: 计算后无可用引擎
-- **WHEN** `effective_engines` 计算结果为空
-- **THEN** 系统拒绝该 skill 包并返回校验错误
+#### Scenario: 引擎声明包含 opencode
+- **WHEN** `runner.json.engines` 或 `runner.json.unsupported_engines` 包含 `opencode`
+- **THEN** 该字段通过枚举校验（前提是其余约束满足）
 
 ### Requirement: input/parameter/output schema MUST 有服务端 meta-schema 预检
 系统 MUST 对 `runner.json.schemas` 指向的 `input`、`parameter`、`output` schema 执行独立 meta-schema 校验，并在安装与临时上传两条链路统一生效。

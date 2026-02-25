@@ -471,6 +471,7 @@ async def ui_engine_models(request: Request, engine: str, error: str | None = No
         view = model_registry.get_manifest_view(engine)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    snapshots_supported = engine != "opencode"
     return templates.TemplateResponse(
         request=request,
         name="ui/engine_models.html",
@@ -479,6 +480,7 @@ async def ui_engine_models(request: Request, engine: str, error: str | None = No
             "view": view,
             "error": error,
             "message": message,
+            "snapshots_supported": snapshots_supported,
         },
     )
 
@@ -493,6 +495,12 @@ async def ui_engine_models_add_snapshot(
     notes: list[str] | None = Form(None),
     supported_effort: list[str] | None = Form(None),
 ):
+    if engine == "opencode":
+        return RedirectResponse(
+            url=f"/ui/engines/{engine}/models?error=Engine+%27opencode%27+does+not+support+model+snapshots",
+            status_code=303,
+        )
+
     display_name = display_name or []
     deprecated = deprecated or []
     notes = notes or []

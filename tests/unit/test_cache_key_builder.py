@@ -128,14 +128,17 @@ def test_skill_fingerprint_engine_specific_config(tmp_path):
     (assets_dir / "gemini_settings.json").write_text(json.dumps({"model": "a"}))
     (assets_dir / "iflow_settings.json").write_text(json.dumps({"modelName": "b"}))
     (assets_dir / "codex_config.toml").write_text("model = 'c'")
+    (assets_dir / "opencode_config.json").write_text(json.dumps({"sandbox": "workspace-write"}))
 
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
     gemini_fp = compute_skill_fingerprint(skill, "gemini")
     iflow_fp = compute_skill_fingerprint(skill, "iflow")
     codex_fp = compute_skill_fingerprint(skill, "codex")
+    opencode_fp = compute_skill_fingerprint(skill, "opencode")
 
     assert gemini_fp != iflow_fp
     assert iflow_fp != codex_fp
+    assert codex_fp != opencode_fp
 
 
 def test_skill_fingerprint_without_path_returns_empty():

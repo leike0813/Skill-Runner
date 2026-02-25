@@ -28,7 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--upgrade", action="store_true", help="Upgrade all engines")
     mode.add_argument(
         "--upgrade-engine",
-        choices=["codex", "gemini", "iflow"],
+        choices=["codex", "gemini", "iflow", "opencode"],
         help="Upgrade a single engine",
     )
     parser.add_argument(

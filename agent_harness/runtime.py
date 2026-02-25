@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import logging
 
 from server.models import EngineSessionHandle, EngineSessionHandleType
@@ -50,6 +50,7 @@ class HarnessLaunchRequest:
     passthrough_args: list[str]
     translate_level: int
     run_selector: str | None = None
+    execution_mode: Literal["auto", "interactive"] = "interactive"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,19 @@ class HarnessResumeRequest:
 class HarnessRuntime:
     def __init__(self, config: HarnessConfig) -> None:
         self.config = config
+
+    def _normalize_execution_mode(self, value: Any) -> Literal["auto", "interactive"]:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "auto":
+                return "auto"
+            if normalized == "interactive":
+                return "interactive"
+        raise HarnessError(
+            "INVALID_EXECUTION_MODE",
+            f'Invalid execution mode "{value}"',
+            details={"execution_mode": value, "allowed": ["auto", "interactive"]},
+        )
 
     def _ensure_engine_supported(self, engine: str) -> str:
         normalized = engine.strip().lower()
@@ -177,9 +191,10 @@ class HarnessRuntime:
         engine: str,
         adapter: Any,
         run_dir: Path,
+        execution_mode: Literal["auto", "interactive"],
     ) -> dict[str, Any]:
         skill = SkillManifest(id="harness-config-bootstrap", path=None)
-        options: dict[str, Any] = {"__harness_mode": True}
+        options: dict[str, Any] = {"__harness_mode": True, "execution_mode": execution_mode}
         if engine == "codex":
             options["__codex_profile_name"] = HARNESS_CODEX_PROFILE_NAME
             options["model"] = HARNESS_CODEX_DEFAULT_MODEL
@@ -206,11 +221,12 @@ class HarnessRuntime:
 
     def start(self, request: HarnessLaunchRequest) -> dict[str, Any]:
         engine = self._ensure_engine_supported(request.engine)
+        execution_mode = self._normalize_execution_mode(request.execution_mode)
         adapter = self._resolve_adapter(engine)
         try:
             command = adapter.build_start_command(
                 prompt="",
-                options={"__harness_mode": True},
+                options={"__harness_mode": True, "execution_mode": execution_mode},
                 passthrough_args=list(request.passthrough_args),
                 use_profile_defaults=False,
             )
@@ -227,9 +243,11 @@ class HarnessRuntime:
             launch_payload={
                 "passthrough_args": list(request.passthrough_args),
                 "run_selector": request.run_selector,
+                "execution_mode": execution_mode,
             },
             stdin_text="",
             session_handle_hint=None,
+            execution_mode=execution_mode,
         )
 
     def resume(self, request: HarnessResumeRequest) -> dict[str, Any]:
@@ -271,10 +289,19 @@ class HarnessRuntime:
         )
         if not request.message.strip():
             raise HarnessError("INVALID_RESUME_MESSAGE", "resume requires a non-empty <message>")
+        execution_mode_obj = record.get("execution_mode", "interactive")
+        if isinstance(execution_mode_obj, str):
+            normalized = execution_mode_obj.strip().lower()
+            if normalized == "auto":
+                execution_mode: Literal["auto", "interactive"] = "auto"
+            else:
+                execution_mode = "interactive"
+        else:
+            execution_mode = "interactive"
         try:
             command = adapter.build_resume_command(
                 prompt=request.message,
-                options={"__harness_mode": True},
+                options={"__harness_mode": True, "execution_mode": execution_mode},
                 session_handle=EngineSessionHandle(
                     engine=engine,
                     handle_type=EngineSessionHandleType.SESSION_ID,
@@ -298,9 +325,14 @@ class HarnessRuntime:
             translate_level=translate_level,
             command=command,
             launch_kind="resume",
-            launch_payload={"handle": record.get("handle"), "message": request.message},
+            launch_payload={
+                "handle": record.get("handle"),
+                "message": request.message,
+                "execution_mode": execution_mode,
+            },
             stdin_text=f"{request.message}\n",
             session_handle_hint=str(record.get("handle", request.handle)),
+            execution_mode=execution_mode,
         )
 
     def _run_command(
@@ -391,6 +423,7 @@ class HarnessRuntime:
         launch_payload: dict[str, Any],
         stdin_text: str,
         session_handle_hint: str | None,
+        execution_mode: Literal["auto", "interactive"],
     ) -> dict[str, Any]:
         if translate_level not in {0, 1, 2, 3}:
             raise HarnessError(
@@ -404,12 +437,14 @@ class HarnessRuntime:
             engine=engine,
             adapter=adapter,
             run_dir=run_dir,
+            execution_mode=execution_mode,
         )
         project_root = self._resolve_project_root()
         skill_injection = inject_all_skill_packages(
             project_root=project_root,
             run_directory=run_dir,
             engine=engine,
+            execution_mode=execution_mode,
         )
         prefix = f"[agent:{engine}]"
         passthrough_args = launch_payload.get("passthrough_args")
@@ -559,6 +594,7 @@ class HarnessRuntime:
                     "run_id": run_dir.name,
                     "run_dir": run_dir.name,
                     "session_id": session_id,
+                    "execution_mode": execution_mode,
                     "translate_level": translate_level,
                     "passthrough_args": list(launch_payload.get("passthrough_args", [])),
                     "updated_at": datetime.utcnow().isoformat(),
@@ -581,6 +617,7 @@ class HarnessRuntime:
                     "kind": launch_kind,
                     "command": command,
                     "payload": launch_payload_with_injection,
+                    "execution_mode": execution_mode,
                     "translate_level": translate_level,
                 },
                 "environment": self._check_environment(engine, Path(command[0])),
@@ -625,6 +662,7 @@ class HarnessRuntime:
             return {
                 "ok": True,
                 "engine": engine,
+                "execution_mode": execution_mode,
                 "run_id": run_dir.name,
                 "run_dir": str(run_dir),
                 "attempt_number": attempt_paths.attempt_number,

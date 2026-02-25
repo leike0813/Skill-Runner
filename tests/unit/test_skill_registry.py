@@ -172,7 +172,7 @@ def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
         registry.scan_skills()
         skill = registry.get_skill("legacy-engine-skill")
         assert skill is not None
-        assert skill.effective_engines == ["codex", "gemini", "iflow"]
+        assert skill.effective_engines == ["codex", "gemini", "iflow", "opencode"]
         assert skill.engines == []
     finally:
         config.defrost()

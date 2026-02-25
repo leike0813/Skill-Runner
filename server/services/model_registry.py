@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import config
 from .agent_cli_manager import AgentCliManager
+from .opencode_model_catalog import opencode_model_catalog
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENGINES: Tuple[str, ...] = ("codex", "gemini", "iflow")
+SUPPORTED_ENGINES: Tuple[str, ...] = ("codex", "gemini", "iflow", "opencode")
 
 
 def supported_engines() -> List[str]:
@@ -25,15 +26,18 @@ class ModelEntry:
     deprecated: bool
     notes: Optional[str]
     supported_effort: Optional[List[str]]
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ModelCatalog:
     engine: str
     cli_version_detected: Optional[str]
-    snapshot_version_used: str
+    snapshot_version_used: Optional[str]
     fallback_reason: Optional[str]
     models: List[ModelEntry]
+    source: str = "pinned_snapshot"
 
 
 class ModelRegistry:
@@ -48,6 +52,11 @@ class ModelRegistry:
         ]
 
     def get_models(self, engine: str, refresh: bool = False) -> ModelCatalog:
+        if engine == "opencode":
+            catalog = self._get_opencode_models(refresh=refresh)
+            self._cache[engine] = catalog
+            return catalog
+
         if not refresh and engine in self._cache:
             return self._cache[engine]
 
@@ -69,7 +78,8 @@ class ModelRegistry:
             cli_version_detected=cli_version,
             snapshot_version_used=snapshot_version,
             fallback_reason=fallback_reason,
-            models=models
+            models=models,
+            source="pinned_snapshot",
         )
         self._cache[engine] = catalog
         return catalog
@@ -77,12 +87,18 @@ class ModelRegistry:
     def refresh(self, engine: Optional[str] = None) -> None:
         if engine is None:
             self._cache.clear()
+            opencode_model_catalog.request_refresh_async(reason="registry_refresh_all")
             return
         self._cache.pop(engine, None)
+        if engine == "opencode":
+            opencode_model_catalog.request_refresh_async(reason="registry_refresh")
 
     def get_manifest_view(self, engine: str) -> Dict[str, Any]:
         if engine not in self._supported_engines():
             raise ValueError(f"Unknown engine: {engine}")
+
+        if engine == "opencode":
+            return self._build_opencode_manifest_view()
 
         cli_version = self._detect_cli_version(engine)
         manifest = self._load_manifest(engine)
@@ -107,6 +123,8 @@ class ModelRegistry:
                     "deprecated": entry.deprecated,
                     "notes": entry.notes,
                     "supported_effort": entry.supported_effort,
+                    "provider": entry.provider,
+                    "model": entry.model,
                 }
                 for entry in models
             ],
@@ -119,6 +137,8 @@ class ModelRegistry:
     ) -> Dict[str, Any]:
         if engine not in self._supported_engines():
             raise ValueError(f"Unknown engine: {engine}")
+        if engine == "opencode":
+            raise ValueError("Engine 'opencode' does not support model snapshots")
 
         cli_version = self._detect_cli_version(engine)
         if not cli_version:
@@ -222,10 +242,98 @@ class ModelRegistry:
                     display_name=entry.get("display_name"),
                     deprecated=entry.get("deprecated", False),
                     notes=entry.get("notes"),
-                    supported_effort=entry.get("supported_effort")
+                    supported_effort=entry.get("supported_effort"),
+                    provider=entry.get("provider"),
+                    model=entry.get("model"),
                 )
             )
         return models
+
+    def _get_opencode_models(self, *, refresh: bool) -> ModelCatalog:
+        if refresh:
+            opencode_model_catalog.request_refresh_async(reason="api_refresh")
+        snapshot = opencode_model_catalog.get_snapshot()
+        rows = snapshot.get("models")
+        models: List[ModelEntry] = []
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                model_id = row.get("id")
+                if not isinstance(model_id, str) or not model_id.strip():
+                    continue
+                models.append(
+                    ModelEntry(
+                        id=model_id.strip(),
+                        display_name=row.get("display_name"),
+                        deprecated=bool(row.get("deprecated", False)),
+                        notes=row.get("notes"),
+                        supported_effort=row.get("supported_effort"),
+                        provider=row.get("provider"),
+                        model=row.get("model"),
+                    )
+                )
+        status = snapshot.get("status")
+        last_error = snapshot.get("last_error")
+        fallback_reason: Optional[str] = None
+        if isinstance(last_error, str) and last_error.strip():
+            fallback_reason = last_error.strip()
+        elif isinstance(status, str) and status not in {"ready", "runtime_probe_cache"}:
+            fallback_reason = status
+        updated_at = snapshot.get("updated_at")
+        if isinstance(updated_at, str) and updated_at.strip():
+            snapshot_version_used: Optional[str] = updated_at.strip()
+        else:
+            snapshot_version_used = "runtime_probe_cache"
+        return ModelCatalog(
+            engine="opencode",
+            cli_version_detected=self._detect_cli_version("opencode"),
+            snapshot_version_used=snapshot_version_used,
+            fallback_reason=fallback_reason,
+            models=models,
+            source="runtime_probe_cache",
+        )
+
+    def _build_opencode_manifest_view(self) -> Dict[str, Any]:
+        snapshot = opencode_model_catalog.get_snapshot()
+        catalog = self._get_opencode_models(refresh=False)
+        cache_path = Path(config.SYSTEM.OPENCODE_MODELS_CACHE_PATH)
+        updated_at = snapshot.get("updated_at")
+        resolved_snapshot_version = (
+            str(updated_at).strip()
+            if isinstance(updated_at, str) and str(updated_at).strip()
+            else "runtime_probe_cache"
+        )
+        return {
+            "engine": "opencode",
+            "cli_version_detected": catalog.cli_version_detected,
+            "manifest": {
+                "engine": "opencode",
+                "dynamic": True,
+                "source": "runtime_probe_cache",
+                "status": snapshot.get("status"),
+                "updated_at": snapshot.get("updated_at"),
+                "providers": snapshot.get("providers", []),
+                "last_error": snapshot.get("last_error"),
+                "cache_file": cache_path.name,
+                "snapshots": [],
+            },
+            "resolved_snapshot_version": resolved_snapshot_version,
+            "resolved_snapshot_file": cache_path.name,
+            "fallback_reason": catalog.fallback_reason,
+            "models": [
+                {
+                    "id": entry.id,
+                    "display_name": entry.display_name,
+                    "deprecated": entry.deprecated,
+                    "notes": entry.notes,
+                    "supported_effort": entry.supported_effort,
+                    "provider": entry.provider,
+                    "model": entry.model,
+                }
+                for entry in catalog.models
+            ],
+        }
 
     def _normalize_snapshot_models(self, models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not models:
@@ -334,6 +442,14 @@ class ModelRegistry:
         return match.group(0) if match else None
 
     def _parse_model_spec(self, engine: str, model_spec: str) -> Tuple[str, Optional[str]]:
+        if engine == "opencode":
+            if "@" in model_spec:
+                raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
+            if not re.fullmatch(r"[^/\s]+/[^/\s]+", model_spec):
+                raise ValueError(
+                    "Engine 'opencode' requires model format '<provider>/<model>'"
+                )
+            return model_spec, None
         if engine != "codex":
             if "@" in model_spec:
                 raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")

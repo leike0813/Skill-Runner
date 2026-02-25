@@ -42,6 +42,11 @@ TEXT_DECODE_CANDIDATES = (
     "big5",
 )
 VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
+ENGINE_DEFAULT_PROVIDER = {
+    "codex": "openai",
+    "gemini": "google",
+    "iflow": "iflowcn",
+}
 
 
 def get_settings(request: Request) -> E2EClientSettings:
@@ -104,6 +109,7 @@ async def run_form_page(
             form_action=f"/skills/{skill_id}/run",
             submitted={
                 "engine": "",
+                "provider": "",
                 "execution_mode": "",
                 "model": "",
                 "runtime_options": {},
@@ -140,6 +146,7 @@ async def fixture_run_form_page(
             form_action=f"/fixtures/{fixture_skill_id}/run",
             submitted={
                 "engine": "",
+                "provider": "",
                 "execution_mode": "",
                 "model": "",
                 "runtime_options": {},
@@ -177,6 +184,7 @@ async def submit_run(
                 form_action=f"/skills/{skill_id}/run",
                 submitted={
                     "engine": submission["engine_for_form"],
+                    "provider": submission["provider_for_form"],
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
@@ -255,6 +263,7 @@ async def submit_fixture_run(
                 form_action=f"/fixtures/{fixture_skill_id}/run",
                 submitted={
                     "engine": submission["engine_for_form"],
+                    "provider": submission["provider_for_form"],
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
@@ -651,15 +660,28 @@ async def _collect_run_submission(
     run_form = await request.form()
     submitted_engine = str(run_form.get("engine", "") or "")
     submitted_execution_mode = str(run_form.get("execution_mode", "") or "")
+    submitted_provider = str(run_form.get("provider", "") or "").strip()
     submitted_model = str(run_form.get("model", "") or "").strip()
+    submitted_model_value = str(run_form.get("model_value", "") or "").strip()
     submitted_runtime_options = _collect_submitted_runtime_options(run_form)
 
     engine = _resolve_engine(submitted_engine, detail)
+    if not submitted_model and submitted_model_value:
+        if engine == "opencode":
+            if "/" in submitted_model_value:
+                submitted_model = submitted_model_value
+            elif submitted_provider:
+                submitted_model = f"{submitted_provider}/{submitted_model_value}"
+        else:
+            submitted_model = submitted_model_value
     execution_mode, mode_error = _resolve_execution_mode(submitted_execution_mode, detail)
     selected_model, model_error = _resolve_model(
         selected=submitted_model,
         allowed_models=_extract_engine_model_ids(engine_models_by_engine, engine),
     )
+    provider_for_form = submitted_provider or _derive_provider_from_model(selected_model, engine=engine)
+    if not provider_for_form:
+        provider_for_form = ENGINE_DEFAULT_PROVIDER.get(engine, "")
     runtime_options, runtime_errors = _build_runtime_options(
         execution_mode=execution_mode,
         submitted=submitted_runtime_options,
@@ -694,6 +716,7 @@ async def _collect_run_submission(
         "errors": errors,
         "engine": engine,
         "engine_for_form": engine,
+        "provider_for_form": provider_for_form,
         "execution_mode": execution_mode,
         "execution_mode_for_form": execution_mode if not mode_error else submitted_execution_mode,
         "selected_model": selected_model,
@@ -938,6 +961,10 @@ def _build_run_form_context(
     if not selected_execution_mode and execution_modes:
         selected_execution_mode = execution_modes[0]
     selected_model = str(submitted.get("model") or "")
+    submitted_provider = str(submitted.get("provider") or "")
+    selected_provider = submitted_provider or _derive_provider_from_model(selected_model, engine=selected_engine)
+    if not selected_provider:
+        selected_provider = ENGINE_DEFAULT_PROVIDER.get(selected_engine, "")
     submitted_runtime_options = submitted.get("runtime_options", {})
     if not isinstance(submitted_runtime_options, dict):
         submitted_runtime_options = {}
@@ -954,6 +981,7 @@ def _build_run_form_context(
         "engine_models_by_engine": engine_models_by_engine,
         "execution_modes": execution_modes,
         "selected_engine": selected_engine,
+        "selected_provider": selected_provider,
         "selected_execution_mode": selected_execution_mode,
         "selected_model": selected_model,
         "submitted_runtime_options": submitted_runtime_options,
@@ -1108,6 +1136,15 @@ def _extract_engine_model_ids(
         if isinstance(value, str) and value.strip():
             model_ids.append(value.strip())
     return list(dict.fromkeys(model_ids))
+
+
+def _derive_provider_from_model(model: str, *, engine: str) -> str:
+    if engine != "opencode":
+        return ENGINE_DEFAULT_PROVIDER.get(engine, "")
+    if not model or "/" not in model:
+        return ""
+    provider = model.split("/", 1)[0].strip()
+    return provider
 
 
 def _collect_submitted_runtime_options(run_form: Mapping[str, Any]) -> dict[str, Any]:

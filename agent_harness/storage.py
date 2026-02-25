@@ -112,12 +112,18 @@ def snapshot_filesystem(run_dir: Path) -> list[dict[str, Any]]:
         ".codex/",
         ".gemini/",
         ".iflow/",
+        ".opencode/",
     )
+    ignored_files = {
+        "opencode.json",
+    }
     for path in sorted(run_dir.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(run_dir).as_posix()
         if rel.startswith(ignored_prefixes):
+            continue
+        if rel in ignored_files:
             continue
         content = path.read_bytes()
         rows.append(

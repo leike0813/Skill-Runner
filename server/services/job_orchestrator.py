@@ -172,6 +172,7 @@ class JobOrchestrator:
         final_validation_warnings: list[str] = []
         final_error_code: Optional[str] = None
         trust_registered = False
+        adapter: Any | None = None
 
         # 1. Update status to RUNNING
         self._update_status(
@@ -284,6 +285,7 @@ class JobOrchestrator:
             repair_level = result.repair_level or "none"
             has_structured_output = False
             done_marker_found_in_stream = self._contains_done_marker_in_stream(
+                adapter=adapter,
                 raw_stdout=result.raw_stdout,
                 raw_stderr=result.raw_stderr,
             )
@@ -615,6 +617,7 @@ class JobOrchestrator:
                         process_failure_reason=process_failure_reason,
                         process_raw_stdout=process_raw_stdout,
                         process_raw_stderr=process_raw_stderr,
+                        adapter=adapter,
                         turn_payload=turn_payload_for_completion,
                         validation_warnings=final_validation_warnings,
                         terminal_error_code=final_error_code,
@@ -768,6 +771,7 @@ class JobOrchestrator:
             "codex": ".codex",
             "gemini": ".gemini",
             "iflow": ".iflow",
+            "opencode": ".opencode",
         }.get(engine_name, f".{engine_name}")
         skill_dir = run_dir / workspace_prefix / "skills" / skill_id
         runner_path = skill_dir / "assets" / "runner.json"
@@ -877,12 +881,18 @@ class JobOrchestrator:
             ".codex/",
             ".gemini/",
             ".iflow/",
+            ".opencode/",
         )
+        ignored_files = {
+            "opencode.json",
+        }
         for path in run_dir.rglob("*"):
             if not path.is_file():
                 continue
             rel_path = path.relative_to(run_dir).as_posix()
             if rel_path.startswith(ignored_prefixes):
+                continue
+            if rel_path in ignored_files:
                 continue
             snapshot[rel_path] = {
                 "size": path.stat().st_size,
@@ -910,21 +920,50 @@ class JobOrchestrator:
     def _find_done_markers(
         self,
         *,
+        adapter: Any | None,
         raw_stdout: str,
         raw_stderr: str,
         turn_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         done_signal_found = "__SKILL_DONE__" in turn_payload and turn_payload.get("__SKILL_DONE__") is True
         markers: List[Dict[str, Any]] = []
-        for stream_name, text in (("stdout", raw_stdout), ("stderr", raw_stderr)):
-            for match in DONE_MARKER_STREAM_PATTERN.finditer(text):
-                markers.append(
-                    {
-                        "stream": stream_name,
-                        "byte_from": match.start(),
-                        "byte_to": match.end(),
-                    }
+        if adapter is not None:
+            try:
+                parsed = adapter.parse_runtime_stream(
+                    stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
+                    stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
+                    pty_raw=b"",
                 )
+            except Exception:
+                parsed = None
+                logger.warning("failed to parse runtime stream for done-marker scan", exc_info=True)
+
+            assistant_messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
+            if isinstance(assistant_messages, list):
+                for item in assistant_messages:
+                    if not isinstance(item, dict):
+                        continue
+                    text_obj = item.get("text")
+                    if not isinstance(text_obj, str) or not text_obj:
+                        continue
+                    raw_ref_obj = item.get("raw_ref")
+                    raw_ref = raw_ref_obj if isinstance(raw_ref_obj, dict) else {}
+                    marker_stream_obj = raw_ref.get("stream")
+                    marker_stream = (
+                        marker_stream_obj
+                        if isinstance(marker_stream_obj, str) and marker_stream_obj
+                        else "assistant"
+                    )
+                    marker_byte_from = raw_ref.get("byte_from")
+                    marker_byte_to = raw_ref.get("byte_to")
+                    for _match in DONE_MARKER_STREAM_PATTERN.finditer(text_obj):
+                        markers.append(
+                            {
+                                "stream": marker_stream,
+                                "byte_from": marker_byte_from,
+                                "byte_to": marker_byte_to,
+                            }
+                        )
         return {
             "done_signal_found": done_signal_found,
             "done_marker_found": bool(markers),
@@ -935,11 +974,17 @@ class JobOrchestrator:
     def _contains_done_marker_in_stream(
         self,
         *,
+        adapter: Any | None,
         raw_stdout: str,
         raw_stderr: str,
     ) -> bool:
-        stream_text = f"{raw_stdout}\n{raw_stderr}"
-        return bool(DONE_MARKER_STREAM_PATTERN.search(stream_text))
+        done_info = self._find_done_markers(
+            adapter=adapter,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+            turn_payload={},
+        )
+        return bool(done_info.get("done_marker_found"))
 
     def _classify_completion(
         self,
@@ -1040,6 +1085,7 @@ class JobOrchestrator:
         process_failure_reason: Optional[str],
         process_raw_stdout: str,
         process_raw_stderr: str,
+        adapter: Any | None,
         turn_payload: Dict[str, Any],
         validation_warnings: List[str],
         terminal_error_code: Optional[str],
@@ -1086,6 +1132,7 @@ class JobOrchestrator:
         )
 
         done_info = self._find_done_markers(
+            adapter=adapter,
             raw_stdout=stdout_text,
             raw_stderr=stderr_text,
             turn_payload=turn_payload,

@@ -78,8 +78,10 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 - **THEN** 回合可进入完成判定与最终输出校验并可结束运行
 
 #### Scenario: done marker 检测兼容转义流文本
-- **WHEN** 运行时输出为 NDJSON 事件行，且 marker 位于事件字符串字段（例如 `\"__SKILL_DONE__\": true`）
+- **WHEN** 运行时输出为 NDJSON 事件行，且 marker 位于 assistant 回复字段的字符串文本（例如 `\"__SKILL_DONE__\": true`）
 - **THEN** 系统必须将其识别为 done marker 证据
+- **AND** done marker 证据仅来自 assistant 回复内容（例如 codex `item.completed.item.type=agent_message`、gemini `response`、opencode `type=text`）
+- **AND** `tool_use`/tool 回显中的 marker 文本 MUST NOT 作为 done marker 证据
 - **AND** 运行时判定与审计判定必须保持一致
 
 #### Scenario: interactive 模式软条件判定完成

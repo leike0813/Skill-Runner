@@ -353,6 +353,12 @@ class EngineModelInfo(BaseModel):
     supported_effort: Optional[List[str]] = None
     """Supported reasoning effort levels (Codex only)."""
 
+    provider: Optional[str] = None
+    """Model provider id (optional, mainly for opencode)."""
+
+    model: Optional[str] = None
+    """Model short name without provider prefix (optional, mainly for opencode)."""
+
 class EngineModelsResponse(BaseModel):
     """
     Response payload listing models for a specific engine.
@@ -363,7 +369,7 @@ class EngineModelsResponse(BaseModel):
     cli_version_detected: Optional[str] = None
     """Detected CLI version, if available."""
 
-    snapshot_version_used: str
+    snapshot_version_used: Optional[str] = None
     """Pinned snapshot version used for the response."""
 
     source: str
@@ -426,6 +432,8 @@ class EngineManifestModelInfo(BaseModel):
     deprecated: bool = False
     notes: Optional[str] = None
     supported_effort: Optional[List[str]] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 class EngineManifestViewResponse(BaseModel):

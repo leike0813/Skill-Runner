@@ -6,7 +6,7 @@ without bundling the agent CLIs into the image.
 ## Goals
 
 - Use a Debian-based Node.js base image.
-- Keep agent CLIs (codex/gemini/iflow) out of the image for fast upgrades.
+- Keep agent CLIs (codex/gemini/iflow/opencode) out of the image for fast upgrades.
 - Mount `skills/` from the host for hot updates.
 - Persist data, configs, and CLI installs via volumes.
 - Centralize caches/packages under a single named volume.
@@ -64,6 +64,8 @@ The entrypoint runs an agent check on startup and writes a status file:
     - `${SKILL_RUNNER_AGENT_HOME}/.codex`
     - `${SKILL_RUNNER_AGENT_HOME}/.gemini`
     - `${SKILL_RUNNER_AGENT_HOME}/.iflow`
+    - `${SKILL_RUNNER_AGENT_HOME}/.config/opencode`
+    - `${SKILL_RUNNER_AGENT_HOME}/.local/share/opencode`
 - Engine CLI install/upgrade/check always use managed prefix:
   - `SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm`
   - `NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm`
@@ -130,6 +132,8 @@ docker run --rm -p 8000:8000 -p 7681:7681 \
     - `baseUrl = "https://apis.iflow.cn/v1"`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.codex/config.toml` with:
     - `cli_auth_credentials_store = "file"`
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/opencode.json` with:
+    - `plugin = ["opencode-antigravity-auth"]`
   - Entry-point trust bootstrap (idempotent):
     - Creates/repairs `${SKILL_RUNNER_AGENT_HOME}/.gemini/trustedFolders.json` as a JSON object.
     - Adds runs parent trust to Gemini:
@@ -165,7 +169,10 @@ Method 1: Login inside the container (TUI)
   - `codex` (creates `auth.json`)
   - `gemini` (creates `google_accounts.json`, `oauth_creds.json`)
   - `iflow` (creates `iflow_accounts.json`, `oauth_creds.json`)
-- The files are stored under `${SKILL_RUNNER_AGENT_HOME}/.<tool>/`.
+  - `opencode` (creates `.local/share/opencode/auth.json`; plugin auth may create `.config/opencode/antigravity-accounts.json`)
+- The files are stored under isolated Agent Home:
+  - Codex/Gemini/iFlow: `${SKILL_RUNNER_AGENT_HOME}/.<tool>/...`
+  - OpenCode: `${SKILL_RUNNER_AGENT_HOME}/.local/share/opencode/auth.json` and `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/antigravity-accounts.json`
 
 Method 2: Login on another machine and copy credentials
 - Login on any machine where the CLI works.
@@ -173,6 +180,7 @@ Method 2: Login on another machine and copy credentials
   - Codex → `agent_config/codex/auth.json`
   - Gemini → `agent_config/gemini/google_accounts.json`, `agent_config/gemini/oauth_creds.json`
   - iFlow → `agent_config/iflow/iflow_accounts.json`, `agent_config/iflow/oauth_creds.json`
+  - OpenCode → `agent_config/opencode/auth.json` (required), `agent_config/opencode/antigravity-accounts.json` (optional)
 - Restart the container (or rerun `agent_manager.py --import-credentials /opt/config`) to import.
 
 ### Web inline terminal notes

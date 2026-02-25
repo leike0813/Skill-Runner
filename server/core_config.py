@@ -102,6 +102,28 @@ _C.SYSTEM.UV_PROJECT_ENVIRONMENT = os.environ.get(
     os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "uv_venv")
 )
 
+# OpenCode model catalog refresh interval (minutes)
+_C.SYSTEM.OPENCODE_MODELS_REFRESH_INTERVAL_MINUTES = int(
+    os.environ.get("OPENCODE_MODELS_REFRESH_INTERVAL_MINUTES", "60")
+)
+
+# OpenCode model probe timeout (seconds)
+_C.SYSTEM.OPENCODE_MODELS_PROBE_TIMEOUT_SEC = int(
+    os.environ.get("OPENCODE_MODELS_PROBE_TIMEOUT_SEC", "20")
+)
+
+# OpenCode startup model probe toggle
+_C.SYSTEM.OPENCODE_MODELS_STARTUP_PROBE = _env_bool(
+    "OPENCODE_MODELS_STARTUP_PROBE",
+    True,
+)
+
+# OpenCode model cache file path
+_C.SYSTEM.OPENCODE_MODELS_CACHE_PATH = os.environ.get(
+    "OPENCODE_MODELS_CACHE_PATH",
+    os.path.join(_C.SYSTEM.DATA_DIR, "engine_catalog", "opencode_models_cache.json"),
+)
+
 # Run database path
 _C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
 
@@ -168,7 +190,9 @@ _C.GEMINI.DEFAULT_PROMPT_TEMPLATE = os.path.join(_C.SYSTEM.ROOT, "server", "asse
 # -----------------------------------------------------------------------------
 _C.CODEX = CN()
 # Enforced configuration file path
-_C.CODEX.ENFORCED_CONFIG = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "configs", "codex_enforced.toml")
+_C.CODEX.ENFORCED_CONFIG = os.path.join(
+    _C.SYSTEM.ROOT, "server", "assets", "configs", "codex", "enforced.toml"
+)
 # Profile schema file path
 _C.CODEX.PROFILE_SCHEMA = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "schemas", "codex_profile_schema.json")
 
@@ -177,7 +201,9 @@ _C.CODEX.PROFILE_SCHEMA = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "sche
 # -----------------------------------------------------------------------------
 _C.IFLOW = CN()
 _C.IFLOW.DEFAULT_PROMPT_TEMPLATE = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "templates", "iflow_default.j2")
-_C.IFLOW.ENFORCED_CONFIG = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "configs", "iflow_enforced.json")
+_C.IFLOW.ENFORCED_CONFIG = os.path.join(
+    _C.SYSTEM.ROOT, "server", "assets", "configs", "iflow", "enforced.json"
+)
 _C.IFLOW.SETTINGS_SCHEMA = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "schemas", "iflow_settings_schema.json")
 
 

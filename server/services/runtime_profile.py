@@ -93,6 +93,14 @@ class RuntimeProfile:
         env["NPM_CONFIG_PREFIX"] = str(self.npm_prefix)
         env["UV_CACHE_DIR"] = str(self.uv_cache_dir)
         env["UV_PROJECT_ENVIRONMENT"] = str(self.uv_project_environment)
+        xdg_config_home = self.agent_home / ".config"
+        xdg_data_home = self.agent_home / ".local" / "share"
+        xdg_state_home = self.agent_home / ".local" / "state"
+        xdg_cache_home = self.agent_home / ".cache"
+        env["XDG_CONFIG_HOME"] = str(xdg_config_home)
+        env["XDG_DATA_HOME"] = str(xdg_data_home)
+        env["XDG_STATE_HOME"] = str(xdg_state_home)
+        env["XDG_CACHE_HOME"] = str(xdg_cache_home)
         if self.platform == "windows":
             env["USERPROFILE"] = str(self.agent_home)
             env["HOME"] = str(self.agent_home)

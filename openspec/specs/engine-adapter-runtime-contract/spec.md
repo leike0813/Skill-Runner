@@ -21,14 +21,19 @@ TBD - created by archiving change interactive-42-engine-runtime-adapter-decoupli
 - **WHEN** 任何引擎 Adapter 解析 stdout/stderr/pty 原始字节流
 - **THEN** 返回值包含统一结构字段并可直接被协议层消费
 
-### Requirement: 系统 MUST 提供 opencode 临时 Adapter 占位
-系统 MUST 提供 `opencode` 的临时 Adapter，实现可迁移的 runtime 流解析能力；对尚未实现的执行能力必须返回结构化 capability unavailable 错误。
+### Requirement: 系统 MUST 提供 opencode 正式 Adapter 执行能力
+系统 MUST 提供 `opencode` 的正式 Adapter，覆盖 start/resume 命令构建、执行生命周期与 runtime 流解析，并在 interactive 场景支持 `session` 续跑。
 
-#### Scenario: opencode 执行能力未实现
-- **WHEN** 调用方请求 opencode 执行命令构建或执行且该能力尚未实现
-- **THEN** 系统返回结构化 `ENGINE_CAPABILITY_UNAVAILABLE` 错误
+#### Scenario: opencode 配置组装包含 enforce 层
+- **WHEN** Adapter 构建 opencode 运行时项目级配置
+- **THEN** MUST 按统一优先级合并 `engine_default -> skill defaults -> runtime overrides -> enforced`
+- **AND** `server/assets/configs/opencode/enforced.json` MUST 作为强制覆盖层生效
 
-#### Scenario: opencode 流解析仍可用
-- **WHEN** 协议层请求 opencode Adapter 解析运行日志
-- **THEN** Adapter 返回标准化 runtime 解析结构用于事件组装
+#### Scenario: opencode auto 模式权限策略
+- **WHEN** `execution_mode=auto`
+- **THEN** Adapter 写入的项目级配置 MUST 包含 `"permission.question":"deny"`
+
+#### Scenario: opencode interactive 模式权限策略
+- **WHEN** `execution_mode=interactive`
+- **THEN** Adapter 写入的项目级配置 MUST 包含 `"permission.question":"allow"`
 

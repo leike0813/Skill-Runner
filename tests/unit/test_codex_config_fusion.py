@@ -21,6 +21,18 @@ def mock_enforced_config(tmp_path):
     return config_file
 
 @pytest.fixture
+def mock_default_config(tmp_path):
+    config_file = tmp_path / "codex_default.toml"
+    content = """
+    [profiles.skill-runner]
+    model = "gpt-5.1-codex-mini"
+    model_provider = "openai"
+    model_reasoning_effort = "low"
+    """
+    config_file.write_text(content)
+    return config_file
+
+@pytest.fixture
 def mock_schema(tmp_path):
     schema_file = tmp_path / "codex_profile_schema.json"
     schema = {
@@ -37,28 +49,29 @@ def mock_schema(tmp_path):
     return schema_file
 
 @pytest.fixture
-def manager(tmp_path, mock_enforced_config, mock_schema):
+def manager(tmp_path, mock_enforced_config, mock_default_config, mock_schema):
     mgr = CodexConfigManager(config_path=tmp_path / "config.toml")
     # Patch paths to use temp files
+    mgr.DEFAULT_CONFIG_PATH = mock_default_config
     mgr.ENFORCED_CONFIG_PATH = mock_enforced_config
     mgr.SCHEMA_PATH = mock_schema
     return mgr
 
 def test_fusion_precedence(manager):
     """
-    Verify precedence: Enforced > Runtime > Skill Defaults
+    Verify precedence: Enforced > Runtime > Skill Defaults > Engine Defaults
     """
-    # 1. Skill Defaults (Low Priority)
+    # 1. Skill Defaults
     skill_defaults = {
         "model": "gpt-3.5",
         "approval_policy": "on-request", # Should be overridden by Enforced
-        "model_provider": "openai"
+        "model_reasoning_effort": "medium",
     }
     
-    # 2. Runtime Config (Medium Priority)
+    # 2. Runtime Config
     runtime_config = {
         "model": "gpt-4", # Should override skill default
-        "model_provider": "anthropic", # Should override skill default
+        "model_provider": "anthropic", # Should override default
         "sandbox_mode": "read-only" # Should be overridden by Enforced
     }
     
@@ -73,6 +86,7 @@ def test_fusion_precedence(manager):
     # Validation 1: Runtime overrides Skill default
     assert final_config["model"] == "gpt-4"
     assert final_config["model_provider"] == "anthropic"
+    assert final_config["model_reasoning_effort"] == "medium"
     
     # Validation 2: Enforced overrides Runtime AND Skill default
     assert final_config["approval_policy"] == "never" # Enforced overrides skill "on-request"
@@ -140,3 +154,16 @@ def test_custom_profile_falls_back_to_default_enforced_section(tmp_path):
             final_config = mgr.generate_profile_settings({"model": "gpt-5"}, {})
     assert final_config["approval_policy"] == "never"
     assert final_config["sandbox_mode"] == "workspace-write"
+
+
+def test_engine_default_used_when_skill_and_runtime_missing(tmp_path, mock_schema, mock_default_config):
+    mgr = CodexConfigManager(config_path=tmp_path / "config.toml")
+    mgr.SCHEMA_PATH = mock_schema
+    mgr.DEFAULT_CONFIG_PATH = mock_default_config
+
+    with patch.object(mgr, "_load_enforced_config", return_value={}):
+        final_config = mgr.generate_profile_settings({}, {})
+
+    assert final_config["model"] == "gpt-5.1-codex-mini"
+    assert final_config["model_provider"] == "openai"
+    assert final_config["model_reasoning_effort"] == "low"
