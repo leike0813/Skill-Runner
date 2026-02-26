@@ -29,6 +29,18 @@
                     <button type="submit">升级该引擎</button>
                 </form>
                 <button type="button" data-engine-start="{{ row.engine }}">在内嵌终端中启动 TUI</button>
+                {% if row.engine == "codex" %}
+                <button type="button" class="secondary" data-engine-auth-start="codex">连接 Codex</button>
+                {% endif %}
+                {% if row.engine == "gemini" %}
+                <button type="button" class="secondary" data-engine-auth-start="gemini">连接 Gemini</button>
+                {% endif %}
+                {% if row.engine == "iflow" %}
+                <button type="button" class="secondary" data-engine-auth-start="iflow">连接 iFlow</button>
+                {% endif %}
+                {% if row.engine == "opencode" %}
+                <button type="button" class="secondary" data-engine-auth-start="opencode">连接 OpenCode</button>
+                {% endif %}
                 <a href="/ui/engines/{{ row.engine }}/models">模型管理</a>
             </td>
         </tr>

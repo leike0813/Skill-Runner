@@ -553,6 +553,7 @@
 - 每个引擎提供“在内嵌终端中启动 TUI”按钮（同一时刻仅允许一个活跃会话）。
 - 启动返回包含 `sandbox_status`/`sandbox_message`（观测信息，默认不阻断启动）。
 - Gemini 内嵌 TUI 在容器沙箱运行时可用时会显式追加 `--sandbox`（不可用时降级启动并保留状态提示）。
+- 若 Gemini 当前认证模式是 API key（`security.auth.selectedType=gemini-api-key`），内嵌 TUI 会强制禁用 `--sandbox`，以避免该模式下 CLI 因 `GEMINI_API_KEY` 前置校验导致启动即退出。
 - iFlow 内嵌 TUI 当前固定非沙箱运行，并返回告警状态（其沙箱依赖 Docker 镜像执行，不符合当前内嵌 TUI 设计）。
 - 内嵌 TUI 路径默认禁用三引擎 shell 工具能力（最小权限策略）。
 - 内嵌 TUI 安全配置与 RUN 路径（`/v1/jobs`）配置隔离，不复用 RUN 的权限融合策略。

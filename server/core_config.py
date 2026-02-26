@@ -173,6 +173,15 @@ _C.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = int(
     os.environ.get("SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS", "1200")
 )
 
+# Experimental codex device-auth proxy
+_C.SYSTEM.ENGINE_AUTH_DEVICE_PROXY_ENABLED = _env_bool(
+    "ENGINE_AUTH_DEVICE_PROXY_ENABLED",
+    True,
+)
+_C.SYSTEM.ENGINE_AUTH_DEVICE_PROXY_TTL_SECONDS = int(
+    os.environ.get("ENGINE_AUTH_DEVICE_PROXY_TTL_SECONDS", "900")
+)
+
 # Interactive session timeout (seconds)
 _C.SYSTEM.SESSION_TIMEOUT_SEC = int(
     os.environ.get("SKILL_RUNNER_SESSION_TIMEOUT_SEC", "1200")

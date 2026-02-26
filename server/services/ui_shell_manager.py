@@ -15,6 +15,11 @@ from threading import Lock
 from typing import Any, Dict, Optional, Protocol
 
 from .agent_cli_manager import AgentCliManager
+from .engine_interaction_gate import (
+    EngineInteractionBusyError,
+    EngineInteractionGate,
+    engine_interaction_gate,
+)
 from .run_folder_trust_manager import run_folder_trust_manager
 
 
@@ -181,9 +186,11 @@ class UiShellManager:
         self,
         agent_manager: Optional[AgentCliManager] = None,
         trust_manager: Optional[TrustManagerProtocol] = None,
+        interaction_gate: Optional[EngineInteractionGate] = None,
     ) -> None:
         self.agent_manager = agent_manager or AgentCliManager()
         self.trust_manager = trust_manager or run_folder_trust_manager
+        self.interaction_gate = interaction_gate or engine_interaction_gate
         self._lock = Lock()
         self._active_session: Optional[UiShellSession] = None
         self._command_specs: Dict[str, CommandSpec] = {
@@ -332,12 +339,40 @@ class UiShellManager:
             )
         return ("unknown", "Sandbox capability is unknown for this engine.")
 
+    def _read_gemini_selected_auth_type(self) -> Optional[str]:
+        settings_path = self.agent_manager.profile.agent_home / ".gemini" / "settings.json"
+        if not settings_path.exists():
+            return None
+        try:
+            payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        security = payload.get("security")
+        if not isinstance(security, dict):
+            return None
+        auth = security.get("auth")
+        if not isinstance(auth, dict):
+            return None
+        selected = auth.get("selectedType")
+        if isinstance(selected, str) and selected.strip():
+            return selected.strip()
+        return None
+
+    def _is_gemini_api_key_auth(self) -> bool:
+        selected = self._read_gemini_selected_auth_type()
+        if not selected:
+            return False
+        return "api-key" in selected.lower()
+
     def _cleanup_stale_session_locked(self) -> None:
         if self._active_session is None:
             return
         session = self._active_session
         state = session.snapshot()
         if state.get("terminal"):
+            self.interaction_gate.release("ui_tui", session.id)
             self._cleanup_trust_for_session(session)
             self._active_session = None
             return
@@ -366,6 +401,9 @@ class UiShellManager:
             self._write_json(
                 session_dir / ".gemini" / "settings.json",
                 {
+                    "general": {
+                        "enableAutoUpdate": False,
+                    },
                     "tools": {
                         "sandbox": sandbox_enabled,
                         "autoAccept": False,
@@ -454,6 +492,7 @@ class UiShellManager:
         if data.get("terminal"):
             with self._lock:
                 if self._active_session is session:
+                    self.interaction_gate.release("ui_tui", session.id)
                     self._cleanup_trust_for_session(session)
                     self._active_session = None
         return data
@@ -477,7 +516,22 @@ class UiShellManager:
 
             sandbox_status, sandbox_message = self._probe_sandbox_status(spec.engine)
             sandbox_enabled = sandbox_status == "supported"
+            if spec.engine == "gemini" and self._is_gemini_api_key_auth():
+                sandbox_enabled = False
+                sandbox_status = "unsupported"
+                sandbox_message = (
+                    "gemini inline TUI disables --sandbox when "
+                    "security.auth.selectedType is gemini-api-key."
+                )
             session_id = str(uuid.uuid4())
+            try:
+                self.interaction_gate.acquire(
+                    "ui_tui",
+                    session_id=session_id,
+                    engine=spec.engine,
+                )
+            except EngineInteractionBusyError as exc:
+                raise UiShellBusyError(str(exc))
             session_dir = self._session_root() / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
             ttyd_host = self._ttyd_bind_host()
@@ -549,6 +603,7 @@ class UiShellManager:
                             session_dir,
                             exc_info=True,
                         )
+                self.interaction_gate.release("ui_tui", session_id)
                 raise
 
             session = UiShellSession(
@@ -581,6 +636,7 @@ class UiShellManager:
         data["active"] = True
         with self._lock:
             if self._active_session is session:
+                self.interaction_gate.release("ui_tui", session.id)
                 self._cleanup_trust_for_session(session)
                 self._active_session = None
         return data

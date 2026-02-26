@@ -19,13 +19,22 @@ from fastapi import (  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
-from ..models import EngineUpgradeTaskStatus, RunStatus, SkillInstallStatus
+from ..models import (
+    EngineAuthSessionInputRequest,
+    EngineAuthSessionStartRequest,
+    EngineUpgradeTaskStatus,
+    RunStatus,
+    SkillInstallStatus,
+)
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
+from ..services.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.engine_interaction_gate import EngineInteractionBusyError
 from ..services.model_registry import model_registry
+from ..services.opencode_auth_provider_registry import opencode_auth_provider_registry
 from ..services.agent_cli_manager import AgentCliManager
 from ..services.skill_browser import (
     build_preview_payload,
@@ -345,6 +354,15 @@ async def ui_engines(request: Request):
         context={
             "engines": _serialize_payload_list(engines_payload, "engines"),
             "session": ui_shell_manager.get_session_snapshot(),
+            "auth_session": engine_auth_flow_manager.get_active_session_snapshot(),
+            "opencode_auth_providers": [
+                {
+                    "provider_id": item.provider_id,
+                    "display_name": item.display_name,
+                    "auth_mode": item.auth_mode,
+                }
+                for item in opencode_auth_provider_registry.list()
+            ],
             "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
         },
     )
@@ -353,6 +371,69 @@ async def ui_engines(request: Request):
 @router.get("/engines/tui/session")
 async def ui_engine_tui_session_status():
     return JSONResponse(ui_shell_manager.get_session_snapshot())
+
+
+@router.post("/engines/auth/sessions")
+async def ui_engine_auth_start(body: EngineAuthSessionStartRequest):
+    try:
+        return JSONResponse(
+            engine_auth_flow_manager.start_session(
+                engine=body.engine,
+                method=body.method,
+                provider_id=body.provider_id,
+            )
+        )
+    except EngineInteractionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/engines/auth/sessions/{session_id}")
+async def ui_engine_auth_status(session_id: str):
+    try:
+        return JSONResponse(engine_auth_flow_manager.get_session(session_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/sessions/{session_id}/cancel")
+async def ui_engine_auth_cancel(session_id: str):
+    try:
+        payload = engine_auth_flow_manager.cancel_session(session_id)
+        return JSONResponse(
+            {
+                "session": payload,
+                "canceled": str(payload.get("status")) == "canceled",
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/sessions/{session_id}/input")
+async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequest):
+    try:
+        payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        return JSONResponse(
+            {
+                "session": payload,
+                "accepted": str(payload.get("status"))
+                in {"code_submitted_waiting_result", "succeeded"},
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/engines/tui/session/start")

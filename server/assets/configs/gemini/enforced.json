@@ -1,4 +1,7 @@
 {
+    "general": {
+        "enableAutoUpdate": false
+    },
     "ui": {
         "quiet": true,
         "hideBanner": true

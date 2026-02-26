@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 
+from server.services.engine_interaction_gate import EngineInteractionGate
 from server.services.ui_shell_manager import (
     UiShellBusyError,
     UiShellManager,
@@ -70,10 +71,12 @@ def _new_manager(
     ttyd_available: bool = True,
     mode: str = "local",
     trust_manager: _TrustSpy | None = None,
+    interaction_gate: EngineInteractionGate | None = None,
 ) -> UiShellManager:
     return UiShellManager(
         agent_manager=cast(Any, _FakeAgentManager(tmp_path, ttyd_available=ttyd_available, mode=mode)),
         trust_manager=cast(Any, trust_manager or _TrustSpy()),
+        interaction_gate=interaction_gate or EngineInteractionGate(),
     )
 
 
@@ -253,6 +256,7 @@ def test_ui_shell_manager_gemini_session_enforces_sandbox_and_disables_shell(
     assert "GEMINI_SANDBOX" not in popen_kwargs["env"]
     settings_path = session_dir / ".gemini" / "settings.json"
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["general"]["enableAutoUpdate"] is False
     assert payload["tools"]["sandbox"] is True
     assert payload["tools"]["autoAccept"] is False
     assert "run_shell_command" in payload["tools"]["exclude"]
@@ -300,6 +304,14 @@ def test_ui_shell_manager_opencode_session_reports_non_sandbox(
     assert payload["permission"] == "deny"
 
 
+def test_ui_shell_manager_respects_auth_gate_conflict(tmp_path: Path, patch_fake_popen):
+    gate = EngineInteractionGate()
+    gate.acquire("auth_flow", session_id="auth-1", engine="codex")
+    manager = _new_manager(tmp_path, interaction_gate=gate)
+    with pytest.raises(UiShellBusyError):
+        manager.start_session("codex")
+
+
 def test_ui_shell_manager_gemini_fallback_without_sandbox_runtime_still_disables_shell(
     tmp_path: Path,
     monkeypatch,
@@ -319,5 +331,79 @@ def test_ui_shell_manager_gemini_fallback_without_sandbox_runtime_still_disables
     assert "GEMINI_SANDBOX" not in patch_fake_popen[0][1]["env"]
     settings_path = session_dir / ".gemini" / "settings.json"
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["general"]["enableAutoUpdate"] is False
     assert payload["tools"]["sandbox"] is False
     assert "run_shell_command" in payload["tools"]["exclude"]
+
+
+def test_ui_shell_manager_gemini_api_key_mode_disables_sandbox(
+    tmp_path: Path,
+    monkeypatch,
+    patch_fake_popen,
+):
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        manager,
+        "_probe_sandbox_status",
+        lambda _engine: ("supported", "sandbox ready"),
+    )
+    gemini_settings = tmp_path / "agent_home" / ".gemini" / "settings.json"
+    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
+    gemini_settings.write_text(
+        json.dumps(
+            {
+                "security": {
+                    "auth": {
+                        "selectedType": "gemini-api-key",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    started = manager.start_session("gemini")
+    popen_args, _ = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    assert "--sandbox" not in command
+    assert started["sandbox_status"] == "unsupported"
+    assert "gemini-api-key" in started["sandbox_message"]
+
+    session_dir = Path(started["session_dir"])
+    settings_path = session_dir / ".gemini" / "settings.json"
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["tools"]["sandbox"] is False
+
+
+@pytest.mark.parametrize(
+    "settings_payload",
+    [
+        {"security": {"auth": {}}},
+        {"security": {}},
+        {},
+    ],
+)
+def test_ui_shell_manager_gemini_missing_auth_fields_do_not_crash_and_keep_sandbox(
+    tmp_path: Path,
+    monkeypatch,
+    patch_fake_popen,
+    settings_payload: dict[str, Any],
+):
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        manager,
+        "_probe_sandbox_status",
+        lambda _engine: ("supported", "sandbox ready"),
+    )
+    gemini_settings = tmp_path / "agent_home" / ".gemini" / "settings.json"
+    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
+    gemini_settings.write_text(
+        json.dumps(settings_payload),
+        encoding="utf-8",
+    )
+
+    started = manager.start_session("gemini")
+    popen_args, _ = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    assert "--sandbox" in command
+    assert started["sandbox_status"] == "supported"

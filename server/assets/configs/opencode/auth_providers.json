@@ -1,0 +1,58 @@
+{
+  "providers": [
+    {
+      "provider_id": "openai",
+      "display_name": "OpenAI",
+      "auth_mode": "oauth",
+      "menu_label": "OpenAI"
+    },
+    {
+      "provider_id": "google",
+      "display_name": "Google (AntiGravity)",
+      "auth_mode": "oauth",
+      "menu_label": "Google"
+    },
+    {
+      "provider_id": "deepseek",
+      "display_name": "DeepSeek",
+      "auth_mode": "api_key",
+      "menu_label": "DeepSeek"
+    },
+    {
+      "provider_id": "iflowcn",
+      "display_name": "iFlowCN",
+      "auth_mode": "api_key",
+      "menu_label": "iFlowCN"
+    },
+    {
+      "provider_id": "minimax",
+      "display_name": "MiniMax",
+      "auth_mode": "api_key",
+      "menu_label": "MiniMax"
+    },
+    {
+      "provider_id": "moonshotai",
+      "display_name": "Moonshot AI",
+      "auth_mode": "api_key",
+      "menu_label": "Moonshot AI"
+    },
+    {
+      "provider_id": "opencode",
+      "display_name": "OpenCode Zen",
+      "auth_mode": "api_key",
+      "menu_label": "OpenCode Zen"
+    },
+    {
+      "provider_id": "openrouter",
+      "display_name": "OpenRouter",
+      "auth_mode": "api_key",
+      "menu_label": "OpenRouter"
+    },
+    {
+      "provider_id": "zai-coding-plan",
+      "display_name": "Z.AI Coding Plan",
+      "auth_mode": "api_key",
+      "menu_label": "Z.AI Coding Plan"
+    }
+  ]
+}

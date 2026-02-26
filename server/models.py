@@ -386,6 +386,56 @@ class EngineAuthStatusResponse(BaseModel):
     engines: Dict[str, Dict[str, Any]]
 
 
+class EngineAuthSessionStartRequest(BaseModel):
+    """Request payload for starting engine auth session."""
+    engine: str
+    method: str = "device-auth"
+    provider_id: Optional[str] = None
+
+
+class EngineAuthSessionSnapshot(BaseModel):
+    """Snapshot payload for engine auth session.
+
+    Status is a driver-defined state, e.g. starting/waiting_orchestrator/
+    waiting_user/code_submitted_waiting_result/succeeded.
+    """
+    session_id: str
+    engine: str
+    method: str
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    status: str
+    input_kind: Optional[str] = None
+    auth_url: Optional[str] = None
+    user_code: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+    auth_ready: bool = False
+    error: Optional[str] = None
+    exit_code: Optional[int] = None
+    audit: Optional[Dict[str, Any]] = None
+    terminal: bool = False
+
+
+class EngineAuthSessionCancelResponse(BaseModel):
+    """Response payload for canceling engine auth session."""
+    session: EngineAuthSessionSnapshot
+    canceled: bool
+
+
+class EngineAuthSessionInputRequest(BaseModel):
+    """Request payload for auth session user input."""
+    kind: str
+    value: str
+
+
+class EngineAuthSessionInputResponse(BaseModel):
+    """Response payload for auth session user input."""
+    session: EngineAuthSessionSnapshot
+    accepted: bool
+
+
 class EngineUpgradeTaskStatus(str, Enum):
     """Lifecycle state for engine upgrade tasks."""
     QUEUED = "queued"

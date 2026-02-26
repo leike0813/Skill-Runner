@@ -5,6 +5,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
+from server.services.engine_interaction_gate import EngineInteractionBusyError
 from server.services.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
 
 
@@ -76,6 +77,291 @@ async def test_v1_engine_auth_status_route(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["engines"]["codex"]["effective_path_source"] == "managed"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_route(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.start_session",
+        lambda engine, method, provider_id=None: {
+            "session_id": "auth-1",
+            "engine": engine,
+            "method": method,
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "auth_url": "https://auth.example.dev/device",
+            "user_code": "TEST-1234",
+            "created_at": "2026-02-25T00:00:00Z",
+            "updated_at": "2026-02-25T00:00:01Z",
+            "expires_at": "2026-02-25T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={"engine": "codex", "method": "device-auth"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "auth-1"
+    assert body["status"] == "waiting_user"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_route_iflow(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.start_session",
+        lambda engine, method, provider_id=None: {
+            "session_id": "auth-iflow-1",
+            "engine": engine,
+            "method": method,
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "auth_url": "https://iflow.cn/oauth?state=abc",
+            "user_code": None,
+            "created_at": "2026-02-26T00:00:00Z",
+            "updated_at": "2026-02-26T00:00:01Z",
+            "expires_at": "2026-02-26T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={"engine": "iflow", "method": "iflow-cli-oauth"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "auth-iflow-1"
+    assert body["engine"] == "iflow"
+    assert body["method"] == "iflow-cli-oauth"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_route_opencode(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.start_session",
+        lambda engine, method, provider_id=None: {
+            "session_id": "auth-opencode-1",
+            "engine": engine,
+            "method": method,
+            "provider_id": provider_id,
+            "provider_name": "DeepSeek",
+            "status": "waiting_user",
+            "input_kind": "api_key",
+            "auth_url": None,
+            "user_code": None,
+            "created_at": "2026-02-26T00:00:00Z",
+            "updated_at": "2026-02-26T00:00:01Z",
+            "expires_at": "2026-02-26T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={"engine": "opencode", "method": "opencode-provider-auth", "provider_id": "deepseek"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "auth-opencode-1"
+    assert body["provider_id"] == "deepseek"
+    assert body["input_kind"] == "api_key"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_conflict(monkeypatch):
+    def _raise(engine, method, provider_id=None):  # noqa: ARG001
+        raise EngineInteractionBusyError("busy")
+
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.start_session",
+        _raise,
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={"engine": "codex", "method": "device-auth"},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_unprocessable(monkeypatch):
+    def _raise(engine, method, provider_id=None):  # noqa: ARG001
+        raise ValueError("unsupported")
+
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.start_session",
+        _raise,
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={"engine": "gemini", "method": "device-auth"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_status_and_cancel(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.get_session",
+        lambda _session_id: {
+            "session_id": "auth-1",
+            "engine": "codex",
+            "method": "device-auth",
+            "status": "waiting_user",
+            "auth_url": "https://auth.example.dev/device",
+            "user_code": "TEST-1234",
+            "created_at": "2026-02-25T00:00:00Z",
+            "updated_at": "2026-02-25T00:00:01Z",
+            "expires_at": "2026-02-25T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.cancel_session",
+        lambda _session_id: {
+            "session_id": "auth-1",
+            "engine": "codex",
+            "method": "device-auth",
+            "status": "canceled",
+            "auth_url": None,
+            "user_code": None,
+            "created_at": "2026-02-25T00:00:00Z",
+            "updated_at": "2026-02-25T00:00:03Z",
+            "expires_at": "2026-02-25T00:15:00Z",
+            "auth_ready": False,
+            "error": "Canceled by user",
+            "exit_code": None,
+            "terminal": True,
+        },
+    )
+
+    status_res = await _request("GET", "/v1/engines/auth/sessions/auth-1")
+    assert status_res.status_code == 200
+    assert status_res.json()["session_id"] == "auth-1"
+
+    cancel_res = await _request("POST", "/v1/engines/auth/sessions/auth-1/cancel")
+    assert cancel_res.status_code == 200
+    payload = cancel_res.json()
+    assert payload["canceled"] is True
+    assert payload["session"]["status"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_input(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.input_session",
+        lambda _session_id, _kind, _value: {
+            "session_id": "auth-g-1",
+            "engine": "gemini",
+            "method": "screen-reader-google-oauth",
+            "status": "code_submitted_waiting_result",
+            "input_kind": "code",
+            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth?foo=bar",
+            "user_code": None,
+            "created_at": "2026-02-26T00:00:00Z",
+            "updated_at": "2026-02-26T00:00:02Z",
+            "expires_at": "2026-02-26T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions/auth-g-1/input",
+        json={"kind": "code", "value": "ABCD-EFGH"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["session"]["engine"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_input_iflow(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.input_session",
+        lambda _session_id, _kind, _value: {
+            "session_id": "auth-iflow-1",
+            "engine": "iflow",
+            "method": "iflow-cli-oauth",
+            "status": "code_submitted_waiting_result",
+            "input_kind": "code",
+            "auth_url": "https://iflow.cn/oauth?state=abc",
+            "user_code": None,
+            "created_at": "2026-02-26T00:00:00Z",
+            "updated_at": "2026-02-26T00:00:02Z",
+            "expires_at": "2026-02-26T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        },
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions/auth-iflow-1/input",
+        json={"kind": "code", "value": "CODE-1234"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["session"]["engine"] == "iflow"
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_input_unprocessable(monkeypatch):
+    def _raise(_session_id, _kind, _value):
+        raise ValueError("unsupported")
+
+    monkeypatch.setattr(
+        "server.routers.engines.engine_auth_flow_manager.input_session",
+        _raise,
+    )
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions/auth-1/input",
+        json={"kind": "code", "value": "ABCD"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_submit_removed():
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions/auth-1/submit",
+        json={"code": "ABCD"},
+    )
+    assert response.status_code in {404, 405}
+
+
+@pytest.mark.asyncio
+async def test_v1_engine_auth_session_status_not_found(monkeypatch):
+    def _raise(_session_id):
+        raise KeyError("missing")
+
+    monkeypatch.setattr("server.routers.engines.engine_auth_flow_manager.get_session", _raise)
+    response = await _request("GET", "/v1/engines/auth/sessions/missing")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

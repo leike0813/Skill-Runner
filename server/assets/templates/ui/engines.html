@@ -71,6 +71,19 @@
             white-space: pre-wrap;
             display: none;
         }
+        .auth-meta { display: grid; gap: 6px; font-size: 14px; }
+        .auth-code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            background: #f3f4f6;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            display: inline-block;
+        }
+        .auth-url {
+            word-break: break-all;
+        }
+        .auth-actions { display: flex; gap: 8px; margin-top: 10px; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
@@ -111,6 +124,49 @@
     </div>
 
     <div class="card">
+        <h2>Engine Auth（实验）</h2>
+        <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
+            Codex 使用 <code>device-auth</code>，Gemini/iFlow/OpenCode 使用 CLI 委托编排或统一输入。鉴权会话与内嵌 TUI 全局互斥。
+        </div>
+        <div class="auth-meta">
+            <div id="auth-engine-row">引擎：-</div>
+            <div id="auth-state">状态：idle</div>
+            <div id="auth-url-row" style="display:none;">
+                授权地址：
+                <a id="auth-url" class="auth-url" href="#" target="_blank" rel="noopener noreferrer"></a>
+            </div>
+            <div id="auth-code-row" style="display:none;">
+                用户代码：
+                <span id="auth-code" class="auth-code"></span>
+            </div>
+            <div id="auth-expire-row" style="display:none;"></div>
+        </div>
+        <div class="auth-actions">
+            <button id="auth-start-btn" type="button">连接 Codex</button>
+            <button id="auth-start-gemini-btn" type="button" class="secondary">连接 Gemini</button>
+            <button id="auth-start-iflow-btn" type="button" class="secondary">连接 iFlow</button>
+            <button id="auth-start-opencode-btn" type="button" class="secondary">连接 OpenCode</button>
+            <button id="auth-cancel-btn" class="secondary" type="button" disabled>取消</button>
+        </div>
+        <div id="auth-opencode-provider-row" style="display:none; margin-top:10px;">
+            <label for="auth-opencode-provider" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">OpenCode Provider</label>
+            <select id="auth-opencode-provider" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+                {% for provider in opencode_auth_providers %}
+                <option value="{{ provider.provider_id }}" data-auth-mode="{{ provider.auth_mode }}">{{ provider.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="auth-input-row" style="display:none; margin-top:10px;">
+            <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">输入</label>
+            <input id="auth-input-value" type="text" autocomplete="off" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;" />
+            <div style="margin-top:8px;">
+                <button id="auth-input-btn" type="button">提交</button>
+            </div>
+        </div>
+        <div id="auth-error" class="error"></div>
+    </div>
+
+    <div class="card">
         <h2>内嵌终端（ttyd）</h2>
         <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
             通过 ttyd 网关启动引擎 TUI。当前仍采用单会话互斥策略（同一时间仅一个引擎会话）。
@@ -142,6 +198,7 @@
 (function () {
     const ttydAvailable = {{ "true" if ttyd_available else "false" }};
     const initialSession = {{ session | tojson }};
+    const initialAuthSession = {{ auth_session | tojson }};
     const stateEl = document.getElementById("terminal-state");
     const sandboxEl = document.getElementById("terminal-sandbox");
     const errorEl = document.getElementById("terminal-error");
@@ -151,6 +208,27 @@
     const frame = document.getElementById("terminal-iframe");
     const terminalBodyEl = document.querySelector(".terminal-body");
     let currentSession = initialSession || { active: false };
+    let currentAuthSession = initialAuthSession || { active: false };
+    const authStateEl = document.getElementById("auth-state");
+    const authEngineRowEl = document.getElementById("auth-engine-row");
+    const authUrlRowEl = document.getElementById("auth-url-row");
+    const authUrlEl = document.getElementById("auth-url");
+    const authCodeRowEl = document.getElementById("auth-code-row");
+    const authCodeEl = document.getElementById("auth-code");
+    const authExpireRowEl = document.getElementById("auth-expire-row");
+    const authStartBtn = document.getElementById("auth-start-btn");
+    const authStartGeminiBtn = document.getElementById("auth-start-gemini-btn");
+    const authStartIflowBtn = document.getElementById("auth-start-iflow-btn");
+    const authStartOpencodeBtn = document.getElementById("auth-start-opencode-btn");
+    const authOpencodeProviderRowEl = document.getElementById("auth-opencode-provider-row");
+    const authOpencodeProviderEl = document.getElementById("auth-opencode-provider");
+    const authCancelBtn = document.getElementById("auth-cancel-btn");
+    const authInputRowEl = document.getElementById("auth-input-row");
+    const authInputLabelEl = document.getElementById("auth-input-label");
+    const authInputValueEl = document.getElementById("auth-input-value");
+    const authInputBtn = document.getElementById("auth-input-btn");
+    const authErrorEl = document.getElementById("auth-error");
+    let authSubmitLocked = false;
 
     function showError(text) {
         errorEl.style.display = "block";
@@ -170,6 +248,138 @@
     function clearWarning() {
         warningEl.style.display = "none";
         warningEl.textContent = "";
+    }
+
+    function showAuthError(text) {
+        authErrorEl.style.display = "block";
+        authErrorEl.textContent = text;
+    }
+
+    function clearAuthError() {
+        authErrorEl.style.display = "none";
+        authErrorEl.textContent = "";
+    }
+
+    function mapStatusLabel(status) {
+        const labels = {
+            idle: "空闲",
+            running: "运行中",
+            starting: "启动中",
+            waiting_user: "等待用户操作",
+            waiting_orchestrator: "后台编排中",
+            code_submitted_waiting_result: "已提交授权码，等待结果",
+            succeeded: "成功",
+            failed: "失败",
+            canceled: "已取消",
+            expired: "已过期",
+            terminated: "已终止",
+            unknown: "未知",
+        };
+        return labels[status] || status;
+    }
+
+    function selectedOpencodeAuthMode() {
+        if (!authOpencodeProviderEl) return "oauth";
+        const option = authOpencodeProviderEl.selectedOptions && authOpencodeProviderEl.selectedOptions[0];
+        if (!option) return "oauth";
+        return option.getAttribute("data-auth-mode") || "oauth";
+    }
+
+    function selectedOpencodeProviderId() {
+        if (!authOpencodeProviderEl) return "";
+        return String(authOpencodeProviderEl.value || "").trim().toLowerCase();
+    }
+
+    function resolveInputKind(session) {
+        const engine = session.engine || "";
+        if (engine === "opencode") {
+            if (session.input_kind === "api_key" || selectedOpencodeAuthMode() === "api_key") {
+                return "api_key";
+            }
+            return "text";
+        }
+        if (engine === "gemini" || engine === "iflow") {
+            return "code";
+        }
+        return "text";
+    }
+
+    function resolveInputLabel(session) {
+        const engine = session.engine || "";
+        if (engine === "gemini" || engine === "iflow") {
+            return "请将授权码粘贴至下方并提交";
+        }
+        if (engine === "opencode") {
+            const mode = resolveInputKind(session);
+            if (mode === "api_key") return "请将 API Key 粘贴至下方并提交";
+            const providerId = (session.provider_id || selectedOpencodeProviderId() || "").toLowerCase();
+            if (providerId === "google") {
+                return "请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交";
+            }
+            return "请将授权返回内容粘贴至下方并提交";
+        }
+        const kind = resolveInputKind(session);
+        if (kind === "api_key") return "API Key";
+        if (kind === "code") return "授权码";
+        return "输入";
+    }
+
+    function applyAuthState(payload) {
+        const next = payload || {};
+        const active = !!(next.active || (next.status && !next.terminal));
+        currentAuthSession = Object.assign({ active }, next);
+        const status = currentAuthSession.status || (active ? "running" : "idle");
+        const statusLabel = mapStatusLabel(status);
+        const terminalSuffix = currentAuthSession.error ? `: ${currentAuthSession.error}` : "";
+        const engine = currentAuthSession.engine || "-";
+        authEngineRowEl.textContent = `引擎：${engine}`;
+        authStateEl.textContent = `状态：${statusLabel}${terminalSuffix}`;
+
+        const shouldShowAuthUrl =
+            !!currentAuthSession.auth_url
+            && status === "waiting_user"
+            && !authSubmitLocked;
+        if (shouldShowAuthUrl) {
+            authUrlRowEl.style.display = "block";
+            authUrlEl.href = currentAuthSession.auth_url;
+            authUrlEl.textContent = currentAuthSession.auth_url;
+        } else {
+            authUrlRowEl.style.display = "none";
+            authUrlEl.removeAttribute("href");
+            authUrlEl.textContent = "";
+        }
+
+        if (currentAuthSession.user_code) {
+            authCodeRowEl.style.display = "block";
+            authCodeEl.textContent = currentAuthSession.user_code;
+        } else {
+            authCodeRowEl.style.display = "none";
+            authCodeEl.textContent = "";
+        }
+
+        if (currentAuthSession.expires_at) {
+            authExpireRowEl.style.display = "block";
+            authExpireRowEl.textContent = `过期时间：${currentAuthSession.expires_at}`;
+        } else {
+            authExpireRowEl.style.display = "none";
+            authExpireRowEl.textContent = "";
+        }
+
+        if (authStartBtn) authStartBtn.disabled = false;
+        if (authStartGeminiBtn) authStartGeminiBtn.disabled = false;
+        if (authStartIflowBtn) authStartIflowBtn.disabled = false;
+        if (authStartOpencodeBtn) authStartOpencodeBtn.disabled = false;
+        if (authCancelBtn) authCancelBtn.disabled = !active;
+        authOpencodeProviderRowEl.style.display = active ? "none" : "block";
+        const showInput =
+            !authSubmitLocked
+            && (currentAuthSession.engine === "gemini" || currentAuthSession.engine === "iflow" || currentAuthSession.engine === "opencode")
+            && !currentAuthSession.terminal
+            && !["succeeded", "failed", "canceled", "expired"].includes(status)
+            && status === "waiting_user";
+        authInputRowEl.style.display = showInput ? "block" : "none";
+        authInputBtn.disabled = !showInput;
+        authInputLabelEl.textContent = resolveInputLabel(currentAuthSession);
     }
 
     function buildTtydUrl(port) {
@@ -216,7 +426,7 @@
         } else {
             const status = currentSession.status || "idle";
             const extra = currentSession.error ? `: ${currentSession.error}` : "";
-            stateEl.textContent = `状态：${status}${extra}`;
+            stateEl.textContent = `状态：${mapStatusLabel(status)}${extra}`;
             frame.src = "about:blank";
         }
     }
@@ -229,6 +439,118 @@
         }
         const payload = await res.json();
         applyState(payload);
+    }
+
+    async function fetchAuthState() {
+        if (!currentAuthSession.session_id) {
+            return;
+        }
+        const res = await fetch(`/ui/engines/auth/sessions/${encodeURIComponent(currentAuthSession.session_id)}`);
+        if (!res.ok) {
+            let detail = `读取鉴权状态失败（HTTP ${res.status}）`;
+            try {
+                const payload = await res.json();
+                if (typeof payload.detail === "string") detail = payload.detail;
+            } catch (_err) {}
+            showAuthError(detail);
+            return;
+        }
+        const payload = await res.json();
+        applyAuthState(payload);
+        if (payload.terminal) {
+            clearAuthError();
+        }
+    }
+
+    function resolveAuthMethod(engine) {
+        if (engine === "gemini") {
+            return "screen-reader-google-oauth";
+        }
+        if (engine === "iflow") {
+            return "iflow-cli-oauth";
+        }
+        if (engine === "opencode") {
+            return "opencode-provider-auth";
+        }
+        return "device-auth";
+    }
+
+    async function startAuth(engine) {
+        clearAuthError();
+        authSubmitLocked = false;
+        authInputValueEl.value = "";
+        const requestBody = { engine: engine, method: resolveAuthMethod(engine) };
+        if (engine === "opencode" && authOpencodeProviderEl) {
+            requestBody.provider_id = authOpencodeProviderEl.value;
+            if (!requestBody.provider_id) {
+                showAuthError("请先选择 OpenCode Provider");
+                return;
+            }
+        }
+        const res = await fetch("/ui/engines/auth/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody)
+        });
+        if (!res.ok) {
+            let detail = `启动鉴权会话失败（HTTP ${res.status}）`;
+            try {
+                const errorPayload = await res.json();
+                if (typeof errorPayload.detail === "string") detail = errorPayload.detail;
+            } catch (_err) {}
+            showAuthError(detail);
+            return;
+        }
+        const responsePayload = await res.json();
+        applyAuthState(responsePayload);
+    }
+
+    async function submitAuthInput() {
+        if (!currentAuthSession.session_id) return;
+        const value = String(authInputValueEl.value || "").trim();
+        if (!value) {
+            showAuthError("请输入内容");
+            return;
+        }
+        clearAuthError();
+        const kind = resolveInputKind(currentAuthSession);
+        const res = await fetch(`/ui/engines/auth/sessions/${encodeURIComponent(currentAuthSession.session_id)}/input`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: kind, value: value }),
+        });
+        if (!res.ok) {
+            let detail = `提交输入失败（HTTP ${res.status}）`;
+            try {
+                const payload = await res.json();
+                if (typeof payload.detail === "string") detail = payload.detail;
+            } catch (_err) {}
+            showAuthError(detail);
+            return;
+        }
+        const payload = await res.json();
+        authInputValueEl.value = "";
+        authSubmitLocked = true;
+        applyAuthState(payload.session || {});
+    }
+
+    async function cancelAuth() {
+        if (!currentAuthSession.session_id) return;
+        clearAuthError();
+        const res = await fetch(`/ui/engines/auth/sessions/${encodeURIComponent(currentAuthSession.session_id)}/cancel`, {
+            method: "POST"
+        });
+        if (!res.ok) {
+            let detail = `取消鉴权会话失败（HTTP ${res.status}）`;
+            try {
+                const payload = await res.json();
+                if (typeof payload.detail === "string") detail = payload.detail;
+            } catch (_err) {}
+            showAuthError(detail);
+            return;
+        }
+        const payload = await res.json();
+        applyAuthState(payload.session || {});
     }
 
     async function startTui(engine) {
@@ -276,16 +598,60 @@
         }
     });
 
-    stopBtn.addEventListener("click", () => {
-        stopTui();
-    });
+    if (stopBtn) {
+        stopBtn.addEventListener("click", () => {
+            stopTui();
+        });
+    }
+    if (authStartBtn) {
+        authStartBtn.addEventListener("click", () => {
+            startAuth("codex");
+        });
+    }
+    if (authStartGeminiBtn) {
+        authStartGeminiBtn.addEventListener("click", () => {
+            startAuth("gemini");
+        });
+    }
+    if (authStartIflowBtn) {
+        authStartIflowBtn.addEventListener("click", () => {
+            startAuth("iflow");
+        });
+    }
+    if (authStartOpencodeBtn) {
+        authStartOpencodeBtn.addEventListener("click", () => {
+            startAuth("opencode");
+        });
+    }
+    if (authCancelBtn) {
+        authCancelBtn.addEventListener("click", () => {
+            cancelAuth();
+        });
+    }
+    if (authInputBtn) {
+        authInputBtn.addEventListener("click", () => {
+            submitAuthInput();
+        });
+    }
 
     document.body.addEventListener("click", (evt) => {
         const target = evt.target;
         if (!(target instanceof HTMLElement)) return;
-        const engine = target.getAttribute("data-engine-start");
+        const startEl = target.closest("[data-engine-start]");
+        if (!startEl) return;
+        const engine = startEl.getAttribute("data-engine-start");
         if (!engine) return;
         startTui(engine);
+    });
+    document.body.addEventListener("click", (evt) => {
+        const target = evt.target;
+        if (!(target instanceof HTMLElement)) return;
+        const authEl = target.closest("[data-engine-auth-start]");
+        if (!authEl) return;
+        const engine = authEl.getAttribute("data-engine-auth-start");
+        if (engine) {
+            startAuth(engine);
+        }
     });
 
     frame.addEventListener("load", () => {
@@ -299,9 +665,11 @@
 
     setInterval(() => {
         fetchSessionState().catch((_err) => {});
+        fetchAuthState().catch((_err) => {});
     }, 1500);
 
     applyState(currentSession);
+    applyAuthState(currentAuthSession);
 })();
 </script>
 </body>

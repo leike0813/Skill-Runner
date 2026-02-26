@@ -20,6 +20,7 @@ references/gemini-cli/
 references/iflow-cli/
 references/opencode/
 references/agent-test-env/
+references/opencode-antigravity-auth/
 e2e_client/recordings/*.json
 .opencode/
 .opencode

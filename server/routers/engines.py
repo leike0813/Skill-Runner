@@ -3,6 +3,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status  # type: ignore[import-not-found]
 
 from ..models import (
+    EngineAuthSessionCancelResponse,
+    EngineAuthSessionInputRequest,
+    EngineAuthSessionInputResponse,
+    EngineAuthSessionSnapshot,
+    EngineAuthSessionStartRequest,
     EngineAuthStatusResponse,
     EngineManifestModelInfo,
     EngineManifestViewResponse,
@@ -21,6 +26,8 @@ from ..services.engine_upgrade_manager import (
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
+from ..services.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.engine_interaction_gate import EngineInteractionBusyError
 from ..services.model_registry import model_registry
 from ..services.agent_cli_manager import AgentCliManager
 from ..services.ui_auth import require_ui_basic_auth
@@ -70,6 +77,81 @@ async def list_models(engine: str):
 )
 async def get_engine_auth_status():
     return EngineAuthStatusResponse(engines=agent_cli_manager.collect_auth_status())
+
+
+@router.post(
+    "/auth/sessions",
+    response_model=EngineAuthSessionSnapshot,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def start_engine_auth_session(body: EngineAuthSessionStartRequest):
+    try:
+        payload = engine_auth_flow_manager.start_session(
+            engine=body.engine,
+            method=body.method,
+            provider_id=body.provider_id,
+        )
+        return EngineAuthSessionSnapshot(**payload)
+    except EngineInteractionBusyError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/auth/sessions/{session_id}",
+    response_model=EngineAuthSessionSnapshot,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_engine_auth_session(session_id: str):
+    try:
+        payload = engine_auth_flow_manager.get_session(session_id)
+        return EngineAuthSessionSnapshot(**payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/sessions/{session_id}/cancel",
+    response_model=EngineAuthSessionCancelResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def cancel_engine_auth_session(session_id: str):
+    try:
+        payload = engine_auth_flow_manager.cancel_session(session_id)
+        return EngineAuthSessionCancelResponse(
+            session=EngineAuthSessionSnapshot(**payload),
+            canceled=str(payload.get("status")) == "canceled",
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/sessions/{session_id}/input",
+    response_model=EngineAuthSessionInputResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def input_engine_auth_session(session_id: str, body: EngineAuthSessionInputRequest):
+    try:
+        payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        return EngineAuthSessionInputResponse(
+            session=EngineAuthSessionSnapshot(**payload),
+            accepted=str(payload.get("status"))
+            in {"code_submitted_waiting_result", "succeeded"},
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
