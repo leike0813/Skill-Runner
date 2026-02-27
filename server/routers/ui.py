@@ -20,12 +20,16 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # ty
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from ..models import (
+    AuthSessionInputRequestV2,
+    AuthSessionStartRequestV2,
     EngineAuthSessionInputRequest,
     EngineAuthSessionStartRequest,
     EngineUpgradeTaskStatus,
     RunStatus,
     SkillInstallStatus,
 )
+from ..services.auth_runtime.orchestrators.cli_delegate_orchestrator import CliDelegateOrchestrator
+from ..services.auth_runtime.orchestrators.oauth_proxy_orchestrator import OAuthProxyOrchestrator
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
@@ -65,6 +69,8 @@ router = APIRouter(
     dependencies=[Depends(require_ui_basic_auth)],
 )
 agent_cli_manager = AgentCliManager()
+oauth_proxy_orchestrator = OAuthProxyOrchestrator(engine_auth_flow_manager)
+cli_delegate_orchestrator = CliDelegateOrchestrator(engine_auth_flow_manager)
 logger = logging.getLogger(__name__)
 
 LEGACY_UI_DATA_API_MODE = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_MODE", "warn").strip().lower()
@@ -373,14 +379,17 @@ async def ui_engine_tui_session_status():
     return JSONResponse(ui_shell_manager.get_session_snapshot())
 
 
-@router.post("/engines/auth/sessions")
-async def ui_engine_auth_start(body: EngineAuthSessionStartRequest):
+@router.post("/engines/auth/oauth-proxy/sessions")
+async def ui_engine_auth_oauth_proxy_start(request: Request, body: AuthSessionStartRequestV2):
+    if body.transport.strip().lower() != "oauth_proxy":
+        raise HTTPException(status_code=422, detail="transport must be oauth_proxy")
     try:
         return JSONResponse(
-            engine_auth_flow_manager.start_session(
+            oauth_proxy_orchestrator.start_session(
                 engine=body.engine,
-                method=body.method,
+                auth_method=body.auth_method,
                 provider_id=body.provider_id,
+                callback_base_url=str(request.base_url).rstrip("/"),
             )
         )
     except EngineInteractionBusyError as exc:
@@ -391,10 +400,152 @@ async def ui_engine_auth_start(body: EngineAuthSessionStartRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/engines/auth/oauth-proxy/sessions/{session_id}")
+async def ui_engine_auth_oauth_proxy_status(session_id: str):
+    try:
+        return JSONResponse(oauth_proxy_orchestrator.get_session(session_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/oauth-proxy/sessions/{session_id}/cancel")
+async def ui_engine_auth_oauth_proxy_cancel(session_id: str):
+    try:
+        payload = oauth_proxy_orchestrator.cancel_session(session_id)
+        return JSONResponse(
+            {
+                "session": payload,
+                "canceled": str(payload.get("status")) == "canceled",
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/oauth-proxy/sessions/{session_id}/input")
+async def ui_engine_auth_oauth_proxy_input(session_id: str, body: AuthSessionInputRequestV2):
+    try:
+        payload = oauth_proxy_orchestrator.input_session(session_id, body.kind, body.value)
+        return JSONResponse(
+            {
+                "session": payload,
+                "accepted": str(payload.get("status"))
+                in {"code_submitted_waiting_result", "succeeded"},
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/cli-delegate/sessions")
+async def ui_engine_auth_cli_delegate_start(request: Request, body: AuthSessionStartRequestV2):
+    if body.transport.strip().lower() != "cli_delegate":
+        raise HTTPException(status_code=422, detail="transport must be cli_delegate")
+    try:
+        return JSONResponse(
+            cli_delegate_orchestrator.start_session(
+                engine=body.engine,
+                auth_method=body.auth_method,
+                provider_id=body.provider_id,
+                callback_base_url=str(request.base_url).rstrip("/"),
+            )
+        )
+    except EngineInteractionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/engines/auth/cli-delegate/sessions/{session_id}")
+async def ui_engine_auth_cli_delegate_status(session_id: str):
+    try:
+        return JSONResponse(cli_delegate_orchestrator.get_session(session_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/cli-delegate/sessions/{session_id}/cancel")
+async def ui_engine_auth_cli_delegate_cancel(session_id: str):
+    try:
+        payload = cli_delegate_orchestrator.cancel_session(session_id)
+        return JSONResponse(
+            {
+                "session": payload,
+                "canceled": str(payload.get("status")) == "canceled",
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/cli-delegate/sessions/{session_id}/input")
+async def ui_engine_auth_cli_delegate_input(session_id: str, body: AuthSessionInputRequestV2):
+    try:
+        payload = cli_delegate_orchestrator.input_session(session_id, body.kind, body.value)
+        return JSONResponse(
+            {
+                "session": payload,
+                "accepted": str(payload.get("status"))
+                in {"code_submitted_waiting_result", "succeeded"},
+            }
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/engines/auth/sessions")
+async def ui_engine_auth_start(request: Request, body: EngineAuthSessionStartRequest):
+    try:
+        payload = engine_auth_flow_manager.start_session(
+                engine=body.engine,
+                method=body.method,
+                auth_method=body.auth_method,
+                provider_id=body.provider_id,
+                transport=body.transport,
+                callback_base_url=str(request.base_url).rstrip("/"),
+            )
+        payload["deprecated"] = True
+        return JSONResponse(payload)
+    except EngineInteractionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/engines/auth/session/active")
+async def ui_engine_auth_active_session():
+    try:
+        return JSONResponse(engine_auth_flow_manager.get_active_session_snapshot())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/engines/auth/sessions/{session_id}")
 async def ui_engine_auth_status(session_id: str):
     try:
-        return JSONResponse(engine_auth_flow_manager.get_session(session_id))
+        payload = engine_auth_flow_manager.get_session(session_id)
+        payload["deprecated"] = True
+        return JSONResponse(payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except Exception as exc:
@@ -405,6 +556,7 @@ async def ui_engine_auth_status(session_id: str):
 async def ui_engine_auth_cancel(session_id: str):
     try:
         payload = engine_auth_flow_manager.cancel_session(session_id)
+        payload["deprecated"] = True
         return JSONResponse(
             {
                 "session": payload,
@@ -421,6 +573,7 @@ async def ui_engine_auth_cancel(session_id: str):
 async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequest):
     try:
         payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        payload["deprecated"] = True
         return JSONResponse(
             {
                 "session": payload,

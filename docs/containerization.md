@@ -166,7 +166,8 @@ Method 1: Login inside the container (TUI)
 - Start the container, then exec into it:
   - `docker exec -it <container_id> /bin/bash`
 - Run the CLI login flow in TUI mode (per tool, in isolated Agent Home):
-  - `codex` (creates `auth.json`)
+  - `codex login` (browser OAuth, creates `auth.json`)
+  - `codex login --device-auth` (device auth)
   - `gemini` (creates `google_accounts.json`, `oauth_creds.json`)
   - `iflow` (creates `iflow_accounts.json`, `oauth_creds.json`)
   - `opencode` (creates `.local/share/opencode/auth.json`; plugin auth may create `.config/opencode/antigravity-accounts.json`)
@@ -182,6 +183,28 @@ Method 2: Login on another machine and copy credentials
   - iFlow → `agent_config/iflow/iflow_accounts.json`, `agent_config/iflow/oauth_creds.json`
   - OpenCode → `agent_config/opencode/auth.json` (required), `agent_config/opencode/antigravity-accounts.json` (optional)
 - Restart the container (or rerun `agent_manager.py --import-credentials /opt/config`) to import.
+
+OpenAI OAuth proxy note:
+- Skill Runner `oauth_proxy` for `codex` and `opencode/openai` starts a per-session local callback listener (`127.0.0.1:1455`) and stops it when session finishes.
+- `callback` 模式支持 `/input` 兜底（远程部署且本地回调不可达时可手工回填）。
+- `gemini` `oauth_proxy` 提供两种模式：
+  - `callback`：依赖本地 listener（`127.0.0.1:51122/oauth2callback`）
+  - `auth_code_or_url`：手工码流，通过 `/input` 回填
+- `gemini` `oauth_proxy` only updates `.gemini/oauth_creds.json` (and optional `google_accounts.json`), and does not write `mcp-oauth-tokens-v2.json` in phase1.
+- Gemini OAuth 代理需要注入：
+  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
+  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`
+- `iflow` `oauth_proxy` 提供两种模式：
+  - `callback`：自动回调优先（`127.0.0.1:11451/oauth2callback`），并支持 `/input` 兜底
+  - `auth_code_or_url`：手工码流，通过 `/input` 回填
+- `iflow` `oauth_proxy` 成功后会更新 `.iflow/oauth_creds.json`、`.iflow/iflow_accounts.json` 和 `.iflow/settings.json`。
+- `opencode/google` `oauth_proxy` (Antigravity browser OAuth) starts a per-session local callback listener on `127.0.0.1:51121` (`/oauth-callback`) and also supports `/input` fallback.
+- OpenCode Google（Antigravity）OAuth 代理需要注入：
+  - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID`
+  - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_SECRET`
+- Auth session logs are separated by transport:
+  - `data/engine_auth_sessions/oauth_proxy/<session_id>/events.jsonl`, `http_trace.log`
+  - `data/engine_auth_sessions/cli_delegate/<session_id>/events.jsonl`, `pty.log`, `stdin.log`
 
 ### Web inline terminal notes
 

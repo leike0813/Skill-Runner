@@ -30,16 +30,27 @@
                 </form>
                 <button type="button" data-engine-start="{{ row.engine }}">在内嵌终端中启动 TUI</button>
                 {% if row.engine == "codex" %}
-                <button type="button" class="secondary" data-engine-auth-start="codex">连接 Codex</button>
+                <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="oauth_proxy" data-auth-method="callback">Codex OAuth代理（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">Codex OAuth代理（AuthCode/URL）</button>
+                <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="cli_delegate" data-auth-method="callback">Codex CLI委托（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">Codex CLI委托（AuthCode/URL）</button>
                 {% endif %}
                 {% if row.engine == "gemini" %}
-                <button type="button" class="secondary" data-engine-auth-start="gemini">连接 Gemini</button>
+                <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="oauth_proxy" data-auth-method="callback">Gemini OAuth代理（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">Gemini OAuth代理（AuthCode/URL）</button>
+                <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">Gemini CLI委托</button>
                 {% endif %}
                 {% if row.engine == "iflow" %}
-                <button type="button" class="secondary" data-engine-auth-start="iflow">连接 iFlow</button>
+                <button type="button" class="secondary" data-engine-auth-start="iflow" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">iFlow CLI委托</button>
                 {% endif %}
                 {% if row.engine == "opencode" %}
-                <button type="button" class="secondary" data-engine-auth-start="opencode">连接 OpenCode</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="oauth_proxy" data-auth-method="callback">OpenCode(OpenAI) OAuth代理（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">OpenCode(OpenAI) OAuth代理（AuthCode/URL）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="google" data-auth-transport="oauth_proxy" data-auth-method="callback">OpenCode(Google) OAuth代理（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="google" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">OpenCode(Google) OAuth代理（AuthCode/URL）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="cli_delegate" data-auth-method="callback">OpenCode(OpenAI) CLI委托（Callback）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">OpenCode(OpenAI) CLI委托（AuthCode/URL）</button>
+                <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="selected" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">OpenCode（当前Provider，CLI委托）</button>
                 {% endif %}
                 <a href="/ui/engines/{{ row.engine }}/models">模型管理</a>
             </td>

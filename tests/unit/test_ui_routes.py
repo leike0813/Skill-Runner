@@ -88,7 +88,7 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.engines.engine_auth_flow_manager.start_session",
-        lambda engine, method, provider_id=None: {
+        lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
             "session_id": "auth-1",
             "engine": engine,
             "method": method,
@@ -146,14 +146,14 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     response = await _request(
         "POST",
         "/v1/engines/auth/sessions",
-        json={"engine": "codex", "method": "device-auth"},
+        json={"engine": "codex", "method": "auth"},
     )
     assert response.status_code == 401
     response = await _request(
         "POST",
         "/v1/engines/auth/sessions",
         auth=("admin", "secret"),
-        json={"engine": "codex", "method": "device-auth"},
+        json={"engine": "codex", "method": "auth"},
     )
     assert response.status_code == 200
 
@@ -298,6 +298,12 @@ async def test_ui_engines_page(monkeypatch):
     assert 'hx-get="/ui/management/engines/table"' in response.text
     assert "内嵌终端（ttyd）" in response.text
     assert "Engine Auth（实验）" in response.text
+    assert "Gemini OAuth代理（Callback）" in response.text
+    assert "iFlow OAuth代理（Callback）" in response.text
+    assert "iFlow OAuth代理（AuthCode/URL）" in response.text
+    assert 'data-engine-auth-start="gemini"' in response.text
+    assert 'data-engine-auth-start="iflow"' in response.text
+    assert 'data-auth-method="callback"' in response.text
     assert "ttyd" in response.text
 
 
@@ -422,6 +428,8 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "yes" in response.text
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-start="codex"' in response.text
+    assert 'data-auth-transport="oauth_proxy"' in response.text
+    assert 'data-auth-transport="cli_delegate"' in response.text
     assert 'data-engine-auth-start="iflow"' in response.text
 
 
@@ -431,10 +439,11 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
     monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_auth_flow_manager.start_session",
-        lambda engine, method, provider_id=None: {
+        lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
             "session_id": "auth-1",
             "engine": engine,
             "method": method,
+            "transport": transport or "oauth_proxy",
             "provider_id": provider_id,
             "status": "waiting_user",
             "auth_url": "https://auth.example.dev/device",
@@ -453,7 +462,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
         lambda _session_id: {
             "session_id": "auth-1",
             "engine": "codex",
-            "method": "device-auth",
+            "method": "auth",
             "status": "waiting_user",
             "auth_url": "https://auth.example.dev/device",
             "user_code": "TEST-1234",
@@ -471,7 +480,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
         lambda _session_id: {
             "session_id": "auth-1",
             "engine": "codex",
-            "method": "device-auth",
+            "method": "auth",
             "status": "canceled",
             "auth_url": None,
             "user_code": None,
@@ -489,7 +498,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
         lambda _session_id, _kind, _value: {
             "session_id": "auth-1",
             "engine": "gemini",
-            "method": "screen-reader-google-oauth",
+            "method": "auth",
             "status": "code_submitted_waiting_result",
             "input_kind": "code",
             "auth_url": "https://accounts.google.com/o/oauth2/v2/auth?foo=bar",
@@ -507,10 +516,11 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
     start_res = await _request(
         "POST",
         "/ui/engines/auth/sessions",
-        json={"engine": "codex", "method": "device-auth"},
+        json={"engine": "codex", "method": "auth"},
     )
     assert start_res.status_code == 200
     assert start_res.json()["session_id"] == "auth-1"
+    assert start_res.json()["transport"] == "oauth_proxy"
 
     status_res = await _request("GET", "/ui/engines/auth/sessions/auth-1")
     assert status_res.status_code == 200
@@ -532,12 +542,111 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_engine_auth_grouped_endpoints(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.oauth_proxy_orchestrator.start_session",
+        lambda engine, auth_method, provider_id=None, callback_base_url=None: {  # noqa: ARG001
+            "session_id": "oauth-ui-1",
+            "engine": engine,
+            "transport": "oauth_proxy",
+            "auth_method": auth_method,
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "created_at": "2026-02-27T00:00:00Z",
+            "updated_at": "2026-02-27T00:00:01Z",
+            "expires_at": "2026-02-27T00:15:00Z",
+            "auth_ready": False,
+            "terminal": False,
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.oauth_proxy_orchestrator.get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "engine": "codex",
+            "transport": "oauth_proxy",
+            "auth_method": "callback",
+            "status": "waiting_user",
+            "created_at": "2026-02-27T00:00:00Z",
+            "updated_at": "2026-02-27T00:00:02Z",
+            "expires_at": "2026-02-27T00:15:00Z",
+            "auth_ready": False,
+            "terminal": False,
+        },
+    )
+
+    start_res = await _request(
+        "POST",
+        "/ui/engines/auth/oauth-proxy/sessions",
+        json={"engine": "codex", "transport": "oauth_proxy", "auth_method": "callback"},
+    )
+    assert start_res.status_code == 200
+    assert start_res.json()["transport"] == "oauth_proxy"
+
+    status_res = await _request("GET", "/ui/engines/auth/oauth-proxy/sessions/oauth-ui-1")
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] == "waiting_user"
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_auth_start_passes_auth_method(monkeypatch):
+    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    captured = {}
+
+    def _start(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ANN001
+        captured.update(
+            {
+                "engine": engine,
+                "method": method,
+                "auth_method": auth_method,
+                "provider_id": provider_id,
+                "transport": transport,
+            }
+        )
+        return {
+            "session_id": "auth-ui-1",
+            "engine": engine,
+            "method": method,
+            "auth_method": auth_method,
+            "transport": transport or "oauth_proxy",
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "created_at": "2026-02-25T00:00:00Z",
+            "updated_at": "2026-02-25T00:00:01Z",
+            "expires_at": "2026-02-25T00:15:00Z",
+            "auth_ready": False,
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        }
+
+    monkeypatch.setattr("server.routers.ui.engine_auth_flow_manager.start_session", _start)
+    response = await _request(
+        "POST",
+        "/ui/engines/auth/sessions",
+        json={
+            "engine": "opencode",
+            "method": "auth",
+            "provider_id": "openai",
+            "transport": "cli_delegate",
+            "auth_method": "auth_code_or_url",
+        },
+    )
+    assert response.status_code == 200
+    assert captured["auth_method"] == "auth_code_or_url"
+    assert captured["provider_id"] == "openai"
+
+
+@pytest.mark.asyncio
 async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
     monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_auth_flow_manager.start_session",
-        lambda engine, method, provider_id=None: {
+        lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
             "session_id": "auth-iflow-1",
             "engine": engine,
             "method": method,
@@ -559,7 +668,7 @@ async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
         lambda _session_id, _kind, _value: {
             "session_id": "auth-iflow-1",
             "engine": "iflow",
-            "method": "iflow-cli-oauth",
+            "method": "auth",
             "status": "code_submitted_waiting_result",
             "input_kind": "code",
             "auth_url": "https://iflow.cn/oauth?state=abc",
@@ -577,11 +686,11 @@ async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
     start_res = await _request(
         "POST",
         "/ui/engines/auth/sessions",
-        json={"engine": "iflow", "method": "iflow-cli-oauth"},
+        json={"engine": "iflow", "method": "auth"},
     )
     assert start_res.status_code == 200
     assert start_res.json()["engine"] == "iflow"
-    assert start_res.json()["method"] == "iflow-cli-oauth"
+    assert start_res.json()["method"] == "auth"
 
     input_res = await _request(
         "POST",
@@ -610,7 +719,7 @@ async def test_ui_engine_auth_session_start_conflict(monkeypatch):
     monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
-    def _raise(engine, method, provider_id=None):  # noqa: ARG001
+    def _raise(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ARG001
         raise EngineInteractionBusyError("busy")
 
     monkeypatch.setattr(
@@ -620,7 +729,7 @@ async def test_ui_engine_auth_session_start_conflict(monkeypatch):
     response = await _request(
         "POST",
         "/ui/engines/auth/sessions",
-        json={"engine": "codex", "method": "device-auth"},
+        json={"engine": "codex", "method": "auth"},
     )
     assert response.status_code == 409
 

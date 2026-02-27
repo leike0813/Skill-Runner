@@ -818,6 +818,96 @@
 - `auth_ready` 判定为：CLI 可用且 `auth.json` 存在。
 - `antigravity-accounts.json` 仅用于插件附加诊断，不作为 ready 必要条件。
 
+### 引擎鉴权会话接口（受 Basic Auth 保护）
+V2（transport 分组）：
+- `POST /v1/engines/auth/oauth-proxy/sessions`
+- `GET /v1/engines/auth/oauth-proxy/sessions/{session_id}`
+- `POST /v1/engines/auth/oauth-proxy/sessions/{session_id}/input`
+- `POST /v1/engines/auth/oauth-proxy/sessions/{session_id}/cancel`
+- `GET /v1/engines/auth/oauth-proxy/callback/openai`（免 Basic Auth）
+- `POST /v1/engines/auth/cli-delegate/sessions`
+- `GET /v1/engines/auth/cli-delegate/sessions/{session_id}`
+- `POST /v1/engines/auth/cli-delegate/sessions/{session_id}/input`
+- `POST /v1/engines/auth/cli-delegate/sessions/{session_id}/cancel`
+
+兼容层（deprecated）：
+- `POST /v1/engines/auth/sessions`
+- `GET /v1/engines/auth/sessions/{session_id}`
+- `POST /v1/engines/auth/sessions/{session_id}/input`
+- `POST /v1/engines/auth/sessions/{session_id}/cancel`
+
+V2 `start` 请求体示例：
+```json
+{
+  "engine": "codex",
+  "auth_method": "callback",
+  "transport": "oauth_proxy"
+}
+```
+
+说明：
+- `transport` 支持 `oauth_proxy` 与 `cli_delegate`。
+- V2 下 `auth_method` 为必填，仅支持 `callback` / `auth_code_or_url` / `api_key`（取决于引擎与 provider）。
+- 旧值 `browser-oauth/device-auth/screen-reader-google-oauth/iflow-cli-oauth/opencode-provider-auth` 已废弃并返回 `422`。
+- V2 下不再使用 `method` 历史字段；兼容层仍可接收 `method`。
+- `codex` 支持 2x2 组合：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
+- `gemini` 支持：
+  - `oauth_proxy + callback`（自动回调优先，零 CLI，支持 `/input` 兜底）
+  - `oauth_proxy + auth_code_or_url`（手工码流，需 `/input`）
+  - `cli_delegate + auth_code_or_url`（现有 CLI 委托链路）
+- `iflow` 支持：
+  - `oauth_proxy + callback`（自动回调优先，支持 `/input` 兜底）
+  - `oauth_proxy + auth_code_or_url`（纯手工码流，通过 `/input` 回填）
+  - `cli_delegate + auth_code_or_url`（现有 CLI 委托链路）
+- `opencode(provider_id=openai)` 支持 2x2：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
+- `opencode(provider_id=google)` 支持：
+  - `oauth_proxy + callback`（自动回调）
+  - `oauth_proxy + auth_code_or_url`（手工回填）
+  - `cli_delegate + auth_code_or_url`（现有 CLI 编排）
+- `cli_delegate + codex` 映射：
+  - `callback` -> `codex login`
+  - `auth_code_or_url` -> `codex login --device-auth`
+- `opencode` 在 V2 通过 `provider_id + auth_method` 指定流程。
+- 用户输入统一通过 `/input` 回填，`kind` 支持 `code` / `api_key` / `text`。
+- 会话快照包含 `transport_state_machine`、`orchestrator`、`log_root` 用于状态解释与日志定位。
+- 语义约束：
+  - `oauth_proxy` 不应出现 `waiting_orchestrator`
+  - `cli_delegate` 不应出现 `polling_result`
+
+OpenAI OAuth 代理回调说明：
+- 默认 `redirect_uri` 为 `http://localhost:1455/auth/callback`。
+- 服务会在 OpenAI OAuth 会话启动时按需拉起本地回调监听（`127.0.0.1:1455`）用于自动收口，会话结束后释放端口。
+- `callback` 模式支持 `/input` 作为兜底（远程部署本地回调不可达时可手工粘贴回调 URL 或 code）。
+
+OpenCode Google（Antigravity）OAuth 代理说明：
+- `oauth_proxy + opencode(provider_id=google)` 使用固定回调地址 `http://localhost:51121/oauth-callback`。
+- 会话启动时服务按需拉起本地 listener（`127.0.0.1:51121`），会话终止时释放。
+- `callback` 模式支持 `/input` 兜底；`auth_code_or_url` 模式可通过 `/input(kind=text)` 提交 redirect URL 或 code。
+- 需通过环境变量提供 Google OAuth 凭据：
+  - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID`
+  - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_SECRET`
+
+Gemini OAuth 代理说明：
+- `oauth_proxy + gemini` 使用本地回调地址 `http://localhost:51122/oauth2callback`。
+- 会话启动时服务按需拉起本地 listener（`127.0.0.1:51122`），会话终止时释放。
+- `callback` 模式要求本地 listener 可用，并支持 `/input` 兜底。
+- `auth_code_or_url` 模式使用手工码流，通过 `/input(kind=text|code)` 完成鉴权。
+- 本期仅写入 `~/.gemini/oauth_creds.json`（以及可选 `google_accounts.json`）；不读写 `mcp-oauth-tokens-v2.json`。
+- 需通过环境变量提供 Google OAuth 凭据：
+  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
+  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`
+
+iFlow OAuth 代理说明：
+- `oauth_proxy + iflow` 使用本地回调地址 `http://localhost:11451/oauth2callback`。
+- `callback` 模式会尝试拉起本地 listener（`127.0.0.1:11451`）；若不可用，会话仍可通过 `/input` 手工兜底完成。
+- `auth_code_or_url` 模式不依赖 listener，通过 `/input(kind=text|code)` 手工提交授权返回内容完成。
+- 鉴权成功后写入 `.iflow/oauth_creds.json`、`.iflow/iflow_accounts.json`、`.iflow/settings.json`（`selectedAuthType=oauth-iflow`）。
+
+服务端回调端点（免 Basic Auth）：
+- `GET /v1/engines/auth/oauth-proxy/callback/openai`
+- `GET /v1/engines/auth/callback/openai`（兼容）
+- `GET /auth/callback`（兼容别名）
+
 ### 获取引擎模型列表
 `GET /v1/engines/{engine}/models`
 

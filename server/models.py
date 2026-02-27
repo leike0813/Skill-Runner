@@ -389,19 +389,24 @@ class EngineAuthStatusResponse(BaseModel):
 class EngineAuthSessionStartRequest(BaseModel):
     """Request payload for starting engine auth session."""
     engine: str
-    method: str = "device-auth"
+    method: str = "auth"
+    auth_method: Optional[str] = None
     provider_id: Optional[str] = None
+    transport: Optional[str] = None
 
 
 class EngineAuthSessionSnapshot(BaseModel):
     """Snapshot payload for engine auth session.
 
-    Status is a driver-defined state, e.g. starting/waiting_orchestrator/
-    waiting_user/code_submitted_waiting_result/succeeded.
+    Status is a driver-defined state, e.g. starting/waiting_user/
+    code_submitted_waiting_result/succeeded. waiting_orchestrator is reserved
+    for cli_delegate flows.
     """
     session_id: str
     engine: str
     method: str
+    auth_method: Optional[str] = None
+    transport: str = "oauth_proxy"
     provider_id: Optional[str] = None
     provider_name: Optional[str] = None
     status: str
@@ -414,6 +419,14 @@ class EngineAuthSessionSnapshot(BaseModel):
     auth_ready: bool = False
     error: Optional[str] = None
     exit_code: Optional[int] = None
+    execution_mode: Optional[str] = None
+    manual_fallback_used: bool = False
+    oauth_callback_received: bool = False
+    oauth_callback_at: Optional[str] = None
+    transport_state_machine: Optional[str] = None
+    orchestrator: Optional[str] = None
+    log_root: Optional[str] = None
+    deprecated: bool = False
     audit: Optional[Dict[str, Any]] = None
     terminal: bool = False
 
@@ -434,6 +447,61 @@ class EngineAuthSessionInputResponse(BaseModel):
     """Response payload for auth session user input."""
     session: EngineAuthSessionSnapshot
     accepted: bool
+
+
+class AuthSessionStartRequestV2(BaseModel):
+    """V2 transport-grouped auth start request."""
+    engine: str
+    transport: str
+    auth_method: str
+    provider_id: Optional[str] = None
+
+
+class AuthSessionSnapshotV2(BaseModel):
+    """V2 transport-grouped auth session snapshot."""
+    session_id: str
+    engine: str
+    transport: str
+    auth_method: str
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    status: str
+    input_kind: Optional[str] = None
+    auth_url: Optional[str] = None
+    user_code: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+    auth_ready: bool = False
+    error: Optional[str] = None
+    exit_code: Optional[int] = None
+    execution_mode: Optional[str] = None
+    manual_fallback_used: bool = False
+    oauth_callback_received: bool = False
+    oauth_callback_at: Optional[str] = None
+    transport_state_machine: Optional[str] = None
+    orchestrator: Optional[str] = None
+    log_root: Optional[str] = None
+    audit: Optional[Dict[str, Any]] = None
+    terminal: bool = False
+
+
+class AuthSessionInputRequestV2(BaseModel):
+    """V2 transport-grouped auth user input request."""
+    kind: str
+    value: str
+
+
+class AuthSessionInputResponseV2(BaseModel):
+    """V2 transport-grouped auth user input response."""
+    session: AuthSessionSnapshotV2
+    accepted: bool
+
+
+class AuthSessionCancelResponseV2(BaseModel):
+    """V2 transport-grouped auth cancel response."""
+    session: AuthSessionSnapshotV2
+    canceled: bool
 
 
 class EngineUpgradeTaskStatus(str, Enum):

@@ -132,3 +132,13 @@ Tracked actions in MVP:
 - Replay payload is accessible via `GET /api/recordings/{request_id}`.
 - Observation stream is accessible via `GET /api/runs/{request_id}/events`.
 - Observation summary sync endpoint is accessible via `POST /api/runs/{request_id}/observe-summary`.
+
+## 8. Auth Matrix Boundary
+
+- The built-in E2E client (`e2e_client/`) does not expose engine auth session controls.
+- Engine auth matrix testing (e.g., `oauth_proxy|cli_delegate` × `callback|auth_code_or_url`) is handled in management UI (`/ui/engines`) and corresponding backend tests.
+- For `oauth_proxy + callback`, `/input` remains available as a manual fallback when local callback cannot reach the server.
+- Gemini OAuth proxy testing supports both `callback` and `auth_code_or_url` in management UI (`/ui/engines`) and corresponding backend tests.
+- iFlow OAuth proxy testing supports both `callback` and `auth_code_or_url` in management UI (`/ui/engines`) and corresponding backend tests.
+- OpenCode Google (Antigravity) browser OAuth proxy testing is also handled in `/ui/engines` (local callback `51121` + `/input` fallback).
+- Auth runtime now exposes transport-grouped endpoints (`/auth/oauth-proxy/*` and `/auth/cli-delegate/*`), while legacy `/auth/sessions*` remains as deprecated compatibility layer.

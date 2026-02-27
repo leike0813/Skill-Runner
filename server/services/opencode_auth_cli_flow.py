@@ -30,6 +30,7 @@ _OPENAI_GO_TO_ANCHOR = "Go to:"
 _OPENAI_WAITING_ANCHOR = "Waiting for authorization"
 _OPENAI_COMPLETE_IN_BROWSER_ANCHOR = "Complete authorization in your browser"
 _ACTION_COOLDOWN_SECONDS = 0.7
+_DEVICE_CODE_PATTERN = re.compile(r"\b[A-Z0-9]{4}(?:-[A-Z0-9]{4,})+\b")
 
 
 def _utc_now() -> datetime:
@@ -57,8 +58,10 @@ class OpencodeAuthCliSession:
     expires_at: datetime
     provider_id: str
     provider_label: str
+    openai_auth_method: str = "callback"
     status: str = "starting"
     auth_url: str | None = None
+    user_code: str | None = None
     error: str | None = None
     exit_code: int | None = None
     input_submitted: bool = False
@@ -87,6 +90,7 @@ class OpencodeAuthCliFlow:
         expires_at: datetime,
         provider_id: str,
         provider_label: str,
+        openai_auth_method: str = "callback",
     ) -> OpencodeAuthCliSession:
         master_fd, slave_fd = pty.openpty()
         try:
@@ -117,6 +121,7 @@ class OpencodeAuthCliFlow:
             expires_at=expires_at,
             provider_id=provider_id,
             provider_label=provider_label,
+            openai_auth_method=openai_auth_method,
         )
         reader = Thread(target=self._reader_loop, args=(session,), daemon=True)
         session._reader_thread = reader
@@ -221,6 +226,9 @@ class OpencodeAuthCliFlow:
             auth_url = self._extract_generic_auth_url(window)
         if auth_url:
             session.auth_url = auth_url
+        user_code = self._extract_user_code(window)
+        if user_code:
+            session.user_code = user_code
 
         if _compact_text(_REDIRECT_PROMPT_ANCHOR) in compact:
             if not session.input_submitted:
@@ -330,16 +338,23 @@ class OpencodeAuthCliFlow:
 
     def _select_login_method_locked(self, session: OpencodeAuthCliSession, text: str) -> None:
         if session.provider_id == "openai":
-            keywords = ["openai"]
+            if session.openai_auth_method == "auth_code_or_url":
+                keywords = ["headless"]
+                fallback_index = 2
+            else:
+                keywords = ["browser"]
+                fallback_index = 1
         elif session.provider_id == "google":
             keywords = ["oauth", "google"]
+            fallback_index = 1
         else:
             keywords = ["oauth"]
+            fallback_index = 1
         self._select_option_by_label_locked(
             session,
             text,
             target_keywords=keywords,
-            fallback_index=1,
+            fallback_index=fallback_index,
         )
 
     def _select_option_by_label_locked(
@@ -420,6 +435,20 @@ class OpencodeAuthCliFlow:
         if not matches:
             return None
         return matches[-1].strip().rstrip(".,);")
+
+    def _extract_user_code(self, text: str) -> str | None:
+        cleaned = _strip_ansi(text)
+        for line in cleaned.splitlines():
+            lowered = line.lower()
+            if "code" not in lowered and "one-time" not in lowered and "device" not in lowered:
+                continue
+            match = _DEVICE_CODE_PATTERN.search(line.upper())
+            if match:
+                return match.group(0)
+        match = _DEVICE_CODE_PATTERN.search(cleaned.upper())
+        if match:
+            return match.group(0)
+        return None
 
     def _is_success_output(self, compact: str) -> bool:
         anchors = (

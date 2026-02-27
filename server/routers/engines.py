@@ -1,8 +1,14 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status  # type: ignore[import-not-found]
+from fastapi import APIRouter, Depends, HTTPException, Request, status  # type: ignore[import-not-found]
+from fastapi.responses import HTMLResponse  # type: ignore[import-not-found]
 
 from ..models import (
+    AuthSessionCancelResponseV2,
+    AuthSessionInputRequestV2,
+    AuthSessionInputResponseV2,
+    AuthSessionSnapshotV2,
+    AuthSessionStartRequestV2,
     EngineAuthSessionCancelResponse,
     EngineAuthSessionInputRequest,
     EngineAuthSessionInputResponse,
@@ -21,6 +27,8 @@ from ..models import (
     EngineUpgradeTaskStatus,
     EnginesResponse,
 )
+from ..services.auth_runtime.orchestrators.cli_delegate_orchestrator import CliDelegateOrchestrator
+from ..services.auth_runtime.orchestrators.oauth_proxy_orchestrator import OAuthProxyOrchestrator
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
@@ -34,6 +42,8 @@ from ..services.ui_auth import require_ui_basic_auth
 
 router = APIRouter(prefix="/engines", tags=["engines"])
 agent_cli_manager = AgentCliManager()
+oauth_proxy_orchestrator = OAuthProxyOrchestrator(engine_auth_flow_manager)
+cli_delegate_orchestrator = CliDelegateOrchestrator(engine_auth_flow_manager)
 
 
 @router.get("", response_model=EnginesResponse)
@@ -80,17 +90,214 @@ async def get_engine_auth_status():
 
 
 @router.post(
+    "/auth/oauth-proxy/sessions",
+    response_model=AuthSessionSnapshotV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def start_oauth_proxy_auth_session(request: Request, body: AuthSessionStartRequestV2):
+    if body.transport.strip().lower() != "oauth_proxy":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="transport must be oauth_proxy")
+    try:
+        payload = oauth_proxy_orchestrator.start_session(
+            engine=body.engine,
+            auth_method=body.auth_method,
+            provider_id=body.provider_id,
+            callback_base_url=str(request.base_url).rstrip("/"),
+        )
+        return AuthSessionSnapshotV2(**payload)
+    except EngineInteractionBusyError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/auth/oauth-proxy/sessions/{session_id}",
+    response_model=AuthSessionSnapshotV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_oauth_proxy_auth_session(session_id: str):
+    try:
+        payload = oauth_proxy_orchestrator.get_session(session_id)
+        return AuthSessionSnapshotV2(**payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/oauth-proxy/sessions/{session_id}/input",
+    response_model=AuthSessionInputResponseV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def input_oauth_proxy_auth_session(session_id: str, body: AuthSessionInputRequestV2):
+    try:
+        payload = oauth_proxy_orchestrator.input_session(session_id, body.kind, body.value)
+        return AuthSessionInputResponseV2(
+            session=AuthSessionSnapshotV2(**payload),
+            accepted=str(payload.get("status")) in {"code_submitted_waiting_result", "succeeded"},
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/oauth-proxy/sessions/{session_id}/cancel",
+    response_model=AuthSessionCancelResponseV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def cancel_oauth_proxy_auth_session(session_id: str):
+    try:
+        payload = oauth_proxy_orchestrator.cancel_session(session_id)
+        return AuthSessionCancelResponseV2(
+            session=AuthSessionSnapshotV2(**payload),
+            canceled=str(payload.get("status")) == "canceled",
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/auth/oauth-proxy/callback/openai", response_class=HTMLResponse)
+async def handle_openai_oauth_proxy_callback(
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+):
+    if not state or not state.strip():
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content="<html><body><h3>OAuth callback failed</h3><p>Missing state.</p></body></html>",
+        )
+    try:
+        payload = oauth_proxy_orchestrator.complete_openai_callback(
+            state=state,
+            code=code,
+            error=error,
+        )
+    except ValueError as exc:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        )
+
+    if str(payload.get("status")) == "succeeded":
+        return HTMLResponse(
+            status_code=status.HTTP_200_OK,
+            content="<html><body><h3>OAuth authorization successful</h3><p>You can close this page and return to Skill Runner.</p></body></html>",
+        )
+    return HTMLResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=f"<html><body><h3>OAuth callback failed</h3><p>{str(payload.get('error') or 'unknown error')}</p></body></html>",
+    )
+
+
+@router.post(
+    "/auth/cli-delegate/sessions",
+    response_model=AuthSessionSnapshotV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def start_cli_delegate_auth_session(request: Request, body: AuthSessionStartRequestV2):
+    if body.transport.strip().lower() != "cli_delegate":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="transport must be cli_delegate")
+    try:
+        payload = cli_delegate_orchestrator.start_session(
+            engine=body.engine,
+            auth_method=body.auth_method,
+            provider_id=body.provider_id,
+            callback_base_url=str(request.base_url).rstrip("/"),
+        )
+        return AuthSessionSnapshotV2(**payload)
+    except EngineInteractionBusyError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/auth/cli-delegate/sessions/{session_id}",
+    response_model=AuthSessionSnapshotV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_cli_delegate_auth_session(session_id: str):
+    try:
+        payload = cli_delegate_orchestrator.get_session(session_id)
+        return AuthSessionSnapshotV2(**payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/cli-delegate/sessions/{session_id}/input",
+    response_model=AuthSessionInputResponseV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def input_cli_delegate_auth_session(session_id: str, body: AuthSessionInputRequestV2):
+    try:
+        payload = cli_delegate_orchestrator.input_session(session_id, body.kind, body.value)
+        return AuthSessionInputResponseV2(
+            session=AuthSessionSnapshotV2(**payload),
+            accepted=str(payload.get("status")) in {"code_submitted_waiting_result", "succeeded"},
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/auth/cli-delegate/sessions/{session_id}/cancel",
+    response_model=AuthSessionCancelResponseV2,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def cancel_cli_delegate_auth_session(session_id: str):
+    try:
+        payload = cli_delegate_orchestrator.cancel_session(session_id)
+        return AuthSessionCancelResponseV2(
+            session=AuthSessionSnapshotV2(**payload),
+            canceled=str(payload.get("status")) == "canceled",
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Auth session not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/auth/sessions",
     response_model=EngineAuthSessionSnapshot,
     dependencies=[Depends(require_ui_basic_auth)],
 )
-async def start_engine_auth_session(body: EngineAuthSessionStartRequest):
+async def start_engine_auth_session(request: Request, body: EngineAuthSessionStartRequest):
     try:
         payload = engine_auth_flow_manager.start_session(
             engine=body.engine,
             method=body.method,
+            auth_method=body.auth_method,
             provider_id=body.provider_id,
+            transport=body.transport,
+            callback_base_url=str(request.base_url).rstrip("/"),
         )
+        payload["deprecated"] = True
         return EngineAuthSessionSnapshot(**payload)
     except EngineInteractionBusyError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -98,6 +305,45 @@ async def start_engine_auth_session(body: EngineAuthSessionStartRequest):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/auth/callback/openai", response_class=HTMLResponse)
+async def handle_openai_oauth_callback(
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+):
+    if not state or not state.strip():
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content="<html><body><h3>OAuth callback failed</h3><p>Missing state.</p></body></html>",
+        )
+    try:
+        payload = engine_auth_flow_manager.complete_openai_callback(
+            state=state,
+            code=code,
+            error=error,
+        )
+    except ValueError as exc:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        )
+
+    if str(payload.get("status")) == "succeeded":
+        return HTMLResponse(
+            status_code=status.HTTP_200_OK,
+            content="<html><body><h3>OAuth authorization successful</h3><p>You can close this page and return to Skill Runner.</p></body></html>",
+        )
+    return HTMLResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=f"<html><body><h3>OAuth callback failed</h3><p>{str(payload.get('error') or 'unknown error')}</p></body></html>",
+    )
 
 
 @router.get(
@@ -108,6 +354,7 @@ async def start_engine_auth_session(body: EngineAuthSessionStartRequest):
 async def get_engine_auth_session(session_id: str):
     try:
         payload = engine_auth_flow_manager.get_session(session_id)
+        payload["deprecated"] = True
         return EngineAuthSessionSnapshot(**payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
@@ -123,6 +370,7 @@ async def get_engine_auth_session(session_id: str):
 async def cancel_engine_auth_session(session_id: str):
     try:
         payload = engine_auth_flow_manager.cancel_session(session_id)
+        payload["deprecated"] = True
         return EngineAuthSessionCancelResponse(
             session=EngineAuthSessionSnapshot(**payload),
             canceled=str(payload.get("status")) == "canceled",
@@ -141,6 +389,7 @@ async def cancel_engine_auth_session(session_id: str):
 async def input_engine_auth_session(session_id: str, body: EngineAuthSessionInputRequest):
     try:
         payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        payload["deprecated"] = True
         return EngineAuthSessionInputResponse(
             session=EngineAuthSessionSnapshot(**payload),
             accepted=str(payload.get("status"))
