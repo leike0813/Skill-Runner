@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from server.services.skill_browser import (
+from server.services.skill.skill_browser import (
     PREVIEW_MAX_BYTES,
     build_preview_payload,
     list_skill_entries,

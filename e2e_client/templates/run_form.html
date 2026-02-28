@@ -100,39 +100,20 @@
             <h3 style="margin-top: 0;">Runtime Options</h3>
             <div class="row">
                 <div style="flex: 1 1 260px;">
-                    <label><input type="checkbox" name="runtime__verbose" {% if submitted_runtime_options.get("verbose") %}checked{% endif %}> verbose</label><br>
-                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> no_cache</label><br>
-                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> debug</label><br>
-                    <label><input type="checkbox" name="runtime__debug_keep_temp" {% if submitted_runtime_options.get("debug_keep_temp") %}checked{% endif %}> debug_keep_temp</label>
-                </div>
-                <div style="flex: 1 1 280px;">
-                    <label for="runtime__interactive_require_user_reply"><strong>interactive_require_user_reply</strong></label><br>
-                    <select id="runtime__interactive_require_user_reply" name="runtime__interactive_require_user_reply" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
-                        <option value="" {% if not submitted_runtime_options.get("interactive_require_user_reply") %}selected{% endif %}>(Default)</option>
-                        <option value="true" {% if submitted_runtime_options.get("interactive_require_user_reply") == "true" %}selected{% endif %}>true</option>
-                        <option value="false" {% if submitted_runtime_options.get("interactive_require_user_reply") == "false" %}selected{% endif %}>false</option>
-                    </select>
+                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> 禁用缓存机制</label><br>
+                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> Debug模式</label><br>
+                    {% if run_source == "temp" %}
+                    <label id="runtime_debug_keep_temp_row"><input type="checkbox" name="runtime__debug_keep_temp" {% if submitted_runtime_options.get("debug_keep_temp") %}checked{% endif %}> 保留上传的临时 Skill 包（Debug用）</label>
+                    {% endif %}
                 </div>
             </div>
-            <div class="row" style="margin-top: 12px;">
-                <div style="flex: 1 1 240px;">
-                    <label for="runtime__session_timeout_sec"><strong>session_timeout_sec</strong></label><br>
-                    <input id="runtime__session_timeout_sec" name="runtime__session_timeout_sec" value="{{ submitted_runtime_options.get('session_timeout_sec', '') }}"
-                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+            <div id="runtime_interactive_section" class="row" style="margin-top: 12px;">
+                <div style="flex: 1 1 260px;">
+                    <label><input id="runtime__interactive_auto_reply" type="checkbox" name="runtime__interactive_auto_reply" {% if submitted_runtime_options.get("interactive_auto_reply") %}checked{% endif %}> 超时自动回复</label>
                 </div>
-                <div style="flex: 1 1 240px;">
-                    <label for="runtime__interactive_wait_timeout_sec"><strong>interactive_wait_timeout_sec</strong></label><br>
-                    <input id="runtime__interactive_wait_timeout_sec" name="runtime__interactive_wait_timeout_sec" value="{{ submitted_runtime_options.get('interactive_wait_timeout_sec', '') }}"
-                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
-                </div>
-                <div style="flex: 1 1 240px;">
-                    <label for="runtime__hard_wait_timeout_sec"><strong>hard_wait_timeout_sec</strong></label><br>
-                    <input id="runtime__hard_wait_timeout_sec" name="runtime__hard_wait_timeout_sec" value="{{ submitted_runtime_options.get('hard_wait_timeout_sec', '') }}"
-                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
-                </div>
-                <div style="flex: 1 1 240px;">
-                    <label for="runtime__wait_timeout_sec"><strong>wait_timeout_sec</strong></label><br>
-                    <input id="runtime__wait_timeout_sec" name="runtime__wait_timeout_sec" value="{{ submitted_runtime_options.get('wait_timeout_sec', '') }}"
+                <div id="runtime_timeout_group" style="flex: 1 1 260px;">
+                    <label for="runtime__interactive_reply_timeout_sec"><strong>回复超时阈值（秒）</strong></label><br>
+                    <input id="runtime__interactive_reply_timeout_sec" name="runtime__interactive_reply_timeout_sec" value="{{ submitted_runtime_options.get('interactive_reply_timeout_sec', '') }}"
                            style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
                 </div>
             </div>
@@ -149,15 +130,21 @@
     const engineModels = {{ engine_models_by_engine | tojson }};
     const selectedProvider = {{ selected_provider | tojson }};
     const selectedModel = {{ selected_model | tojson }};
+    const runSource = {{ run_source | tojson }};
     const fixedProviders = {
         codex: "openai",
         gemini: "google",
         iflow: "iflowcn",
     };
     const engineSelect = document.getElementById("engine");
+    const executionModeSelect = document.getElementById("execution_mode");
     const providerSelect = document.getElementById("provider");
     const modelSelect = document.getElementById("model_value");
     const modelHidden = document.getElementById("model");
+    const interactiveSection = document.getElementById("runtime_interactive_section");
+    const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
+    const timeoutGroup = document.getElementById("runtime_timeout_group");
+    const debugKeepTempRow = document.getElementById("runtime_debug_keep_temp_row");
 
     function splitProviderModel(id) {
         if (typeof id !== "string") return null;
@@ -273,6 +260,27 @@
         renderProviders();
         renderModels();
     });
+    function updateRuntimeOptionVisibility() {
+        const isInteractive = executionModeSelect && executionModeSelect.value === "interactive";
+        if (interactiveSection) {
+            interactiveSection.style.display = isInteractive ? "flex" : "none";
+        }
+        if (timeoutGroup) {
+            const showTimeout = Boolean(
+                isInteractive && interactiveAutoReply && interactiveAutoReply.checked
+            );
+            timeoutGroup.style.display = showTimeout ? "block" : "none";
+        }
+        if (debugKeepTempRow) {
+            debugKeepTempRow.style.display = runSource === "temp" ? "block" : "none";
+        }
+    }
+    if (executionModeSelect) {
+        executionModeSelect.addEventListener("change", updateRuntimeOptionVisibility);
+    }
+    if (interactiveAutoReply) {
+        interactiveAutoReply.addEventListener("change", updateRuntimeOptionVisibility);
+    }
     providerSelect.addEventListener("change", () => {
         renderModels();
     });
@@ -282,6 +290,7 @@
 
     renderProviders();
     renderModels();
+    updateRuntimeOptionVisibility();
 })();
 </script>
 {% endblock %}

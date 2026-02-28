@@ -30,16 +30,16 @@ from ..models import (
 from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
 from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
 from ..runtime.auth.callbacks import oauth_callback_router
-from ..services.engine_upgrade_manager import (
+from ..services.orchestration.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
-from ..services.engine_auth_flow_manager import engine_auth_flow_manager
-from ..services.engine_interaction_gate import EngineInteractionBusyError
-from ..services.model_registry import model_registry
-from ..services.agent_cli_manager import AgentCliManager
-from ..services.ui_auth import require_ui_basic_auth
+from ..services.orchestration.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.orchestration.engine_interaction_gate import EngineInteractionBusyError
+from ..services.orchestration.model_registry import model_registry
+from ..services.orchestration.agent_cli_manager import AgentCliManager
+from ..services.ui.ui_auth import require_ui_basic_auth
 
 router = APIRouter(prefix="/engines", tags=["engines"])
 agent_cli_manager = AgentCliManager()

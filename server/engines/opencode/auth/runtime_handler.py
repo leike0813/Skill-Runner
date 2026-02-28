@@ -5,7 +5,7 @@ from typing import Any
 
 from ....config import config
 from ....runtime.auth.session_lifecycle import AuthStartPlan, StartRuntimeContext
-from ....services.openai_device_proxy_flow import OpenAIDeviceProxySession
+from ...common.openai_auth import OpenAIDeviceProxySession
 from .auth_store import OpencodeAuthStore
 from .cli_delegate import OpencodeAuthCliSession
 from .google_antigravity_oauth_proxy import OpencodeGoogleAntigravityOAuthProxySession

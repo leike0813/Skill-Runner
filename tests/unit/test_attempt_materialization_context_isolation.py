@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 class _Model:
@@ -42,17 +42,17 @@ def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path
         captured["fcmp"] = kwargs
         return [_Model({"protocol_version": "fcmp/1.0", "seq": 1, "meta": {"attempt": 1}, "run_id": "x", "ts": "2026-02-24T00:00:00", "engine": "codex", "type": "conversation.state.changed", "data": {"from": "running", "to": "waiting_user", "trigger": "turn.needs_input", "updated_at": "2026-02-24T00:00:10", "pending_interaction_id": 1}})]
 
-    monkeypatch.setattr("server.services.run_observability.build_rasp_events", _build_rasp_events)
-    monkeypatch.setattr("server.services.run_observability.build_fcmp_events", _build_fcmp_events)
-    monkeypatch.setattr("server.services.run_observability.compute_protocol_metrics", lambda _rows: {})
-    monkeypatch.setattr("server.services.run_observability.validate_rasp_event", lambda _row: None)
-    monkeypatch.setattr("server.services.run_observability.validate_fcmp_event", lambda _row: None)
+    monkeypatch.setattr("server.runtime.observability.run_observability.build_rasp_events", _build_rasp_events)
+    monkeypatch.setattr("server.runtime.observability.run_observability.build_fcmp_events", _build_fcmp_events)
+    monkeypatch.setattr("server.runtime.observability.run_observability.compute_protocol_metrics", lambda _rows: {})
+    monkeypatch.setattr("server.runtime.observability.run_observability.validate_rasp_event", lambda _row: None)
+    monkeypatch.setattr("server.runtime.observability.run_observability.validate_fcmp_event", lambda _row: None)
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "interactive"}},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [
             {
                 "interaction_id": 1,
@@ -63,11 +63,11 @@ def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path
         ],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: {"interaction_id": 9, "kind": "open_text", "prompt": "latest pending"},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: 1200,
     )
 

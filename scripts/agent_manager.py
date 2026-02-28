@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from server.services.agent_cli_manager import (  # noqa: E402
+from server.services.orchestration.agent_cli_manager import (  # noqa: E402
     AgentCliManager,
     format_auth_status_payload,
     format_status_payload,

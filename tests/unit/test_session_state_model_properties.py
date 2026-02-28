@@ -3,7 +3,7 @@ from __future__ import annotations
 from itertools import product
 from typing import Dict, Iterable, Optional, Tuple
 
-from server.services import session_statechart
+from server.runtime.session import statechart as session_statechart
 from tests.common.session_invariant_contract import (
     canonical_states,
     initial_state,

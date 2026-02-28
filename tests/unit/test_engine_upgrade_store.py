@@ -1,5 +1,5 @@
 from server.models import EngineUpgradeTaskStatus
-from server.services.engine_upgrade_store import EngineUpgradeStore
+from server.services.orchestration.engine_upgrade_store import EngineUpgradeStore
 
 
 def test_engine_upgrade_store_create_update_get(tmp_path):

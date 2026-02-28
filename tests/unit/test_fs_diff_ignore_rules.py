@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from server.services.job_orchestrator import JobOrchestrator
+from server.services.orchestration.job_orchestrator import JobOrchestrator
 
 
 def _write(path: Path, content: str = "x") -> None:

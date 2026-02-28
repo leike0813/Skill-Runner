@@ -5,8 +5,8 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
-from server.services.engine_interaction_gate import EngineInteractionBusyError
-from server.services.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
+from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError
+from server.services.orchestration.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -743,10 +743,10 @@ async def test_v1_management_routes_available():
 @pytest.mark.asyncio
 async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-1"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("hello", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("err", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("hello", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("err", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -761,15 +761,15 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: None,
     )
 
@@ -786,10 +786,10 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-temp"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -804,15 +804,15 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: {"interaction_id": 1, "kind": "open_text", "prompt": "continue"},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: None,
     )
 
@@ -828,10 +828,10 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-2"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    stdout_path = logs_dir / "stdout.txt"
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = audit_dir / "stdout.1.log"
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     stdout_path.write_text("part-1\n", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
@@ -851,15 +851,15 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: {"interaction_id": 1},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: None,
     )
 
@@ -885,10 +885,10 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-canceled"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("before-cancel\n", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("before-cancel\n", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps(
             {
@@ -908,15 +908,15 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: None,
     )
 

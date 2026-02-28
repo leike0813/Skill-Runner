@@ -27,8 +27,8 @@ async def _request(method: str, path: str, **kwargs):
 
 @pytest.mark.asyncio
 async def test_ui_pages_render_with_management_api_sources(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_skills",
         lambda: SimpleNamespace(skills=[]),
@@ -87,8 +87,8 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_legacy_data_routes_emit_deprecation_headers(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_skills",
         lambda: SimpleNamespace(skills=[]),

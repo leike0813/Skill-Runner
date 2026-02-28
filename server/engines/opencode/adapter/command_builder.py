@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from server.models import EngineSessionHandle
 from server.runtime.adapter.contracts import AdapterExecutionContext
-from server.services.engine_command_profile import merge_cli_args
+from server.services.orchestration.engine_command_profile import merge_cli_args
 
 if TYPE_CHECKING:
     from .execution_adapter import OpencodeExecutionAdapter

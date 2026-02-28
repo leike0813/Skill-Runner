@@ -47,16 +47,16 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> waiting_user
-    waiting_user --> waiting_user: strict=true (interactive_require_user_reply=true)
-    waiting_user --> queued: strict=false timeout => auto_decision
+    waiting_user --> waiting_user: auto_reply=false (interactive_auto_reply=false)
+    waiting_user --> queued: auto_reply=true timeout => auto_decision
     waiting_user --> waiting_user: restart with valid(pending + handle)
     waiting_user --> failed: restart invalid => SESSION_RESUME_FAILED
 ```
 
 约束：
 
-- `strict=true`：超时不自动失败，持续等待用户回复或显式取消
-- `strict=false`：超时触发自动决策并走统一 resume 路径（`waiting_user -> queued`）
+- `auto_reply=false`：超时不自动继续，持续等待用户回复或显式取消
+- `auto_reply=true`：超时触发自动决策并走统一 resume 路径（`waiting_user -> queued`）
 
 ## 5. Canonical States / Events / Guards / Actions
 
@@ -74,7 +74,7 @@ stateDiagram-v2
   - `restart.preserve_waiting`
   - `restart.reconcile_failed`
 - Guards:
-  - `interactive_require_user_reply == false`（可触发 auto decision）
+  - `interactive_auto_reply == true`（可触发 auto decision）
   - `has_pending_interaction && has_valid_handle`（可保留 waiting）
 - Actions:
   - `acquire_slot`

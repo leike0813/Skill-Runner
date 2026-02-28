@@ -2,7 +2,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from server.engines.codex.auth.protocol.oauth_proxy_flow import CodexOAuthProxyFlow
-from server.services.oauth_openai_proxy_common import OpenAITokenSet
+from server.engines.common.openai_auth import OpenAITokenSet
 
 
 def test_codex_oauth_proxy_flow_start_and_submit(tmp_path: Path, monkeypatch):

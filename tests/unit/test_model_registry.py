@@ -2,7 +2,7 @@ import pytest
 import json
 from pathlib import Path
 
-from server.services.model_registry import ModelRegistry
+from server.services.orchestration.model_registry import ModelRegistry
 
 
 def test_get_models_uses_latest_snapshot_when_version_unknown(monkeypatch):
@@ -76,7 +76,7 @@ def test_validate_model_opencode_requires_provider_model(monkeypatch):
     registry = ModelRegistry()
     monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
     monkeypatch.setattr(
-        "server.services.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
@@ -111,7 +111,7 @@ def test_get_models_opencode_runtime_probe_cache(monkeypatch):
     registry = ModelRegistry()
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
     monkeypatch.setattr(
-        "server.services.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
@@ -140,7 +140,7 @@ def test_get_manifest_view_opencode_dynamic_compat(monkeypatch):
     registry = ModelRegistry()
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
     monkeypatch.setattr(
-        "server.services.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",

@@ -82,7 +82,7 @@
 - **配置生成**: 
   - 生成 `.iflow/settings.json`。
   - 融合 `engine_default -> skill default -> runtime options -> iflow_config -> enforced`。
-  - 智能过滤非配置参数 (如 `verbose`)。
+  - 智能过滤非配置参数（如 runtime 控制开关）。
 - **环境隔离**:
   - 将技能复制到 `.iflow/skills/{id}` 以符合 iFlow 工作区标准。
 - **执行**:

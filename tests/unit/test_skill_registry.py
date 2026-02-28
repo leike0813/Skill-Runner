@@ -1,7 +1,7 @@
 import json
 
 from server.config import config
-from server.services.skill_registry import SkillRegistry
+from server.services.skill.skill_registry import SkillRegistry
 
 
 def test_scan_artifacts_from_output_schema(tmp_path):

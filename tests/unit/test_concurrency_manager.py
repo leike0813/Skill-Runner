@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from server.config import config
-from server.services.concurrency_manager import ConcurrencyManager
+from server.services.platform.concurrency_manager import ConcurrencyManager
 
 
 @pytest.fixture

@@ -24,7 +24,6 @@ def test_construct_config_maps_model_and_merges_iflow_config(tmp_path):
     adapter = IFlowExecutionAdapter()
     options = {
         "model": "gpt-4-test",
-        "verbose": True,
         "iflow_config": {"theme": "Dark"}
     }
 
@@ -34,7 +33,6 @@ def test_construct_config_maps_model_and_merges_iflow_config(tmp_path):
     args = json.loads(config_path.read_text())
     assert args["modelName"] == "gpt-4-test"
     assert args["theme"] == "Dark"
-    assert "verbose" not in args
 
 
 def test_construct_config_uses_engine_default_when_no_overrides(tmp_path):

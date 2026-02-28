@@ -366,7 +366,7 @@ async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch
         AsyncMock(side_effect=_cancel_run),
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
 

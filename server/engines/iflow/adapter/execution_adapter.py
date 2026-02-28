@@ -8,8 +8,8 @@ from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
 from server.runtime.adapter.common.session_codec_common import ProfiledSessionCodec
 from server.runtime.adapter.common.workspace_provisioner_common import ProfiledWorkspaceProvisioner
-from server.services.agent_cli_manager import AgentCliManager
-from server.services.engine_command_profile import engine_command_profile
+from server.services.orchestration.agent_cli_manager import AgentCliManager
+from server.services.orchestration.engine_command_profile import engine_command_profile
 from .command_builder import IFlowCommandBuilder
 from .config_composer import IFlowConfigComposer
 from .stream_parser import IFlowStreamParser

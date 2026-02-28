@@ -4,9 +4,9 @@ from unittest.mock import patch
 import pytest
 
 from server.models import ManifestArtifact
-from server.services import skill_patcher as patcher_module
-from server.services.skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER
-from server.services.skill_patcher import (
+from server.services.skill import skill_patcher as patcher_module
+from server.services.skill.skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER
+from server.services.skill.skill_patcher import (
     MODE_AUTO_PATCH_MARKER,
     MODE_INTERACTIVE_PATCH_MARKER,
     OUTPUT_FORMAT_CONTRACT_MARKER,

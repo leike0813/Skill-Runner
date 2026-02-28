@@ -9,9 +9,9 @@ from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
 from server.runtime.adapter.common.session_codec_common import ProfiledSessionCodec
 from server.runtime.adapter.common.workspace_provisioner_common import ProfiledWorkspaceProvisioner
-from server.services.agent_cli_manager import AgentCliManager
-from server.services.codex_config_manager import CodexConfigManager
-from server.services.engine_command_profile import engine_command_profile
+from server.services.orchestration.agent_cli_manager import AgentCliManager
+from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
+from server.services.orchestration.engine_command_profile import engine_command_profile
 from .command_builder import CodexCommandBuilder
 from .config_composer import CodexConfigComposer
 from .stream_parser import CodexStreamParser

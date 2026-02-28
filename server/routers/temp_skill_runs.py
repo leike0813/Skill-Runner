@@ -22,34 +22,39 @@ from ..models import (
     TempSkillRunCreateResponse,
     TempSkillRunUploadResponse,
 )
-from ..services.concurrency_manager import concurrency_manager
-from ..services.job_orchestrator import job_orchestrator
-from ..services.model_registry import model_registry
-from ..services.cache_key_builder import (
+from ..services.platform.concurrency_manager import concurrency_manager
+from ..services.orchestration.job_orchestrator import job_orchestrator
+from ..services.orchestration.model_registry import model_registry
+from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
+from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
+from ..services.platform.cache_key_builder import (
     compute_bytes_hash,
     compute_cache_key,
     compute_inline_input_hash,
     compute_input_manifest_hash,
     compute_skill_fingerprint,
 )
-from ..services.run_store import run_store
-from ..services.temp_skill_run_manager import temp_skill_run_manager
-from ..services.temp_skill_run_store import temp_skill_run_store
-from ..services.workspace_manager import workspace_manager
-from ..services.engine_policy import resolve_skill_engine_policy
-from ..services.run_execution_core import (
+from ..services.orchestration.run_store import run_store
+from ..services.skill.temp_skill_run_manager import temp_skill_run_manager
+from ..services.skill.temp_skill_run_store import temp_skill_run_store
+from ..services.orchestration.workspace_manager import workspace_manager
+from ..services.orchestration.engine_policy import resolve_skill_engine_policy
+from ..services.orchestration.run_execution_core import (
     declared_execution_modes,
     ensure_skill_engine_supported,
     ensure_skill_execution_mode_supported,
     is_cache_enabled,
     validate_runtime_and_model_options,
 )
-from ..services.run_interaction_service import run_interaction_service
-from ..services.run_read_facade import run_read_facade
-from ..services.run_source_adapter import RunSourceCapabilities
+from ..services.orchestration.run_interaction_service import run_interaction_service
+from ..runtime.observability.run_read_facade import run_read_facade
+from ..runtime.observability.run_source_adapter import RunSourceCapabilities
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
+
+install_runtime_protocol_ports()
+install_runtime_observability_ports()
 
 
 class _TempRouterSourceAdapter:
@@ -268,6 +273,8 @@ async def get_temp_skill_run_status(request_id: str):
     rec = temp_skill_run_store.get_request(request_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Request not found")
+    runtime_options = rec.get("runtime_options", {})
+    interactive_auto_reply, interactive_reply_timeout_sec = _resolve_interactive_autoreply_runtime_options(runtime_options)
 
     created_at = _parse_dt(rec.get("created_at"))
     updated_at = _parse_dt(rec.get("updated_at"))
@@ -291,6 +298,8 @@ async def get_temp_skill_run_status(request_id: str):
             recovery_state=RecoveryState.NONE,
             recovered_at=None,
             recovery_reason=None,
+            interactive_auto_reply=interactive_auto_reply,
+            interactive_reply_timeout_sec=interactive_reply_timeout_sec,
         )
 
     run_dir = workspace_manager.get_run_dir(run_id)
@@ -333,6 +342,8 @@ async def get_temp_skill_run_status(request_id: str):
         recovery_state=_parse_recovery_state(recovery_info.get("recovery_state")),
         recovered_at=recovered_at,
         recovery_reason=_coerce_str_or_none(recovery_info.get("recovery_reason")),
+        interactive_auto_reply=interactive_auto_reply,
+        interactive_reply_timeout_sec=interactive_reply_timeout_sec,
     )
 
 
@@ -519,6 +530,19 @@ def _coerce_str_or_none(raw: Any) -> str | None:
         value = raw.strip()
         return value or None
     return str(raw)
+
+
+def _resolve_interactive_autoreply_runtime_options(runtime_options: Any) -> tuple[bool | None, int | None]:
+    if not isinstance(runtime_options, dict):
+        return (None, None)
+    auto_reply_obj = runtime_options.get("interactive_auto_reply")
+    if not isinstance(auto_reply_obj, bool):
+        return (None, None)
+    timeout_obj = runtime_options.get("interactive_reply_timeout_sec")
+    timeout_sec: int | None = None
+    if isinstance(timeout_obj, int) and timeout_obj > 0:
+        timeout_sec = timeout_obj
+    return (auto_reply_obj, timeout_sec)
 
 
 def _parse_recovery_state(raw: Any) -> RecoveryState:

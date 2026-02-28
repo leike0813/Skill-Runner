@@ -8,9 +8,9 @@ from ..models import (
     SkillInstallStatus,
     SkillInstallStatusResponse
 )
-from ..services.skill_install_store import skill_install_store
-from ..services.skill_package_manager import skill_package_manager
-from ..services.ui_auth import require_ui_basic_auth
+from ..services.skill.skill_install_store import skill_install_store
+from ..services.skill.skill_package_manager import skill_package_manager
+from ..services.ui.ui_auth import require_ui_basic_auth
 
 
 router = APIRouter(

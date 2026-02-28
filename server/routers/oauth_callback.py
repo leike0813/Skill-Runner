@@ -2,7 +2,7 @@ from fastapi import APIRouter, status  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse  # type: ignore[import-not-found]
 
 from ..runtime.auth.callbacks import oauth_callback_router
-from ..services.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.orchestration.engine_auth_flow_manager import engine_auth_flow_manager
 
 
 router = APIRouter(tags=["oauth-callback"])

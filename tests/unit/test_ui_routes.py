@@ -10,7 +10,7 @@ httpx = pytest.importorskip("httpx")
 
 from server.main import app
 from server.routers.ui import _build_auth_ui_capabilities
-from server.services.engine_interaction_gate import EngineInteractionBusyError
+from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -40,8 +40,8 @@ def _build_skill_dir(base: Path) -> Path:
 
 @pytest.mark.asyncio
 async def test_ui_index_available_when_auth_disabled(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
     response = await _request("GET", "/ui")
     assert response.status_code == 200
@@ -50,10 +50,10 @@ async def test_ui_index_available_when_auth_disabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: True)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: True)
     monkeypatch.setattr(
-        "server.services.ui_auth.get_ui_basic_auth_credentials",
+        "server.services.ui.ui_auth.get_ui_basic_auth_credentials",
         lambda: ("admin", "secret"),
     )
     monkeypatch.setattr(
@@ -161,8 +161,8 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_skills_table_highlight(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_skills",
         lambda: SimpleNamespace(
@@ -193,8 +193,8 @@ async def test_ui_skills_table_highlight(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_install_status_succeeded_refreshes_table(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.skill_install_store.get_install",
         lambda _request_id: {
@@ -213,8 +213,8 @@ async def test_ui_install_status_succeeded_refreshes_table(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     skill_dir = _build_skill_dir(tmp_path)
     monkeypatch.setattr(
         "server.routers.ui.management_router.get_management_skill",
@@ -247,8 +247,8 @@ async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_ui_skill_preview_binary_and_large_and_invalid_path(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     skill_dir = _build_skill_dir(tmp_path)
     monkeypatch.setattr(
         "server.routers.ui.skill_registry.get_skill",
@@ -277,8 +277,8 @@ async def test_ui_skill_preview_binary_and_large_and_invalid_path(monkeypatch, t
 
 @pytest.mark.asyncio
 async def test_ui_engines_page(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.agent_cli_manager.profile",
         SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
@@ -324,8 +324,8 @@ def test_ui_auth_capabilities_opencode_api_key_scoped_to_oauth_proxy():
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_shell_route_is_removed(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
     response = await _request("GET", "/ui/engines/auth-shell")
     assert response.status_code == 404
@@ -333,8 +333,8 @@ async def test_ui_engine_auth_shell_route_is_removed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_tui_session_endpoints(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.get_session_snapshot",
         lambda: {"active": True, "status": "running", "session_id": "s-1"},
@@ -369,10 +369,10 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
-    from server.services.ui_shell_manager import UiShellBusyError
+    from server.services.ui.ui_shell_manager import UiShellBusyError
 
     def _raise_busy(_engine: str):
         raise UiShellBusyError("busy")
@@ -386,8 +386,8 @@ async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
         lambda engine: {
@@ -408,8 +408,8 @@ async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engines_table_partial(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_engines",
         lambda: SimpleNamespace(
@@ -453,8 +453,8 @@ async def test_ui_engines_table_partial(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_session_endpoints(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_auth_flow_manager.start_session",
         lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
@@ -561,8 +561,8 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_grouped_endpoints(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.oauth_proxy_orchestrator.start_session",
         lambda engine, auth_method, provider_id=None, callback_base_url=None: {  # noqa: ARG001
@@ -610,8 +610,8 @@ async def test_ui_engine_auth_grouped_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_start_passes_auth_method(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     captured = {}
 
     def _start(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ANN001
@@ -660,8 +660,8 @@ async def test_ui_engine_auth_start_passes_auth_method(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_auth_flow_manager.start_session",
         lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
@@ -722,8 +722,8 @@ async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_submit_removed(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     response = await _request(
         "POST",
         "/ui/engines/auth/sessions/auth-1/submit",
@@ -734,8 +734,8 @@ async def test_ui_engine_auth_submit_removed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_auth_session_start_conflict(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
     def _raise(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ARG001
         raise EngineInteractionBusyError("busy")
@@ -754,8 +754,8 @@ async def test_ui_engine_auth_session_start_conflict(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_upgrade_status_partial(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_upgrade_manager.get_task",
         lambda _request_id: {
@@ -775,8 +775,8 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_models_page(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.model_registry.get_manifest_view",
         lambda _engine: {
@@ -798,8 +798,8 @@ async def test_ui_engine_models_page(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.model_registry.add_snapshot_for_detected_version",
         lambda _engine, _models: None,
@@ -822,8 +822,8 @@ async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_engine_models_add_snapshot_rejects_opencode(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
 
     response = await _request(
         "POST",
@@ -842,8 +842,8 @@ async def test_ui_engine_models_add_snapshot_rejects_opencode(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_runs_page_and_table(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_runs",
         lambda limit=200: SimpleNamespace(
@@ -875,8 +875,8 @@ async def test_ui_runs_page_and_table(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_run_detail_preview_and_logs(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.get_management_run",
         lambda _request_id: SimpleNamespace(
@@ -956,8 +956,8 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["running", "waiting_user", "canceled"])
 async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.get_management_run",
         lambda _request_id: SimpleNamespace(
@@ -995,8 +995,8 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
 
 @pytest.mark.asyncio
 async def test_ui_pages_use_management_data_endpoints(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_skills",
         lambda: SimpleNamespace(skills=[]),
@@ -1021,8 +1021,8 @@ async def test_ui_pages_use_management_data_endpoints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ui_legacy_data_endpoint_can_switch_to_410(monkeypatch):
-    monkeypatch.setattr("server.services.ui_auth.validate_ui_basic_auth_config", lambda: None)
-    monkeypatch.setattr("server.services.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr("server.routers.ui.LEGACY_UI_DATA_API_MODE", "gone")
 
     response = await _request("GET", "/ui/skills/table")

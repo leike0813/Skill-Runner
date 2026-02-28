@@ -134,7 +134,6 @@ def run_suite_case(
     engine: str,
     skill_id: str,
     case: Dict[str, Any],
-    verbose: int,
     no_cache: bool,
     debug: bool,
     skill_source: str = "installed",
@@ -169,7 +168,7 @@ def run_suite_case(
             "engine": engine,
             "parameter": parameters,
             "model": model,
-            "runtime_options": {"no_cache": True, "verbose": verbose, "debug": debug},
+            "runtime_options": {"no_cache": True, "debug": debug},
         }
         logger.info("Create payload: %s", create_payload)
         create_res = client.post(f"{base_url}/v1/temp-skill-runs", json=create_payload)
@@ -216,7 +215,7 @@ def run_suite_case(
             "engine": engine,
             "parameter": parameters,
             "model": model,
-            "runtime_options": {"no_cache": no_cache, "verbose": verbose, "debug": debug}
+            "runtime_options": {"no_cache": no_cache, "debug": debug}
         }
         logger.info("Case: %s (source=installed, engine=%s, no_cache=%s, debug=%s)", name, engine, no_cache, debug)
         logger.info("Create payload: %s", create_payload)
@@ -345,7 +344,6 @@ def main() -> int:
                 suite_engine,
                 skill_id,
                 case,
-                verbose=args.verbose,
                 no_cache=args.no_cache,
                 debug=args.debug,
                 skill_source=skill_source,

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from server.services.skill_package_validator import SkillPackageValidator
+from server.services.skill.skill_package_validator import SkillPackageValidator
 
 
 def _build_skill_zip(

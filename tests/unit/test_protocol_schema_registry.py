@@ -1,6 +1,6 @@
 import pytest
 
-from server.services.protocol_schema_registry import (
+from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
     validate_fcmp_event,
     validate_interaction_history_entry,

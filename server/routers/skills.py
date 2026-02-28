@@ -9,7 +9,7 @@ Exposes endpoints for:
 from fastapi import APIRouter, HTTPException  # type: ignore[import-not-found]
 from typing import List
 from ..models import SkillManifest
-from ..services.skill_registry import skill_registry
+from ..services.skill.skill_registry import skill_registry
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 

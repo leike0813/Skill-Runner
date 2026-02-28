@@ -43,9 +43,12 @@ Primary routes:
   - Parameter fields.
   - File upload fields.
 - Runtime options block:
-  - booleans: `verbose/no_cache/debug/debug_keep_temp`
-  - interaction policy: `interactive_require_user_reply`
-  - timeout options: `session_timeout_sec/interactive_wait_timeout_sec/hard_wait_timeout_sec/wait_timeout_sec`
+  - booleans: `no_cache/debug/debug_keep_temp/interactive_auto_reply`
+  - timeout option: `interactive_reply_timeout_sec`
+  - visibility rules:
+    - `debug_keep_temp` only for temp-skill source
+    - `interactive_auto_reply` and `interactive_reply_timeout_sec` only when `execution_mode=interactive`
+    - `interactive_reply_timeout_sec` only when `interactive_auto_reply=true`
 - Validation errors shown inline at top.
 - Submit action:
   - Installed skill source:

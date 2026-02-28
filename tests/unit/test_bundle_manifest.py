@@ -2,7 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from server.services.job_orchestrator import JobOrchestrator
+from server.services.orchestration.job_orchestrator import JobOrchestrator
 
 
 def test_bundle_manifest_includes_run_files(tmp_path):

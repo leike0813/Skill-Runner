@@ -26,19 +26,24 @@ from ..models import (
     RunStatus,
     SkillManifest,
 )
-from ..services.agent_cli_manager import AgentCliManager
-from ..services.model_registry import model_registry
-from ..services.run_observability import run_observability_service
-from ..services.run_store import run_store
-from ..services.skill_browser import list_skill_entries, resolve_skill_file_path
-from ..services.engine_policy import resolve_skill_engine_policy
-from ..services.skill_registry import skill_registry
-from ..services.workspace_manager import workspace_manager
+from ..services.orchestration.agent_cli_manager import AgentCliManager
+from ..services.orchestration.model_registry import model_registry
+from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
+from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
+from ..runtime.observability.run_observability import run_observability_service
+from ..services.orchestration.run_store import run_store
+from ..services.skill.skill_browser import list_skill_entries, resolve_skill_file_path
+from ..services.orchestration.engine_policy import resolve_skill_engine_policy
+from ..services.skill.skill_registry import skill_registry
+from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
 
 router = APIRouter(prefix="/management", tags=["management"])
 agent_cli_manager = AgentCliManager()
+
+install_runtime_protocol_ports()
+install_runtime_observability_ports()
 
 
 @router.get("/skills", response_model=ManagementSkillListResponse)
@@ -481,6 +486,8 @@ def _build_run_state_from_detail(
     run_dir = Path(run_dir_obj) if isinstance(run_dir_obj, str) else None
     auto_stats = run_store.get_auto_decision_stats(request_id)
     status = _parse_run_status(detail.get("status"))
+    timeout_obj = detail.get("interactive_reply_timeout_sec")
+    timeout_sec = timeout_obj if isinstance(timeout_obj, int) and timeout_obj > 0 else None
     return ManagementRunConversationState(
         request_id=request_id,
         run_id=str(detail.get("run_id", "")),
@@ -501,6 +508,12 @@ def _build_run_state_from_detail(
         recovery_reason=_coerce_str_or_none(detail.get("recovery_reason")),
         poll_logs=bool(detail.get("poll_logs", False)),
         error=_read_run_error(run_dir),
+        interactive_auto_reply=(
+            detail.get("interactive_auto_reply")
+            if isinstance(detail.get("interactive_auto_reply"), bool)
+            else None
+        ),
+        interactive_reply_timeout_sec=timeout_sec,
     )
 
 

@@ -30,27 +30,29 @@ from ..models import (
 )
 from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
 from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
-from ..services.engine_upgrade_manager import (
+from ..services.orchestration.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
-from ..services.engine_auth_flow_manager import engine_auth_flow_manager
-from ..services.engine_interaction_gate import EngineInteractionBusyError
-from ..services.model_registry import model_registry
+from ..services.orchestration.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.orchestration.engine_interaction_gate import EngineInteractionBusyError
+from ..services.orchestration.model_registry import model_registry
+from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
+from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
-from ..services.agent_cli_manager import AgentCliManager
-from ..services.skill_browser import (
+from ..services.orchestration.agent_cli_manager import AgentCliManager
+from ..services.skill.skill_browser import (
     build_preview_payload,
     list_skill_entries,
     resolve_skill_file_path,
 )
-from ..services.run_observability import run_observability_service
-from ..services.skill_install_store import skill_install_store
-from ..services.skill_package_manager import skill_package_manager
-from ..services.skill_registry import skill_registry
-from ..services.ui_auth import require_ui_basic_auth
-from ..services.ui_shell_manager import (
+from ..runtime.observability.run_observability import run_observability_service
+from ..services.skill.skill_install_store import skill_install_store
+from ..services.skill.skill_package_manager import skill_package_manager
+from ..services.skill.skill_registry import skill_registry
+from ..services.ui.ui_auth import require_ui_basic_auth
+from ..services.ui.ui_shell_manager import (
     UiShellBusyError,
     UiShellRuntimeError,
     UiShellValidationError,
@@ -72,6 +74,9 @@ agent_cli_manager = AgentCliManager()
 oauth_proxy_orchestrator = OAuthProxyOrchestrator(engine_auth_flow_manager)
 cli_delegate_orchestrator = CliDelegateOrchestrator(engine_auth_flow_manager)
 logger = logging.getLogger(__name__)
+
+install_runtime_protocol_ports()
+install_runtime_observability_ports()
 
 LEGACY_UI_DATA_API_MODE = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_MODE", "warn").strip().lower()
 LEGACY_UI_DATA_API_SUNSET = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_SUNSET", "2026-06-30")

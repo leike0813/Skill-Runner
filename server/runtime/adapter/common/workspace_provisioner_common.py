@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ....models import SkillManifest
-from ....services.skill_patcher import skill_patcher
+from ....services.skill.skill_patcher import skill_patcher
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 

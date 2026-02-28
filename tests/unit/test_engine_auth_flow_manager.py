@@ -14,10 +14,9 @@ from server.engines.opencode.auth import (
     OpencodeGoogleAntigravityOAuthProxySession,
 )
 from server.runtime.auth.session_lifecycle import AuthStartPlan
-from server.services.engine_auth_flow_manager import EngineAuthFlowManager
-from server.services.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
-from server.services.openai_device_proxy_flow import OpenAIDeviceProxySession
-from server.services.oauth_openai_proxy_common import OpenAIOAuthError
+from server.services.orchestration.engine_auth_flow_manager import EngineAuthFlowManager
+from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
+from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 
 
 class _FakeProfile:
@@ -254,7 +253,7 @@ def test_engine_auth_flow_manager_codex_oauth_proxy_zero_cli(tmp_path: Path, mon
     def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("subprocess should not be called in oauth_proxy mode")
 
-    monkeypatch.setattr("server.services.engine_auth_flow_manager.subprocess.Popen", _raise)
+    monkeypatch.setattr("server.services.orchestration.engine_auth_flow_manager.subprocess.Popen", _raise)
     started = manager.start_session("codex", "auth", transport="oauth_proxy", auth_method="callback")
     assert started["status"] == "waiting_user"
     assert started["execution_mode"] == "protocol_proxy"
@@ -285,7 +284,7 @@ def test_engine_auth_flow_manager_codex_cli_delegate_uses_browser_login(tmp_path
         "server.engines.common.callbacks.openai_local_callback_server.start",
         lambda: (_ for _ in ()).throw(AssertionError("listener should not start for cli_delegate")),
     )
-    monkeypatch.setattr("server.services.engine_auth_flow_manager.subprocess.Popen", _fake_popen)
+    monkeypatch.setattr("server.services.orchestration.engine_auth_flow_manager.subprocess.Popen", _fake_popen)
     started = manager.start_session("codex", "auth", transport="cli_delegate", auth_method="callback")
     assert started["transport"] == "cli_delegate"
     assert started["method"] == "auth"
@@ -365,7 +364,7 @@ def test_engine_auth_flow_manager_cancel_releases_lock_on_terminate_error(tmp_pa
         captured.append(list(cmd))
         return _FakeProc()
 
-    monkeypatch.setattr("server.services.engine_auth_flow_manager.subprocess.Popen", _fake_popen)
+    monkeypatch.setattr("server.services.orchestration.engine_auth_flow_manager.subprocess.Popen", _fake_popen)
     started = manager.start_session("codex", "auth", transport="cli_delegate", auth_method="callback")
 
     monkeypatch.setattr(manager, "_terminate_process", lambda _session: (_ for _ in ()).throw(RuntimeError("boom")))
@@ -1055,7 +1054,7 @@ def test_engine_auth_flow_manager_opencode_openai_enters_waiting_user(tmp_path: 
     def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("subprocess should not be called in oauth_proxy mode")
 
-    monkeypatch.setattr("server.services.engine_auth_flow_manager.subprocess.Popen", _raise)
+    monkeypatch.setattr("server.services.orchestration.engine_auth_flow_manager.subprocess.Popen", _raise)
 
     started = manager.start_session(
         "opencode",

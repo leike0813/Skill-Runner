@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from server.services.codex_config_manager import CodexConfigManager
+from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
 
 from server.runtime.adapter.contracts import AdapterExecutionContext
 
@@ -14,16 +14,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RUNNER_ONLY_OPTION_KEYS = {
-    "verbose",
     "no_cache",
     "debug",
     "debug_keep_temp",
     "execution_mode",
-    "interactive_require_user_reply",
-    "session_timeout_sec",
-    "interactive_wait_timeout_sec",
-    "hard_wait_timeout_sec",
-    "wait_timeout_sec",
+    "interactive_auto_reply",
+    "interactive_reply_timeout_sec",
     "hard_timeout_seconds",
 }
 

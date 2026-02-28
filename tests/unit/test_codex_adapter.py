@@ -121,14 +121,12 @@ def test_construct_config_excludes_runtime_interactive_options(tmp_path):
             "model": "gpt-5.2-codex",
             "model_reasoning_effort": "high",
             "execution_mode": "interactive",
-            "interactive_require_user_reply": True,
-            "session_timeout_sec": 1200,
-            "interactive_wait_timeout_sec": 10,
-            "verbose": True,
+            "interactive_auto_reply": False,
+            "interactive_reply_timeout_sec": 1200,
             "__resume_session_handle": {"handle_value": "th_1"},
             "codex_config": {
                 "sandbox_mode": "workspace-write",
-                "session_timeout_sec": 999,
+                "interactive_reply_timeout_sec": 999,
             },
         },
     )
@@ -140,10 +138,8 @@ def test_construct_config_excludes_runtime_interactive_options(tmp_path):
     assert passed_overrides["model_reasoning_effort"] == "high"
     assert passed_overrides["sandbox_mode"] == "workspace-write"
     assert "execution_mode" not in passed_overrides
-    assert "interactive_require_user_reply" not in passed_overrides
-    assert "session_timeout_sec" not in passed_overrides
-    assert "interactive_wait_timeout_sec" not in passed_overrides
-    assert "verbose" not in passed_overrides
+    assert "interactive_auto_reply" not in passed_overrides
+    assert "interactive_reply_timeout_sec" not in passed_overrides
 
 
 def test_construct_config_allows_harness_profile_override(tmp_path):
@@ -186,10 +182,10 @@ def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
     config_path = run_dir / ".codex" / "config.toml"
 
     with patch(
-        "server.services.skill_patcher.skill_patcher.load_output_schema",
+        "server.services.skill.skill_patcher.skill_patcher.load_output_schema",
         return_value={"type": "object"},
     ) as mock_load, patch(
-        "server.services.skill_patcher.skill_patcher.patch_skill_md"
+        "server.services.skill.skill_patcher.skill_patcher.patch_skill_md"
     ) as mock_patch:
         target = adapter._setup_environment(skill, run_dir, config_path, options={})
 

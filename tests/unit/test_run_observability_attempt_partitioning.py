@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 def _fcmp_state_event(*, seq: int, attempt: int, to_state: str) -> dict:
@@ -54,11 +54,11 @@ def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
         lambda _run_dir: {"status": "succeeded"},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"runtime_options": {"execution_mode": "interactive"}, "engine": "codex"},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_interaction_count",
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
         lambda _request_id: 1,
     )
 

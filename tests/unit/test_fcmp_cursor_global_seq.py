@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 def _fcmp_event(*, attempt: int, seq: int, type_name: str, data: dict) -> dict:
@@ -92,7 +92,7 @@ def test_list_event_history_rewrites_seq_to_global_monotonic(monkeypatch, tmp_pa
         (audit_dir / f"stdout.{attempt}.log").write_text("", encoding="utf-8")
 
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
     )
 
@@ -171,7 +171,7 @@ async def test_iter_sse_events_respects_global_cursor_across_attempts(monkeypatc
         (audit_dir / f"stdout.{attempt}.log").write_text("", encoding="utf-8")
 
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
     )
 

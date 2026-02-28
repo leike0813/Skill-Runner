@@ -3,7 +3,7 @@ from pathlib import Path
 
 import tomlkit
 
-from server.services.run_folder_trust_manager import RunFolderTrustManager
+from server.services.orchestration.run_folder_trust_manager import RunFolderTrustManager
 
 
 def _load_toml(path: Path):

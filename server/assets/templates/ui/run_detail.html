@@ -166,12 +166,20 @@
     const renderedChatSeq = new Set();
     const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
     const availableAttempts = [];
+    const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
+    const WATCHDOG_RETRY_INTERVAL_MS = 2000;
+    const WATCHDOG_RETRY_WINDOW_MS = 30000;
 
     let cursor = 0;
     let source = null;
     let reconnectTimer = null;
     let terminal = terminalStatuses.has(statusEl.textContent || "");
     let currentAttempt = 1;
+    let interactiveAutoReplyEnabled = false;
+    let interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
+    let waitingUserWatchdogTimer = null;
+    let waitingUserWatchdogStartAt = 0;
+    let waitingUserWatchdogInFlight = false;
 
     function appendLog(target, chunk) {
         if (!chunk) return;
@@ -275,6 +283,58 @@
         }
     }
 
+    function clearWaitingUserWatchdog() {
+        if (waitingUserWatchdogTimer) {
+            clearTimeout(waitingUserWatchdogTimer);
+            waitingUserWatchdogTimer = null;
+        }
+        waitingUserWatchdogStartAt = 0;
+        waitingUserWatchdogInFlight = false;
+    }
+
+    async function executeWaitingUserWatchdogTick() {
+        if (waitingUserWatchdogInFlight) return;
+        if (terminal || (statusEl.textContent || "") !== "waiting_user") {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        waitingUserWatchdogInFlight = true;
+        try {
+            await refreshState();
+            if (terminal || (statusEl.textContent || "") !== "waiting_user") {
+                clearWaitingUserWatchdog();
+                if (!source && !terminal) {
+                    connectEvents();
+                }
+                await loadConversationHistory();
+                return;
+            }
+        } finally {
+            waitingUserWatchdogInFlight = false;
+        }
+        const elapsed = Date.now() - waitingUserWatchdogStartAt;
+        if (elapsed >= WATCHDOG_RETRY_WINDOW_MS) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, WATCHDOG_RETRY_INTERVAL_MS);
+    }
+
+    function maybeStartWaitingUserWatchdog() {
+        if (!interactiveAutoReplyEnabled) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        if (terminal || (statusEl.textContent || "") !== "waiting_user") {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        if (waitingUserWatchdogTimer || waitingUserWatchdogStartAt > 0) return;
+        waitingUserWatchdogStartAt = Date.now();
+        const initialDelayMs = Math.max(1, interactiveReplyTimeoutSec) * 1000;
+        waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, initialDelayMs);
+    }
+
     function stripAskUserBlocks(text) {
         if (typeof text !== "string" || !text.trim()) return "";
         let normalized = text;
@@ -292,11 +352,24 @@
 
     function updateStatus(payload) {
         if (!payload || typeof payload !== "object") return;
+        if (typeof payload.interactive_auto_reply === "boolean") {
+            interactiveAutoReplyEnabled = payload.interactive_auto_reply;
+        }
+        if (
+            typeof payload.interactive_reply_timeout_sec === "number"
+            && Number.isFinite(payload.interactive_reply_timeout_sec)
+            && payload.interactive_reply_timeout_sec > 0
+        ) {
+            interactiveReplyTimeoutSec = Math.floor(payload.interactive_reply_timeout_sec);
+        } else if (typeof payload.interactive_reply_timeout_sec === "number") {
+            interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
+        }
         if (typeof payload.status === "string" && payload.status) {
             statusEl.textContent = payload.status;
             terminal = terminalStatuses.has(payload.status);
             if (terminal) {
                 closeStream();
+                clearWaitingUserWatchdog();
             }
         }
         if (typeof payload.updated_at === "string" && payload.updated_at) {
@@ -307,6 +380,11 @@
         }
         if (payload.interaction_count !== undefined && payload.interaction_count !== null) {
             interactionCountEl.textContent = String(payload.interaction_count);
+        }
+        if ((statusEl.textContent || "") === "waiting_user") {
+            maybeStartWaitingUserWatchdog();
+        } else {
+            clearWaitingUserWatchdog();
         }
     }
 
@@ -543,6 +621,7 @@
                 return;
             }
             if (type === "interaction.reply.accepted") {
+                clearWaitingUserWatchdog();
                 const preview = data.data && typeof data.data.response_preview === "string"
                     ? data.data.response_preview.trim()
                     : "";
@@ -554,6 +633,7 @@
                 return;
             }
             if (type === "interaction.auto_decide.timeout") {
+                clearWaitingUserWatchdog();
                 appendChatEvent("system", "Timeout auto decision applied.", data, rawRef);
                 return;
             }
@@ -581,6 +661,7 @@
     }
 
     cancelBtn.addEventListener("click", async () => {
+        clearWaitingUserWatchdog();
         cancelBtn.disabled = true;
         await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
         await refreshState();
@@ -621,6 +702,10 @@
     if (!terminal) {
         connectEvents();
     }
+
+    window.addEventListener("beforeunload", () => {
+        clearWaitingUserWatchdog();
+    });
 })();
 </script>
 </body>

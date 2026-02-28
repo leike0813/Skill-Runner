@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from server.services.runtime_event_protocol import build_rasp_events
+from server.runtime.protocol.event_protocol import build_rasp_events
 
 
 @pytest.mark.parametrize(

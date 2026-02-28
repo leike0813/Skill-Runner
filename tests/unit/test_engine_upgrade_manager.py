@@ -1,12 +1,12 @@
 import pytest
 
-from server.services.engine_upgrade_manager import (
+from server.services.orchestration.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeManager,
     EngineUpgradeValidationError,
 )
 from server.models import EngineUpgradeTaskStatus
-from server.services.engine_upgrade_store import EngineUpgradeStore
+from server.services.orchestration.engine_upgrade_store import EngineUpgradeStore
 
 
 def _build_manager_with_store(tmp_path):

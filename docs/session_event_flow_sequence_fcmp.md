@@ -75,7 +75,7 @@ sequenceDiagram
     P-->>C: chat_event(conversation.state.changed running->waiting_user)
     P-->>C: chat_event(user.input.required)
 
-    Timer->>O: waiting reached session_timeout_sec
+    Timer->>O: waiting reached interactive_reply_timeout_sec
     O->>P: interaction.auto_decide.timeout
     P-->>C: chat_event(interaction.auto_decide.timeout)
     P-->>C: chat_event(conversation.state.changed waiting_user->queued)

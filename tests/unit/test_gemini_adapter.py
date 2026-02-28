@@ -119,8 +119,8 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
     )
 
     # Mock dependencies
-    with patch("server.services.config_generator.config_generator.generate_config"), \
-         patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
+    with patch("server.engines.common.config.json_layer_config_generator.config_generator.generate_config"), \
+         patch("server.services.skill.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
 
         mock_proc = MagicMock()
@@ -180,8 +180,8 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
         }
     )
 
-    with patch("server.services.config_generator.config_generator.generate_config"), \
-         patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
+    with patch("server.engines.common.config.json_layer_config_generator.config_generator.generate_config"), \
+         patch("server.services.skill.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
 
         mock_proc = MagicMock()

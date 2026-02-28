@@ -1,7 +1,7 @@
 import pytest
 import tomlkit
 from pathlib import Path
-from server.services.codex_config_manager import CodexConfigManager
+from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
 
 @pytest.fixture
 def temp_config_file(tmp_path):

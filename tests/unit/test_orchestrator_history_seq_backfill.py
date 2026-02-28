@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path: Path):
@@ -41,7 +41,7 @@ def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path:
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
     )
     service = RunObservabilityService()

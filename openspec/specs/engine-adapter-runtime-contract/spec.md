@@ -91,3 +91,70 @@ adapter profile 校验失败 MUST 在 registry 初始化阶段直接报错并阻
 - **WHEN** 系统装配模型目录或 manifest
 - **THEN** 静态 manifest 引擎从 profile 的 `model_catalog` 字段读取路径
 - **AND** 动态 catalog 引擎从 profile 声明其 seed/cache 与模式元信息
+
+### Requirement: Services MUST be domain-organized in phase1
+系统 MUST 将 `server/services` 按域分包（orchestration/skill/ui/platform），并停止继续新增扁平 services 模块。
+
+#### Scenario: Service module placement
+- **WHEN** 新增服务模块
+- **THEN** 模块路径必须位于对应域子包
+- **AND** 不允许新增根级 `server/services/*.py` 业务实现文件
+
+### Requirement: Runtime MUST be the only Run Core implementation layer
+系统 MUST 将 Run Core 逻辑收敛到 `server/runtime/*`，phase1 不允许新增 `server/services/run/*`。
+
+#### Scenario: Run core placement
+- **WHEN** 实现运行时协议、状态机、事件物化与运行观测能力
+- **THEN** 代码必须位于 `server/runtime/*`
+- **AND** `server/services` 仅允许 façade/兼容导入层
+
+### Requirement: Runtime adapter common MUST NOT depend on flat services modules
+`server/runtime/adapter/common/*` MUST 不再直接依赖扁平 services 模块。
+
+#### Scenario: Adapter common imports
+- **WHEN** 检查 `server/runtime/adapter/common/*` import
+- **THEN** 不出现 `server.services.<flat_module>` 引用
+
+### Requirement: Runtime modules MUST not directly import orchestration singletons
+`server/runtime/**` MUST 通过 contracts/ports 与 orchestration 协作，不得直接依赖 `server/services/orchestration/*`。
+
+#### Scenario: Runtime boundary guard
+- **WHEN** 检查 runtime 模块依赖
+- **THEN** 不存在 `from server.services.orchestration...` 或等价直接导入
+- **AND** runtime 仅依赖 runtime contracts 与注入端口
+
+### Requirement: Runtime execution business modules MUST live in orchestration
+`run_execution_core` 与 `run_interaction_service` 作为业务编排模块 MUST 位于 `services/orchestration`。
+
+#### Scenario: Execution module ownership
+- **WHEN** 扫描运行执行核心模块
+- **THEN** `server/runtime/execution/` 下不再存在上述业务实现文件
+- **AND** 等价实现位于 `server/services/orchestration/`
+
+### Requirement: Legacy compatibility imports MUST be removed in phase2
+phase2 后，adapter/runtime 相关旧路径兼容导入层 MUST NOT 存在。
+
+#### Scenario: Compatibility layer cleanup
+- **WHEN** 完成 phase2 收口
+- **THEN** 不存在仅用于兼容旧路径的 re-export 模块
+- **AND** 全仓引用均指向新目录结构
+
+### Requirement: Trust strategy MUST be adapter-local and centrally dispatched
+run folder trust 策略 MUST 以引擎 adapter 层实现，并由 orchestration trust manager 统一调度。
+
+#### Scenario: Adapter-local trust strategy placement
+- **WHEN** 为引擎实现 run folder trust
+- **THEN** codex 与 gemini 策略分别位于 `server/engines/codex/adapter/trust_folder_strategy.py` 与 `server/engines/gemini/adapter/trust_folder_strategy.py`
+- **AND** `server/services/orchestration/run_folder_trust_manager.py` 内部不出现 `if engine == ...` 分支
+- **AND** 未注册策略引擎自动使用 registry 内置 noop fallback
+
+### Requirement: Legacy orchestration compatibility shells MUST NOT exist
+phase2 收口后，orchestration 目录中的兼容壳文件 MUST 被删除。
+
+#### Scenario: Compatibility shell cleanup
+- **WHEN** 完成 phase2 增量收口
+- **THEN** 以下文件不存在：
+  - `server/services/orchestration/codex_config_manager.py`
+  - `server/services/orchestration/config_generator.py`
+  - `server/services/orchestration/opencode_model_catalog.py`
+

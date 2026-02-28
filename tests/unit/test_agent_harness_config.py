@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_harness.config import HARNESS_RUN_ROOT_ENV, resolve_harness_config
-from server.services.runtime_profile import reset_runtime_profile_cache
+from server.services.orchestration.runtime_profile import reset_runtime_profile_cache
 
 
 def test_config_defaults_run_root_under_data_dir(monkeypatch, tmp_path: Path) -> None:

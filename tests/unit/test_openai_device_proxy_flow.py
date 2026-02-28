@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from server.services.openai_device_proxy_flow import OpenAIDeviceProxyFlow, OpenAIDeviceProxySession
-from server.services.oauth_openai_proxy_common import (
+from server.engines.common.openai_auth.device_flow import OpenAIDeviceProxyFlow, OpenAIDeviceProxySession
+from server.engines.common.openai_auth.common import (
     OpenAIDeviceAuthorizationCode,
     OpenAIDeviceCodeStart,
     OpenAITokenSet,
@@ -22,7 +22,7 @@ def test_openai_device_proxy_flow_start_session(monkeypatch):
             verification_url="https://auth.openai.com/activate",
         )
 
-    monkeypatch.setattr("server.services.openai_device_proxy_flow.request_openai_device_code", _fake_start)
+    monkeypatch.setattr("server.engines.common.openai_auth.device_flow.request_openai_device_code", _fake_start)
     flow = OpenAIDeviceProxyFlow()
     runtime = flow.start_session(
         session_id="s-1",
@@ -82,11 +82,11 @@ def test_openai_device_proxy_flow_poll_once_completes(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "server.services.openai_device_proxy_flow.poll_openai_device_authorization_code",
+        "server.engines.common.openai_auth.device_flow.poll_openai_device_authorization_code",
         _fake_poll,
     )
     monkeypatch.setattr(
-        "server.services.openai_device_proxy_flow.exchange_authorization_code",
+        "server.engines.common.openai_auth.device_flow.exchange_authorization_code",
         _fake_exchange,
     )
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from agent_harness import cli
 from agent_harness.config import HarnessConfig
-from server.services.runtime_profile import RuntimeProfile
+from server.services.orchestration.runtime_profile import RuntimeProfile
 
 
 def _profile(root: Path) -> RuntimeProfile:

@@ -5,7 +5,7 @@ import re
 from typing import Any, Callable
 
 from ....models import EngineSessionHandle, EngineSessionHandleType
-from ....services.runtime_parse_utils import find_session_id, find_session_id_in_text
+from ....runtime.protocol.parse_utils import find_session_id, find_session_id_in_text
 from .profile_loader import AdapterProfile
 
 def first_json_line(raw_stdout: str, *, error_prefix: str) -> dict[str, Any]:

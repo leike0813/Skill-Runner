@@ -6,8 +6,8 @@ from typing import Any, cast
 
 import pytest
 
-from server.services.engine_interaction_gate import EngineInteractionGate
-from server.services.ui_shell_manager import (
+from server.services.orchestration.engine_interaction_gate import EngineInteractionGate
+from server.services.ui.ui_shell_manager import (
     UiShellBusyError,
     UiShellManager,
     UiShellRuntimeError,
@@ -89,11 +89,11 @@ def patch_fake_popen(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.subprocess.Popen",
+        "server.services.ui.ui_shell_manager.subprocess.Popen",
         _fake_popen,
     )
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.UiShellManager._is_port_available",
+        "server.services.ui.ui_shell_manager.UiShellManager._is_port_available",
         lambda self, host, port: True,  # noqa: ARG005
     )
     return calls
@@ -125,7 +125,7 @@ def test_ui_shell_manager_stop_session_sets_terminal(tmp_path: Path, patch_fake_
     started = manager.start_session("codex")
     assert started["status"] == "running"
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.os.killpg",
+        "server.services.ui.ui_shell_manager.os.killpg",
         lambda _pid, _sig: None,
     )
     stopped = manager.stop_session()
@@ -161,7 +161,7 @@ def test_ui_shell_manager_non_codex_sandbox_probe_is_non_blocking(
 def test_ui_shell_manager_local_port_conflict_fallback(tmp_path: Path, patch_fake_popen, monkeypatch):
     manager = _new_manager(tmp_path, mode="local")
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.UiShellManager._is_port_available",
+        "server.services.ui.ui_shell_manager.UiShellManager._is_port_available",
         lambda self, host, port: port == 7682,  # noqa: ARG005
     )
     started = manager.start_session("codex")
@@ -171,7 +171,7 @@ def test_ui_shell_manager_local_port_conflict_fallback(tmp_path: Path, patch_fak
 def test_ui_shell_manager_container_port_conflict_raises_busy(tmp_path: Path, patch_fake_popen, monkeypatch):
     manager = _new_manager(tmp_path, mode="container")
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.UiShellManager._is_port_available",
+        "server.services.ui.ui_shell_manager.UiShellManager._is_port_available",
         lambda self, host, port: False,  # noqa: ARG005
     )
     with pytest.raises(UiShellBusyError):
@@ -212,7 +212,7 @@ def test_ui_shell_manager_start_failure_rolls_back_trust(tmp_path: Path, monkeyp
     trust_spy = _TrustSpy()
     manager = _new_manager(tmp_path, trust_manager=trust_spy)
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.UiShellManager._is_port_available",
+        "server.services.ui.ui_shell_manager.UiShellManager._is_port_available",
         lambda self, host, port: True,  # noqa: ARG005
     )
 
@@ -220,7 +220,7 @@ def test_ui_shell_manager_start_failure_rolls_back_trust(tmp_path: Path, monkeyp
         raise RuntimeError("spawn failed")
 
     monkeypatch.setattr(
-        "server.services.ui_shell_manager.subprocess.Popen",
+        "server.services.ui.ui_shell_manager.subprocess.Popen",
         _raise_popen,
     )
 

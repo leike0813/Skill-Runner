@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from server.services.config_generator import config_generator
+from server.engines.common.config.json_layer_config_generator import config_generator
 from server.runtime.adapter.contracts import AdapterExecutionContext
 
 if TYPE_CHECKING:

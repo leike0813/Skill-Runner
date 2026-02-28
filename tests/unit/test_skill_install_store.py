@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from server.services.skill_install_store import SkillInstallStore
+from server.services.skill.skill_install_store import SkillInstallStore
 
 
 def test_skill_install_store_lifecycle(tmp_path):

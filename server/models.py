@@ -290,6 +290,12 @@ class RequestStatusResponse(BaseModel):
     recovery_reason: Optional[str] = None
     """Human-readable reason for startup reconciliation decision."""
 
+    interactive_auto_reply: Optional[bool] = None
+    """Whether timeout auto-reply is enabled for this run."""
+
+    interactive_reply_timeout_sec: Optional[int] = None
+    """Reply timeout threshold (seconds) when auto-reply is enabled."""
+
 class RunResponse(BaseModel):
     """
     Internal response format for run status snapshots.
@@ -863,6 +869,8 @@ class ManagementRunConversationState(BaseModel):
     recovery_reason: Optional[str] = None
     poll_logs: bool = False
     error: Optional[Any] = None
+    interactive_auto_reply: Optional[bool] = None
+    interactive_reply_timeout_sec: Optional[int] = None
 
 
 class ManagementRunListResponse(BaseModel):

@@ -354,12 +354,6 @@ class EngineExecutionAdapter:
         options: dict[str, Any],
         prefix: str,
     ) -> ProcessExecutionResult:
-        verbose_opt = options.get("verbose", 0)
-        if isinstance(verbose_opt, bool):
-            verbose_level = 1 if verbose_opt else 0
-        else:
-            verbose_level = int(verbose_opt)
-
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
 
@@ -381,10 +375,10 @@ class EngineExecutionAdapter:
                     logger.info("[%s]%s", tag, decoded_chunk.rstrip())
 
         stdout_task = asyncio.create_task(
-            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", verbose_level >= 1)
+            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False)
         )
         stderr_task = asyncio.create_task(
-            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", verbose_level >= 2)
+            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False)
         )
 
         run_id_obj = options.get("__run_id")

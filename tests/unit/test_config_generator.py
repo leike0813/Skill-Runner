@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from server.services.config_generator import ConfigGenerator
+from server.engines.common.config.json_layer_config_generator import ConfigGenerator
 
 
 def test_unknown_config_key_logs_warning(tmp_path, caplog):

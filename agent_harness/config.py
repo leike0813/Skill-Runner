@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from server.services.runtime_profile import RuntimeProfile, get_runtime_profile
+from server.services.orchestration.runtime_profile import RuntimeProfile, get_runtime_profile
 
 
 HARNESS_RUN_ROOT_ENV = "SKILL_RUNNER_HARNESS_RUN_ROOT"

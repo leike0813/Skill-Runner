@@ -12,14 +12,14 @@ from fastapi import BackgroundTasks, UploadFile, HTTPException
 from server.config import config
 from server.models import RunCreateRequest, RunStatus, SkillManifest
 from server.routers import jobs as jobs_router
-from server.services.cache_key_builder import (
+from server.services.platform.cache_key_builder import (
     build_input_manifest,
     compute_cache_key,
     compute_input_manifest_hash,
     compute_skill_fingerprint
 )
-from server.services.run_store import RunStore
-from server.services.workspace_manager import workspace_manager
+from server.services.orchestration.run_store import RunStore
+from server.services.orchestration.workspace_manager import workspace_manager
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def _allow_workspace_skill(monkeypatch, temp_config_dirs):
         path=temp_config_dirs
     )
     monkeypatch.setattr(
-        "server.services.skill_registry.skill_registry.get_skill",
+        "server.services.skill.skill_registry.skill_registry.get_skill",
         lambda skill_id: skill if skill_id == "demo-skill" else None
     )
 

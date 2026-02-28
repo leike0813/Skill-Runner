@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from server.services.engine_auth_flow_manager import EngineAuthFlowManager
-from server.services.engine_interaction_gate import EngineInteractionGate
+from server.services.orchestration.engine_auth_flow_manager import EngineAuthFlowManager
+from server.services.orchestration.engine_interaction_gate import EngineInteractionGate
 
 
 class _Profile:
@@ -93,4 +93,3 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path) -> Non
         engine="codex",
         auth_method="callback",
     ) == "auth"
-

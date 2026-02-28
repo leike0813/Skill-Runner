@@ -4,7 +4,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from server.runtime.adapter.types import RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
-from server.services.runtime_parse_utils import (
+from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
     extract_fenced_or_plain_json,

@@ -1,8 +1,8 @@
 from datetime import datetime
 
 from server.models import RuntimeEventCategory, RuntimeEventSource
-from server.services.protocol_factories import make_rasp_event
-from server.services.runtime_event_protocol import build_fcmp_events
+from server.runtime.protocol.factories import make_rasp_event
+from server.runtime.protocol.event_protocol import build_fcmp_events
 
 
 def test_build_fcmp_events_deduplicates_waiting_prompt_and_keeps_reply_preview():

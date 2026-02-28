@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from server.services import runtime_event_protocol
-from server.services.runtime_event_protocol import build_fcmp_events, build_rasp_events
-from server.services.protocol_schema_registry import (
+from server.runtime.protocol import event_protocol as runtime_event_protocol
+from server.runtime.protocol.event_protocol import build_fcmp_events, build_rasp_events
+from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
     validate_fcmp_event,
     validate_rasp_event,

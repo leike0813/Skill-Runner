@@ -14,9 +14,9 @@ import logging
 
 from server.models import EngineSessionHandle, EngineSessionHandleType
 from server.models import SkillManifest
-from server.services.engine_adapter_registry import engine_adapter_registry
-from server.services.run_folder_trust_manager import run_folder_trust_manager
-from server.services.runtime_event_protocol import (
+from server.services.orchestration.engine_adapter_registry import engine_adapter_registry
+from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
+from server.runtime.protocol.event_protocol import (
     build_fcmp_events,
     build_rasp_events,
     compute_protocol_metrics,

@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pytest
 
 from server.models import ManifestArtifact
-from server.services import skill_patcher as patcher_module
-from server.services.skill_patcher import SkillPatcher
+from server.services.skill import skill_patcher as patcher_module
+from server.services.skill.skill_patcher import SkillPatcher
 
 
 def _sample_output_schema() -> dict:

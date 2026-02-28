@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from server.config import config
-from server.services.skill_install_store import SkillInstallStore
-from server.services.skill_package_manager import SkillPackageManager
+from server.services.skill.skill_install_store import SkillInstallStore
+from server.services.skill.skill_package_manager import SkillPackageManager
 
 
 def _build_skill_zip(
@@ -105,8 +105,8 @@ def isolated_skill_paths(tmp_path):
 
 def test_install_new_skill(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
 
     manager = SkillPackageManager()
     payload = _build_skill_zip("demo-upload", "1.0.0")
@@ -122,8 +122,8 @@ def test_install_new_skill(monkeypatch, isolated_skill_paths):
 
 def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
 
     manager = SkillPackageManager()
     payload = _build_skill_zip(
@@ -149,8 +149,8 @@ def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monke
 
 def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
@@ -171,8 +171,8 @@ def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
 
 def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
@@ -198,8 +198,8 @@ def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_
 
 def test_reject_downgrade(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     manager.create_install_request("req-1", _build_skill_zip("demo-upload", "2.0.0"))
@@ -215,7 +215,7 @@ def test_reject_downgrade(monkeypatch, isolated_skill_paths):
 
 def test_reject_missing_required_files(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     manager = SkillPackageManager()
 
     manager.create_install_request(
@@ -232,7 +232,7 @@ def test_reject_missing_required_files(monkeypatch, isolated_skill_paths):
 
 def test_reject_identity_mismatch(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     manager = SkillPackageManager()
 
     manager.create_install_request(
@@ -249,8 +249,8 @@ def test_reject_identity_mismatch(monkeypatch, isolated_skill_paths):
 
 def test_reject_existing_archive_path(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
@@ -269,14 +269,14 @@ def test_reject_existing_archive_path(monkeypatch, isolated_skill_paths):
 
 def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
     manager.run_install("req-1")
 
-    import server.services.skill_package_manager as mod
+    import server.services.skill.skill_package_manager as mod
     real_move = mod.shutil.move
     state = {"first_done": False}
 
@@ -303,8 +303,8 @@ def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
 
 def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_registry.scan_skills", lambda: None)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
     broken_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, List, Literal
 
 from server.models import ManifestArtifact
-from server.services.manifest_artifact_inference import infer_manifest_artifacts
-from server.services.skill_patcher import skill_patcher
+from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
+from server.services.skill.skill_patcher import skill_patcher
 
 
 AGENT_SKILL_ROOTS: dict[str, Path] = {

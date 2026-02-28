@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server.services.engine_command_profile import EngineCommandProfile, merge_cli_args
+from server.services.orchestration.engine_command_profile import EngineCommandProfile, merge_cli_args
 
 
 def test_resolve_args_returns_empty_when_profile_missing(tmp_path: Path) -> None:

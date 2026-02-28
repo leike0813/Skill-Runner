@@ -1,7 +1,7 @@
 import json
 import pytest
 from pathlib import Path
-from server.services.workspace_manager import workspace_manager
+from server.services.orchestration.workspace_manager import workspace_manager
 from server.models import RunCreateRequest, SkillManifest
 
 
@@ -15,7 +15,7 @@ def _allow_test_skill(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
-        "server.services.skill_registry.skill_registry.get_skill",
+        "server.services.skill.skill_registry.skill_registry.get_skill",
         lambda skill_id: skill if skill_id == "test-skill" else None
     )
 
@@ -72,7 +72,7 @@ def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
         path=tmp_path
     )
     monkeypatch.setattr(
-        "server.services.skill_registry.skill_registry.get_skill",
+        "server.services.skill.skill_registry.skill_registry.get_skill",
         lambda skill_id: skill if skill_id == "test-skill" else None
     )
 

@@ -192,12 +192,11 @@
     - `selectedAuthType = "oauth-iflow"`
     - `baseUrl = "https://apis.iflow.cn/v1"`
 - **运行时选项**:
-  - `runtime_options` 不影响输出结果（例如 `verbose`）。
   - `runtime_options.execution_mode` 支持 `auto`（默认）与 `interactive`。
-  - 会话超时统一键：`runtime_options.session_timeout_sec`（默认 `1200`）。
-  - `interactive` 下可设置 `runtime_options.interactive_require_user_reply`：
-    - `true`（默认）：严格等待用户回复，超时不自动失败。
-    - `false`：等待超时后自动决策并继续执行。
+  - 会话回复超时键：`runtime_options.interactive_reply_timeout_sec`（默认 `1200`）。
+  - `interactive` 下可设置 `runtime_options.interactive_auto_reply`：
+    - `false`（默认）：严格等待用户回复，超时不自动继续。
+    - `true`：等待超时后自动决策并继续执行。
   - `interactive` 模式始终采用单一可恢复会话语义，内部保存会话句柄；对外不暴露 `interactive_profile.kind`。
   - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
   - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。

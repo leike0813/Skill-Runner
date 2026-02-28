@@ -9,19 +9,19 @@ from pathlib import Path
 from typing import Any, Dict
 
 from server.models import RunCreateRequest, RunStatus
-from server.services.cache_key_builder import (
+from server.services.platform.cache_key_builder import (
     compute_cache_key,
     compute_input_manifest_hash,
     compute_skill_fingerprint,
 )
-from server.services.job_orchestrator import job_orchestrator
-from server.services.model_registry import model_registry
-from server.services.options_policy import options_policy
-from server.services.run_store import run_store
-from server.services.skill_registry import skill_registry
-from server.services.temp_skill_run_manager import temp_skill_run_manager
-from server.services.temp_skill_run_store import temp_skill_run_store
-from server.services.workspace_manager import workspace_manager
+from server.services.orchestration.job_orchestrator import job_orchestrator
+from server.services.orchestration.model_registry import model_registry
+from server.services.platform.options_policy import options_policy
+from server.services.orchestration.run_store import run_store
+from server.services.skill.skill_registry import skill_registry
+from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
+from server.services.skill.temp_skill_run_store import temp_skill_run_store
+from server.services.orchestration.workspace_manager import workspace_manager
 from tests.common.skill_fixture_loader import (
     build_fixture_skill_zip,
     fixture_skill_engines,
@@ -50,7 +50,6 @@ class EngineIntegrationHarnessFixture:
         skill_id: str,
         case: Dict[str, Any],
         default_engine: str = "gemini",
-        verbose: int = 0,
         no_cache: bool = False,
         skill_source: str = "installed",
         skill_fixture: str | None = None,
@@ -77,7 +76,7 @@ class EngineIntegrationHarnessFixture:
             engine=engine,
             parameter=case.get("parameters", {}),
             model=model,
-            runtime_options={"verbose": verbose, "no_cache": effective_no_cache},
+            runtime_options={"no_cache": effective_no_cache},
         )
         runtime_opts = options_policy.validate_runtime_options(req.runtime_options)
         engine_opts = {}

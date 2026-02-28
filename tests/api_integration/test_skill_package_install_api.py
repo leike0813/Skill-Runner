@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from server.config import config
 from server.main import app
-from server.services.skill_install_store import SkillInstallStore
+from server.services.skill.skill_install_store import SkillInstallStore
 
 
 def _build_skill_zip(skill_id: str, version: str) -> bytes:
@@ -112,7 +112,7 @@ def isolated_skill_install_env(monkeypatch, tmp_path):
 
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.routers.skill_packages.skill_install_store", store)
-    monkeypatch.setattr("server.services.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     try:
         yield tmp_path
     finally:
@@ -127,10 +127,10 @@ def isolated_skill_install_env(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def disable_lifespan_schedulers(monkeypatch):
-    monkeypatch.setattr("server.services.cache_manager.cache_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
 
 
 def test_install_new_skill_and_discoverable(isolated_skill_install_env):

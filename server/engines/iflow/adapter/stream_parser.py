@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING
 
 from server.runtime.adapter.types import RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
-from server.services.runtime_parse_utils import (
+from server.runtime.protocol.parse_utils import (
     dedup_assistant_messages,
     find_session_id_in_text,
     stream_lines_with_offsets,

@@ -12,9 +12,9 @@ from server.models import (
     RunStatus,
     SkillManifest,
 )
-from server.services.job_orchestrator import JobOrchestrator
-from server.services.run_store import RunStore
-from server.services.workspace_manager import workspace_manager
+from server.services.orchestration.job_orchestrator import JobOrchestrator
+from server.services.orchestration.run_store import RunStore
+from server.services.orchestration.workspace_manager import workspace_manager
 from server.config import config
 from server.runtime.adapter.types import EngineRunResult
 
@@ -152,12 +152,12 @@ def _patch_trust_manager(monkeypatch):
         def cleanup_stale_entries(self, active_run_dirs):
             return None
 
-    monkeypatch.setattr("server.services.job_orchestrator.run_folder_trust_manager", NoopTrustManager())
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.run_folder_trust_manager", NoopTrustManager())
 
 
 def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     req = RunCreateRequest(skill_id=skill.id, engine="codex", parameter={})
-    with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill):
+    with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
         resp = workspace_manager.create_run(req)
     return resp.run_id
 
@@ -196,8 +196,8 @@ async def test_run_job_missing_required_input_marks_failed(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": FailingAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         status_path = Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json"
@@ -245,8 +245,8 @@ async def test_run_job_writes_output_warnings(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DummyAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -289,8 +289,8 @@ async def test_run_job_cancel_requested_before_execution_short_circuits(tmp_path
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": CancelShouldSkipAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
@@ -322,7 +322,7 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
     orchestrator = JobOrchestrator()
     orchestrator.adapters = {"codex": _CancelableAdapter()}
 
-    with patch("server.services.job_orchestrator.run_store", local_store):
+    with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
         accepted = await orchestrator.cancel_run(
             run_id=run_id,
             engine_name="codex",
@@ -371,8 +371,8 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DummyAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
@@ -413,8 +413,8 @@ async def test_run_job_fails_when_output_json_missing(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": NoOutputAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -464,8 +464,8 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": MissingArtifactsAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -505,8 +505,8 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": AuthRequiredAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -547,8 +547,8 @@ async def test_run_job_marks_timeout_error_code(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": TimeoutAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -593,8 +593,8 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": TimeoutSuccessLikeAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -646,7 +646,7 @@ async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
             self.events.append(("remove", engine, str(run_dir)))
 
     recorder = Recorder()
-    monkeypatch.setattr("server.services.job_orchestrator.run_folder_trust_manager", recorder)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.run_folder_trust_manager", recorder)
 
     old_runs_dir = config.SYSTEM.RUNS_DIR
     old_runs_db = config.SYSTEM.RUNS_DB
@@ -659,8 +659,8 @@ async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DummyAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         assert any(event[0] == "register" and event[1] == "codex" for event in recorder.events)
@@ -701,8 +701,8 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -755,8 +755,8 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSchemaFailAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -940,8 +940,8 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -1022,8 +1022,8 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill-stderr-session",
@@ -1097,8 +1097,8 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -1361,8 +1361,8 @@ async def test_run_job_output_validation_strips_done_marker(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DoneMarkerOutputAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(run_id, skill.id, "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
@@ -1415,8 +1415,8 @@ async def test_run_job_interactive_escaped_stream_done_marker_completes_without_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": EscapedDoneMarkerStreamOnlyAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1475,8 +1475,8 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": EscapedDoneMarkerWithInvalidOutputAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1536,8 +1536,8 @@ async def test_run_job_interactive_tool_use_done_marker_echo_does_not_complete(t
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": ToolUseDoneMarkerEchoAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1598,8 +1598,8 @@ async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1659,8 +1659,8 @@ async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1721,8 +1721,8 @@ async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1779,8 +1779,8 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1838,8 +1838,8 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1892,8 +1892,8 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1997,8 +1997,8 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -2275,8 +2275,8 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
     async def _release():
         events.append("release")
 
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.release_slot", _release)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.release_slot", _release)
 
     skill = _build_interactive_skill(tmp_path)
     old_runs_dir = config.SYSTEM.RUNS_DIR
@@ -2296,8 +2296,8 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -2335,8 +2335,8 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
     async def _release():
         events.append("release")
 
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.job_orchestrator.concurrency_manager.release_slot", _release)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.release_slot", _release)
 
     skill = _build_interactive_skill(tmp_path)
     old_runs_dir = config.SYSTEM.RUNS_DIR
@@ -2356,8 +2356,8 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
             engine_options={},
             runtime_options={
                 "execution_mode": "interactive",
-                "interactive_require_user_reply": False,
-                "session_timeout_sec": 1,
+                "interactive_auto_reply": True,
+                "interactive_reply_timeout_sec": 1,
             },
             input_data={},
         )
@@ -2371,16 +2371,16 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
                 "codex",
                 options={
                     "execution_mode": "interactive",
-                    "interactive_require_user_reply": False,
-                    "session_timeout_sec": 1,
+                    "interactive_auto_reply": True,
+                    "interactive_reply_timeout_sec": 1,
                 },
             )
             await asyncio.sleep(1.3)
@@ -2448,8 +2448,8 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
             session_timeout_sec=session_timeout_sec,
         )
 
-        with patch("server.services.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 "test-skill",
@@ -2495,7 +2495,7 @@ async def test_recover_waiting_user_keeps_waiting_when_handle_valid(tmp_path):
         )
 
         orchestrator = JobOrchestrator()
-        with patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
         run_state = local_store.get_run("run-recover-resumable")
@@ -2533,7 +2533,7 @@ async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
         )
 
         orchestrator = JobOrchestrator()
-        with patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
         status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
@@ -2571,7 +2571,7 @@ async def test_recover_running_or_queued_fails_with_restart_interrupted(tmp_path
         )
 
         orchestrator = JobOrchestrator()
-        with patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
         status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
@@ -2617,7 +2617,7 @@ async def test_recover_orphan_cleanup_is_noop_and_idempotent(tmp_path):
         adapter = CountingCancelAdapter()
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": adapter}
-        with patch("server.services.job_orchestrator.run_store", local_store):
+        with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
             first_calls = adapter.cancel_calls
             await orchestrator.recover_incomplete_runs_on_startup()

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 def _event(*, attempt: int, seq: int, type_name: str) -> dict:
@@ -72,7 +72,7 @@ def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_path: Pa
         (audit_dir / f"stderr.{attempt}.log").write_text("", encoding="utf-8")
 
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
     )
 

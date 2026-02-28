@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from server.models import RuntimeEventCategory, RuntimeEventSource
-from server.services.protocol_factories import make_rasp_event
-from server.services.runtime_event_protocol import build_fcmp_events, build_rasp_events
+from server.runtime.protocol.factories import make_rasp_event
+from server.runtime.protocol.event_protocol import build_fcmp_events, build_rasp_events
 from tests.common.session_invariant_contract import (
     fcmp_state_changed_tuples,
     ordering_rules,

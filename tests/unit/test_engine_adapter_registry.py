@@ -8,7 +8,7 @@ from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
-from server.services.engine_adapter_registry import EngineAdapterRegistry
+from server.services.orchestration.engine_adapter_registry import EngineAdapterRegistry
 
 
 def test_registry_exposes_all_supported_adapters() -> None:

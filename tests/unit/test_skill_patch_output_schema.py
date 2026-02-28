@@ -2,7 +2,7 @@ import json
 
 from jsonschema import validate
 
-from server.services.skill_patch_output_schema import (
+from server.services.skill.skill_patch_output_schema import (
     OUTPUT_SCHEMA_PATCH_MARKER,
     generate_output_schema_patch,
 )

@@ -2,7 +2,7 @@ import pytest
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from server.services.schema_validator import SchemaValidator
+from server.services.platform.schema_validator import SchemaValidator
 from server.models import SkillManifest
 
 @pytest.fixture

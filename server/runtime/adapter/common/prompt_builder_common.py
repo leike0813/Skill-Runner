@@ -7,7 +7,7 @@ from typing import Any
 from jinja2 import Template
 
 from ....models import SkillManifest
-from ....services.schema_validator import schema_validator
+from ....services.platform.schema_validator import schema_validator
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 

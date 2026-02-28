@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from server.config import config
-from server.services.run_cleanup_manager import RunCleanupManager
-from server.services.run_store import RunStore
-from server.services.workspace_manager import workspace_manager
+from server.services.orchestration.run_cleanup_manager import RunCleanupManager
+from server.services.orchestration.run_store import RunStore
+from server.services.orchestration.workspace_manager import workspace_manager
 from server.models import RunCreateRequest, RunStatus, SkillManifest
 
 
@@ -20,7 +20,7 @@ def _allow_cleanup_skill(monkeypatch, tmp_path):
         path=tmp_path
     )
     monkeypatch.setattr(
-        "server.services.skill_registry.skill_registry.get_skill",
+        "server.services.skill.skill_registry.skill_registry.get_skill",
         lambda skill_id: skill if skill_id == "s" else None
     )
     class NoopTrustManager:
@@ -28,7 +28,7 @@ def _allow_cleanup_skill(monkeypatch, tmp_path):
             return None
 
     monkeypatch.setattr(
-        "server.services.run_cleanup_manager.run_folder_trust_manager",
+        "server.services.orchestration.run_cleanup_manager.run_folder_trust_manager",
         NoopTrustManager()
     )
 
@@ -44,8 +44,8 @@ def _set_run_row(store: RunStore, run_id: str, status: str, created_at: str) -> 
 @pytest.mark.asyncio
 async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -104,8 +104,8 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
 @pytest.mark.asyncio
 async def test_cleanup_skips_queued_and_running(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -137,8 +137,8 @@ async def test_cleanup_skips_queued_and_running(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_cleanup_handles_invalid_timestamp(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -164,8 +164,8 @@ async def test_cleanup_handles_invalid_timestamp(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_cleanup_handles_missing_run_dir(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -192,8 +192,8 @@ async def test_cleanup_handles_missing_run_dir(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_cleanup_disabled_when_retention_zero(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -221,8 +221,8 @@ async def test_cleanup_disabled_when_retention_zero(monkeypatch, temp_config_dir
 
 def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     manager = RunCleanupManager()
 
@@ -259,8 +259,8 @@ def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_store", store)
-    monkeypatch.setattr("server.services.run_cleanup_manager.workspace_manager", workspace_manager)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
     store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.RUNNING)
@@ -273,7 +273,7 @@ async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, t
             self.active = [str(path) for path in active_run_dirs]
 
     recorder = RecorderTrustManager()
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_folder_trust_manager", recorder)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_folder_trust_manager", recorder)
 
     manager = RunCleanupManager()
     await manager.cleanup_stale_trust_entries()

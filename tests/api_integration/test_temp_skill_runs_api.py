@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from server.config import config
 from server.main import app
-from server.services.job_orchestrator import job_orchestrator
+from server.services.orchestration.job_orchestrator import job_orchestrator
 
 
 def _build_skill_zip(skill_id: str = "demo-temp-api") -> bytes:
@@ -62,19 +62,19 @@ def _wait_status(client: TestClient, request_id: str, timeout_sec: float = 5.0) 
 
 @pytest.fixture(autouse=True)
 def disable_lifespan_schedulers(monkeypatch):
-    monkeypatch.setattr("server.services.cache_manager.cache_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", lambda: None)
     async def _admit():
         return True
     async def _acquire():
         return None
     async def _release():
         return None
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.admit_or_reject", _admit)
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.acquire_slot", _acquire)
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.release_slot", _release)
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.admit_or_reject", _admit)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.acquire_slot", _acquire)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.release_slot", _release)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
 
 
 @pytest.fixture

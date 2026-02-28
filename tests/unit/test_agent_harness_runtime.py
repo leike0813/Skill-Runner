@@ -10,7 +10,7 @@ from agent_harness.config import HarnessConfig
 from agent_harness.errors import HarnessError
 from agent_harness.runtime import HarnessLaunchRequest, HarnessResumeRequest, HarnessRuntime
 from agent_harness.storage import resolve_next_attempt_paths
-from server.services.runtime_profile import RuntimeProfile
+from server.services.orchestration.runtime_profile import RuntimeProfile
 
 
 def _build_profile(root: Path) -> RuntimeProfile:

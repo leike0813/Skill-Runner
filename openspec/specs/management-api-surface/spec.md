@@ -266,3 +266,52 @@ TBD - created by archiving change interactive-27-unified-management-api-surface.
 #### Scenario: OpenCode 发起鉴权
 - **WHEN** 用户在 OpenCode 入口中先选择 provider，再选择 auth_method
 - **THEN** UI 请求体包含 `engine=opencode`、`provider_id=<selected>`、`transport=<global>`、`auth_method=<selected>`
+
+### Requirement: API surface MUST remain compatible during services/runtime reorganization
+在本次目录重构中，对外 `/v1` 管理与运行接口路径、请求语义、关键响应字段 MUST 保持兼容。
+
+#### Scenario: Existing API clients
+- **WHEN** 现有客户端调用 `/v1` 端点
+- **THEN** 不因内部模块迁移出现破坏性行为变化
+- **AND** 请求/响应主字段语义保持一致
+
+### Requirement: Runtime/orchestration boundary refactor MUST preserve external API semantics
+本次边界澄清属于内部重构，对外 `/v1` 与 `/ui` 接口语义 MUST 保持兼容。
+
+#### Scenario: Existing API clients after boundary refactor
+- **WHEN** 现有客户端调用已存在的管理、作业与观测接口
+- **THEN** 路由路径、输入/输出主字段与状态语义保持不变
+- **AND** 不因内部端口注入改造产生破坏性差异
+
+### Requirement: API compatibility MUST survive phase2 hard cutover
+phase2 移除兼容导入层后，`/v1` 对外接口行为 MUST 保持兼容。
+
+#### Scenario: Existing clients after hard cutover
+- **WHEN** 现有客户端调用既有 `/v1` 路由
+- **THEN** 不出现由内部模块迁移导致的破坏性变化
+
+### Requirement: Runtime options contract MUST use hard-cut keys
+`/v1/jobs*` 与 `/v1/temp-skill-runs*` 的 `runtime_options` MUST 采用新键集合，旧键不再兼容。
+
+#### Scenario: Submit request with removed runtime option keys
+- **WHEN** 客户端提交 `verbose`、`session_timeout_sec`、`interactive_wait_timeout_sec`、`hard_wait_timeout_sec`、`wait_timeout_sec` 或 `interactive_require_user_reply`
+- **THEN** 服务返回 `422`（或参数校验错误）
+- **AND** 不进行自动映射或静默忽略
+
+#### Scenario: Submit request with new interactive keys
+- **WHEN** 客户端提交 `interactive_auto_reply` 与 `interactive_reply_timeout_sec`
+- **THEN** 服务按新语义接受并执行
+- **AND** `interactive_auto_reply` 默认值为 `false`
+
+### Requirement: Interactive timeout semantics MUST align with interactive_auto_reply
+interactive waiting 超时触发逻辑 MUST 由 `interactive_auto_reply` 控制。
+
+#### Scenario: interactive_auto_reply enabled
+- **WHEN** `execution_mode=interactive` 且 `interactive_auto_reply=true` 且进入 waiting_user
+- **THEN** 在 `interactive_reply_timeout_sec` 到达后触发自动回复续跑
+
+#### Scenario: interactive_auto_reply disabled
+- **WHEN** `execution_mode=interactive` 且 `interactive_auto_reply=false`
+- **THEN** 超时不触发自动回复
+- **AND** 会话持续等待用户回复
+

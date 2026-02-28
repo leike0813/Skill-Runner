@@ -30,7 +30,7 @@ fi
 python3 -c '
 from pathlib import Path
 from server.config import config
-from server.services.run_folder_trust_manager import run_folder_trust_manager
+from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
 
 runs_parent = Path(config.SYSTEM.RUNS_DIR).resolve()
 runs_parent.mkdir(parents=True, exist_ok=True)

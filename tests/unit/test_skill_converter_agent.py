@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft7Validator  # type: ignore[import-untyped]
 
-from server.services.skill_package_validator import SkillPackageValidator
+from server.services.skill.skill_package_validator import SkillPackageValidator
 
 
 SCRIPTS_DIR = (

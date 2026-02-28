@@ -8,6 +8,16 @@ import pytest
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from server.services.orchestration.runtime_observability_ports import install_runtime_observability_ports
+from server.services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
+
+
+@pytest.fixture(autouse=True)
+def _install_runtime_ports():
+    install_runtime_protocol_ports()
+    install_runtime_observability_ports()
+    yield
+
 
 @pytest.fixture
 def temp_config_dirs(tmp_path):

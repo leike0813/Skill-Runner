@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from server.models import SkillManifest
-from server.services.cache_key_builder import (
+from server.services.platform.cache_key_builder import (
     build_input_manifest,
     compute_bytes_hash,
     compute_input_manifest_hash,

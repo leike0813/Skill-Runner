@@ -280,9 +280,9 @@ EngineRunResult 字段建议：
 Interactive 会话恢复约定（v0.3）：
 - 统一为单一可恢复会话范式（single resumable），不再区分 `resumable/sticky_process` 双档位。
 - Orchestrator 在 interactive 首回合前完成恢复能力探测；无论 probe 结果如何，都走统一可恢复路径并持久化 `EngineSessionHandle`。
-- strict 开关：`runtime_options.interactive_require_user_reply`（默认 `true`）：
-  - `true`：保持人工回复门禁；`waiting_user` 不因会话超时自动失败。
-  - `false`：等待超时触发自动决策并继续执行（统一回到 `queued` 再恢复）。
+- 自动回复开关：`runtime_options.interactive_auto_reply`（默认 `false`）：
+  - `false`：保持人工回复门禁；`waiting_user` 超时后不自动继续。
+  - `true`：等待超时触发自动决策并继续执行（统一回到 `queued` 再恢复）。
 - interactive 完成判定（双轨）：
   - 强条件：在 assistant 回复内容中检测到 `__SKILL_DONE__`。
   - 软条件：未检测到 marker，但当轮输出通过 output schema。
@@ -482,7 +482,7 @@ Request:
   "model": "gpt-5.2-codex@high",
   "runtime_options": {
     "debug": false,
-    "session_timeout_sec": 1200
+    "interactive_reply_timeout_sec": 1200
   }
 }
 Response:
@@ -496,7 +496,7 @@ Response:
 - Input 文件（对应 input.schema.json）需通过 `POST /v1/jobs/{request_id}/upload` 单独上传。
 - `engine` 必须在 skill 的有效引擎集合内（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - `model` 需从 `GET /v1/engines/{engine}/models` 中选择；Codex 使用 `name@reasoning_effort` 格式。
-- interactive 会话超时统一使用 `runtime_options.session_timeout_sec`（默认 1200 秒）。
+- interactive 会话超时统一使用 `runtime_options.interactive_reply_timeout_sec`（默认 1200 秒）。
 
 4) GET /v1/jobs/{request_id}
 - 查询状态与摘要

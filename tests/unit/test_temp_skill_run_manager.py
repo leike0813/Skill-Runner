@@ -7,8 +7,8 @@ import pytest
 
 from server.config import config
 from server.models import RunStatus
-from server.services.temp_skill_run_manager import TempSkillRunManager
-from server.services.temp_skill_run_store import TempSkillRunStore
+from server.services.skill.temp_skill_run_manager import TempSkillRunManager
+from server.services.skill.temp_skill_run_store import TempSkillRunStore
 
 
 def _build_skill_zip(
@@ -43,7 +43,7 @@ def _build_skill_zip(
 
 def test_stage_and_cleanup_temp_skill(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
-    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
 
     request_id = "req-temp-1"
@@ -71,7 +71,7 @@ def test_stage_and_cleanup_temp_skill(monkeypatch, temp_config_dirs):
 
 def test_reject_oversized_skill_package(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
-    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     config.defrost()
     config.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES = 64
     config.freeze()
@@ -92,7 +92,7 @@ def test_reject_oversized_skill_package(monkeypatch, temp_config_dirs):
 
 def test_debug_keep_temp_skips_immediate_cleanup(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
-    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
 
     request_id = "req-temp-3"
@@ -114,7 +114,7 @@ def test_debug_keep_temp_skips_immediate_cleanup(monkeypatch, temp_config_dirs):
 
 def test_stage_missing_engines_defaults_to_all_supported(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
-    monkeypatch.setattr("server.services.temp_skill_run_manager.temp_skill_run_store", store)
+    monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
 
     request_id = "req-temp-4"

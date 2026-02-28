@@ -7,7 +7,7 @@ from typing import Any
 
 from ....config import config
 from ....runtime.auth.session_lifecycle import AuthStartPlan, StartRuntimeContext
-from ....services.openai_device_proxy_flow import OpenAIDeviceProxySession
+from ...common.openai_auth import OpenAIDeviceProxySession
 from .oauth_proxy import CodexOAuthProxySession
 
 _DEFAULT_TRANSPORT = "oauth_proxy"

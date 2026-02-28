@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, HTTPException
 from server.config import config
 from server.models import InteractionReplyRequest, RunCreateRequest, RunStatus, SkillManifest
 from server.routers import jobs as jobs_router
-from server.services.run_store import RunStore
+from server.services.orchestration.run_store import RunStore
 
 
 def _create_skill(base_dir: Path, skill_id: str) -> SkillManifest:
@@ -58,6 +58,8 @@ def _write_status(run_id: str, status: RunStatus) -> None:
 async def _create_interactive_request(
     monkeypatch: pytest.MonkeyPatch,
     temp_config_dirs: Path,
+    *,
+    runtime_options: dict[str, object] | None = None,
 ) -> tuple[RunStore, str]:
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
@@ -75,7 +77,7 @@ async def _create_interactive_request(
             engine="gemini",
             parameter={},
             model="gemini-2.5-pro",
-            runtime_options={"execution_mode": "interactive"},
+            runtime_options=runtime_options or {"execution_mode": "interactive"},
         ),
         BackgroundTasks(),
     )
@@ -133,6 +135,29 @@ async def test_get_run_status_exposes_waiting_user_pending_fields(monkeypatch, t
     assert response.recovery_state.value == "none"
     assert response.recovered_at is None
     assert response.recovery_reason is None
+
+
+@pytest.mark.asyncio
+async def test_get_run_status_exposes_interactive_auto_reply_fields(monkeypatch, temp_config_dirs):
+    store, request_id = await _create_interactive_request(
+        monkeypatch,
+        temp_config_dirs,
+        runtime_options={
+            "execution_mode": "interactive",
+            "interactive_auto_reply": True,
+            "interactive_reply_timeout_sec": 5,
+        },
+    )
+    request_record = store.get_request(request_id)
+    assert request_record is not None
+    run_id = request_record["run_id"]
+    assert run_id is not None
+
+    _write_status(run_id, RunStatus.WAITING_USER)
+    response = await jobs_router.get_run_status(request_id)
+    assert response.status == RunStatus.WAITING_USER
+    assert response.interactive_auto_reply is True
+    assert response.interactive_reply_timeout_sec == 5
 
 
 @pytest.mark.asyncio

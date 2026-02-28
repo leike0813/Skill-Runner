@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from server.services.run_observability import RunObservabilityService
+from server.runtime.observability.run_observability import RunObservabilityService
 
 
 def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
@@ -19,7 +19,7 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     )
 
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_requests_with_runs",
+        "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
         lambda limit=200: [
             {
                 "request_id": "req-1",
@@ -32,7 +32,7 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
         ],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request_with_run",
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
         lambda request_id: {
             "request_id": request_id,
             "run_id": "run-1",
@@ -43,7 +43,7 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
         },
     )
     monkeypatch.setattr(
-        "server.services.run_observability.workspace_manager.get_run_dir",
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
         lambda _run_id: run_dir,
     )
 
@@ -118,11 +118,11 @@ def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Pat
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._materialize_protocol_stream",
+        "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.RunObservabilityService._read_status_payload",
+        "server.runtime.observability.run_observability.RunObservabilityService._read_status_payload",
         lambda self, _run_dir: {"status": "succeeded"},
     )
     service = RunObservabilityService()
@@ -164,23 +164,23 @@ def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
 
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": execution_mode}},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_interaction_count",
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
         lambda _request_id: 0,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: 1200,
     )
     _ = status
@@ -243,23 +243,23 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
     )
 
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: {"interaction_id": 7, "kind": "open_text", "prompt": "请继续输入"},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "interactive"}},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_interaction_count",
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
         lambda _request_id: 0,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: 1200,
     )
 
@@ -379,11 +379,11 @@ def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     )
 
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "auto"}},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_interaction_count",
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
         lambda _request_id: 0,
     )
 
@@ -412,11 +412,11 @@ def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: 
     )
 
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_request",
+        "server.runtime.observability.run_observability.run_store.get_request",
         lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "auto"}},
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_interaction_count",
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
         lambda _request_id: 0,
     )
 

@@ -12,7 +12,7 @@ import yaml  # type: ignore[import-untyped]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
-from server.services.skill_registry import skill_registry
+from server.services.skill.skill_registry import skill_registry
 from tests.engine_integration.harness_fixture import EngineIntegrationHarnessFixture
 
 TEST_ROOT = PROJECT_ROOT / "tests"
@@ -96,13 +96,6 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description="Skill Runner Engine Integration Test Runner")
     parser.add_argument("-k", "--keyword", help="Filter suites by keyword", default="")
     parser.add_argument("-e", "--engine", help="Override execution engine", default=None)
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Verbose output (-v: stdout, -vv: stdout+stderr)",
-    )
     parser.add_argument("--no-cache", action="store_true", help="Disable cache usage")
     args = parser.parse_args()
 
@@ -151,7 +144,6 @@ async def main() -> int:
                 skill_id,
                 case,
                 default_engine=suite_engine,
-                verbose=args.verbose,
                 no_cache=args.no_cache,
                 skill_source=skill_source,
                 skill_fixture=skill_fixture,

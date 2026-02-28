@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from server.services.runtime_event_protocol import build_fcmp_events, build_rasp_events
-from server.services.session_statechart import SessionEvent, build_transition_index
+from server.runtime.protocol.event_protocol import build_fcmp_events, build_rasp_events
+from server.runtime.session.statechart import SessionEvent, build_transition_index
 from tests.common.session_invariant_contract import fcmp_state_changed_tuples
 
 

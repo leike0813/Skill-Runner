@@ -309,6 +309,14 @@
     let fileTreeExpanded = false;
     const renderedChatKeys = new Set();
     const renderedPromptKeys = new Set();
+    const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
+    const WATCHDOG_RETRY_INTERVAL_MS = 2000;
+    const WATCHDOG_RETRY_WINDOW_MS = 30000;
+    let interactiveAutoReplyEnabled = false;
+    let interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
+    let waitingUserWatchdogTimer = null;
+    let waitingUserWatchdogStartAt = 0;
+    let waitingUserWatchdogInFlight = false;
 
     function apiUrl(path) {
         const separator = path.includes("?") ? "&" : "?";
@@ -334,6 +342,73 @@
         if (next <= cursor) return;
         cursor = next;
         cursorEl.textContent = String(cursor);
+    }
+
+    function clearWaitingUserWatchdog() {
+        if (waitingUserWatchdogTimer) {
+            clearTimeout(waitingUserWatchdogTimer);
+            waitingUserWatchdogTimer = null;
+        }
+        waitingUserWatchdogStartAt = 0;
+        waitingUserWatchdogInFlight = false;
+    }
+
+    function updateInteractiveAutoReplyConfig(payload) {
+        if (!payload || typeof payload !== "object") return;
+        if (typeof payload.interactive_auto_reply === "boolean") {
+            interactiveAutoReplyEnabled = payload.interactive_auto_reply;
+        }
+        if (
+            typeof payload.interactive_reply_timeout_sec === "number"
+            && Number.isFinite(payload.interactive_reply_timeout_sec)
+            && payload.interactive_reply_timeout_sec > 0
+        ) {
+            interactiveReplyTimeoutSec = Math.floor(payload.interactive_reply_timeout_sec);
+        } else if (typeof payload.interactive_reply_timeout_sec === "number") {
+            interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
+        }
+    }
+
+    async function executeWaitingUserWatchdogTick() {
+        if (waitingUserWatchdogInFlight) return;
+        if (currentStatus !== "waiting_user" || isTerminal(currentStatus)) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        waitingUserWatchdogInFlight = true;
+        try {
+            await refreshState();
+            if (currentStatus !== "waiting_user") {
+                clearWaitingUserWatchdog();
+                if (!stream && !isTerminal(currentStatus)) {
+                    await startStream();
+                }
+                return;
+            }
+        } finally {
+            waitingUserWatchdogInFlight = false;
+        }
+        const elapsed = Date.now() - waitingUserWatchdogStartAt;
+        if (elapsed >= WATCHDOG_RETRY_WINDOW_MS) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, WATCHDOG_RETRY_INTERVAL_MS);
+    }
+
+    function maybeStartWaitingUserWatchdog() {
+        if (!interactiveAutoReplyEnabled) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        if (currentStatus !== "waiting_user" || isTerminal(currentStatus)) {
+            clearWaitingUserWatchdog();
+            return;
+        }
+        if (waitingUserWatchdogTimer || waitingUserWatchdogStartAt > 0) return;
+        waitingUserWatchdogStartAt = Date.now();
+        const initialDelayMs = Math.max(1, interactiveReplyTimeoutSec) * 1000;
+        waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, initialDelayMs);
     }
 
     function isTerminal(status) {
@@ -768,6 +843,7 @@
         const res = await fetch(apiUrl(`/api/runs/${requestId}`));
         if (!res.ok) return;
         const payload = await res.json();
+        updateInteractiveAutoReplyConfig(payload);
         currentStatus = safeText(payload.status || "unknown");
         statusEl.textContent = currentStatus;
         updateThinkingCard(currentStatus);
@@ -777,7 +853,9 @@
         if (currentStatus === "waiting_user") {
             clearFinalSummaryCard();
             await refreshPending();
+            maybeStartWaitingUserWatchdog();
         } else {
+            clearWaitingUserWatchdog();
             setReplyEnabled(false);
             if (currentStatus !== "waiting_user") {
                 clearPromptCard();
@@ -787,6 +865,7 @@
             }
         }
         if (isTerminal(currentStatus)) {
+            clearWaitingUserWatchdog();
             if (stream) {
                 stream.close();
                 stream = null;
@@ -822,8 +901,10 @@
         if (nextStatus === "waiting_user") {
             clearFinalSummaryCard();
             refreshPending().catch(() => {});
+            maybeStartWaitingUserWatchdog();
             return;
         }
+        clearWaitingUserWatchdog();
         if (!isTerminal(nextStatus)) {
             clearFinalSummaryCard();
         }
@@ -875,6 +956,7 @@
             return;
         }
         if (type === "interaction.reply.accepted") {
+            clearWaitingUserWatchdog();
             clearPromptCard();
             setReplyEnabled(false);
             const interactionId = Number(event?.data?.interaction_id || 0);
@@ -887,6 +969,7 @@
             return;
         }
         if (type === "interaction.auto_decide.timeout") {
+            clearWaitingUserWatchdog();
             clearPromptCard();
             setReplyEnabled(false);
             appendChatBubble("agent", "等待超时，系统已自动决策并继续执行。", `auto.timeout:${event.seq || 0}`);
@@ -965,6 +1048,7 @@
         const interactionId = Number(interactionIdEl.value || "0");
         const text = safeText(replyTextEl.value).trim();
         if (!interactionId) return;
+        clearWaitingUserWatchdog();
         const payload = {
             interaction_id: interactionId,
             response: { text },
@@ -1012,6 +1096,10 @@
         await startStream();
         await refreshState();
     })();
+
+    window.addEventListener("beforeunload", () => {
+        clearWaitingUserWatchdog();
+    });
 })();
 </script>
 {% endblock %}

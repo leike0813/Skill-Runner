@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server.services.oauth_openai_proxy_common import OpenAITokenSet
+from server.engines.common.openai_auth import OpenAITokenSet
 from server.engines.opencode.auth.protocol.openai_oauth_proxy_flow import OpencodeOpenAIOAuthProxyFlow
 
 

@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from server.services.agent_cli_manager import AgentCliManager
-from server.services.agent_cli_manager import CommandResult
-from server.services.runtime_profile import RuntimeProfile
+from server.services.orchestration.agent_cli_manager import AgentCliManager
+from server.services.orchestration.agent_cli_manager import CommandResult
+from server.services.orchestration.runtime_profile import RuntimeProfile
 
 
 def _build_profile(tmp_path: Path) -> RuntimeProfile:
@@ -120,7 +120,7 @@ def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
 
     def _fake_install(package: str):
         calls.append(package)
-        from server.services.agent_cli_manager import CommandResult
+        from server.services.orchestration.agent_cli_manager import CommandResult
         return CommandResult(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "resolve_global_engine_command", _fake_global)

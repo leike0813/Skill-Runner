@@ -301,3 +301,58 @@ callback 收口 MUST 以 `channel + state` 路由到目标会话与 handler，ru
 - **WHEN** 任一引擎会话进入 terminal 状态
 - **THEN** manager 调用 handler finalize hook
 - **AND** manager 统一执行 session store 清理与全局锁释放
+
+### Requirement: OpenAI shared auth protocol MUST be engines/common SSOT
+OpenAI 共享鉴权协议实现 MUST 位于 `server/engines/common/openai_auth/*`，并作为 codex/opencode 共用单一来源。
+
+#### Scenario: OpenAI auth import path
+- **WHEN** codex 或 opencode 需要 OpenAI OAuth/device 协议能力
+- **THEN** 通过 `server/engines/common/openai_auth/*` 导入
+- **AND** 不再依赖 `server/services/oauth_openai_proxy_common.py` 或 `server/services/openai_device_proxy_flow.py`
+
+### Requirement: Auth session behavior MUST remain stable during reorganization
+目录重组期间，鉴权会话状态推进与终态行为 MUST 保持兼容。
+
+#### Scenario: Existing auth flows
+- **WHEN** 执行现有 oauth_proxy/cli_delegate 鉴权流程
+- **THEN** 状态机语义与终态行为不回归
+
+### Requirement: Auth observability integration MUST remain compatible after boundary clarification
+边界澄清后，auth 与 run observability 的交互行为 MUST 保持兼容，不得影响会话状态和事件可见性。
+
+#### Scenario: Delegated auth and run observability coexistence
+- **WHEN** 启动鉴权会话并并发读取 run 观测信息
+- **THEN** auth 生命周期与 run 事件流各自正常推进
+- **AND** 端口注入改造不改变既有状态机语义
+
+### Requirement: Auth observability behavior MUST remain stable after hard cutover
+phase2 删除兼容层后，鉴权会话状态与审计语义 MUST 保持兼容。
+
+#### Scenario: Auth observability regression check
+- **WHEN** 执行现有鉴权流程并读取会话快照
+- **THEN** 状态推进、终态与关键审计字段语义不变
+
+### Requirement: Delegated auth trust injection MUST remain active after decoupling
+CLI delegated auth start 前 MUST 继续执行 run folder trust 注入。
+
+#### Scenario: Delegated auth trust strategy invocation
+- **WHEN** 启动 `cli_delegate` 鉴权会话
+- **THEN** orchestration trust manager 会在会话目录创建前后调用对应引擎策略
+- **AND** 会话终态时执行 trust 清理
+
+### Requirement: Engine auth manager MUST behave as orchestration façade
+`engine_auth_flow_manager` MUST 将 flow/listener/handler/matrix 装配外移，避免 manager 继续承载装配职责。
+
+#### Scenario: Bootstrap ownership
+- **WHEN** 初始化 auth orchestration
+- **THEN** flow/listener/handler/matrix 由 bootstrap 模块装配
+- **AND** manager 仅保留 façade 与生命周期调度职责
+
+### Requirement: Runtime option hard-cut MUST NOT alter auth session observability semantics
+The runtime option hard-cut MUST NOT change auth session state-machine or observability semantics.
+
+#### Scenario: Auth session status progression after runtime option hard-cut
+- **WHEN** 用户在管理 UI 发起任意鉴权会话（oauth_proxy 或 cli_delegate）
+- **THEN** 鉴权状态推进与事件可见性保持既有语义
+- **AND** runtime options 键名调整不会影响 auth session observability
+

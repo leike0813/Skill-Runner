@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from server.services.run_store import RunStore
+from server.services.orchestration.run_store import RunStore
 
 
 def test_run_store_request_and_cache(tmp_path):
@@ -14,7 +14,7 @@ def test_run_store_request_and_cache(tmp_path):
         engine="gemini",
         parameter={"a": 1},
         engine_options={"model": "x"},
-        runtime_options={"verbose": True}
+        runtime_options={"no_cache": True}
     )
     request = store.get_request("req-1")
     assert request is not None

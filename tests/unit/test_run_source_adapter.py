@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from server.services.run_source_adapter import (
+from server.runtime.observability.run_source_adapter import (
     get_request_and_run_dir,
     installed_run_source_adapter,
     temp_run_source_adapter,
 )
-from server.services.run_store import RunStore
-from server.services.temp_skill_run_store import TempSkillRunStore
+from server.services.orchestration.run_store import RunStore
+from server.services.skill.temp_skill_run_store import TempSkillRunStore
 
 
 def test_source_capability_parity_matrix() -> None:
@@ -27,7 +27,7 @@ def test_cache_lookup_namespace_isolated(tmp_path, monkeypatch) -> None:
     store = RunStore(db_path=tmp_path / "runs.db")
     store.record_cache_entry("shared-key", "run-installed")
     store.record_temp_cache_entry("shared-key", "run-temp")
-    monkeypatch.setattr("server.services.run_source_adapter.run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
 
     assert installed_run_source_adapter.get_cached_run("shared-key") == "run-installed"
     assert temp_run_source_adapter.get_cached_run("shared-key") == "run-temp"
@@ -54,8 +54,8 @@ def test_temp_bind_cached_run_updates_both_stores(tmp_path, monkeypatch) -> None
         runtime_options={"execution_mode": "interactive"},
     )
 
-    monkeypatch.setattr("server.services.run_source_adapter.run_store", store)
-    monkeypatch.setattr("server.services.run_source_adapter.temp_skill_run_store", temp_store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.temp_skill_run_store", temp_store)
 
     temp_run_source_adapter.bind_cached_run("temp-req-1", "run-cached-temp-1")
 
@@ -84,9 +84,9 @@ def test_get_request_and_run_dir_reads_source_request(tmp_path, monkeypatch) -> 
     )
     store.update_request_run_id("req-1", "run-1")
 
-    monkeypatch.setattr("server.services.run_source_adapter.run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
     monkeypatch.setattr(
-        "server.services.run_source_adapter.workspace_manager.get_run_dir",
+        "server.runtime.observability.run_source_adapter.workspace_manager.get_run_dir",
         lambda run_id: run_dir if run_id == "run-1" else None,
     )
 

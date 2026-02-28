@@ -221,6 +221,8 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
             "status": "waiting_user",
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": False,
+            "interactive_auto_reply": True,
+            "interactive_reply_timeout_sec": 5,
             "recovery_state": "recovered_waiting",
             "recovered_at": "2026-02-16T00:01:00",
             "recovery_reason": "resumable_waiting_preserved",
@@ -251,6 +253,8 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
     assert body["interaction_count"] == 3
     assert body["auto_decision_count"] == 2
     assert body["last_auto_decision_at"] == "2026-02-16T00:10:00"
+    assert body["interactive_auto_reply"] is True
+    assert body["interactive_reply_timeout_sec"] == 5
     assert body["recovery_state"] == "recovered_waiting"
     assert body["recovered_at"] == "2026-02-16T00:01:00"
     assert body["recovery_reason"] == "resumable_waiting_preserved"
@@ -314,22 +318,23 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_pending_interaction",
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         lambda _request_id: None,
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.list_interaction_history",
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
         lambda _request_id: [],
     )
     monkeypatch.setattr(
-        "server.services.run_observability.run_store.get_effective_session_timeout",
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         lambda _request_id: None,
     )
 
     response = await _request("GET", "/v1/management/runs/req-events/events")
     assert response.status_code == 200
     assert "event: snapshot" in response.text
-    assert "event: chat_event" in response.text
+    # Strict audit-only mode: without .audit attempt logs, stream emits snapshot only.
+    assert "event: chat_event" not in response.text
     assert "event: end" not in response.text
 
 

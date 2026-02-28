@@ -65,10 +65,10 @@ async def _run_background_tasks(background_tasks: BackgroundTasks) -> None:
 
 @pytest.fixture(autouse=True)
 def disable_schedulers(monkeypatch):
-    monkeypatch.setattr("server.services.cache_manager.cache_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.concurrency_manager.concurrency_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", lambda: None)
 
 
 @pytest.mark.asyncio
@@ -122,6 +122,30 @@ async def test_upload_queue_full_returns_429_and_marks_failed(temp_config_dirs, 
 
     status = await temp_skill_runs_router.get_temp_skill_run_status(create.request_id)
     assert status.status == RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_temp_status_exposes_interactive_auto_reply_fields(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={
+                "execution_mode": "interactive",
+                "interactive_auto_reply": True,
+                "interactive_reply_timeout_sec": 8,
+            },
+        )
+    )
+
+    status = await temp_skill_runs_router.get_temp_skill_run_status(create.request_id)
+    assert status.interactive_auto_reply is True
+    assert status.interactive_reply_timeout_sec == 8
 
 
 @pytest.mark.asyncio
@@ -361,8 +385,8 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
         skill_override=None,
         temp_request_id=None,
     ):
-        from server.services.temp_skill_run_manager import temp_skill_run_manager
-        from server.services.workspace_manager import workspace_manager
+        from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
+        from server.services.orchestration.workspace_manager import workspace_manager
 
         run_dir = workspace_manager.get_run_dir(run_id)
         assert run_dir is not None

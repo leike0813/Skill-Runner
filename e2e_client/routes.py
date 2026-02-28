@@ -27,13 +27,8 @@ templates = Jinja2Templates(directory=str(TEMPLATE_ROOT))
 
 router = APIRouter(tags=["e2e-client"])
 
-RUNTIME_BOOL_OPTIONS = ("verbose", "no_cache", "debug", "debug_keep_temp")
-RUNTIME_TIMEOUT_OPTIONS = (
-    "session_timeout_sec",
-    "interactive_wait_timeout_sec",
-    "hard_wait_timeout_sec",
-    "wait_timeout_sec",
-)
+RUNTIME_BOOL_OPTIONS = ("no_cache", "debug", "debug_keep_temp", "interactive_auto_reply")
+RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec",)
 PREVIEW_MAX_BYTES = 256 * 1024
 TEXT_DECODE_CANDIDATES = (
     "utf-8",
@@ -170,6 +165,7 @@ async def submit_run(
         detail=detail,
         schemas=schemas,
         engine_models_by_engine=engine_models_by_engine,
+        run_source=RUN_SOURCE_INSTALLED,
     )
     if submission["errors"]:
         return templates.TemplateResponse(
@@ -249,6 +245,7 @@ async def submit_fixture_run(
         detail=detail,
         schemas=schemas,
         engine_models_by_engine=engine_models_by_engine,
+        run_source=RUN_SOURCE_TEMP,
     )
     if submission["errors"]:
         return templates.TemplateResponse(
@@ -656,6 +653,7 @@ async def _collect_run_submission(
     detail: Mapping[str, Any],
     schemas: Mapping[str, Any],
     engine_models_by_engine: dict[str, list[dict[str, Any]]],
+    run_source: RunSource,
 ) -> dict[str, Any]:
     run_form = await request.form()
     submitted_engine = str(run_form.get("engine", "") or "")
@@ -685,6 +683,7 @@ async def _collect_run_submission(
     runtime_options, runtime_errors = _build_runtime_options(
         execution_mode=execution_mode,
         submitted=submitted_runtime_options,
+        run_source=run_source,
     )
 
     inline_schema = _as_schema_dict(schemas.get("input"))
@@ -1151,8 +1150,6 @@ def _collect_submitted_runtime_options(run_form: Mapping[str, Any]) -> dict[str,
     submitted: dict[str, Any] = {}
     for key in RUNTIME_BOOL_OPTIONS:
         submitted[key] = bool(run_form.get(f"runtime__{key}"))
-    mode = str(run_form.get("runtime__interactive_require_user_reply", "") or "").strip()
-    submitted["interactive_require_user_reply"] = mode
     for key in RUNTIME_TIMEOUT_OPTIONS:
         submitted[key] = str(run_form.get(f"runtime__{key}", "") or "").strip()
     return submitted
@@ -1162,33 +1159,34 @@ def _build_runtime_options(
     *,
     execution_mode: str,
     submitted: dict[str, Any],
+    run_source: RunSource,
 ) -> tuple[dict[str, Any], list[str]]:
     options: dict[str, Any] = {"execution_mode": execution_mode}
     errors: list[str] = []
-    for key in RUNTIME_BOOL_OPTIONS:
-        if bool(submitted.get(key)):
-            options[key] = True
-    reply_mode = submitted.get("interactive_require_user_reply")
-    if isinstance(reply_mode, str) and reply_mode:
-        if reply_mode == "true":
-            options["interactive_require_user_reply"] = True
-        elif reply_mode == "false":
-            options["interactive_require_user_reply"] = False
-        else:
-            errors.append("interactive_require_user_reply must be default/true/false")
-    for key in RUNTIME_TIMEOUT_OPTIONS:
-        raw_value = submitted.get(key)
-        if not isinstance(raw_value, str) or not raw_value.strip():
-            continue
-        try:
-            parsed = int(raw_value.strip())
-        except ValueError:
-            errors.append(f"{key} must be a positive integer")
-            continue
-        if parsed <= 0:
-            errors.append(f"{key} must be a positive integer")
-            continue
-        options[key] = parsed
+    if bool(submitted.get("no_cache")):
+        options["no_cache"] = True
+    if bool(submitted.get("debug")):
+        options["debug"] = True
+    if run_source == RUN_SOURCE_TEMP and bool(submitted.get("debug_keep_temp")):
+        options["debug_keep_temp"] = True
+
+    if execution_mode == "interactive":
+        interactive_auto_reply = bool(submitted.get("interactive_auto_reply"))
+        options["interactive_auto_reply"] = interactive_auto_reply
+        raw_value = submitted.get("interactive_reply_timeout_sec")
+        if interactive_auto_reply:
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                errors.append("interactive_reply_timeout_sec must be a positive integer")
+            else:
+                try:
+                    parsed = int(raw_value.strip())
+                except ValueError:
+                    errors.append("interactive_reply_timeout_sec must be a positive integer")
+                else:
+                    if parsed <= 0:
+                        errors.append("interactive_reply_timeout_sec must be a positive integer")
+                    else:
+                        options["interactive_reply_timeout_sec"] = parsed
     return options, errors
 
 
