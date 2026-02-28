@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server.services.opencode_google_antigravity_oauth_proxy_flow import (
+from server.engines.opencode.auth.protocol.google_antigravity_oauth_proxy_flow import (
     AntigravityOAuthProxyError,
     OpencodeGoogleAntigravityOAuthProxyFlow,
 )

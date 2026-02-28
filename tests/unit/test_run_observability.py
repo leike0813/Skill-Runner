@@ -189,14 +189,15 @@ def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = 
 @pytest.mark.asyncio
 async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-protocol"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text(
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text(
         '{"type":"thread.started","thread_id":"thread-1"}\n'
         '{"type":"item.completed","item":{"type":"agent_message","text":"hello from codex"}}\n',
         encoding="utf-8",
     )
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -231,10 +232,11 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
 @pytest.mark.asyncio
 async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-wait"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -285,14 +287,15 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
 @pytest.mark.asyncio
 async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-cursor"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text(
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text(
         '{"type":"thread.started","thread_id":"thread-2"}\n'
         '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n',
         encoding="utf-8",
     )
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -329,14 +332,15 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
 
 def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text(
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text(
         '{"type":"thread.started","thread_id":"thread-h"}\n'
         '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}\n',
         encoding="utf-8",
     )
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
@@ -362,15 +366,12 @@ def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
 
 def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-range"
-    logs_dir = run_dir / "logs"
     audit_dir = run_dir / ".audit"
-    logs_dir.mkdir(parents=True, exist_ok=True)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "status.json").write_text(
         json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
         encoding="utf-8",
     )
-    (logs_dir / "stdout.txt").write_text("live-stdout", encoding="utf-8")
     (audit_dir / "stdout.1.log").write_text("audit-stdout", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text(
         json.dumps({"completion": {"state": "completed", "reason_code": "DONE_MARKER_FOUND"}}),
@@ -395,3 +396,36 @@ def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
         byte_to=5,
     )
     assert payload["chunk"] == "audit"
+
+
+def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-no-fallback"
+    logs_dir = run_dir / "logs"
+    audit_dir = run_dir / ".audit"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("legacy-stdout", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
+    (run_dir / "status.json").write_text(
+        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_request",
+        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "auto"}},
+    )
+    monkeypatch.setattr(
+        "server.services.run_observability.run_store.get_interaction_count",
+        lambda _request_id: 0,
+    )
+
+    service = RunObservabilityService()
+    payload = service.read_log_range(
+        run_dir=run_dir,
+        request_id="req-no-fallback",
+        stream="stdout",
+        byte_from=0,
+        byte_to=64,
+    )
+    assert payload["chunk"] == ""

@@ -25,8 +25,8 @@ async def _request(method: str, path: str, **kwargs):
 @pytest.mark.asyncio
 async def test_openai_callback_route_success(monkeypatch):
     monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.complete_openai_callback",
-        lambda state, code=None, error=None: {  # noqa: ARG005
+        "server.routers.engines.engine_auth_flow_manager.complete_callback",
+        lambda channel, state, code=None, error=None: {  # noqa: ARG005
             "status": "succeeded",
             "error": None,
         },
@@ -48,11 +48,11 @@ async def test_openai_callback_route_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_openai_callback_route_replay(monkeypatch):
-    def _raise(state, code=None, error=None):  # noqa: ARG001
+    def _raise(channel, state, code=None, error=None):  # noqa: ARG001
         raise ValueError("OAuth callback state has already been consumed")
 
     monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.complete_openai_callback",
+        "server.routers.engines.engine_auth_flow_manager.complete_callback",
         _raise,
     )
     response = await _request(

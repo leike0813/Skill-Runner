@@ -5,30 +5,75 @@ from pathlib import Path
 
 import pytest
 
-from server.adapters.base import EngineAdapter, ProcessExecutionResult
-from server.models import AdapterTurnOutcome, AdapterTurnResult, SkillManifest
+from server.models import EngineSessionHandle, EngineSessionHandleType, SkillManifest
+from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
+from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.runtime.adapter.types import ProcessExecutionResult
 
 
-class _TestAdapter(EngineAdapter):
-    def _construct_config(self, skill: SkillManifest, run_dir: Path, options):
-        return run_dir / "dummy.json"
+class _NoopComposer:
+    def compose(self, ctx: AdapterExecutionContext) -> Path:  # noqa: ARG002
+        return ctx.run_dir / "dummy.json"
 
-    def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: Path, options):
-        return run_dir
 
-    def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data):
+class _NoopWorkspace:
+    def prepare(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:  # noqa: ARG002
+        return ctx.run_dir
+
+
+class _NoopPromptBuilder:
+    def render(self, ctx: AdapterExecutionContext) -> str:  # noqa: ARG002
         return "noop"
 
+
+class _NoopCommandBuilder:
+    def build_start(self, ctx: AdapterExecutionContext, prompt: str) -> list[str]:  # noqa: ARG002
+        return list(ctx.options.get("command", []))
+
+    def build_resume(
+        self,
+        ctx: AdapterExecutionContext,  # noqa: ARG002
+        prompt: str,  # noqa: ARG002
+        session_handle: EngineSessionHandle,  # noqa: ARG002
+    ) -> list[str]:
+        return list(ctx.options.get("command", []))
+
+
+class _NoopStreamParser:
+    def parse(self, raw_stdout: str):  # noqa: ANN001
+        return {"turn_result": {"outcome": "final", "final_data": {}, "repair_level": "none"}}
+
+
+class _NoopSessionCodec:
+    def extract(self, raw_stdout: str, turn_index: int) -> EngineSessionHandle:  # noqa: ARG002
+        return EngineSessionHandle(
+            engine="test",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="dummy",
+            created_at_turn=turn_index,
+        )
+
+
+class _TestAdapter(EngineExecutionAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            config_composer=_NoopComposer(),
+            workspace_provisioner=_NoopWorkspace(),
+            prompt_builder=_NoopPromptBuilder(),
+            command_builder=_NoopCommandBuilder(),
+            stream_parser=_NoopStreamParser(),
+            session_codec=_NoopSessionCodec(),
+            process_prefix="Test",
+        )
+
     async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options) -> ProcessExecutionResult:
+        _ = prompt, skill
         proc = await self._create_subprocess(
             *options["command"],
             cwd=run_dir,
             env=os.environ.copy(),
         )
         return await self._capture_process_output(proc, run_dir, options, "Test")
-
-    def _parse_output(self, raw_stdout: str):
-        return AdapterTurnResult(outcome=AdapterTurnOutcome.FINAL, final_data={})
 
 
 @pytest.mark.asyncio

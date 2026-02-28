@@ -28,8 +28,8 @@ from ..models import (
     RunStatus,
     SkillInstallStatus,
 )
-from ..services.auth_runtime.orchestrators.cli_delegate_orchestrator import CliDelegateOrchestrator
-from ..services.auth_runtime.orchestrators.oauth_proxy_orchestrator import OAuthProxyOrchestrator
+from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
+from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
@@ -38,7 +38,7 @@ from ..services.engine_upgrade_manager import (
 from ..services.engine_auth_flow_manager import engine_auth_flow_manager
 from ..services.engine_interaction_gate import EngineInteractionBusyError
 from ..services.model_registry import model_registry
-from ..services.opencode_auth_provider_registry import opencode_auth_provider_registry
+from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
 from ..services.agent_cli_manager import AgentCliManager
 from ..services.skill_browser import (
     build_preview_payload,
@@ -79,6 +79,47 @@ LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
     "SKILL_RUNNER_UI_LEGACY_API_REPLACEMENT_DOC",
     "/docs/api_reference.md#management-api-recommended",
 )
+
+
+def _build_auth_ui_capabilities(
+    opencode_provider_modes: dict[str, str],
+) -> dict[str, object]:
+    oauth_proxy_opencode: dict[str, list[str]] = {}
+    cli_delegate_opencode: dict[str, list[str]] = {}
+    capabilities: dict[str, object] = {
+        "oauth_proxy": {
+            "codex": ["callback", "auth_code_or_url"],
+            "gemini": ["callback", "auth_code_or_url"],
+            "iflow": ["callback", "auth_code_or_url"],
+            "opencode": oauth_proxy_opencode,
+        },
+        "cli_delegate": {
+            "codex": ["callback", "auth_code_or_url"],
+            "gemini": ["auth_code_or_url"],
+            "iflow": ["auth_code_or_url"],
+            "opencode": cli_delegate_opencode,
+        },
+    }
+    for provider_id, auth_mode in opencode_provider_modes.items():
+        normalized_provider = str(provider_id).strip().lower()
+        normalized_mode = str(auth_mode).strip().lower()
+        if not normalized_provider:
+            continue
+        if normalized_provider == "openai":
+            oauth_proxy_opencode[normalized_provider] = ["callback", "auth_code_or_url"]
+            cli_delegate_opencode[normalized_provider] = ["callback", "auth_code_or_url"]
+            continue
+        if normalized_provider == "google":
+            oauth_proxy_opencode[normalized_provider] = ["callback", "auth_code_or_url"]
+            cli_delegate_opencode[normalized_provider] = ["auth_code_or_url"]
+            continue
+        if normalized_mode == "api_key":
+            oauth_proxy_opencode[normalized_provider] = ["api_key"]
+            continue
+        if normalized_mode == "oauth":
+            oauth_proxy_opencode[normalized_provider] = ["callback", "auth_code_or_url"]
+            cli_delegate_opencode[normalized_provider] = ["auth_code_or_url"]
+    return capabilities
 
 
 def _legacy_data_headers(replacement_path: str) -> dict[str, str]:
@@ -354,6 +395,18 @@ async def ui_run_logs_tail(request: Request, request_id: str):
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
+    opencode_providers = [
+        {
+            "provider_id": item.provider_id,
+            "display_name": item.display_name,
+            "auth_mode": item.auth_mode,
+        }
+        for item in opencode_auth_provider_registry.list()
+    ]
+    opencode_provider_modes = {
+        str(item["provider_id"]).strip().lower(): str(item["auth_mode"]).strip().lower()
+        for item in opencode_providers
+    }
     return templates.TemplateResponse(
         request=request,
         name="ui/engines.html",
@@ -361,14 +414,8 @@ async def ui_engines(request: Request):
             "engines": _serialize_payload_list(engines_payload, "engines"),
             "session": ui_shell_manager.get_session_snapshot(),
             "auth_session": engine_auth_flow_manager.get_active_session_snapshot(),
-            "opencode_auth_providers": [
-                {
-                    "provider_id": item.provider_id,
-                    "display_name": item.display_name,
-                    "auth_mode": item.auth_mode,
-                }
-                for item in opencode_auth_provider_registry.list()
-            ],
+            "opencode_auth_providers": opencode_providers,
+            "auth_ui_capabilities": _build_auth_ui_capabilities(opencode_provider_modes),
             "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
         },
     )

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -12,12 +13,10 @@ from ..models import (
     EngineInteractiveProfile,
     EngineResumeCapability,
 )
+from ..runtime.adapter.common.profile_loader import load_adapter_profile
 from .runtime_profile import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
-
-BOOTSTRAP_CONFIG_DIR = Path(__file__).resolve().parents[1] / "assets" / "configs"
-
 
 ENGINE_PACKAGES = {
     "codex": "@openai/codex",
@@ -71,7 +70,7 @@ _DEFAULT_OPENCODE_CONFIG_FALLBACK = {
 
 
 def _load_bootstrap_json(filename: str, fallback: Mapping[str, object]) -> Dict[str, Any]:
-    path = BOOTSTRAP_CONFIG_DIR / filename
+    path = Path(filename)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
@@ -83,7 +82,7 @@ def _load_bootstrap_json(filename: str, fallback: Mapping[str, object]) -> Dict[
 
 
 def _load_bootstrap_text(filename: str, fallback: str) -> str:
-    path = BOOTSTRAP_CONFIG_DIR / filename
+    path = Path(filename)
     try:
         return path.read_text(encoding="utf-8")
     except Exception:
@@ -91,22 +90,31 @@ def _load_bootstrap_text(filename: str, fallback: str) -> str:
     return fallback
 
 
-DEFAULT_GEMINI_SETTINGS = _load_bootstrap_json(
-    "gemini/bootstrap.json",
-    _DEFAULT_GEMINI_SETTINGS_FALLBACK,
-)
-DEFAULT_IFLOW_SETTINGS = _load_bootstrap_json(
-    "iflow/bootstrap.json",
-    _DEFAULT_IFLOW_SETTINGS_FALLBACK,
-)
-DEFAULT_CODEX_CONFIG = _load_bootstrap_text(
-    "codex/bootstrap.toml",
-    _DEFAULT_CODEX_CONFIG_FALLBACK,
-)
-DEFAULT_OPENCODE_CONFIG = _load_bootstrap_json(
-    "opencode/bootstrap.json",
-    _DEFAULT_OPENCODE_CONFIG_FALLBACK,
-)
+
+@lru_cache(maxsize=8)
+def _load_engine_profile(engine: str):
+    profile_path = Path(__file__).resolve().parents[1] / "engines" / engine / "adapter" / "adapter_profile.json"
+    return load_adapter_profile(engine, profile_path)
+
+
+def _default_gemini_settings() -> Dict[str, Any]:
+    profile = _load_engine_profile("gemini")
+    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_GEMINI_SETTINGS_FALLBACK)
+
+
+def _default_iflow_settings() -> Dict[str, Any]:
+    profile = _load_engine_profile("iflow")
+    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_IFLOW_SETTINGS_FALLBACK)
+
+
+def _default_codex_config() -> str:
+    profile = _load_engine_profile("codex")
+    return _load_bootstrap_text(str(profile.resolve_bootstrap_path()), _DEFAULT_CODEX_CONFIG_FALLBACK)
+
+
+def _default_opencode_config() -> Dict[str, Any]:
+    profile = _load_engine_profile("opencode")
+    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_OPENCODE_CONFIG_FALLBACK)
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
 
@@ -151,21 +159,21 @@ class AgentCliManager:
         )
         self._ensure_json_file(
             profile.agent_home / ".gemini" / "settings.json",
-            DEFAULT_GEMINI_SETTINGS,
+            _default_gemini_settings(),
         )
         self._ensure_json_file(
             profile.agent_home / ".iflow" / "settings.json",
-            DEFAULT_IFLOW_SETTINGS,
+            _default_iflow_settings(),
         )
         self._normalize_iflow_settings(
             profile.agent_home / ".iflow" / "settings.json",
         )
         codex_config = profile.agent_home / ".codex" / "config.toml"
         if not codex_config.exists():
-            codex_config.write_text(DEFAULT_CODEX_CONFIG, encoding="utf-8")
+            codex_config.write_text(_default_codex_config(), encoding="utf-8")
         self._ensure_json_file(
             profile.agent_home / ".config" / "opencode" / "opencode.json",
-            DEFAULT_OPENCODE_CONFIG,
+            _default_opencode_config(),
         )
 
     def ensure_ui_terminal_assets(self) -> Path:
@@ -470,6 +478,7 @@ class AgentCliManager:
         path.write_text(json.dumps(dict(payload), indent=2) + "\n", encoding="utf-8")
 
     def _normalize_iflow_settings(self, path: Path) -> None:
+        defaults = _default_iflow_settings()
         try:
             current = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(current, dict):
@@ -481,12 +490,12 @@ class AgentCliManager:
 
         selected_auth = current.get("selectedAuthType")
         if not selected_auth or selected_auth == "iflow":
-            current["selectedAuthType"] = DEFAULT_IFLOW_SETTINGS["selectedAuthType"]
+            current["selectedAuthType"] = defaults["selectedAuthType"]
             changed = True
 
         base_url = current.get("baseUrl")
         if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
-            current["baseUrl"] = DEFAULT_IFLOW_SETTINGS["baseUrl"]
+            current["baseUrl"] = defaults["baseUrl"]
             changed = True
 
         if changed:

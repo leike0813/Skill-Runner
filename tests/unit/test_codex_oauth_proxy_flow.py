@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timezone
 
-from server.services.codex_oauth_proxy_flow import CodexOAuthProxyFlow
+from server.engines.codex.auth.protocol.oauth_proxy_flow import CodexOAuthProxyFlow
 from server.services.oauth_openai_proxy_common import OpenAITokenSet
 
 
@@ -19,7 +19,7 @@ def test_codex_oauth_proxy_flow_start_and_submit(tmp_path: Path, monkeypatch):
     assert "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback" in runtime.auth_url
 
     monkeypatch.setattr(
-        "server.services.codex_oauth_proxy_flow.exchange_authorization_code",
+        "server.engines.codex.auth.protocol.oauth_proxy_flow.exchange_authorization_code",
         lambda **_kwargs: OpenAITokenSet(
             id_token="a.b.c",
             access_token="access-token",
@@ -28,7 +28,7 @@ def test_codex_oauth_proxy_flow_start_and_submit(tmp_path: Path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "server.services.codex_oauth_proxy_flow.exchange_id_token_for_api_key",
+        "server.engines.codex.auth.protocol.oauth_proxy_flow.exchange_id_token_for_api_key",
         lambda **_kwargs: "sk-proxy-api-key",
     )
 

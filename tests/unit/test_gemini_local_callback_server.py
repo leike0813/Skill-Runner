@@ -1,7 +1,7 @@
 import urllib.error
 import urllib.request
 
-from server.services.gemini_local_callback_server import GeminiLocalCallbackServer
+from server.engines.gemini.auth.callbacks.local_callback_server import GeminiLocalCallbackServer
 
 
 def test_gemini_local_callback_server_success():

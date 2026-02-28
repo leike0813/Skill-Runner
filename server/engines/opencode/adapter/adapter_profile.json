@@ -1,0 +1,44 @@
+{
+  "engine": "opencode",
+  "prompt_builder": {
+    "engine_key": "opencode",
+    "default_template_path": "../../../assets/templates/opencode_default.j2",
+    "fallback_inline": "{{ input_prompt }}",
+    "merge_input_if_no_parameter_schema": false,
+    "params_json_source": "none",
+    "main_prompt_source": "parameter.prompt",
+    "main_prompt_default_template": "Execute skill {skill_id}",
+    "include_input_file_name": false,
+    "include_skill_dir": false
+  },
+  "session_codec": {
+    "strategy": "json_lines_scan",
+    "error_message": "SESSION_RESUME_FAILED: missing session id",
+    "error_prefix": "SESSION_RESUME_FAILED: opencode",
+    "required_type": null,
+    "id_field": null,
+    "recursive_key": null,
+    "fallback_text_finder": null,
+    "json_lines_finder": "find_session_id",
+    "regex_pattern": null
+  },
+  "workspace_provisioner": {
+    "workspace_subdir": ".opencode",
+    "skills_subdir": "skills",
+    "use_config_parent_as_workspace": false,
+    "unknown_fallback": false
+  },
+  "config_assets": {
+    "bootstrap_path": "../../../assets/configs/opencode/bootstrap.json",
+    "default_path": "../../../assets/configs/opencode/default.json",
+    "enforced_path": "../../../assets/configs/opencode/enforced.json",
+    "settings_schema_path": "../../../assets/schemas/opencode_config_schema.json",
+    "skill_defaults_path": "assets/opencode_config.json"
+  },
+  "model_catalog": {
+    "mode": "runtime_probe",
+    "manifest_path": null,
+    "models_root": "../../../assets/models/opencode",
+    "seed_path": "../../../assets/models/opencode/models_seed.json"
+  }
+}

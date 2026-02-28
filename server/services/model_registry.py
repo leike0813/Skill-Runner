@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import config
+from ..runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from .agent_cli_manager import AgentCliManager
 from .opencode_model_catalog import opencode_model_catalog
 
@@ -44,6 +45,7 @@ class ModelRegistry:
     def __init__(self) -> None:
         self._cache: Dict[str, ModelCatalog] = {}
         self._agent_manager = AgentCliManager()
+        self._adapter_profiles: Dict[str, AdapterProfile] = {}
 
     def list_engines(self) -> List[Dict[str, Optional[str]]]:
         return [
@@ -195,7 +197,10 @@ class ModelRegistry:
         return supported_engines()
 
     def _load_manifest(self, engine: str) -> Dict[str, object]:
-        manifest_path = self._models_root(engine) / "manifest.json"
+        profile = self._adapter_profile(engine)
+        manifest_path = profile.resolve_manifest_path()
+        if manifest_path is None:
+            manifest_path = self._models_root(engine) / "manifest.json"
         if not manifest_path.exists():
             raise ValueError(f"Model manifest not found for engine '{engine}'")
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -212,7 +217,22 @@ class ModelRegistry:
         raise ValueError(f"Snapshot file not found for version {version}")
 
     def _models_root(self, engine: str) -> Path:
-        return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / engine
+        profile = self._adapter_profile(engine)
+        models_root = profile.resolve_models_root()
+        if models_root is None:
+            return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / engine
+        return models_root
+
+    def _adapter_profile(self, engine: str) -> AdapterProfile:
+        cached = self._adapter_profiles.get(engine)
+        if cached is not None:
+            return cached
+        profile_path = (
+            Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
+        )
+        loaded = load_adapter_profile(engine, profile_path)
+        self._adapter_profiles[engine] = loaded
+        return loaded
 
     def _extract_snapshots(self, manifest: Dict[str, object]) -> List[Dict[str, str]]:
         snapshots = manifest.get("snapshots")

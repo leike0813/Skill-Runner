@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-runner.local/schemas/adapter_profile_schema.json",
+  "title": "Adapter Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "engine",
+    "prompt_builder",
+    "session_codec",
+    "workspace_provisioner",
+    "config_assets",
+    "model_catalog"
+  ],
+  "properties": {
+    "engine": {
+      "type": "string",
+      "enum": ["codex", "gemini", "iflow", "opencode"]
+    },
+    "prompt_builder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine_key",
+        "merge_input_if_no_parameter_schema",
+        "fallback_inline",
+        "params_json_source",
+        "main_prompt_source",
+        "main_prompt_default_template",
+        "include_input_file_name",
+        "include_skill_dir"
+      ],
+      "properties": {
+        "engine_key": { "type": "string" },
+        "default_template_path": { "type": ["string", "null"] },
+        "fallback_inline": { "type": "string" },
+        "merge_input_if_no_parameter_schema": { "type": "boolean" },
+        "params_json_source": {
+          "type": "string",
+          "enum": ["none", "input_data", "combined_input_parameter"]
+        },
+        "main_prompt_source": {
+          "type": "string",
+          "enum": ["none", "parameter.prompt"]
+        },
+        "main_prompt_default_template": { "type": "string" },
+        "include_input_file_name": { "type": "boolean" },
+        "include_skill_dir": { "type": "boolean" }
+      }
+    },
+    "session_codec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "error_message"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["first_json_line", "json_recursive_key", "json_lines_scan", "regex_extract"]
+        },
+        "error_message": { "type": "string" },
+        "error_prefix": { "type": ["string", "null"] },
+        "required_type": { "type": ["string", "null"] },
+        "id_field": { "type": ["string", "null"] },
+        "recursive_key": { "type": ["string", "null"] },
+        "fallback_text_finder": {
+          "type": ["string", "null"],
+          "enum": [null, "find_session_id_in_text"]
+        },
+        "json_lines_finder": {
+          "type": ["string", "null"],
+          "enum": [null, "find_session_id"]
+        },
+        "regex_pattern": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "strategy": { "const": "first_json_line" } } },
+          "then": { "required": ["error_prefix", "required_type", "id_field"] }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "json_recursive_key" } } },
+          "then": { "required": ["recursive_key"] }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "json_lines_scan" } } },
+          "then": { "required": ["error_prefix", "json_lines_finder"] }
+        },
+        {
+          "if": { "properties": { "strategy": { "const": "regex_extract" } } },
+          "then": { "required": ["regex_pattern"] }
+        }
+      ]
+    },
+    "workspace_provisioner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_subdir",
+        "skills_subdir",
+        "use_config_parent_as_workspace",
+        "unknown_fallback"
+      ],
+      "properties": {
+        "workspace_subdir": { "type": "string" },
+        "skills_subdir": { "type": "string" },
+        "use_config_parent_as_workspace": { "type": "boolean" },
+        "unknown_fallback": { "type": "boolean" }
+      }
+    },
+    "config_assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bootstrap_path",
+        "default_path",
+        "enforced_path"
+      ],
+      "properties": {
+        "bootstrap_path": { "type": "string", "minLength": 1 },
+        "default_path": { "type": "string", "minLength": 1 },
+        "enforced_path": { "type": "string", "minLength": 1 },
+        "settings_schema_path": { "type": ["string", "null"] },
+        "skill_defaults_path": { "type": ["string", "null"] }
+      }
+    },
+    "model_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["manifest", "runtime_probe"]
+        },
+        "manifest_path": { "type": ["string", "null"] },
+        "models_root": { "type": ["string", "null"] },
+        "seed_path": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "manifest" } } },
+          "then": { "required": ["manifest_path"] }
+        }
+      ]
+    }
+  }
+}

@@ -2,13 +2,13 @@ import json
 from unittest.mock import MagicMock, AsyncMock, patch
 from pathlib import Path
 import pytest
-from server.adapters.codex_adapter import CodexAdapter
+from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.models import AdapterTurnOutcome, EngineSessionHandleType, SkillManifest
 
 
 @pytest.mark.asyncio
 async def test_execute_constructs_correct_command(tmp_path):
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
@@ -40,7 +40,7 @@ async def test_execute_constructs_correct_command(tmp_path):
 
 
 def test_parse_output_valid_ask_user_envelope():
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     event = {
         "type": "item.completed",
         "item": {
@@ -58,7 +58,7 @@ def test_parse_output_valid_ask_user_envelope():
 
 
 def test_parse_output_invalid_ask_user_payload_returns_error():
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     event = {
         "type": "item.completed",
         "item": {
@@ -71,7 +71,7 @@ def test_parse_output_invalid_ask_user_payload_returns_error():
 
 
 def test_extract_session_handle_from_thread_started():
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     raw_stdout = '\n{"type":"thread.started","thread_id":"th_123"}\n{"type":"item.completed"}\n'
     handle = adapter.extract_session_handle(raw_stdout, turn_index=2)
     assert handle.handle_type == EngineSessionHandleType.SESSION_ID
@@ -80,10 +80,28 @@ def test_extract_session_handle_from_thread_started():
 
 
 def test_extract_session_handle_missing_thread_started_raises():
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     raw_stdout = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
     with pytest.raises(RuntimeError, match="SESSION_RESUME_FAILED"):
         adapter.extract_session_handle(raw_stdout, turn_index=1)
+
+
+def test_parse_runtime_stream_keeps_latest_turn_only():
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"turn.started","turn_id":"turn-1"}\n'
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"old turn"}}\n'
+            b'{"type":"turn.completed","turn_id":"turn-1"}\n'
+            b'{"type":"turn.started","turn_id":"turn-2"}\n'
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"latest turn"}}\n'
+            b'{"type":"turn.completed","turn_id":"turn-2"}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["assistant_messages"]
+    assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest turn"]
 
 
 def test_construct_config_excludes_runtime_interactive_options(tmp_path):
@@ -91,7 +109,7 @@ def test_construct_config_excludes_runtime_interactive_options(tmp_path):
     config_path = tmp_path / ".codex" / "config.toml"
     config_manager.config_path = config_path
     config_manager.generate_profile_settings.return_value = {"model": "gpt-5.2-codex"}
-    adapter = CodexAdapter(config_manager=config_manager)
+    adapter = CodexExecutionAdapter(config_manager=config_manager)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = SkillManifest(id="test-skill", path=tmp_path)
@@ -133,7 +151,7 @@ def test_construct_config_allows_harness_profile_override(tmp_path):
     config_path = tmp_path / ".codex" / "config.toml"
     config_manager.config_path = config_path
     config_manager.generate_profile_settings.return_value = {"model": "gpt-5.2-codex"}
-    adapter = CodexAdapter(config_manager=config_manager)
+    adapter = CodexExecutionAdapter(config_manager=config_manager)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = SkillManifest(id="test-skill", path=tmp_path)
@@ -153,7 +171,7 @@ def test_construct_config_allows_harness_profile_override(tmp_path):
 
 
 def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("# skill\n", encoding="utf-8")
@@ -187,7 +205,7 @@ def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
 
 @pytest.mark.asyncio
 async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
@@ -228,7 +246,7 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path):
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill_dir = tmp_path / "skill"
@@ -266,7 +284,7 @@ async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path
 
 @pytest.mark.asyncio
 async def test_execute_interactive_command_includes_auto_flags(tmp_path):
-    adapter = CodexAdapter(config_manager=MagicMock())
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()

@@ -27,8 +27,9 @@ from ..models import (
     EngineUpgradeTaskStatus,
     EnginesResponse,
 )
-from ..services.auth_runtime.orchestrators.cli_delegate_orchestrator import CliDelegateOrchestrator
-from ..services.auth_runtime.orchestrators.oauth_proxy_orchestrator import OAuthProxyOrchestrator
+from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
+from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
+from ..runtime.auth.callbacks import oauth_callback_router
 from ..services.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
@@ -172,37 +173,32 @@ async def handle_openai_oauth_proxy_callback(
     code: str | None = None,
     error: str | None = None,
 ):
-    if not state or not state.strip():
-        return HTMLResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content="<html><body><h3>OAuth callback failed</h3><p>Missing state.</p></body></html>",
-        )
     try:
-        payload = oauth_proxy_orchestrator.complete_openai_callback(
+        callback_payload = oauth_callback_router.parse(
             state=state,
             code=code,
             error=error,
         )
+        payload = oauth_callback_router.execute(
+            callback_payload,
+            lambda *, state, code=None, error=None: oauth_proxy_orchestrator.complete_callback(
+                channel="openai",
+                state=state,
+                code=code,
+                error=error,
+            ),
+        )
     except ValueError as exc:
-        return HTMLResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        return oauth_callback_router.render_error(
+            str(exc),
+            http_status=status.HTTP_400_BAD_REQUEST,
         )
     except Exception as exc:
-        return HTMLResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        return oauth_callback_router.render_error(
+            str(exc),
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    if str(payload.get("status")) == "succeeded":
-        return HTMLResponse(
-            status_code=status.HTTP_200_OK,
-            content="<html><body><h3>OAuth authorization successful</h3><p>You can close this page and return to Skill Runner.</p></body></html>",
-        )
-    return HTMLResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content=f"<html><body><h3>OAuth callback failed</h3><p>{str(payload.get('error') or 'unknown error')}</p></body></html>",
-    )
+    return oauth_callback_router.render(payload)
 
 
 @router.post(
@@ -313,37 +309,32 @@ async def handle_openai_oauth_callback(
     code: str | None = None,
     error: str | None = None,
 ):
-    if not state or not state.strip():
-        return HTMLResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content="<html><body><h3>OAuth callback failed</h3><p>Missing state.</p></body></html>",
-        )
     try:
-        payload = engine_auth_flow_manager.complete_openai_callback(
+        callback_payload = oauth_callback_router.parse(
             state=state,
             code=code,
             error=error,
         )
+        payload = oauth_callback_router.execute(
+            callback_payload,
+            lambda *, state, code=None, error=None: engine_auth_flow_manager.complete_callback(
+                channel="openai",
+                state=state,
+                code=code,
+                error=error,
+            ),
+        )
     except ValueError as exc:
-        return HTMLResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        return oauth_callback_router.render_error(
+            str(exc),
+            http_status=status.HTTP_400_BAD_REQUEST,
         )
     except Exception as exc:
-        return HTMLResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=f"<html><body><h3>OAuth callback failed</h3><p>{str(exc)}</p></body></html>",
+        return oauth_callback_router.render_error(
+            str(exc),
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    if str(payload.get("status")) == "succeeded":
-        return HTMLResponse(
-            status_code=status.HTTP_200_OK,
-            content="<html><body><h3>OAuth authorization successful</h3><p>You can close this page and return to Skill Runner.</p></body></html>",
-        )
-    return HTMLResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content=f"<html><body><h3>OAuth callback failed</h3><p>{str(payload.get('error') or 'unknown error')}</p></body></html>",
-    )
+    return oauth_callback_router.render(payload)
 
 
 @router.get(

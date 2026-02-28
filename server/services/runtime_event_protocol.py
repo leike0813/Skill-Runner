@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from ..adapters.base import RuntimeStreamParseResult
+from ..runtime.adapter.types import RuntimeStreamParseResult
 from ..models import (
     ConversationEventEnvelope,
     FcmpEventType,

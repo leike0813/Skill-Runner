@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
-from server.services.opencode_auth_cli_flow import OpencodeAuthCliFlow, OpencodeAuthCliSession
+from server.engines.opencode.auth.drivers.cli_delegate_flow import (
+    OpencodeAuthCliFlow,
+    OpencodeAuthCliSession,
+)
 
 
 def test_opencode_auth_cli_flow_extract_menu_options():

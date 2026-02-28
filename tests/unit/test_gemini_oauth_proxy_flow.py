@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server.services.gemini_oauth_proxy_flow import GeminiOAuthProxyError, GeminiOAuthProxyFlow
+from server.engines.gemini.auth.protocol.oauth_proxy_flow import GeminiOAuthProxyError, GeminiOAuthProxyFlow
 
 
 def _set_google_oauth_env(monkeypatch) -> None:

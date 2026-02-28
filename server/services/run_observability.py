@@ -103,15 +103,12 @@ class RunObservabilityService:
             run_dir=run_dir,
             requested_attempt=attempt,
         )
-        logs_dir = run_dir / "logs"
         audit_dir = run_dir / AUDIT_DIR_NAME
         if safe_stream == "pty":
             attempted = audit_dir / f"pty-output.{attempt_number}.log"
-            fallback = logs_dir / "pty-output.txt"
         else:
             attempted = audit_dir / f"{safe_stream}.{attempt_number}.log"
-            fallback = logs_dir / f"{safe_stream}.txt"
-        path = attempted if attempted.exists() else fallback
+        path = attempted
         start = max(0, int(byte_from))
         end = max(start, int(byte_to))
         if not path.exists() or not path.is_file():
@@ -518,7 +515,6 @@ class RunObservabilityService:
             )
 
         audit_dir = run_dir / AUDIT_DIR_NAME
-        logs_dir = run_dir / "logs"
         attempt_meta = self._read_attempt_meta(audit_dir, attempt_number)
         attempt_status_obj = attempt_meta.get("status")
         attempt_status = (
@@ -530,9 +526,48 @@ class RunObservabilityService:
         attempted_stdout = audit_dir / f"stdout.{attempt_number}.log"
         attempted_stderr = audit_dir / f"stderr.{attempt_number}.log"
         attempted_pty = audit_dir / f"pty-output.{attempt_number}.log"
-        stdout_path = attempted_stdout if attempted_stdout.exists() else logs_dir / "stdout.txt"
-        stderr_path = attempted_stderr if attempted_stderr.exists() else logs_dir / "stderr.txt"
-        pty_path = attempted_pty if attempted_pty.exists() else logs_dir / "pty-output.txt"
+        stdout_path = attempted_stdout
+        stderr_path = attempted_stderr
+        pty_path = attempted_pty if attempted_pty.exists() else None
+
+        # Strict audit-only mode: never fallback to legacy run_dir/logs.
+        if not stdout_path.exists() and not stderr_path.exists() and pty_path is None:
+            warning_payload = {
+                "ts": datetime.utcnow().isoformat(),
+                "event": {"category": "diagnostic", "type": "diagnostic.warning"},
+                "data": {
+                    "code": "ATTEMPT_AUDIT_LOG_MISSING",
+                    "attempt_number": attempt_number,
+                },
+            }
+            paths = self._protocol_paths(run_dir, attempt_number)
+            write_jsonl(paths["events"], [])
+            write_jsonl(paths["fcmp"], [])
+            write_jsonl(paths["diagnostics"], [warning_payload])
+            self.reindex_fcmp_global_seq(run_dir)
+            paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
+            paths["metrics"].write_text(
+                json.dumps(
+                    {
+                        "event_count": 0,
+                        "diagnostic_count": 1,
+                        "parser_warning_count": 1,
+                        "raw_count": 0,
+                        "confidence_avg": None,
+                        "confidence_min": None,
+                        "confidence_max": None,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            logger.warning(
+                "Attempt audit logs missing for %s attempt=%s; skip materialization until logs arrive",
+                request_id or run_id,
+                attempt_number,
+            )
+            return {"rasp_events": [], "fcmp_events": []}
         completion_obj = attempt_meta.get("completion")
         completion_payload: Optional[Dict[str, Any]] = (
             completion_obj if isinstance(completion_obj, dict) else None
@@ -816,11 +851,10 @@ class RunObservabilityService:
         run_dir = Path(detail["run_dir"])
         latest_attempt = max(1, self._latest_attempt_number(run_dir))
         audit_dir = run_dir / AUDIT_DIR_NAME
-        logs_dir = run_dir / "logs"
         attempted_stdout = audit_dir / f"stdout.{latest_attempt}.log"
         attempted_stderr = audit_dir / f"stderr.{latest_attempt}.log"
-        stdout_path = attempted_stdout if attempted_stdout.exists() else logs_dir / "stdout.txt"
-        stderr_path = attempted_stderr if attempted_stderr.exists() else logs_dir / "stderr.txt"
+        stdout_path = attempted_stdout
+        stderr_path = attempted_stderr
         return {
             "request_id": request_id,
             "run_id": detail["run_id"],

@@ -3,17 +3,20 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from server.config import config
-from server.services.engine_auth_flow_manager import EngineAuthFlowManager
-from server.services.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
-from server.services.codex_oauth_proxy_flow import CodexOAuthProxySession
-from server.services.gemini_oauth_proxy_flow import GeminiOAuthProxySession
-from server.services.iflow_oauth_proxy_flow import IFlowOAuthProxySession
-from server.services.openai_device_proxy_flow import OpenAIDeviceProxySession
-from server.services.opencode_auth_cli_flow import OpencodeAuthCliSession
-from server.services.opencode_google_antigravity_oauth_proxy_flow import (
+from server.engines.codex.auth import CodexOAuthProxySession
+from server.engines.gemini.auth import GeminiOAuthProxySession
+from server.engines.iflow.auth import IFlowOAuthProxySession
+from server.engines.opencode.auth import (
+    OpencodeAuthCliSession,
     OpencodeGoogleAntigravityOAuthProxySession,
 )
+from server.runtime.auth.session_lifecycle import AuthStartPlan
+from server.services.engine_auth_flow_manager import EngineAuthFlowManager
+from server.services.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
+from server.services.openai_device_proxy_flow import OpenAIDeviceProxySession
 from server.services.oauth_openai_proxy_common import OpenAIOAuthError
 
 
@@ -127,7 +130,7 @@ def test_engine_auth_flow_manager_codex_oauth_proxy_uses_protocol_flow(tmp_path:
 
     monkeypatch.setattr(manager._codex_oauth_proxy_flow, "submit_input", _fake_submit)
     monkeypatch.setattr(
-        "server.services.openai_local_callback_server.openai_local_callback_server.set_callback_handler",
+        "server.engines.common.callbacks.openai_local_callback_server.set_callback_handler",
         lambda _handler: None,
     )
     def _fake_listener_start() -> bool:
@@ -138,11 +141,11 @@ def test_engine_auth_flow_manager_codex_oauth_proxy_uses_protocol_flow(tmp_path:
         listener_calls["stop"] = listener_calls["stop"] + 1
 
     monkeypatch.setattr(
-        "server.services.openai_local_callback_server.openai_local_callback_server.start",
+        "server.engines.common.callbacks.openai_local_callback_server.start",
         _fake_listener_start,
     )
     monkeypatch.setattr(
-        "server.services.openai_local_callback_server.openai_local_callback_server.stop",
+        "server.engines.common.callbacks.openai_local_callback_server.stop",
         _fake_listener_stop,
     )
 
@@ -182,6 +185,61 @@ def test_engine_auth_flow_manager_extract_auth_url_prefers_non_localhost(tmp_pat
     )
     extracted = manager._extract_auth_url(text)  # noqa: SLF001
     assert extracted == "https://auth.openai.com/oauth/authorize?client_id=abc&state=xyz"
+
+
+def test_engine_auth_flow_manager_start_delegates_to_session_starter(tmp_path: Path, monkeypatch):
+    command_path = _write_script(tmp_path / "fake-codex", "exit 0")
+    profile = _FakeProfile(tmp_path)
+    gate = EngineInteractionGate()
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=gate,
+        trust_manager=_TrustSpy(),
+    )
+
+    stub_plan = AuthStartPlan(
+        engine="codex",
+        method="auth",
+        auth_method="callback",
+        transport="oauth_proxy",
+        provider_id=None,
+        provider=None,
+        registry_provider_id=None,
+        command=None,
+        requires_command=False,
+    )
+    monkeypatch.setattr(
+        manager._session_start_planner,  # noqa: SLF001
+        "plan_start",
+        lambda **_kwargs: stub_plan,
+    )
+
+    called: dict[str, str | None] = {}
+
+    def _fake_start_from_plan_locked(*, plan, session_id, callback_base_url=None):  # noqa: ANN001
+        called["plan_engine"] = plan.engine
+        called["session_id"] = session_id
+        called["callback_base_url"] = callback_base_url
+        return {
+            "session_id": session_id,
+            "engine": plan.engine,
+            "transport": plan.transport,
+            "auth_method": plan.auth_method,
+            "terminal": False,
+        }
+
+    monkeypatch.setattr(
+        manager._session_starter,  # noqa: SLF001
+        "start_from_plan_locked",
+        _fake_start_from_plan_locked,
+    )
+
+    started = manager.start_session("codex", "auth", transport="oauth_proxy", auth_method="callback")
+    assert started["engine"] == "codex"
+    assert called["plan_engine"] == "codex"
+    assert isinstance(called["session_id"], str)
+
+    gate.release("auth_flow", str(called["session_id"]))
 
 
 def test_engine_auth_flow_manager_codex_oauth_proxy_zero_cli(tmp_path: Path, monkeypatch):
@@ -224,7 +282,7 @@ def test_engine_auth_flow_manager_codex_cli_delegate_uses_browser_login(tmp_path
         return _FakeProc()
 
     monkeypatch.setattr(
-        "server.services.openai_local_callback_server.openai_local_callback_server.start",
+        "server.engines.common.callbacks.openai_local_callback_server.start",
         lambda: (_ for _ in ()).throw(AssertionError("listener should not start for cli_delegate")),
     )
     monkeypatch.setattr("server.services.engine_auth_flow_manager.subprocess.Popen", _fake_popen)
@@ -367,13 +425,13 @@ def test_engine_auth_flow_manager_openai_callback_state_once(tmp_path: Path, mon
         auth_path.write_text("{\"tokens\":{}}\n", encoding="utf-8")
 
     monkeypatch.setattr(manager._codex_oauth_proxy_flow, "complete_with_code", _fake_complete)
-    payload = manager.complete_openai_callback(state=state, code="callback-code")
+    payload = manager.complete_callback(channel="openai", state=state, code="callback-code")
     assert payload["status"] == "succeeded"
     assert payload["oauth_callback_received"] is True
     assert payload["manual_fallback_used"] is False
 
     try:
-        manager.complete_openai_callback(state=state, code="callback-code")
+        manager.complete_callback(channel="openai", state=state, code="callback-code")
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert "already been consumed" in str(exc)
@@ -461,8 +519,12 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_uses_protocol_flow(tmp_path
     def _fake_listener_stop() -> None:
         listener_calls["stop"] = listener_calls["stop"] + 1
 
-    monkeypatch.setattr(manager, "_start_gemini_local_callback_listener", _fake_listener_start)
-    monkeypatch.setattr(manager, "_stop_gemini_local_callback_listener", _fake_listener_stop)
+    monkeypatch.setattr(
+        manager,
+        "start_callback_listener",
+        lambda *, channel, callback_handler: (True, _fake_listener_start()),
+    )
+    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: _fake_listener_stop())
 
     started = manager.start_session(
         "gemini",
@@ -513,10 +575,10 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_callback_state_once(tmp_pat
     )
     monkeypatch.setattr(
         manager,
-        "_start_gemini_local_callback_listener",
-        lambda: "http://127.0.0.1:51122/oauth2callback",
+        "start_callback_listener",
+        lambda *, channel, callback_handler: (True, "http://127.0.0.1:51122/oauth2callback"),
     )
-    monkeypatch.setattr(manager, "_stop_gemini_local_callback_listener", lambda: None)
+    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: None)
     monkeypatch.setattr(
         manager._gemini_oauth_proxy_flow,
         "complete_with_code",
@@ -536,13 +598,13 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_callback_state_once(tmp_pat
     runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
     assert isinstance(runtime, GeminiOAuthProxySession)
 
-    payload = manager.complete_gemini_callback(state=runtime.state, code="callback-code")
+    payload = manager.complete_callback(channel="gemini", state=runtime.state, code="callback-code")
     assert payload["status"] == "succeeded"
     assert payload["oauth_callback_received"] is True
     assert payload["manual_fallback_used"] is False
 
     try:
-        manager.complete_gemini_callback(state=runtime.state, code="callback-code")
+        manager.complete_callback(channel="gemini", state=runtime.state, code="callback-code")
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert "already been consumed" in str(exc)
@@ -565,8 +627,12 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_manual_success(tmp_path: Pat
     def _fake_listener_stop() -> None:
         listener_calls["stop"] = listener_calls["stop"] + 1
 
-    monkeypatch.setattr(manager, "_start_iflow_local_callback_listener", _fake_listener_start)
-    monkeypatch.setattr(manager, "_stop_iflow_local_callback_listener", _fake_listener_stop)
+    monkeypatch.setattr(
+        manager,
+        "start_callback_listener",
+        lambda *, channel, callback_handler: (True, _fake_listener_start()),
+    )
+    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: _fake_listener_stop())
     monkeypatch.setattr(
         manager._iflow_oauth_proxy_flow,
         "submit_input",
@@ -614,10 +680,10 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_state_once(tmp_path
 
     monkeypatch.setattr(
         manager,
-        "_start_iflow_local_callback_listener",
-        lambda: "http://127.0.0.1:11451/oauth2callback",
+        "start_callback_listener",
+        lambda *, channel, callback_handler: (True, "http://127.0.0.1:11451/oauth2callback"),
     )
-    monkeypatch.setattr(manager, "_stop_iflow_local_callback_listener", lambda: None)
+    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: None)
     monkeypatch.setattr(
         manager._iflow_oauth_proxy_flow,
         "complete_with_code",
@@ -634,13 +700,13 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_state_once(tmp_path
     runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
     assert isinstance(runtime, IFlowOAuthProxySession)
 
-    payload = manager.complete_iflow_callback(state=runtime.state, code="callback-code")
+    payload = manager.complete_callback(channel="iflow", state=runtime.state, code="callback-code")
     assert payload["status"] == "succeeded"
     assert payload["oauth_callback_received"] is True
     assert payload["manual_fallback_used"] is False
 
     try:
-        manager.complete_iflow_callback(state=runtime.state, code="callback-code")
+        manager.complete_callback(channel="iflow", state=runtime.state, code="callback-code")
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert "already been consumed" in str(exc)
@@ -907,7 +973,7 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
         "opencode",
         "auth",
         provider_id="deepseek",
-        transport="cli_delegate",
+        transport="oauth_proxy",
         auth_method="api_key",
     )
     assert started["engine"] == "opencode"
@@ -924,6 +990,25 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
     payload = auth_path.read_text(encoding="utf-8")
     assert "deepseek" in payload
     assert "sk-test-123" in payload
+
+
+def test_engine_auth_flow_manager_opencode_api_key_rejects_cli_delegate(tmp_path: Path):
+    command_path = _write_script(tmp_path / "fake-opencode", "sleep 1")
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+    )
+
+    with pytest.raises(ValueError, match="require oauth_proxy transport"):
+        manager.start_session(
+            "opencode",
+            "auth",
+            provider_id="deepseek",
+            transport="cli_delegate",
+            auth_method="api_key",
+        )
 
 
 def test_engine_auth_flow_manager_opencode_google_cleanup_failure(tmp_path: Path, monkeypatch):
@@ -1001,7 +1086,7 @@ def test_engine_auth_flow_manager_opencode_google_oauth_proxy_manual_fallback_su
     listener_calls = {"start": 0, "stop": 0}
 
     monkeypatch.setattr(
-        "server.services.antigravity_local_callback_server.antigravity_local_callback_server.set_callback_handler",
+        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.set_callback_handler",
         lambda _handler: None,
     )
     def _fake_antigravity_listener_start() -> bool:
@@ -1012,11 +1097,11 @@ def test_engine_auth_flow_manager_opencode_google_oauth_proxy_manual_fallback_su
         listener_calls["stop"] = listener_calls["stop"] + 1
 
     monkeypatch.setattr(
-        "server.services.antigravity_local_callback_server.antigravity_local_callback_server.start",
+        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.start",
         _fake_antigravity_listener_start,
     )
     monkeypatch.setattr(
-        "server.services.antigravity_local_callback_server.antigravity_local_callback_server.stop",
+        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.stop",
         _fake_antigravity_listener_stop,
     )
 

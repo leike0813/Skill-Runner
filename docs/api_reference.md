@@ -2,6 +2,9 @@
 
 本文档描述 Skill Runner 提供的 RESTful API 接口。
 
+说明（内部实现）：当前 adapter 已收敛为 execution adapter + 组件模型，属于内部重构，
+不影响本文档中的对外 API 契约。
+
 ## Base URL
 默认为 `http://localhost:8000` (取决于部署配置)。
 建议使用版本化前缀：`/v1`。
@@ -549,6 +552,10 @@
 - 查看 Engine 状态与检测到的 CLI 版本；
 - 触发“升级全部”与“按引擎升级”；
 - 跳转到 Engine 模型管理页。
+- 鉴权交互收敛为“全局后台 + 引擎单入口菜单”：
+  - 全局“鉴权后台”下拉：`oauth_proxy` / `cli_delegate`（默认 `oauth_proxy`）
+  - 引擎表格每行一个“连接”入口；OpenCode 为 `provider -> 鉴权方式` 两级菜单
+  - 主鉴权状态区仅保留状态展示、输入区和“取消”按钮
 - 在页面下方内嵌 TUI 终端（ttyd 网关）。
 - 每个引擎提供“在内嵌终端中启动 TUI”按钮（同一时刻仅允许一个活跃会话）。
 - 启动返回包含 `sandbox_status`/`sandbox_message`（观测信息，默认不阻断启动）。

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from server.adapters.iflow_adapter import IFlowAdapter
+from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.models import AdapterTurnOutcome, SkillManifest
 
 
@@ -21,7 +21,7 @@ def test_construct_config_maps_model_and_merges_iflow_config(tmp_path):
         entrypoint={}
     )
 
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     options = {
         "model": "gpt-4-test",
         "verbose": True,
@@ -41,7 +41,7 @@ def test_construct_config_uses_engine_default_when_no_overrides(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = SkillManifest(id="test-skill", path=tmp_path)
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
 
     config_path = adapter._construct_config(skill, run_dir, options={})
     payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -61,7 +61,7 @@ def test_construct_config_skill_overrides_engine_default(tmp_path):
         encoding="utf-8",
     )
     skill = SkillManifest(id="test-skill", path=skill_dir)
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
 
     config_path = adapter._construct_config(skill, run_dir, options={})
     payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -70,7 +70,7 @@ def test_construct_config_skill_overrides_engine_default(tmp_path):
 
 
 def test_extract_session_handle_from_execution_info():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     raw_stdout = """
 <Execution Info>
 {"session-id":"iflow-123"}
@@ -82,13 +82,13 @@ def test_extract_session_handle_from_execution_info():
 
 
 def test_extract_session_handle_missing_session_id_raises():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     with pytest.raises(RuntimeError, match="SESSION_RESUME_FAILED"):
         adapter.extract_session_handle("<Execution Info>{}</Execution Info>", turn_index=1)
 
 
 def test_parse_runtime_stream_extracts_session_id_from_execution_info_and_cleans_message():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=(
             b"hello from iflow\n"
@@ -105,7 +105,7 @@ def test_parse_runtime_stream_extracts_session_id_from_execution_info_and_cleans
 
 
 def test_parse_runtime_stream_extracts_session_id_from_pty_when_stdout_missing():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=b"",
         stderr_raw=b"",
@@ -119,7 +119,7 @@ def test_parse_runtime_stream_extracts_session_id_from_pty_when_stdout_missing()
 
 
 def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=(
             b"hello from iflow\n"
@@ -141,7 +141,7 @@ def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate():
 
 
 def test_parse_runtime_stream_uses_pty_fallback_when_split_empty():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=b"",
         stderr_raw=b"",
@@ -152,8 +152,28 @@ def test_parse_runtime_stream_uses_pty_fallback_when_split_empty():
     assert "PTY_FALLBACK_USED" in parsed["diagnostics"]
 
 
+def test_parse_runtime_stream_keeps_latest_round_text():
+    adapter = IFlowExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b"old round output\n"
+            b"<Execution Info>\n"
+            b'{"session-id":"iflow-r1"}\n'
+            b"</Execution Info>\n"
+            b"latest round output\n"
+            b"<Execution Info>\n"
+            b'{"session-id":"iflow-r2"}\n'
+            b"</Execution Info>\n"
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["assistant_messages"]
+    assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest round output"]
+
+
 def test_parse_output_valid_ask_user_envelope():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     raw = json.dumps(
         {
             "outcome": "ask_user",
@@ -172,7 +192,7 @@ def test_parse_output_valid_ask_user_envelope():
 
 
 def test_parse_output_invalid_ask_user_payload_returns_error():
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     raw = json.dumps(
         {
             "outcome": "ask_user",
@@ -186,7 +206,7 @@ def test_parse_output_invalid_ask_user_payload_returns_error():
 
 
 def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("# skill\n", encoding="utf-8")
@@ -201,10 +221,10 @@ def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
     config_path = run_dir / ".iflow" / "settings.json"
 
     with patch(
-        "server.adapters.iflow_adapter.skill_patcher.load_output_schema",
+        "server.runtime.adapter.common.workspace_provisioner_common.skill_patcher.load_output_schema",
         return_value={"type": "object"},
     ) as mock_load, patch(
-        "server.adapters.iflow_adapter.skill_patcher.patch_skill_md"
+        "server.runtime.adapter.common.workspace_provisioner_common.skill_patcher.patch_skill_md"
     ) as mock_patch:
         target = adapter._setup_environment(skill, run_dir, config_path, options={})
 
@@ -220,7 +240,7 @@ def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
 
 @pytest.mark.asyncio
 async def test_execute_resume_command_contains_resume_flag(tmp_path):
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -259,7 +279,7 @@ async def test_execute_resume_command_contains_resume_flag(tmp_path):
 
 @pytest.mark.asyncio
 async def test_execute_interactive_command_includes_yolo_and_thinking(tmp_path):
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -289,7 +309,7 @@ async def test_execute_interactive_command_includes_yolo_and_thinking(tmp_path):
 
 @pytest.mark.asyncio
 async def test_execute_auto_command_includes_yolo_and_thinking(tmp_path):
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/iflow")
     run_dir = tmp_path / "run"
     run_dir.mkdir()

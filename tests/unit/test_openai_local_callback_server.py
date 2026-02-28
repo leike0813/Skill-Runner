@@ -1,7 +1,7 @@
 import urllib.error
 import urllib.request
 
-from server.services.openai_local_callback_server import OpenAILocalCallbackServer
+from server.engines.common.callbacks.openai_local_callback_server import OpenAILocalCallbackServer
 
 
 def test_openai_local_callback_server_success():
@@ -60,4 +60,3 @@ def test_openai_local_callback_server_callback_error():
             assert "state is invalid" in body
     finally:
         server.stop()
-

@@ -116,3 +116,153 @@ TBD - created by archiving change interactive-27-unified-management-api-surface.
 - **THEN** 原有字段语义保持不变
 - **AND** 旧客户端仅读取 `models[].id` 不受影响
 
+### Requirement: 鉴权公开 API MUST 保持兼容
+系统 MUST 在本次内部重构中保持现有 `/v1/engines/auth/*` 公开 API 路径与主要请求/响应语义兼容。
+
+#### Scenario: 兼容 oauth_proxy 与 cli_delegate 接口
+- **WHEN** 客户端调用 `/v1/engines/auth/oauth-proxy/sessions*` 或 `/v1/engines/auth/cli-delegate/sessions*`
+- **THEN** 接口路径与主要字段语义保持不变
+
+#### Scenario: 兼容旧 sessions 接口
+- **WHEN** 客户端调用 `/v1/engines/auth/sessions*` 兼容层
+- **THEN** 兼容行为保持可用
+- **AND** 内部可转发到重构后的 façade/orchestrator
+
+### Requirement: 鉴权会话输入 MUST 统一使用 input 接口
+系统 MUST 使用 `/input` 统一承载授权码、回调 URL 与 API key 输入，不再使用 submit 子动作。
+
+#### Scenario: 提交统一输入
+- **WHEN** 客户端调用 `POST /v1/engines/auth/sessions/{session_id}/input`
+- **AND** 请求体包含 `kind` 与 `value`
+- **THEN** 系统分发输入到对应会话并返回最新快照
+
+#### Scenario: 非法输入类型
+- **WHEN** `kind` 不在 `code|api_key|text` 集合
+- **THEN** 返回 `422`
+
+#### Scenario: submit 端点废弃
+- **WHEN** 客户端调用 `POST /v1/engines/auth/sessions/{session_id}/submit`
+- **THEN** 返回 `404` 或 `405`
+
+### Requirement: 鉴权会话 MUST 使用统一 auth_method 新语义
+系统 MUST 使用 `callback|auth_code_or_url|api_key` 表达鉴权方式，并拒绝历史值。
+
+#### Scenario: 新语义有效
+- **WHEN** 客户端在 start 请求中传入 `auth_method=callback|auth_code_or_url|api_key`
+- **THEN** 会话按 capability 矩阵创建并进入对应状态机
+
+#### Scenario: 旧语义拒绝
+- **WHEN** 客户端传入历史值（如 `browser-oauth`、`device-auth`）
+- **THEN** 返回 `422`
+
+### Requirement: OpenAI 鉴权矩阵 MUST 按新语义暴露
+系统 MUST 为 `codex` 与 `opencode/provider=openai` 暴露 `callback` 与 `auth_code_or_url` 两种方式，并兼容两种 transport。
+
+#### Scenario: codex 组合可启动
+- **WHEN** `engine=codex` 且 `transport in {oauth_proxy,cli_delegate}` 且 `auth_method in {callback,auth_code_or_url}`
+- **THEN** 会话成功创建并进入非终态
+
+#### Scenario: opencode/openai 组合可启动
+- **WHEN** `engine=opencode`、`provider_id=openai`、`transport in {oauth_proxy,cli_delegate}`、`auth_method in {callback,auth_code_or_url}`
+- **THEN** 会话成功创建并进入非终态
+
+### Requirement: OpenAI callback 流 MUST 支持自动回调与手工兜底
+系统 MUST 支持 callback 自动收口，并在回调不可达时允许 `/input` 手工提交 URL/code。
+
+#### Scenario: callback 自动收口
+- **WHEN** callback 提供合法 `state + code`
+- **THEN** 会话进入 `succeeded`
+
+#### Scenario: 手工兜底
+- **WHEN** 会话处于 `waiting_user`
+- **AND** 客户端调用 `POST /v1/engines/auth/sessions/{id}/input`
+- **THEN** `kind=text` 可提交 redirect URL 或授权码完成闭环
+
+### Requirement: OpenAI auth_code_or_url 协议路径 MUST 为零 CLI
+系统 MUST 在 `oauth_proxy + auth_code_or_url` 路径禁止 CLI/PTY 调用。
+
+#### Scenario: 协议代理
+- **WHEN** `transport=oauth_proxy` 且 `auth_method=auth_code_or_url`（OpenAI device-code 语义）
+- **THEN** 会话返回 `verification_url + user_code`
+- **AND** 后端按协议轮询 token
+- **AND** 不调用 CLI/PTY/subprocess
+
+### Requirement: OpenCode provider 鉴权启动 MUST 支持 provider_id
+系统 MUST 允许 OpenCode 在 start 请求中显式携带 `provider_id`，并按 provider 能力矩阵校验组合。
+
+#### Scenario: OpenCode provider 会话启动
+- **WHEN** 客户端调用 `POST /v1/engines/auth/sessions`
+- **AND** 请求体包含 `engine=opencode` 与 `provider_id`
+- **THEN** 系统创建会话并返回快照
+
+### Requirement: OpenCode API Key provider MUST 通过 oauth_proxy 会话入口可见
+系统 MUST 将 API Key 直写 provider 归入 `oauth_proxy` 路径的可用能力集合，避免 UI 在 oauth_proxy 下丢失 provider 入口。
+
+#### Scenario: oauth_proxy 下显示 API key provider
+- **WHEN** 客户端选择 `transport=oauth_proxy` 并发起 OpenCode 鉴权
+- **THEN** API key provider 仍可被选择
+- **AND** 输入类型为 `api_key`
+
+### Requirement: OpenCode Google oauth_proxy MUST 支持 callback 与 auth_code_or_url
+系统 MUST 放行 `engine=opencode`、`provider_id=google` 在 `oauth_proxy` 下的 `callback|auth_code_or_url` 两种组合。
+
+#### Scenario: callback 组合
+- **WHEN** 请求体为 `engine=opencode, transport=oauth_proxy, provider_id=google, auth_method=callback`
+- **THEN** 返回 `200` 且会话进入 `waiting_user`
+
+#### Scenario: auth_code_or_url 组合
+- **WHEN** 请求体为 `engine=opencode, transport=oauth_proxy, provider_id=google, auth_method=auth_code_or_url`
+- **THEN** 返回 `200` 且会话进入 `waiting_user`
+
+### Requirement: Engine 鉴权 API MUST 提供 transport 分组路由
+系统 MUST 提供按 transport 分组的鉴权会话 API，以避免 `oauth_proxy` 与 `cli_delegate` 契约混淆。
+
+#### Scenario: 启动 oauth_proxy 会话
+- **WHEN** 客户端调用 `POST /v1/engines/auth/oauth-proxy/sessions`
+- **THEN** 系统创建 `oauth_proxy` 会话并返回快照
+- **AND** 快照包含 `transport=oauth_proxy`
+
+#### Scenario: 启动 cli_delegate 会话
+- **WHEN** 客户端调用 `POST /v1/engines/auth/cli-delegate/sessions`
+- **THEN** 系统创建 `cli_delegate` 会话并返回快照
+- **AND** 快照包含 `transport=cli_delegate`
+
+### Requirement: 回调接口 MUST 归属 oauth_proxy 路由组
+系统 MUST 提供 `oauth_proxy` 专属 OpenAI callback 接口，并对 state 执行会话绑定、TTL 与一次性消费校验。
+
+#### Scenario: 有效 state 回调成功
+- **WHEN** 客户端访问 `GET /v1/engines/auth/oauth-proxy/callback/openai`
+- **AND** `state/code` 匹配活跃会话
+- **THEN** 会话推进到成功或明确失败终态
+
+### Requirement: 旧鉴权会话接口 MUST 提供兼容层
+系统 MUST 保留旧 `/v1/engines/auth/sessions*` 接口一个过渡周期，并保证兼容映射可用。
+
+#### Scenario: 旧接口启动会话
+- **WHEN** 客户端调用 `POST /v1/engines/auth/sessions`
+- **THEN** 系统通过兼容映射转发到新分组 API
+- **AND** 外部请求语义保持可用
+
+### Requirement: 鉴权会话 V2 模型 MUST 使用 auth_method/provider_id 替代 method
+系统 MUST 在 V2 会话模型中移除 `method` 历史语义，统一使用 `auth_method` 与 `provider_id`。
+
+#### Scenario: V2 启动请求
+- **WHEN** 客户端提交 `AuthSessionStartRequestV2`
+- **THEN** 请求体要求显式 `transport` 与 `auth_method`
+- **AND** `provider_id` 在需要 provider 的引擎场景必填
+
+### Requirement: 管理 UI 鉴权入口 MUST 由全局 transport 统一驱动
+系统 MUST 允许管理 UI 先选择全局 transport，再发起引擎鉴权会话；请求契约仍保持 `engine/transport/auth_method/provider_id`。
+
+#### Scenario: 先选 transport 再发起鉴权
+- **WHEN** 用户在 `/ui/engines` 将全局鉴权后台切换为 `cli_delegate`
+- **AND** 从引擎入口菜单选择某个鉴权方式
+- **THEN** UI 请求体中的 `transport` 必须为 `cli_delegate`
+- **AND** 不需要在按钮层面硬编码 transport
+
+### Requirement: 管理 UI MUST 对 OpenCode 使用 provider->auth_method 组合
+系统 MUST 在 OpenCode 鉴权发起时显式提交 `provider_id` 与 `auth_method` 组合，且二者来源于当前 transport 的能力过滤结果。
+
+#### Scenario: OpenCode 发起鉴权
+- **WHEN** 用户在 OpenCode 入口中先选择 provider，再选择 auth_method
+- **THEN** UI 请求体包含 `engine=opencode`、`provider_id=<selected>`、`transport=<global>`、`auth_method=<selected>`

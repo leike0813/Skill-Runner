@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server.services.iflow_oauth_proxy_flow import IFlowOAuthProxyError, IFlowOAuthProxyFlow
+from server.engines.iflow.auth.protocol.oauth_proxy_flow import IFlowOAuthProxyError, IFlowOAuthProxyFlow
 
 
 def test_iflow_oauth_proxy_flow_start_session(tmp_path: Path):

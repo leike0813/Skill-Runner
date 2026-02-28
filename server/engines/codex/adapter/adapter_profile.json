@@ -1,0 +1,44 @@
+{
+  "engine": "codex",
+  "prompt_builder": {
+    "engine_key": "codex",
+    "default_template_path": "../../../assets/templates/codex_default.j2",
+    "fallback_inline": "Execute skill \"{{ skill.id }}\" with inputs: {{ params_json }}",
+    "merge_input_if_no_parameter_schema": true,
+    "params_json_source": "combined_input_parameter",
+    "main_prompt_source": "none",
+    "main_prompt_default_template": "Execute skill {skill_id}",
+    "include_input_file_name": false,
+    "include_skill_dir": false
+  },
+  "session_codec": {
+    "strategy": "first_json_line",
+    "error_message": "SESSION_RESUME_FAILED: missing thread_id",
+    "error_prefix": "SESSION_RESUME_FAILED: codex",
+    "required_type": "thread.started",
+    "id_field": "thread_id",
+    "recursive_key": null,
+    "fallback_text_finder": null,
+    "json_lines_finder": null,
+    "regex_pattern": null
+  },
+  "workspace_provisioner": {
+    "workspace_subdir": ".codex",
+    "skills_subdir": "skills",
+    "use_config_parent_as_workspace": false,
+    "unknown_fallback": false
+  },
+  "config_assets": {
+    "bootstrap_path": "../../../assets/configs/codex/bootstrap.toml",
+    "default_path": "../../../assets/configs/codex/default.toml",
+    "enforced_path": "../../../assets/configs/codex/enforced.toml",
+    "settings_schema_path": "../../../assets/schemas/codex_profile_schema.json",
+    "skill_defaults_path": "assets/codex_config.toml"
+  },
+  "model_catalog": {
+    "mode": "manifest",
+    "manifest_path": "../../../assets/models/codex/manifest.json",
+    "models_root": "../../../assets/models/codex",
+    "seed_path": null
+  }
+}

@@ -1,7 +1,9 @@
 import urllib.error
 import urllib.request
 
-from server.services.antigravity_local_callback_server import AntigravityLocalCallbackServer
+from server.engines.opencode.auth.callbacks.antigravity_local_callback_server import (
+    AntigravityLocalCallbackServer,
+)
 
 
 def test_antigravity_local_callback_server_success():

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from server.adapters.codex_adapter import CodexAdapter
-from server.adapters.gemini_adapter import GeminiAdapter
-from server.adapters.iflow_adapter import IFlowAdapter
-from server.adapters.opencode_adapter import OpencodeAdapter
+from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
+from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
+from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
+from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.services.engine_adapter_registry import EngineAdapterRegistry
 
 
@@ -16,10 +16,10 @@ def test_registry_exposes_all_supported_adapters() -> None:
     adapters = registry.adapter_map()
 
     assert set(adapters.keys()) == {"codex", "gemini", "iflow", "opencode"}
-    assert isinstance(adapters["codex"], CodexAdapter)
-    assert isinstance(adapters["gemini"], GeminiAdapter)
-    assert isinstance(adapters["iflow"], IFlowAdapter)
-    assert isinstance(adapters["opencode"], OpencodeAdapter)
+    assert isinstance(adapters["codex"], CodexExecutionAdapter)
+    assert isinstance(adapters["gemini"], GeminiExecutionAdapter)
+    assert isinstance(adapters["iflow"], IFlowExecutionAdapter)
+    assert isinstance(adapters["opencode"], OpencodeExecutionAdapter)
 
 
 def test_registry_require_raises_for_unknown_engine() -> None:

@@ -187,6 +187,7 @@ Method 2: Login on another machine and copy credentials
 OpenAI OAuth proxy note:
 - Skill Runner `oauth_proxy` for `codex` and `opencode/openai` starts a per-session local callback listener (`127.0.0.1:1455`) and stops it when session finishes.
 - `callback` 模式支持 `/input` 兜底（远程部署且本地回调不可达时可手工回填）。
+- `/ui/engines` 的鉴权入口采用全局后台下拉（`oauth_proxy` / `cli_delegate`）+ 引擎单入口菜单；鉴权进行中会禁用后台切换。
 - `gemini` `oauth_proxy` 提供两种模式：
   - `callback`：依赖本地 listener（`127.0.0.1:51122/oauth2callback`）
   - `auth_code_or_url`：手工码流，通过 `/input` 回填

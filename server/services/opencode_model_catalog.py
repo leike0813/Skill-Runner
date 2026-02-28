@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 from ..config import config
+from ..runtime.adapter.common.profile_loader import load_adapter_profile
 from .agent_cli_manager import AgentCliManager
 from .runtime_profile import RuntimeProfile, get_runtime_profile
 
@@ -37,7 +38,14 @@ class OpencodeModelCatalog:
         return Path(config.SYSTEM.OPENCODE_MODELS_CACHE_PATH)
 
     def _seed_path(self) -> Path:
-        return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / "opencode" / "models_seed.json"
+        profile = load_adapter_profile(
+            "opencode",
+            Path(config.SYSTEM.ROOT) / "server" / "engines" / "opencode" / "adapter" / "adapter_profile.json",
+        )
+        seed_path = profile.resolve_seed_path()
+        if seed_path is None:
+            return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / "opencode" / "models_seed.json"
+        return seed_path
 
     def _normalize_models(self, rows: Any) -> List[Dict[str, Any]]:
         if not isinstance(rows, list):

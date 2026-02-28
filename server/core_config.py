@@ -7,8 +7,6 @@ for all configurable parameters.
 
 Configuration is organized into sections:
 - SYSTEM: Global paths and environment settings.
-- GEMINI: Gemini-specific adapter settings.
-- CODEX: Codex-specific adapter settings.
 """
 
 import os
@@ -190,35 +188,6 @@ _C.SYSTEM.ENGINE_AUTH_OAUTH_CALLBACK_BASE_URL = os.environ.get(
 _C.SYSTEM.SESSION_TIMEOUT_SEC = int(
     os.environ.get("SKILL_RUNNER_SESSION_TIMEOUT_SEC", "1200")
 )
-
-# -----------------------------------------------------------------------------
-# Gemini Configuration
-# -----------------------------------------------------------------------------
-_C.GEMINI = CN()
-# Path to the default Jinja2 prompt template for Gemini
-_C.GEMINI.DEFAULT_PROMPT_TEMPLATE = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "templates", "gemini_default.j2")
-
-# -----------------------------------------------------------------------------
-# Codex Configuration
-# -----------------------------------------------------------------------------
-_C.CODEX = CN()
-# Enforced configuration file path
-_C.CODEX.ENFORCED_CONFIG = os.path.join(
-    _C.SYSTEM.ROOT, "server", "assets", "configs", "codex", "enforced.toml"
-)
-# Profile schema file path
-_C.CODEX.PROFILE_SCHEMA = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "schemas", "codex_profile_schema.json")
-
-# -----------------------------------------------------------------------------
-# iFlow Configuration
-# -----------------------------------------------------------------------------
-_C.IFLOW = CN()
-_C.IFLOW.DEFAULT_PROMPT_TEMPLATE = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "templates", "iflow_default.j2")
-_C.IFLOW.ENFORCED_CONFIG = os.path.join(
-    _C.SYSTEM.ROOT, "server", "assets", "configs", "iflow", "enforced.json"
-)
-_C.IFLOW.SETTINGS_SCHEMA = os.path.join(_C.SYSTEM.ROOT, "server", "assets", "schemas", "iflow_settings_schema.json")
-
 
 def get_cfg_defaults():
     """

@@ -1,7 +1,7 @@
 import urllib.error
 import urllib.request
 
-from server.services.iflow_local_callback_server import IFlowLocalCallbackServer
+from server.engines.iflow.auth.callbacks.local_callback_server import IFlowLocalCallbackServer
 
 
 def test_iflow_local_callback_server_success():

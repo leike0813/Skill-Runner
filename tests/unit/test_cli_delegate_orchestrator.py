@@ -1,8 +1,12 @@
-from server.services.auth_runtime.orchestrators.cli_delegate_orchestrator import CliDelegateOrchestrator
+from server.runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
 
 
 class _ManagerStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
     def start_session(self, **kwargs):
+        self.calls.append(("start", kwargs))
         return {
             "session_id": "s2",
             "engine": kwargs["engine"],
@@ -39,9 +43,16 @@ class _ManagerStub:
         payload["terminal"] = True
         return payload
 
+    def resolve_transport_start_method(self, **kwargs):
+        self.calls.append(("resolve_method", kwargs))
+        if kwargs.get("engine") == "iflow":
+            return "iflow-cli-oauth"
+        return "auth"
+
 
 def test_cli_delegate_orchestrator_start():
-    orchestrator = CliDelegateOrchestrator(_ManagerStub())
+    manager = _ManagerStub()
+    orchestrator = CliDelegateOrchestrator(manager)
     started = orchestrator.start_session(
         engine="gemini",
         auth_method="auth_code_or_url",
@@ -51,3 +62,5 @@ def test_cli_delegate_orchestrator_start():
     assert started["transport"] == "cli_delegate"
     assert started["orchestrator"] == "cli_delegate_orchestrator"
     assert started["transport_state_machine"] == "cli_delegate_v1"
+    assert manager.calls[-1][0] == "start"
+    assert manager.calls[-1][1]["method"] == "auth"

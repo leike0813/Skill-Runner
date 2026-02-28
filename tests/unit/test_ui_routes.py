@@ -9,6 +9,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
+from server.routers.ui import _build_auth_ui_capabilities
 from server.services.engine_interaction_gate import EngineInteractionBusyError
 
 
@@ -298,13 +299,27 @@ async def test_ui_engines_page(monkeypatch):
     assert 'hx-get="/ui/management/engines/table"' in response.text
     assert "内嵌终端（ttyd）" in response.text
     assert "Engine Auth（实验）" in response.text
-    assert "Gemini OAuth代理（Callback）" in response.text
-    assert "iFlow OAuth代理（Callback）" in response.text
-    assert "iFlow OAuth代理（AuthCode/URL）" in response.text
-    assert 'data-engine-auth-start="gemini"' in response.text
-    assert 'data-engine-auth-start="iflow"' in response.text
-    assert 'data-auth-method="callback"' in response.text
+    assert 'id="auth-transport-select"' in response.text
+    assert "OAuth 代理（oauth_proxy）" in response.text
+    assert "CLI 委托（cli_delegate）" in response.text
+    assert "const authUiCapabilities = " in response.text
+    assert "Codex OAuth代理（Callback）" not in response.text
     assert "ttyd" in response.text
+
+
+def test_ui_auth_capabilities_opencode_api_key_scoped_to_oauth_proxy():
+    capabilities = _build_auth_ui_capabilities(
+        {
+            "openai": "oauth",
+            "google": "oauth",
+            "deepseek": "api_key",
+        }
+    )
+
+    oauth_opencode = capabilities["oauth_proxy"]["opencode"]
+    cli_opencode = capabilities["cli_delegate"]["opencode"]
+    assert oauth_opencode["deepseek"] == ["api_key"]
+    assert "deepseek" not in cli_opencode
 
 
 @pytest.mark.asyncio
@@ -427,10 +442,13 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "available" in response.text
     assert "yes" in response.text
     assert 'data-engine-start="codex"' in response.text
-    assert 'data-engine-auth-start="codex"' in response.text
-    assert 'data-auth-transport="oauth_proxy"' in response.text
-    assert 'data-auth-transport="cli_delegate"' in response.text
-    assert 'data-engine-auth-start="iflow"' in response.text
+    assert 'data-engine-auth-entry="codex"' in response.text
+    assert 'data-engine-auth-entry="iflow"' in response.text
+    assert "鉴权(Codex)" in response.text
+    assert "鉴权(iFlow)" in response.text
+    assert "启动TUI" in response.text
+    assert "升级" in response.text
+    assert 'data-engine-auth-start=' not in response.text
 
 
 @pytest.mark.asyncio

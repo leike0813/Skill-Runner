@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from server.services.oauth_openai_proxy_common import OpenAITokenSet
-from server.services.opencode_openai_oauth_proxy_flow import OpencodeOpenAIOAuthProxyFlow
+from server.engines.opencode.auth.protocol.openai_oauth_proxy_flow import OpencodeOpenAIOAuthProxyFlow
 
 
 def test_opencode_openai_oauth_proxy_flow_start_and_submit(tmp_path: Path, monkeypatch):
@@ -19,7 +19,7 @@ def test_opencode_openai_oauth_proxy_flow_start_and_submit(tmp_path: Path, monke
     assert "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback" in runtime.auth_url
 
     monkeypatch.setattr(
-        "server.services.opencode_openai_oauth_proxy_flow.exchange_authorization_code",
+        "server.engines.opencode.auth.protocol.openai_oauth_proxy_flow.exchange_authorization_code",
         lambda **_kwargs: OpenAITokenSet(
             id_token="a.b.c",
             access_token="access-token",
@@ -28,7 +28,7 @@ def test_opencode_openai_oauth_proxy_flow_start_and_submit(tmp_path: Path, monke
         ),
     )
     monkeypatch.setattr(
-        "server.services.opencode_openai_oauth_proxy_flow.extract_account_id_from_id_token",
+        "server.engines.opencode.auth.protocol.openai_oauth_proxy_flow.extract_account_id_from_id_token",
         lambda _id_token: "acct_123",
     )
 

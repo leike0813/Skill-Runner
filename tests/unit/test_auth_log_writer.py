@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from server.services.auth_runtime.log_writer import AuthLogWriter
+from server.runtime.auth.log_writer import AuthLogWriter
 
 
 def test_auth_log_writer_oauth_proxy_layout(tmp_path: Path):

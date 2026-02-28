@@ -112,7 +112,7 @@ def isolated_temp_env(monkeypatch, tmp_path):
 
     class _FakeAdapter:
         async def run(self, skill, input_data, run_dir, options):
-            from server.adapters.base import EngineRunResult
+            from server.runtime.adapter.types import EngineRunResult
 
             (run_dir / "artifacts" / "out.txt").write_text("ok", encoding="utf-8")
             result_path = run_dir / "result" / "result.json"

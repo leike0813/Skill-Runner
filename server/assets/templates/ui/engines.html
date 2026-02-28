@@ -84,6 +84,7 @@
             word-break: break-all;
         }
         .auth-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .engine-auth-entry-btn { width: 136px; text-align: center; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
@@ -126,8 +127,15 @@
     <div class="card">
         <h2>Engine Auth（实验）</h2>
         <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
-            每个引擎提供 OAuth 代理与 CLI 委托两条鉴权入口。鉴权会话与内嵌 TUI 全局互斥。
-            OpenAI OAuth 代理在浏览器与后端同机时可自动回调；异机部署可粘贴回调 URL 或授权码兜底。
+            鉴权会话与内嵌 TUI 全局互斥。先选择全局鉴权后台，再在引擎表格中点击“连接”入口选择具体方式。
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+            <label for="auth-transport-select" style="font-size:13px; color:#374151;">鉴权后台</label>
+            <select id="auth-transport-select" style="padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+                <option value="oauth_proxy" selected>OAuth 代理（oauth_proxy）</option>
+                <option value="cli_delegate">CLI 委托（cli_delegate）</option>
+            </select>
+            <button id="auth-cancel-btn" class="secondary" type="button" disabled>取消</button>
         </div>
         <div class="auth-meta">
             <div id="auth-engine-row">引擎：-</div>
@@ -141,36 +149,10 @@
             <div id="auth-code-row" style="display:none;">
                 用户代码：
                 <span id="auth-code" class="auth-code"></span>
+                <button id="auth-code-copy-btn" class="secondary" type="button" style="margin-left:8px; padding:4px 8px;">复制</button>
+                <span id="auth-code-copy-result" style="margin-left:8px; font-size:12px; color:#6b7280;"></span>
             </div>
             <div id="auth-expire-row" style="display:none;"></div>
-        </div>
-        <div class="auth-actions">
-            <button type="button" data-engine-auth-start="codex" data-auth-transport="oauth_proxy" data-auth-method="callback">Codex OAuth代理（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">Codex OAuth代理（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="cli_delegate" data-auth-method="callback">Codex CLI委托（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="codex" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">Codex CLI委托（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="oauth_proxy" data-auth-method="callback">Gemini OAuth代理（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">Gemini OAuth代理（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="gemini" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">Gemini CLI委托</button>
-            <button type="button" class="secondary" data-engine-auth-start="iflow" data-auth-transport="oauth_proxy" data-auth-method="callback">iFlow OAuth代理（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="iflow" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">iFlow OAuth代理（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="iflow" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">iFlow CLI委托</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="oauth_proxy" data-auth-method="callback">OpenCode(OpenAI) OAuth代理（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">OpenCode(OpenAI) OAuth代理（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="google" data-auth-transport="oauth_proxy" data-auth-method="callback">OpenCode(Google) OAuth代理（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="google" data-auth-transport="oauth_proxy" data-auth-method="auth_code_or_url">OpenCode(Google) OAuth代理（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="cli_delegate" data-auth-method="callback">OpenCode(OpenAI) CLI委托（Callback）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="openai" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">OpenCode(OpenAI) CLI委托（AuthCode/URL）</button>
-            <button type="button" class="secondary" data-engine-auth-start="opencode" data-auth-provider="selected" data-auth-transport="cli_delegate" data-auth-method="auth_code_or_url">OpenCode（当前Provider，CLI委托）</button>
-            <button id="auth-cancel-btn" class="secondary" type="button" disabled>取消</button>
-        </div>
-        <div id="auth-opencode-provider-row" style="display:none; margin-top:10px;">
-            <label for="auth-opencode-provider" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">OpenCode Provider</label>
-            <select id="auth-opencode-provider" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-                {% for provider in opencode_auth_providers %}
-                <option value="{{ provider.provider_id }}" data-auth-mode="{{ provider.auth_mode }}">{{ provider.display_name }}</option>
-                {% endfor %}
-            </select>
         </div>
         <div id="auth-input-row" style="display:none; margin-top:10px;">
             <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">输入</label>
@@ -180,6 +162,10 @@
             </div>
         </div>
         <div id="auth-error" class="error"></div>
+        <div id="auth-menu-popover" style="display:none; position:fixed; z-index:80; min-width:220px; background:#ffffff; border:1px solid #d1d5db; box-shadow:0 12px 24px rgba(15,23,42,0.16); border-radius:10px; padding:8px;">
+            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">请选择</div>
+            <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
+        </div>
     </div>
 
     <div class="card">
@@ -215,6 +201,25 @@
     const ttydAvailable = {{ "true" if ttyd_available else "false" }};
     const initialSession = {{ session | tojson }};
     const initialAuthSession = {{ auth_session | tojson }};
+    const opencodeAuthProviders = {{ opencode_auth_providers | tojson }};
+    const authUiCapabilities = {{ auth_ui_capabilities | tojson }};
+    const transportLabels = {
+        oauth_proxy: "OAuth 代理（oauth_proxy）",
+        cli_delegate: "CLI 委托（cli_delegate）",
+    };
+    const authMethodLabels = {
+        callback: "回调模式",
+        auth_code_or_url: "授权码模式",
+        api_key: "API Key",
+    };
+    const engineLabels = {
+        codex: "Codex",
+        gemini: "Gemini",
+        iflow: "iFlow",
+        opencode: "OpenCode",
+    };
+    const terminalStatuses = new Set(["succeeded", "failed", "canceled", "expired"]);
+
     const stateEl = document.getElementById("terminal-state");
     const sandboxEl = document.getElementById("terminal-sandbox");
     const errorEl = document.getElementById("terminal-error");
@@ -233,18 +238,24 @@
     const authUrlEl = document.getElementById("auth-url");
     const authCodeRowEl = document.getElementById("auth-code-row");
     const authCodeEl = document.getElementById("auth-code");
+    const authCodeCopyBtn = document.getElementById("auth-code-copy-btn");
+    const authCodeCopyResultEl = document.getElementById("auth-code-copy-result");
     const authExpireRowEl = document.getElementById("auth-expire-row");
-    const authOpencodeProviderRowEl = document.getElementById("auth-opencode-provider-row");
-    const authOpencodeProviderEl = document.getElementById("auth-opencode-provider");
+    const authTransportSelectEl = document.getElementById("auth-transport-select");
     const authCancelBtn = document.getElementById("auth-cancel-btn");
     const authInputRowEl = document.getElementById("auth-input-row");
     const authInputLabelEl = document.getElementById("auth-input-label");
     const authInputValueEl = document.getElementById("auth-input-value");
     const authInputBtn = document.getElementById("auth-input-btn");
     const authErrorEl = document.getElementById("auth-error");
+    const authMenuPopoverEl = document.getElementById("auth-menu-popover");
+    const authMenuTitleEl = document.getElementById("auth-menu-title");
+    const authMenuItemsEl = document.getElementById("auth-menu-items");
+
     let authSubmitLocked = false;
     let authStartPending = false;
     let tuiStartPending = false;
+    let authMenuState = null;
 
     function showError(text) {
         errorEl.style.display = "block";
@@ -284,6 +295,7 @@
             waiting_user: "等待用户操作",
             waiting_orchestrator: "后台编排中",
             code_submitted_waiting_result: "已提交授权码，等待结果",
+            polling_result: "轮询结果中",
             succeeded: "成功",
             failed: "失败",
             canceled: "已取消",
@@ -294,16 +306,14 @@
         return labels[status] || status;
     }
 
-    function selectedOpencodeAuthMode() {
-        if (!authOpencodeProviderEl) return "oauth";
-        const option = authOpencodeProviderEl.selectedOptions && authOpencodeProviderEl.selectedOptions[0];
-        if (!option) return "oauth";
-        return option.getAttribute("data-auth-mode") || "oauth";
+    function resolveTransportLabel(transport) {
+        const normalized = String(transport || "").trim().toLowerCase();
+        return transportLabels[normalized] || normalized || "-";
     }
 
-    function selectedOpencodeProviderId() {
-        if (!authOpencodeProviderEl) return "";
-        return String(authOpencodeProviderEl.value || "").trim().toLowerCase();
+    function resolveAuthMethodLabel(method) {
+        const normalized = String(method || "").trim().toLowerCase();
+        return authMethodLabels[normalized] || normalized || "-";
     }
 
     function resolveInputKind(session) {
@@ -311,42 +321,42 @@
         if (explicitKind === "code" || explicitKind === "api_key" || explicitKind === "text") {
             return explicitKind;
         }
-        const engine = session.engine || "";
-        if (engine === "gemini" || engine === "iflow") return "code";
-        if (engine === "opencode" && selectedOpencodeAuthMode() === "api_key") return "api_key";
-        return "text";
+        const engine = String(session.engine || "").trim().toLowerCase();
+        const authMethod = String(session.auth_method || "").trim().toLowerCase();
+        const providerId = String(session.provider_id || "").trim().toLowerCase();
+        if (authMethod === "api_key") return "api_key";
+        if (authMethod === "callback") return "text";
+        if (authMethod === "auth_code_or_url") {
+            if (engine === "gemini") return "code";
+            if (engine === "iflow") return "text";
+            if (engine === "opencode" && providerId === "google") return "text";
+            return "";
+        }
+        return "";
     }
 
     function resolveInputLabel(session) {
-        const engine = session.engine || "";
+        const engine = String(session.engine || "").trim().toLowerCase();
+        const providerId = String(session.provider_id || "").trim().toLowerCase();
         const authMethod = String(session.auth_method || "").trim().toLowerCase();
         if (authMethod === "callback") {
             return "优先等待自动回调；若服务非本地部署，可粘贴登录后的回调 URL 并提交。";
         }
-        if (engine === "codex" && resolveInputKind(session) === "text") {
-            return "请将授权码或回调链接粘贴至下方并提交";
-        }
         if (engine === "gemini") {
-            if (String(session.transport || "").toLowerCase() === "oauth_proxy") {
-                return "请将授权码粘贴至下方并提交";
-            }
             return "请将授权码粘贴至下方并提交";
         }
         if (engine === "iflow") {
             return "请将授权码或回调 URL 粘贴至下方并提交";
         }
-        if (engine === "opencode") {
-            const mode = resolveInputKind(session);
-            if (mode === "api_key") return "请将 API Key 粘贴至下方并提交";
-            const providerId = (session.provider_id || selectedOpencodeProviderId() || "").toLowerCase();
-            if (providerId === "google") {
-                return "请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交";
-            }
-            return "请将授权返回内容粘贴至下方并提交";
-        }
         const kind = resolveInputKind(session);
         if (kind === "api_key") return "API Key";
         if (kind === "code") return "授权码";
+        if (engine === "opencode" && providerId === "google") {
+            return "请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交";
+        }
+        if (engine === "opencode" && providerId === "openai") {
+            return "请将授权码或回调 URL 粘贴至下方并提交";
+        }
         return "输入";
     }
 
@@ -356,7 +366,7 @@
         const status = String(candidate.status || "").trim().toLowerCase();
         if (!status) return false;
         if (candidate.terminal === true) return false;
-        return !["succeeded", "failed", "canceled", "expired"].includes(status);
+        return !terminalStatuses.has(status);
     }
 
     function isTuiSessionActive(session) {
@@ -364,12 +374,202 @@
         return !!(candidate.active && !candidate.terminal);
     }
 
+    function resolveAuthRoutePrefix(transport) {
+        const normalized = String(transport || "").trim().toLowerCase();
+        if (normalized === "oauth_proxy") {
+            return "/ui/engines/auth/oauth-proxy";
+        }
+        if (normalized === "cli_delegate") {
+            return "/ui/engines/auth/cli-delegate";
+        }
+        return "/ui/engines/auth";
+    }
+
+    function selectedTransport() {
+        if (!authTransportSelectEl) return "oauth_proxy";
+        return String(authTransportSelectEl.value || "oauth_proxy").trim().toLowerCase();
+    }
+
+    function methodsForEngine(transport, engine, providerId) {
+        const transportKey = String(transport || "").trim().toLowerCase();
+        const engineKey = String(engine || "").trim().toLowerCase();
+        const scoped = authUiCapabilities[transportKey] || {};
+        const engineCaps = scoped[engineKey];
+        if (!engineCaps) return [];
+        if (engineKey !== "opencode") {
+            return Array.isArray(engineCaps) ? engineCaps : [];
+        }
+        const providerCaps = (engineCaps && typeof engineCaps === "object") ? engineCaps : {};
+        const providerKey = String(providerId || "").trim().toLowerCase();
+        const methods = providerCaps[providerKey];
+        return Array.isArray(methods) ? methods : [];
+    }
+
+    function availableOpencodeProviders(transport) {
+        return opencodeAuthProviders.filter((provider) => {
+            const providerId = String(provider.provider_id || "").trim().toLowerCase();
+            return methodsForEngine(transport, "opencode", providerId).length > 0;
+        });
+    }
+
+    function hideAuthMenu() {
+        authMenuState = null;
+        if (authMenuPopoverEl) authMenuPopoverEl.style.display = "none";
+        if (authMenuItemsEl) authMenuItemsEl.innerHTML = "";
+        if (authMenuTitleEl) authMenuTitleEl.textContent = "请选择";
+    }
+
+    function positionAuthMenu(anchor) {
+        if (!authMenuPopoverEl || !anchor) return;
+        const rect = anchor.getBoundingClientRect();
+        authMenuPopoverEl.style.display = "block";
+        authMenuPopoverEl.style.left = `${Math.max(12, rect.left)}px`;
+        authMenuPopoverEl.style.top = `${Math.min(window.innerHeight - 20, rect.bottom + 6)}px`;
+    }
+
+    function renderAuthMenuItems(items, title) {
+        if (!authMenuItemsEl || !authMenuTitleEl) return;
+        authMenuTitleEl.textContent = title;
+        authMenuItemsEl.innerHTML = "";
+        items.forEach((item) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = item.secondary ? "secondary" : "";
+            btn.style.textAlign = "left";
+            btn.style.width = "100%";
+            btn.textContent = item.label;
+            btn.addEventListener("click", (evt) => {
+                evt.preventDefault();
+                evt.stopPropagation();
+                item.onClick();
+            });
+            authMenuItemsEl.appendChild(btn);
+        });
+    }
+
+    function openEngineAuthMenu(anchor, engine) {
+        if (!anchor || isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
+            showAuthError("当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。");
+            return;
+        }
+        clearAuthError();
+        const normalizedEngine = String(engine || "").trim().toLowerCase();
+        if (!normalizedEngine) return;
+        const transport = selectedTransport();
+        if (normalizedEngine !== "opencode") {
+            const methods = methodsForEngine(transport, normalizedEngine, "");
+            if (methods.length === 0) {
+                showAuthError("当前鉴权后台下，该引擎暂无可用鉴权方式。");
+                return;
+            }
+            renderAuthMenuItems(
+                methods.map((method) => ({
+                    label: resolveAuthMethodLabel(method),
+                    onClick: () => {
+                        hideAuthMenu();
+                        startAuth(normalizedEngine, transport, method, "");
+                    },
+                })),
+                `${engineLabels[normalizedEngine] || normalizedEngine} · 选择鉴权方式`
+            );
+            authMenuState = { level: "method", engine: normalizedEngine, anchor };
+            positionAuthMenu(anchor);
+            return;
+        }
+
+        const providers = availableOpencodeProviders(transport);
+        if (providers.length === 0) {
+            showAuthError("当前鉴权后台下，OpenCode 没有可用 Provider。");
+            return;
+        }
+        renderAuthMenuItems(
+            providers.map((provider) => ({
+                label: provider.display_name,
+                onClick: () => openOpencodeMethodMenu(anchor, transport, provider),
+            })),
+            "OpenCode · 选择 Provider"
+        );
+        authMenuState = { level: "provider", engine: "opencode", anchor };
+        positionAuthMenu(anchor);
+    }
+
+    function openOpencodeMethodMenu(anchor, transport, provider) {
+        const providerId = String(provider.provider_id || "").trim().toLowerCase();
+        let methods = methodsForEngine(transport, "opencode", providerId);
+        if (methods.length === 0) {
+            const authMode = String(provider.auth_mode || "").trim().toLowerCase();
+            if (providerId === "openai") {
+                methods = ["callback", "auth_code_or_url"];
+            } else if (providerId === "google") {
+                methods = String(transport || "").toLowerCase() === "oauth_proxy"
+                    ? ["callback", "auth_code_or_url"]
+                    : ["auth_code_or_url"];
+            } else if (authMode === "api_key") {
+                methods = String(transport || "").toLowerCase() === "oauth_proxy" ? ["api_key"] : [];
+            } else if (authMode === "oauth") {
+                methods = String(transport || "").toLowerCase() === "oauth_proxy"
+                    ? ["callback", "auth_code_or_url"]
+                    : ["auth_code_or_url"];
+            }
+        }
+        if (methods.length === 0) {
+            showAuthError(`该 Provider 在当前鉴权后台下没有可用鉴权方式。provider=${providerId}, transport=${transport}`);
+            return;
+        }
+        const items = [
+            {
+                label: "← 返回 Provider 列表",
+                secondary: true,
+                onClick: () => openEngineAuthMenu(anchor, "opencode"),
+            },
+            ...methods.map((method) => ({
+                label: resolveAuthMethodLabel(method),
+                onClick: () => {
+                    hideAuthMenu();
+                    startAuth("opencode", transport, method, providerId);
+                },
+            })),
+        ];
+        renderAuthMenuItems(items, `OpenCode / ${provider.display_name} · 选择鉴权方式`);
+        authMenuState = { level: "method", engine: "opencode", providerId, anchor };
+        positionAuthMenu(anchor);
+    }
+
+    function shouldShowUserCodeCopy(session) {
+        const engine = String(session.engine || "").trim().toLowerCase();
+        const providerId = String(session.provider_id || "").trim().toLowerCase();
+        const authMethod = String(session.auth_method || "").trim().toLowerCase();
+        if (!session.user_code) return false;
+        if (authMethod !== "auth_code_or_url") return false;
+        return engine === "codex" || (engine === "opencode" && providerId === "openai");
+    }
+
+    async function copyText(text) {
+        const value = String(text || "");
+        if (!value) return false;
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+        const input = document.createElement("textarea");
+        input.value = value;
+        input.setAttribute("readonly", "readonly");
+        input.style.position = "fixed";
+        input.style.left = "-99999px";
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(input);
+        return copied;
+    }
+
     function updateInteractiveActionLocks() {
         const authActive = isAuthSessionActive(currentAuthSession);
         const tuiActive = isTuiSessionActive(currentSession);
         const lockStarts = authActive || tuiActive || authStartPending || tuiStartPending;
 
-        document.querySelectorAll("[data-engine-auth-start]").forEach((button) => {
+        document.querySelectorAll("[data-engine-auth-entry]").forEach((button) => {
             if (button instanceof HTMLButtonElement) {
                 button.disabled = lockStarts;
             }
@@ -381,28 +581,33 @@
         });
 
         if (authCancelBtn) authCancelBtn.disabled = !authActive;
-        if (authOpencodeProviderEl) authOpencodeProviderEl.disabled = lockStarts;
+        if (authTransportSelectEl) authTransportSelectEl.disabled = lockStarts;
+        if (lockStarts) hideAuthMenu();
     }
 
     function applyAuthState(payload) {
         const next = payload || {};
+        const previousSessionId = currentAuthSession.session_id;
         const active = isAuthSessionActive(next);
         currentAuthSession = Object.assign({ active }, next);
+        if (previousSessionId !== currentAuthSession.session_id) {
+            authSubmitLocked = false;
+            if (authInputValueEl) authInputValueEl.value = "";
+            if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = "";
+        }
         const status = currentAuthSession.status || (active ? "running" : "idle");
         const statusLabel = mapStatusLabel(status);
         const terminalSuffix = currentAuthSession.error ? `: ${currentAuthSession.error}` : "";
         const engine = currentAuthSession.engine || "-";
-        const transport = currentAuthSession.transport || "-";
-        const authMethod = currentAuthSession.auth_method || "-";
+        const transport = resolveTransportLabel(currentAuthSession.transport || "-");
+        const authMethodText = resolveAuthMethodLabel(currentAuthSession.auth_method || "-");
+        const authMethodRaw = String(currentAuthSession.auth_method || "-");
         authEngineRowEl.textContent = `引擎：${engine}`;
         authTransportRowEl.textContent = `链路：${transport}`;
-        authMethodRowEl.textContent = `鉴权方式：${authMethod}`;
+        authMethodRowEl.textContent = `鉴权方式：${authMethodText}${authMethodRaw !== "-" ? ` (${authMethodRaw})` : ""}`;
         authStateEl.textContent = `状态：${statusLabel}${terminalSuffix}`;
 
-        const shouldShowAuthUrl =
-            !!currentAuthSession.auth_url
-            && status === "waiting_user"
-            && !authSubmitLocked;
+        const shouldShowAuthUrl = !!currentAuthSession.auth_url && status === "waiting_user" && !authSubmitLocked;
         if (shouldShowAuthUrl) {
             authUrlRowEl.style.display = "block";
             authUrlEl.href = currentAuthSession.auth_url;
@@ -416,9 +621,13 @@
         if (currentAuthSession.user_code) {
             authCodeRowEl.style.display = "block";
             authCodeEl.textContent = currentAuthSession.user_code;
+            if (authCodeCopyBtn) {
+                authCodeCopyBtn.style.display = shouldShowUserCodeCopy(currentAuthSession) ? "inline-block" : "none";
+            }
         } else {
             authCodeRowEl.style.display = "none";
             authCodeEl.textContent = "";
+            if (authCodeCopyBtn) authCodeCopyBtn.style.display = "none";
         }
 
         if (currentAuthSession.expires_at) {
@@ -429,14 +638,13 @@
             authExpireRowEl.textContent = "";
         }
 
-        authOpencodeProviderRowEl.style.display = active ? "none" : "block";
-        const inputKind = String(currentAuthSession.input_kind || "").trim().toLowerCase();
+        const inputKind = resolveInputKind(currentAuthSession);
         const inputRequired = inputKind === "code" || inputKind === "api_key" || inputKind === "text";
         const showInput =
             !authSubmitLocked
             && inputRequired
             && !currentAuthSession.terminal
-            && !["succeeded", "failed", "canceled", "expired"].includes(status)
+            && !terminalStatuses.has(String(status || "").toLowerCase())
             && status === "waiting_user";
         authInputRowEl.style.display = showInput ? "block" : "none";
         authInputBtn.disabled = !showInput;
@@ -542,29 +750,6 @@
         if (!isAuthSessionActive(activePayload)) clearAuthError();
     }
 
-    function resolveAuthRoutePrefix(transport) {
-        const normalized = String(transport || "").trim().toLowerCase();
-        if (normalized === "oauth_proxy") {
-            return "/ui/engines/auth/oauth-proxy";
-        }
-        if (normalized === "cli_delegate") {
-            return "/ui/engines/auth/cli-delegate";
-        }
-        return "/ui/engines/auth";
-    }
-
-    function resolveStartAuthMethod(engine, requestedAuthMethod) {
-        const requested = String(requestedAuthMethod || "").trim().toLowerCase();
-        if (requested) return requested;
-        if (engine === "codex") return "callback";
-        if (engine === "gemini") return "auth_code_or_url";
-        if (engine === "iflow") return "auth_code_or_url";
-        if (engine === "opencode") {
-            return selectedOpencodeAuthMode() === "api_key" ? "api_key" : "callback";
-        }
-        return "callback";
-    }
-
     async function startAuth(engine, transport, authMethod, authProvider) {
         if (isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
             showAuthError("当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。");
@@ -574,17 +759,18 @@
         authSubmitLocked = false;
         authInputValueEl.value = "";
         const normalizedTransport = (transport || "oauth_proxy");
-        const normalizedAuthMethod = resolveStartAuthMethod(engine, authMethod);
+        const normalizedAuthMethod = String(authMethod || "").trim().toLowerCase();
+        if (!normalizedAuthMethod) {
+            showAuthError("未选择鉴权方式");
+            return;
+        }
         const requestBody = {
             engine: engine,
             transport: normalizedTransport,
             auth_method: normalizedAuthMethod,
         };
-        if (engine === "opencode" && authOpencodeProviderEl) {
-            const forcedProvider = String(authProvider || "").trim().toLowerCase();
-            requestBody.provider_id = (forcedProvider && forcedProvider !== "selected")
-                ? forcedProvider
-                : authOpencodeProviderEl.value;
+        if (engine === "opencode") {
+            requestBody.provider_id = String(authProvider || "").trim().toLowerCase();
             if (!requestBody.provider_id) {
                 showAuthError("请先选择 OpenCode Provider");
                 return;
@@ -738,6 +924,27 @@
             submitAuthInput();
         });
     }
+    if (authCodeCopyBtn) {
+        authCodeCopyBtn.addEventListener("click", async () => {
+            const code = String((authCodeEl && authCodeEl.textContent) || "").trim();
+            if (!code) return;
+            if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = "";
+            try {
+                const ok = await copyText(code);
+                if (authCodeCopyResultEl) {
+                    authCodeCopyResultEl.textContent = ok ? "已复制" : "复制失败";
+                }
+            } catch (_err) {
+                if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = "复制失败";
+            }
+        });
+    }
+    if (authTransportSelectEl) {
+        authTransportSelectEl.addEventListener("change", () => {
+            hideAuthMenu();
+            clearAuthError();
+        });
+    }
 
     document.body.addEventListener("click", (evt) => {
         const target = evt.target;
@@ -752,16 +959,26 @@
     document.body.addEventListener("click", (evt) => {
         const target = evt.target;
         if (!(target instanceof HTMLElement)) return;
-        const authEl = target.closest("[data-engine-auth-start]");
-        if (!authEl) return;
-        if (authEl instanceof HTMLButtonElement && authEl.disabled) return;
-        const engine = authEl.getAttribute("data-engine-auth-start");
-        const transport = authEl.getAttribute("data-auth-transport") || "oauth_proxy";
-        const authMethod = authEl.getAttribute("data-auth-method") || "";
-        const authProvider = authEl.getAttribute("data-auth-provider") || "";
-        if (engine) {
-            startAuth(engine, transport, authMethod, authProvider);
+        const authEntryEl = target.closest("[data-engine-auth-entry]");
+        if (authEntryEl instanceof HTMLButtonElement && authEntryEl.disabled) return;
+        if (authEntryEl) {
+            evt.preventDefault();
+            evt.stopPropagation();
+            const engine = authEntryEl.getAttribute("data-engine-auth-entry");
+            if (engine) {
+                openEngineAuthMenu(authEntryEl, engine);
+            }
+            return;
         }
+        if (authMenuPopoverEl && authMenuPopoverEl.style.display === "block") {
+            const inside = target.closest("#auth-menu-popover");
+            if (!inside) {
+                hideAuthMenu();
+            }
+        }
+    });
+    document.body.addEventListener("htmx:afterSwap", () => {
+        updateInteractiveActionLocks();
     });
 
     frame.addEventListener("load", () => {
@@ -780,6 +997,7 @@
 
     applyState(currentSession);
     applyAuthState(currentAuthSession);
+    updateInteractiveActionLocks();
 })();
 </script>
 </body>

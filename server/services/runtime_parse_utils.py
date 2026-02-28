@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from ..adapters.base import RuntimeAssistantMessage, RuntimeStreamRawRow
+from ..runtime.adapter.types import RuntimeAssistantMessage, RuntimeStreamRawRow
 
 
 SCRIPT_STARTED_PREFIX = "Script started on "

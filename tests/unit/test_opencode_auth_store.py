@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.services.opencode_auth_store import OpencodeAuthStore
+from server.engines.opencode.auth.store import OpencodeAuthStore
 
 
 def test_opencode_auth_store_upsert_api_key(tmp_path: Path):

@@ -137,6 +137,10 @@ Tracked actions in MVP:
 
 - The built-in E2E client (`e2e_client/`) does not expose engine auth session controls.
 - Engine auth matrix testing (e.g., `oauth_proxy|cli_delegate` × `callback|auth_code_or_url`) is handled in management UI (`/ui/engines`) and corresponding backend tests.
+- 管理 UI 的鉴权入口已收敛为：
+  - 全局鉴权后台下拉（默认 `oauth_proxy`，会话进行中禁用）
+  - 引擎表格单入口按钮（非 OpenCode：方式菜单；OpenCode：provider -> 方式）
+  - 主状态卡只保留状态展示、输入区与取消按钮
 - For `oauth_proxy + callback`, `/input` remains available as a manual fallback when local callback cannot reach the server.
 - Gemini OAuth proxy testing supports both `callback` and `auth_code_or_url` in management UI (`/ui/engines`) and corresponding backend tests.
 - iFlow OAuth proxy testing supports both `callback` and `auth_code_or_url` in management UI (`/ui/engines`) and corresponding backend tests.

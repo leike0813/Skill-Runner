@@ -9,7 +9,6 @@ def test_default_config_loading():
     cfg = get_cfg_defaults()
     assert cfg.SYSTEM.ROOT == str(Path(__file__).parent.parent.parent)
     assert cfg.SYSTEM.DATA_DIR == str(Path(cfg.SYSTEM.ROOT) / "data")
-    assert cfg.GEMINI.DEFAULT_PROMPT_TEMPLATE.endswith("gemini_default.j2")
     assert cfg.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS == 1200
 
 def test_config_singleton():

@@ -16,7 +16,7 @@ from server.services.job_orchestrator import JobOrchestrator
 from server.services.run_store import RunStore
 from server.services.workspace_manager import workspace_manager
 from server.config import config
-from server.adapters.base import EngineRunResult
+from server.runtime.adapter.types import EngineRunResult
 
 
 class FailingAdapter:

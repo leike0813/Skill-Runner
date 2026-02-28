@@ -520,8 +520,8 @@ async def test_v1_engine_auth_session_input_unprocessable(monkeypatch):
 @pytest.mark.asyncio
 async def test_v1_engine_auth_openai_callback_without_basic_auth(monkeypatch):
     monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.complete_openai_callback",
-        lambda state, code=None, error=None: {  # noqa: ARG005
+        "server.routers.engines.engine_auth_flow_manager.complete_callback",
+        lambda channel, state, code=None, error=None: {  # noqa: ARG005
             "status": "succeeded",
             "error": None,
         },
@@ -536,11 +536,11 @@ async def test_v1_engine_auth_openai_callback_without_basic_auth(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_v1_engine_auth_openai_callback_invalid_state(monkeypatch):
-    def _raise(state, code=None, error=None):  # noqa: ARG001
+    def _raise(channel, state, code=None, error=None):  # noqa: ARG001
         raise ValueError("OAuth callback state is invalid")
 
     monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.complete_openai_callback",
+        "server.routers.engines.engine_auth_flow_manager.complete_callback",
         _raise,
     )
     response = await _request(

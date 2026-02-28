@@ -1,4 +1,4 @@
-from server.services.auth_runtime.orchestrators.oauth_proxy_orchestrator import OAuthProxyOrchestrator
+from server.runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
 
 
 class _ManagerStub:
@@ -43,11 +43,15 @@ class _ManagerStub:
         payload["terminal"] = True
         return payload
 
-    def complete_openai_callback(self, **kwargs):
+    def complete_callback(self, **kwargs):
         payload = self.get_session("s1")
         payload["status"] = "succeeded"
         payload["terminal"] = True
         return payload
+
+    def resolve_transport_start_method(self, **kwargs):
+        self.calls.append(("resolve_method", kwargs))
+        return "auth"
 
 
 def test_oauth_proxy_orchestrator_start_and_get():
@@ -75,6 +79,7 @@ def test_oauth_proxy_orchestrator_gemini_maps_to_auth():
         callback_base_url=None,
     )
     assert started["engine"] == "gemini"
+    assert mgr.calls[-1][0] == "start"
     assert mgr.calls[-1][1]["method"] == "auth"
 
 
@@ -88,4 +93,5 @@ def test_oauth_proxy_orchestrator_iflow_maps_to_auth():
         callback_base_url=None,
     )
     assert started["engine"] == "iflow"
+    assert mgr.calls[-1][0] == "start"
     assert mgr.calls[-1][1]["method"] == "auth"

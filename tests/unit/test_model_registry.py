@@ -12,7 +12,12 @@ def test_get_models_uses_latest_snapshot_when_version_unknown(monkeypatch):
     catalog = registry.get_models("gemini", refresh=True)
 
     assert catalog.engine == "gemini"
-    assert catalog.snapshot_version_used == "0.25.2"
+    manifest = registry._load_manifest("gemini")
+    expected = max(
+        (snap["version"] for snap in manifest["snapshots"]),
+        key=registry._semver_key,
+    )
+    assert catalog.snapshot_version_used == expected
     assert catalog.fallback_reason == "cli_version_unknown"
     assert any(model.id == "gemini-2.5-pro" for model in catalog.models)
 
@@ -196,10 +201,21 @@ def _build_models_fixture(tmp_path: Path, engine: str) -> Path:
     return engine_root
 
 
+class _FakeAdapterProfile:
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def resolve_manifest_path(self) -> Path:
+        return self._root / "manifest.json"
+
+    def resolve_models_root(self) -> Path:
+        return self._root
+
+
 def test_get_manifest_view(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     _build_models_fixture(tmp_path, "gemini")
-    monkeypatch.setattr(registry, "_models_root", lambda _engine: tmp_path / "gemini")
+    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(tmp_path / "gemini"))
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
 
     view = registry.get_manifest_view("gemini")
@@ -213,7 +229,7 @@ def test_get_manifest_view(monkeypatch, tmp_path: Path):
 def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     engine_root = _build_models_fixture(tmp_path, "gemini")
-    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
 
     view = registry.add_snapshot_for_detected_version(
@@ -240,7 +256,7 @@ def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_pat
     engine_root = _build_models_fixture(tmp_path, "gemini")
     with open(engine_root / "models_0.2.0.json", "w", encoding="utf-8") as f:
         json.dump({"engine": "gemini", "version": "0.2.0", "models": []}, f)
-    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
 
     with pytest.raises(ValueError, match="Snapshot already exists"):
@@ -250,7 +266,7 @@ def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_pat
 def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     engine_root = _build_models_fixture(tmp_path, "gemini")
-    monkeypatch.setattr(registry, "_models_root", lambda _engine: engine_root)
+    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: None)
 
     with pytest.raises(ValueError, match="CLI version not detected"):

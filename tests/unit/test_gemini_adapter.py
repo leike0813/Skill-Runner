@@ -3,12 +3,12 @@ import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
-from server.adapters.gemini_adapter import GeminiAdapter
+from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.models import AdapterTurnOutcome, SkillManifest
 
 @pytest.fixture
 def adapter():
-    adapter = GeminiAdapter()
+    adapter = GeminiExecutionAdapter()
     adapter.agent_manager.resolve_engine_command = lambda _engine: Path("/usr/bin/gemini")
     return adapter
 
@@ -50,7 +50,7 @@ def mock_skill(tmp_path):
 
 
 def test_construct_config_includes_engine_default_layer(tmp_path):
-    adapter = GeminiAdapter()
+    adapter = GeminiExecutionAdapter()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill_dir = tmp_path / "skill"
@@ -72,7 +72,7 @@ def test_construct_config_includes_engine_default_layer(tmp_path):
         output_path.write_text("{}", encoding="utf-8")
         return output_path
 
-    with patch("server.adapters.gemini_adapter.config_generator.generate_config", side_effect=_capture_generate_config):
+    with patch("server.engines.gemini.adapter.config_composer.config_generator.generate_config", side_effect=_capture_generate_config):
         adapter._construct_config(
             skill,
             run_dir,
@@ -111,50 +111,45 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
         "input_file: {{ input.input_file }}\n"
         "divisor: {{ parameter.divisor }}"
     )
-    
-    from server.config import config
-    old_template = config.GEMINI.DEFAULT_PROMPT_TEMPLATE
-    config.defrost()
-    config.GEMINI.DEFAULT_PROMPT_TEMPLATE = str(template_file)
-    config.freeze()
-    
-    try:
-        # Mock dependencies
-         with patch("server.services.config_generator.config_generator.generate_config"), \
-              patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
-              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
-             
-            mock_proc = MagicMock()
-            mock_proc.stdout = MagicMock()
-            mock_proc.stderr = MagicMock()
-            mock_proc.stdout.read = AsyncMock(side_effect=[b""])
-            mock_proc.stderr.read = AsyncMock(side_effect=[b""])
-            mock_proc.wait = AsyncMock()
-            mock_proc.returncode = 0
-            mock_exec.return_value = mock_proc
-            
-            await adapter.run(mock_skill, input_data, run_dir, options)
-            
-            # Check rendered prompt passed to Gemini CLI
-            args, _ = mock_exec.call_args
-            prompt_content = args[-1]
-            
-            # Verify Context injection
-            # input.input_file should be absolute path
-            abs_path = str((uploads_dir / "input_file").absolute())
-            assert f"input_file: {abs_path}" in prompt_content
-            
-            # parameter.divisor should be 5
-            assert "divisor: 5" in prompt_content
-            assert mock_patch.call_count == 1
-            _, kwargs = mock_patch.call_args
-            assert "output_schema" in kwargs
-            assert isinstance(kwargs["output_schema"], dict)
-            assert kwargs["output_schema"]["type"] == "object"
-    finally:
-        config.defrost()
-        config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
-        config.freeze()
+
+    skill_with_prompt = mock_skill.model_copy(
+        update={
+            "entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}
+        }
+    )
+
+    # Mock dependencies
+    with patch("server.services.config_generator.config_generator.generate_config"), \
+         patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(skill_with_prompt, input_data, run_dir, options)
+
+        # Check rendered prompt passed to Gemini CLI
+        args, _ = mock_exec.call_args
+        prompt_content = args[-1]
+
+        # Verify Context injection
+        # input.input_file should be absolute path
+        abs_path = str((uploads_dir / "input_file").absolute())
+        assert f"input_file: {abs_path}" in prompt_content
+
+        # parameter.divisor should be 5
+        assert "divisor: 5" in prompt_content
+        assert mock_patch.call_count == 1
+        _, kwargs = mock_patch.call_args
+        assert "output_schema" in kwargs
+        assert isinstance(kwargs["output_schema"], dict)
+        assert kwargs["output_schema"]["type"] == "object"
 
 @pytest.mark.asyncio
 async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
@@ -178,35 +173,30 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
         "{{ key }}: {{ val }}\n"
         "{% endfor %}"
     )
-    
-    from server.config import config
-    old_template = config.GEMINI.DEFAULT_PROMPT_TEMPLATE
-    config.defrost()
-    config.GEMINI.DEFAULT_PROMPT_TEMPLATE = str(template_file)
-    config.freeze()
-    
-    try:
-         with patch("server.services.config_generator.config_generator.generate_config"), \
-              patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
-              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
-             
-            mock_proc = MagicMock()
-            mock_proc.stdout = MagicMock()
-            mock_proc.stderr = MagicMock()
-            mock_proc.stdout.read = AsyncMock(side_effect=[b""])
-            mock_proc.stderr.read = AsyncMock(side_effect=[b""])
-            mock_proc.wait = AsyncMock()
-            mock_exec.return_value = mock_proc
-            with pytest.raises(ValueError, match="Missing required input files"):
-                await adapter.run(mock_skill, input_data, run_dir, options)
-            assert mock_patch.call_count == 1
-            _, kwargs = mock_patch.call_args
-            assert "output_schema" in kwargs
-            assert isinstance(kwargs["output_schema"], dict)
-    finally:
-        config.defrost()
-        config.GEMINI.DEFAULT_PROMPT_TEMPLATE = old_template
-        config.freeze()
+
+    skill_with_prompt = mock_skill.model_copy(
+        update={
+            "entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}
+        }
+    )
+
+    with patch("server.services.config_generator.config_generator.generate_config"), \
+         patch("server.services.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
+         patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_exec.return_value = mock_proc
+        with pytest.raises(ValueError, match="Missing required input files"):
+            await adapter.run(skill_with_prompt, input_data, run_dir, options)
+        assert mock_patch.call_count == 1
+        _, kwargs = mock_patch.call_args
+        assert "output_schema" in kwargs
+        assert isinstance(kwargs["output_schema"], dict)
 
 
 def test_extract_session_handle_missing_session_id_raises(adapter):
@@ -302,6 +292,20 @@ def test_parse_runtime_stream_falls_back_to_pty_json_lines(adapter):
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from pty"
     assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
+
+
+def test_parse_runtime_stream_uses_latest_response_frame(adapter):
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"session_id":"sess_old","response":"old response"}\n'
+            b'{"session_id":"sess_new","response":"latest response"}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["session_id"] == "sess_new"
+    assert parsed["assistant_messages"]
+    assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest response"]
 
 
 def test_parse_output_valid_ask_user_envelope(adapter):

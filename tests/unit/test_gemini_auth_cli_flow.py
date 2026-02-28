@@ -3,7 +3,11 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from server.services.gemini_auth_cli_flow import GeminiAuthCliFlow, GeminiAuthCliSession, _utc_now
+from server.engines.gemini.auth.drivers.cli_delegate_flow import (
+    GeminiAuthCliFlow,
+    GeminiAuthCliSession,
+    _utc_now,
+)
 
 
 class _FakeProcess:

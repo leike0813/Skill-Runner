@@ -3,7 +3,11 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from server.services.iflow_auth_cli_flow import IFlowAuthCliFlow, IFlowAuthCliSession, _utc_now
+from server.engines.iflow.auth.drivers.cli_delegate_flow import (
+    IFlowAuthCliFlow,
+    IFlowAuthCliSession,
+    _utc_now,
+)
 
 
 class _FakeProcess:

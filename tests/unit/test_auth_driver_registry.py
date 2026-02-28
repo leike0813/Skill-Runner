@@ -1,4 +1,4 @@
-from server.services.auth_runtime.driver_registry import AuthDriverRegistry
+from server.runtime.auth.driver_registry import AuthDriverRegistry
 
 
 def test_auth_driver_registry_resolve_and_fallback():

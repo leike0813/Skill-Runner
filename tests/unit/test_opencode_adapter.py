@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.adapters.opencode_adapter import OpencodeAdapter
+from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.models import SkillManifest
 
 
@@ -26,7 +26,7 @@ def test_construct_config_auto_mode_uses_engine_default_and_enforced(tmp_path):
         encoding="utf-8",
     )
     skill = SkillManifest(id="test-skill", path=skill_dir)
-    adapter = OpencodeAdapter()
+    adapter = OpencodeExecutionAdapter()
 
     config_path = adapter._construct_config(
         skill,
@@ -53,7 +53,7 @@ def test_construct_config_interactive_mode_sets_question_allow(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = SkillManifest(id="test-skill", path=tmp_path)
-    adapter = OpencodeAdapter()
+    adapter = OpencodeExecutionAdapter()
 
     config_path = adapter._construct_config(
         skill,
@@ -64,3 +64,21 @@ def test_construct_config_interactive_mode_sets_question_allow(tmp_path):
 
     assert payload["model"] == "opencode/gpt-5-nano"
     assert payload["permission"]["question"] == "allow"
+
+
+def test_parse_runtime_stream_keeps_latest_step_only():
+    adapter = OpencodeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"step_start","id":"s1"}\n'
+            b'{"type":"text","text":"old step"}\n'
+            b'{"type":"step_finish","id":"s1"}\n'
+            b'{"type":"step_start","id":"s2"}\n'
+            b'{"type":"text","text":"latest step"}\n'
+            b'{"type":"step_finish","id":"s2"}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert parsed["assistant_messages"]
+    assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest step"]

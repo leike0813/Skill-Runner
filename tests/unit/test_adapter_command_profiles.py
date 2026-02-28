@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.adapters.codex_adapter import CodexAdapter
-from server.adapters.gemini_adapter import GeminiAdapter
-from server.adapters.iflow_adapter import IFlowAdapter
-from server.adapters.opencode_adapter import OpencodeAdapter
+from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
+from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
+from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
+from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 
 
 def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
-    adapter = CodexAdapter()
+    adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.adapters.codex_adapter.engine_command_profile.resolve_args",
+        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner"],
     )
 
@@ -35,11 +35,11 @@ def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
 
 
 def test_codex_harness_start_command_passthrough_without_profile(monkeypatch) -> None:
-    adapter = CodexAdapter()
+    adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.adapters.codex_adapter.engine_command_profile.resolve_args",
+        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--json", "-p", "skill-runner"],
     )
 
@@ -54,11 +54,11 @@ def test_codex_harness_start_command_passthrough_without_profile(monkeypatch) ->
 
 
 def test_codex_start_command_fallbacks_full_auto_to_yolo_when_landlock_disabled(monkeypatch) -> None:
-    adapter = CodexAdapter()
+    adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.setenv("LANDLOCK_ENABLED", "0")
     monkeypatch.setattr(
-        "server.adapters.codex_adapter.engine_command_profile.resolve_args",
+        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner"],
     )
 
@@ -73,7 +73,7 @@ def test_codex_start_command_fallbacks_full_auto_to_yolo_when_landlock_disabled(
 
 
 def test_codex_harness_passthrough_full_auto_fallbacks_to_yolo_when_landlock_disabled(monkeypatch) -> None:
-    adapter = CodexAdapter()
+    adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.setenv("LANDLOCK_ENABLED", "0")
 
@@ -88,10 +88,10 @@ def test_codex_harness_passthrough_full_auto_fallbacks_to_yolo_when_landlock_dis
 
 
 def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
-    adapter = GeminiAdapter()
+    adapter = GeminiExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/gemini"))
     monkeypatch.setattr(
-        "server.adapters.gemini_adapter.engine_command_profile.resolve_args",
+        "server.engines.gemini.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--yolo", "--model", "gemini-default"],
     )
 
@@ -113,11 +113,11 @@ def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
 def test_codex_resume_command_filters_profile_flags(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 
-    adapter = CodexAdapter()
+    adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.adapters.codex_adapter.engine_command_profile.resolve_args",
+        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner", "--profile=other"],
     )
 
@@ -149,10 +149,10 @@ def test_codex_resume_command_filters_profile_flags(monkeypatch) -> None:
 def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 
-    adapter = IFlowAdapter()
+    adapter = IFlowExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/iflow"))
     monkeypatch.setattr(
-        "server.adapters.iflow_adapter.engine_command_profile.resolve_args",
+        "server.engines.iflow.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--yolo", "--thinking"],
     )
 
@@ -182,10 +182,10 @@ def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None
 
 
 def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> None:
-    adapter = OpencodeAdapter()
+    adapter = OpencodeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
     monkeypatch.setattr(
-        "server.adapters.opencode_adapter.engine_command_profile.resolve_args",
+        "server.engines.opencode.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--format", "json"],
     )
 
@@ -209,10 +209,10 @@ def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> No
 def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 
-    adapter = OpencodeAdapter()
+    adapter = OpencodeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
     monkeypatch.setattr(
-        "server.adapters.opencode_adapter.engine_command_profile.resolve_args",
+        "server.engines.opencode.adapter.execution_adapter.engine_command_profile.resolve_args",
         lambda **_kwargs: ["--should-not-appear"],
     )
 

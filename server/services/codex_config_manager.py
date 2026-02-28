@@ -24,15 +24,26 @@ class CodexConfigManager:
     """
     
     PROFILE_NAME = "skill-runner"
-    DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "default.toml"
-    ENFORCED_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "enforced.toml"
-    SCHEMA_PATH = Path(__file__).parent.parent / "assets" / "schemas" / "codex_profile_schema.json"
+    _DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "default.toml"
+    _ENFORCED_CONFIG_PATH = Path(__file__).parent.parent / "assets" / "configs" / "codex" / "enforced.toml"
+    _SCHEMA_PATH = Path(__file__).parent.parent / "assets" / "schemas" / "codex_profile_schema.json"
     
-    def __init__(self, config_path: Optional[Path] = None, profile_name: Optional[str] = None):
+    def __init__(
+        self,
+        config_path: Optional[Path] = None,
+        profile_name: Optional[str] = None,
+        default_config_path: Optional[Path] = None,
+        enforced_config_path: Optional[Path] = None,
+        schema_path: Optional[Path] = None,
+    ):
         profile = get_runtime_profile()
         self.config_path = config_path or profile.agent_home / ".codex" / "config.toml"
         normalized_profile_name = (profile_name or self.PROFILE_NAME).strip()
         self.profile_name = normalized_profile_name or self.PROFILE_NAME
+        # Keep instance-level names for backward-compatible tests/overrides.
+        self.DEFAULT_CONFIG_PATH = default_config_path or self._DEFAULT_CONFIG_PATH
+        self.ENFORCED_CONFIG_PATH = enforced_config_path or self._ENFORCED_CONFIG_PATH
+        self.SCHEMA_PATH = schema_path or self._SCHEMA_PATH
         
     def ensure_config_exists(self) -> None:
         """Create empty config file if it doesn't exist."""
