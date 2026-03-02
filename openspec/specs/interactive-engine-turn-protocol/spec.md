@@ -1,7 +1,8 @@
 # interactive-engine-turn-protocol Specification
 
 ## Purpose
-TBD - created by archiving change interactive-20-adapter-turn-protocol-and-mode-aware-patching. Update Purpose after archive.
+定义引擎适配层的统一回合协议、ask_user 载荷校验、模式感知补丁注入和按 execution_mode 区分的完成态判定规则。
+
 ## Requirements
 ### Requirement: 引擎适配层 MUST 输出统一回合协议
 The system MUST express turn results via a unified protocol, and `ask_user` MUST NOT be a hard prerequisite for entering `waiting_user` in interactive mode.
@@ -131,3 +132,4 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 - **WHEN** execution_mode=`interactive`
 - **THEN** 仅注入 interactive mode patch
 - **AND** 不注入 auto mode patch
+

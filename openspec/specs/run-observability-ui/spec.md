@@ -1,7 +1,8 @@
 # run-observability-ui Specification
 
 ## Purpose
-TBD - created by archiving change run-observability-streaming-and-timeout. Update Purpose after archive.
+定义 Run 观测 UI 的入口、文件只读预览和实时日志展示约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供 Run 观测 UI 入口
 系统 MUST 提供按 request_id 查询 run 观测信息的 UI 页面，并关联 run_id 展示运行实体信息。
@@ -97,3 +98,4 @@ Run 管理页面 MUST 作为观测/审计工具，不承担终端用户交互回
 - **WHEN** 用户在 run 详情页审计协议与 raw 日志
 - **THEN** `raw_ref` 预览窗口位于对话区旁
 - **AND** `Raw stderr` 位于下方审计操作区，便于联动查看
+

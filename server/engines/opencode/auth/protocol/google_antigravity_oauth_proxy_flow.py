@@ -83,7 +83,7 @@ def _decode_state(state: str) -> Dict[str, Any]:
     try:
         decoded = base64.urlsafe_b64decode(padded.encode("utf-8"))
         payload = json.loads(decoded.decode("utf-8"))
-    except Exception as exc:
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
         raise AntigravityOAuthProxyError("Invalid OAuth state payload") from exc
     if not isinstance(payload, dict):
         raise AntigravityOAuthProxyError("Invalid OAuth state payload")
@@ -104,7 +104,7 @@ def _parse_input_value(value: str) -> tuple[str, str | None]:
 
     try:
         parsed = urllib_parse.urlparse(normalized)
-    except Exception:
+    except ValueError:
         return normalized, None
 
     if parsed.scheme and parsed.netloc:
@@ -233,7 +233,7 @@ class OpencodeGoogleAntigravityOAuthProxyFlow:
         if isinstance(expires_in_raw, (int, float, str)):
             try:
                 expires_in = int(expires_in_raw)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 expires_in = 3600
         if not access_token or not refresh_token:
             raise AntigravityOAuthProxyError("Google token response missing required fields")
@@ -277,7 +277,7 @@ class OpencodeGoogleAntigravityOAuthProxyFlow:
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")
-            except Exception:
+            except (OSError, ValueError):
                 detail = ""
             raise AntigravityOAuthProxyError(
                 f"Google token endpoint returned status {exc.code}: {detail[:300]}"
@@ -286,12 +286,12 @@ class OpencodeGoogleAntigravityOAuthProxyFlow:
             raise AntigravityOAuthProxyError(
                 f"Google token endpoint request failed: {exc.reason}"
             ) from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise AntigravityOAuthProxyError(f"Google token endpoint request failed: {exc}") from exc
 
         try:
             parsed = json.loads(raw)
-        except Exception as exc:
+        except (json.JSONDecodeError, TypeError) as exc:
             raise AntigravityOAuthProxyError("Google token endpoint returned invalid JSON") from exc
         if not isinstance(parsed, dict):
             raise AntigravityOAuthProxyError("Google token endpoint returned invalid payload")
@@ -306,11 +306,11 @@ class OpencodeGoogleAntigravityOAuthProxyFlow:
         try:
             with urllib_request.urlopen(request, timeout=20) as response:
                 raw = response.read().decode("utf-8", errors="replace")
-        except Exception:
+        except (urllib_error.URLError, OSError, ValueError):
             return None
         try:
             parsed = json.loads(raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return None
         if not isinstance(parsed, dict):
             return None

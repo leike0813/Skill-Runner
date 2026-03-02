@@ -5,25 +5,25 @@ from typing import Any, Protocol
 
 
 class RunStorePort(Protocol):
-    def get_request(self, request_id: str) -> dict[str, Any] | None:
+    async def get_request(self, request_id: str) -> dict[str, Any] | None:
         ...
 
-    def get_request_with_run(self, request_id: str) -> dict[str, Any] | None:
+    async def get_request_with_run(self, request_id: str) -> dict[str, Any] | None:
         ...
 
-    def list_requests_with_runs(self, limit: int = 200) -> list[dict[str, Any]]:
+    async def list_requests_with_runs(self, limit: int = 200) -> list[dict[str, Any]]:
         ...
 
-    def get_pending_interaction(self, request_id: str) -> dict[str, Any] | None:
+    async def get_pending_interaction(self, request_id: str) -> dict[str, Any] | None:
         ...
 
-    def get_interaction_count(self, request_id: str) -> int:
+    async def get_interaction_count(self, request_id: str) -> int:
         ...
 
-    def list_interaction_history(self, request_id: str) -> list[dict[str, Any]]:
+    async def list_interaction_history(self, request_id: str) -> list[dict[str, Any]]:
         ...
 
-    def get_effective_session_timeout(self, request_id: str) -> int | None:
+    async def get_effective_session_timeout(self, request_id: str) -> int | None:
         ...
 
 

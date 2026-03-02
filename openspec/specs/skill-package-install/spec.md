@@ -1,7 +1,8 @@
 # skill-package-install Specification
 
 ## Purpose
-TBD - created by archiving change skill-package-install. Update Purpose after archive.
+定义 skill 包上传、根目录校验和异步安装的 API 约束。
+
 ## Requirements
 ### Requirement: Accept skill package upload for async install
 The system SHALL provide an API endpoint to accept a skill package as a zip upload and initiate an asynchronous installation job.

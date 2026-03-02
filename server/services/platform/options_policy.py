@@ -67,7 +67,7 @@ class OptionsPolicy:
             )
         try:
             parsed = int(value)
-        except Exception as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a positive integer"
             ) from exc

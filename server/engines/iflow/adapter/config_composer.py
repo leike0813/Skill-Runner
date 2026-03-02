@@ -13,6 +13,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_JSON_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    TypeError,
+    ValueError,
+)
+_COMPOSE_CONFIG_EXCEPTIONS = (
+    FileNotFoundError,
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    TypeError,
+    ValueError,
+    AttributeError,
+    RuntimeError,
+)
+
 
 class IFlowConfigComposer:
     def __init__(self, adapter: "IFlowExecutionAdapter") -> None:
@@ -28,8 +46,11 @@ class IFlowConfigComposer:
         if default_config_path.exists():
             try:
                 with open(default_config_path, "r", encoding="utf-8") as f:
-                    engine_defaults = json.load(f)
-            except Exception:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("iFlow engine defaults must be a JSON object")
+                engine_defaults = payload
+            except _JSON_LOAD_EXCEPTIONS:
                 logger.exception("Failed to load iFlow engine defaults")
 
         skill_defaults: dict[str, object] = {}
@@ -38,9 +59,12 @@ class IFlowConfigComposer:
             if skill_settings_path.exists():
                 try:
                     with open(skill_settings_path, "r", encoding="utf-8") as f:
-                        skill_defaults = json.load(f)
+                        payload = json.load(f)
+                    if not isinstance(payload, dict):
+                        raise ValueError("iFlow skill defaults must be a JSON object")
+                    skill_defaults = payload
                     logger.info("Loaded skill defaults from %s", skill_settings_path)
-                except Exception:
+                except _JSON_LOAD_EXCEPTIONS:
                     logger.exception("Failed to load skill defaults")
 
         user_overrides: dict[str, object] = {}
@@ -56,8 +80,11 @@ class IFlowConfigComposer:
         if enforced_path.exists():
             try:
                 with open(enforced_path, "r", encoding="utf-8") as f:
-                    enforced_config = json.load(f)
-            except Exception:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("iFlow enforced config must be a JSON object")
+                enforced_config = payload
+            except _JSON_LOAD_EXCEPTIONS:
                 logger.exception("Failed to load iFlow enforced config")
 
         layers = [engine_defaults, skill_defaults, user_overrides, runtime_engine_overrides, enforced_config]
@@ -72,5 +99,5 @@ class IFlowConfigComposer:
                 output_path=target_path,
             )
             return target_path
-        except Exception as exc:
+        except _COMPOSE_CONFIG_EXCEPTIONS as exc:
             raise RuntimeError(f"Failed to generate iFlow configuration: {exc}") from exc

@@ -1,7 +1,8 @@
 # ui-auth-shell Specification
 
 ## Purpose
-TBD - created by archiving change ui-auth-shell-and-home-nav-polish. Update Purpose after archive.
+定义 UI 认证壳组件的路由保护、登录重定向和认证状态管理行为。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供受控的 UI 鉴权终端会话
 系统 MUST 在 `/ui` 下提供用于 Engine 鉴权的网页终端能力，并在 managed 环境中执行预置命令。

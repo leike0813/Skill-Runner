@@ -7,7 +7,7 @@ from typing import Any
 
 from ....config import config
 from ....runtime.auth.session_lifecycle import AuthStartPlan, StartRuntimeContext
-from ...common.openai_auth import OpenAIDeviceProxySession
+from ...common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 from .oauth_proxy import CodexOAuthProxySession
 
 _DEFAULT_TRANSPORT = "oauth_proxy"
@@ -151,7 +151,7 @@ class CodexAuthRuntimeHandler:
                     now=context.now,
                     user_agent=_OPENAI_DEVICE_USER_AGENT_CODEX,
                 )
-            except Exception as exc:
+            except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
                 raise self._manager._build_openai_device_start_error(exc) from exc  # noqa: SLF001
             return self._manager._new_session(  # noqa: SLF001
                 session_id=context.session_id,
@@ -238,7 +238,7 @@ class CodexAuthRuntimeHandler:
                 session.error = None
                 session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
                 session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
@@ -263,7 +263,7 @@ class CodexAuthRuntimeHandler:
         try:
             stdin.write(normalized + "\n")
             stdin.flush()
-        except Exception as exc:
+        except (BrokenPipeError, OSError, ValueError) as exc:
             raise ValueError(f"Failed to submit input to codex auth session: {exc}") from exc
         session.status = "code_submitted_waiting_result"
         session.updated_at = _utc_now()
@@ -334,7 +334,7 @@ class CodexAuthRuntimeHandler:
             session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
-        except Exception as exc:
+        except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = self._manager._build_openai_device_error_message(exc)  # noqa: SLF001
             session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
@@ -378,7 +378,7 @@ class CodexAuthRuntimeHandler:
             session.status = "succeeded"
             session.error = None
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
-        except Exception as exc:
+        except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = f"OAuth callback token exchange failed: {exc}"
             session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001

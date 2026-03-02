@@ -3,7 +3,7 @@ from typing import Iterable
 
 from server.config import config
 from server.engines.common.trust_registry import create_default_trust_registry
-from server.services.orchestration.runtime_profile import get_runtime_profile
+from server.services.engine_management.runtime_profile import get_runtime_profile
 
 class RunFolderTrustManager:
     """Dispatch run-folder trust operations to engine-registered strategies."""

@@ -12,7 +12,7 @@ artifact management.
 
 ## Features
 
-- Multi-engine execution: Codex / Gemini CLI / iFlow CLI
+- Multi-engine execution: Codex / Gemini CLI / iFlow CLI / OpenCode
 - Skill protocol: `runner.json` + `SKILL.md` + input/parameter/output schemas
 - Isolated runs with reproducible artifacts
 - Structured results: JSON + artifacts + bundle
@@ -145,7 +145,7 @@ Notes:
 - UI shows `sandbox_status` as observability signal; by default it does not block TUI startup
 - For inline TUI sessions, Gemini is launched with `--sandbox` when container sandbox runtime is available
 - iFlow inline TUI currently runs without sandbox; UI will show a warning because iFlow sandbox requires Docker-image execution (outside this TUI design)
-- Inline TUI enforces a minimal-permission profile: shell tools are disabled for Codex/Gemini/iFlow
+- Inline TUI enforces a minimal-permission profile: shell tools are disabled for Codex/Gemini/iFlow/OpenCode
 - Inline TUI security settings are isolated from run execution settings (`/v1/jobs`)
 
 ## API examples
@@ -215,7 +215,9 @@ Full API details: `docs/api_reference.md`.
 - Skill Registry scans `skills/`
 - Workspace Manager prepares run directories
 - Job Orchestrator validates inputs/outputs, executes, and bundles results
-- Engine Adapters integrate Codex / Gemini / iFlow CLIs
+- Engine Adapters integrate Codex / Gemini / iFlow / OpenCode CLIs
+- Runtime layer provides protocol (FCMP), state machine, observability, and adapter framework
+- Services layer handles orchestration, skill management, and platform capabilities
 
 Flow:
 1) POST /v1/jobs  
@@ -251,10 +253,11 @@ Copy to:
 - Codex CLI (`@openai/codex`)
 - Gemini CLI (`@google/gemini-cli`)
 - iFlow CLI (`@iflow-ai/iflow-cli`)
+- OpenCode (`opencode`)
 
 ## Disclaimer (Fast-moving Agent CLIs)
 
-Codex, Gemini CLI, and iFlow CLI are evolving quickly. Their config formats,
+Codex, Gemini CLI, iFlow CLI, and OpenCode are evolving quickly. Their config formats,
 CLI behavior, and API details can change in short cycles.
 
 If you hit mismatched config expectations or compatibility errors with newer

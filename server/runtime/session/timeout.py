@@ -33,7 +33,7 @@ def _parse_positive_int(raw: Any) -> int | None:
         return None
     try:
         parsed = int(raw)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
     if parsed <= 0:
         return None

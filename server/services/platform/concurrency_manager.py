@@ -40,7 +40,7 @@ class ConcurrencyManager:
             self._max_concurrent = self._compute_max_concurrency(policy)
             self._max_queue_size = max(1, int(policy["max_queue_size"]))
             self._policy = policy
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             logger.exception("Failed to initialize concurrency policy, using fallback defaults")
             self._max_concurrent = 2
             self._max_queue_size = 128
@@ -191,7 +191,7 @@ class ConcurrencyManager:
             hard_cap = max(1, int(policy["max_concurrent_hard_cap"]))
             limit = min(cpu_limit, mem_limit, fd_limit, pid_limit, hard_cap)
             return max(1, limit)
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             logger.exception("Resource probe failed, using fallback concurrency")
             return fallback
 

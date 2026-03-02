@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJECT_ROOT))
 
 from server.main import app
-from server.services.orchestration.model_registry import model_registry
+from server.services.engine_management.model_registry import model_registry
 from server.services.skill.skill_registry import skill_registry
 from tests.common.skill_fixture_loader import (
     build_fixture_skill_zip,

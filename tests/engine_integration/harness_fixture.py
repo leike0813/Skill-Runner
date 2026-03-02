@@ -15,7 +15,7 @@ from server.services.platform.cache_key_builder import (
     compute_skill_fingerprint,
 )
 from server.services.orchestration.job_orchestrator import job_orchestrator
-from server.services.orchestration.model_registry import model_registry
+from server.services.engine_management.model_registry import model_registry
 from server.services.platform.options_policy import options_policy
 from server.services.orchestration.run_store import run_store
 from server.services.skill.skill_registry import skill_registry

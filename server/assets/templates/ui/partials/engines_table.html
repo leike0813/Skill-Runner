@@ -3,8 +3,6 @@
         <tr>
             <th>Engine</th>
             <th>CLI Version</th>
-            <th>Auth Ready</th>
-            <th>Sandbox</th>
             <th>Models</th>
             <th>Actions</th>
         </tr>
@@ -14,8 +12,6 @@
         <tr>
             <td>{{ row.engine }}</td>
             <td>{{ row.cli_version or "-" }}</td>
-            <td>{{ "yes" if row.auth_ready else "no" }}</td>
-            <td>{{ row.sandbox_status or "-" }}</td>
             <td>{{ row.models_count }}</td>
             <td>
                 <form

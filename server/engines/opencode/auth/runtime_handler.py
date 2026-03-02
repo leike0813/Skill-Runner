@@ -207,7 +207,7 @@ class OpencodeAuthRuntimeHandler:
                         now=context.now,
                         user_agent=_OPENAI_DEVICE_USER_AGENT_OPENCODE,
                     )
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     raise self._manager._build_openai_device_start_error(exc) from exc  # noqa: SLF001
                 return self._manager._new_session(  # noqa: SLF001
                     session_id=context.session_id,
@@ -307,7 +307,7 @@ class OpencodeAuthRuntimeHandler:
                     **backup_info,
                     **cleanup,
                 }
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 rollback_success = False
                 rollback_error: str | None = None
                 try:
@@ -316,7 +316,7 @@ class OpencodeAuthRuntimeHandler:
                         backup_path=(str(backup_info.get("backup_path")) if backup_info.get("backup_path") else None),
                     )
                     rollback_success = True
-                except Exception as rollback_exc:
+                except (OSError, RuntimeError, ValueError) as rollback_exc:
                     rollback_error = str(rollback_exc)
                 session = self._manager._new_session(  # noqa: SLF001
                     session_id=context.session_id,
@@ -449,7 +449,7 @@ class OpencodeAuthRuntimeHandler:
                 session.error = None
                 session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
                 session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
@@ -468,7 +468,7 @@ class OpencodeAuthRuntimeHandler:
                 audit.update(flow_result)
                 audit["callback_mode"] = "manual"
                 self._manager._finalize_active_session(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
                 session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
@@ -599,7 +599,7 @@ class OpencodeAuthRuntimeHandler:
                 session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = self._manager._build_openai_device_error_message(exc)  # noqa: SLF001
                 session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
@@ -639,7 +639,7 @@ class OpencodeAuthRuntimeHandler:
                 session.status = "succeeded"
                 session.error = None
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = f"OAuth callback token exchange failed: {exc}"
                 session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
@@ -675,7 +675,7 @@ class OpencodeAuthRuntimeHandler:
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
                 audit.update(flow_result)
                 audit["callback_mode"] = "auto"
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = f"OAuth callback token exchange failed: {exc}"
                 session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
@@ -725,7 +725,7 @@ class OpencodeAuthRuntimeHandler:
             )
             cleanup["rollback_attempted"] = True
             cleanup["rollback_success"] = True
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             cleanup["rollback_attempted"] = True
             cleanup["rollback_success"] = False
             cleanup["rollback_error"] = str(exc)

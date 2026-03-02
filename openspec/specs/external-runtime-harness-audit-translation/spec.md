@@ -1,7 +1,8 @@
 # external-runtime-harness-audit-translation Specification
 
 ## Purpose
-TBD - created by archiving change interactive-41-external-runtime-harness-conformance. Update Purpose after archive.
+定义外部 harness 复用核心 RASP/FCMP 转译链路和按 attempt 组织审计工件的约束。
+
 ## Requirements
 ### Requirement: Harness MUST 复用项目核心 RASP/FCMP 转译链路
 系统 MUST 复用本项目既有运行时协议实现（RASP/FCMP）进行解析与转译，禁止在 harness 内实现并维护另一套语义不一致的核心转译逻辑。

@@ -185,7 +185,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
         engine_options={"model": model_name},
         input_manifest_hash=manifest_hash
     )
-    store.record_cache_entry(cache_key, "run-cached")
+    await store.record_cache_entry(cache_key, "run-cached")
 
     background_tasks = BackgroundTasks()
     response = await jobs_router.create_run(
@@ -205,7 +205,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
     assert not runs_dir.exists() or not any(runs_dir.iterdir())
 
-    request_record = store.get_request(response.request_id)
+    request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] == "run-cached"
 
@@ -266,14 +266,14 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
     assert response.status == RunStatus.QUEUED
     assert len(background_tasks.tasks) == 1
 
-    request_record = store.get_request(response.request_id)
+    request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["cache_key"]
 
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
     assert runs_dir.exists()
 
-    request_record = store.get_request(response.request_id)
+    request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"]
 
@@ -485,7 +485,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
         engine_options={"model": "gemini-2.5-pro"},
         input_manifest_hash=manifest_hash
     )
-    store.record_cache_entry(cache_key, "run-cached")
+    await store.record_cache_entry(cache_key, "run-cached")
 
     upload = _build_upload_zip("input.txt", "hello")
 
@@ -501,7 +501,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
     assert not runs_dir.exists() or not any(runs_dir.iterdir())
 
-    request_record = store.get_request(create_response.request_id)
+    request_record = await store.get_request(create_response.request_id)
     assert request_record is not None
     assert request_record["run_id"] == "run-cached"
 
@@ -541,7 +541,7 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
         engine_options={"model": "gemini-2.5-pro"},
         input_manifest_hash=manifest_hash
     )
-    store.record_cache_entry(cache_key, "run-cached")
+    await store.record_cache_entry(cache_key, "run-cached")
 
     upload = _build_upload_zip("input.txt", "hello")
     upload_response = await jobs_router.upload_file(
@@ -551,7 +551,7 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
     )
 
     assert upload_response.cache_hit is False
-    request_record = store.get_request(create_response.request_id)
+    request_record = await store.get_request(create_response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
 
@@ -591,7 +591,7 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
 
     assert upload_response.cache_hit is False
     assert len(upload_tasks.tasks) == 1
-    request_record = store.get_request(create_response.request_id)
+    request_record = await store.get_request(create_response.request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
@@ -661,7 +661,7 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
         engine_options={"model": "gemini-2.5-pro"},
         input_manifest_hash=manifest_hash
     )
-    store.record_cache_entry(cache_key, "run-cached")
+    await store.record_cache_entry(cache_key, "run-cached")
 
     background_tasks = BackgroundTasks()
     response = await jobs_router.create_run(
@@ -676,10 +676,10 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     )
 
     assert response.cache_hit is False
-    request_record = store.get_request(response.request_id)
+    request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
-    run_record = store.get_run(request_record["run_id"])
+    run_record = await store.get_run(request_record["run_id"])
     assert run_record is not None
     assert run_record["cache_key"] is None
 
@@ -707,7 +707,7 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
         engine_options={"model": "gemini-2.5-pro"},
         input_manifest_hash=manifest_hash
     )
-    store.record_cache_entry(cache_key, "run-cached")
+    await store.record_cache_entry(cache_key, "run-cached")
 
     background_tasks = BackgroundTasks()
     response = await jobs_router.create_run(
@@ -722,10 +722,10 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
     )
 
     assert response.cache_hit is False
-    request_record = store.get_request(response.request_id)
+    request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"] != "run-cached"
-    run_record = store.get_run(request_record["run_id"])
+    run_record = await store.get_run(request_record["run_id"])
     assert run_record is not None
     assert run_record["cache_key"] is None
 
@@ -778,7 +778,7 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
 
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
         engine="gemini",
@@ -786,7 +786,7 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
     response = await jobs_router.get_run_artifacts(request_id)
     assert response.request_id == request_id
@@ -802,7 +802,7 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
     run_response = workspace_manager.create_run(run_request)
 
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
         engine="gemini",
@@ -810,7 +810,7 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
     response = await jobs_router.get_run_artifacts(request_id)
     assert response.request_id == request_id
@@ -830,7 +830,7 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     (run_dir / "artifacts" / "output.txt").write_text("ok")
     (run_dir / "result" / "result.json").write_text('{"status":"success"}')
 
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
         engine="gemini",
@@ -838,7 +838,7 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={"debug": True}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
     response = await jobs_router.get_run_bundle(request_id)
     assert str(response.path).endswith("run_bundle_debug.zip")
@@ -854,7 +854,7 @@ async def test_download_run_artifact_rejects_invalid_path(monkeypatch, temp_conf
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
     run_response = workspace_manager.create_run(run_request)
 
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
         engine="gemini",
@@ -862,7 +862,7 @@ async def test_download_run_artifact_rejects_invalid_path(monkeypatch, temp_conf
         engine_options={},
         runtime_options={}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
     with pytest.raises(HTTPException) as exc:
         await jobs_router.download_run_artifact(request_id, "bundle/run_bundle.zip")
@@ -881,7 +881,7 @@ async def test_download_run_artifact_success(monkeypatch, temp_config_dirs):
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
 
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
         engine="gemini",
@@ -889,7 +889,7 @@ async def test_download_run_artifact_success(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
     response = await jobs_router.download_run_artifact(request_id, "artifacts/output.txt")
     assert Path(response.path).exists()

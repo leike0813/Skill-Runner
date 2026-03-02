@@ -12,7 +12,8 @@ def test_completion_event_does_not_render_chat_bubble() -> None:
     assert "maybeAppendFinalSummary().catch(() => {});" in content
 
 
-def test_structured_done_message_is_suppressed_from_chat() -> None:
+def test_agent_messages_are_not_filtered_by_legacy_done_message_guard() -> None:
     content = _template()
-    assert "function isStructuredDoneMessage(text)" in content
-    assert "if (cleaned && !isStructuredDoneMessage(cleaned))" in content
+    assert "function isStructuredDoneMessage(text)" not in content
+    assert "if (cleaned && !isStructuredDoneMessage(cleaned))" not in content
+    assert 'appendChatBubble("agent", message,' in content

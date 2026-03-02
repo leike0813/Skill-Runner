@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -252,7 +252,7 @@ async def test_upload_auto_mode_cache_hit(temp_config_dirs, monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
-        lambda _key: "run-cached-temp-1",
+        AsyncMock(return_value="run-cached-temp-1"),
     )
     run_job_mock = AsyncMock()
     monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", run_job_mock)
@@ -276,7 +276,7 @@ async def test_upload_auto_mode_cache_hit(temp_config_dirs, monkeypatch):
     assert res.cache_hit is True
     run_job_mock.assert_not_called()
 
-    record = temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    record = await temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
     assert record is not None
     assert record.get("run_id") == "run-cached-temp-1"
 
@@ -293,7 +293,7 @@ async def test_upload_interactive_mode_skips_cache_lookup_and_writeback_key(temp
         "server.routers.temp_skill_runs.model_registry.validate_model",
         lambda _e, m: {"model": m},
     )
-    get_cached_run_mock = MagicMock(return_value="run-cached-temp-2")
+    get_cached_run_mock = AsyncMock(return_value="run-cached-temp-2")
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
         get_cached_run_mock,
@@ -334,7 +334,7 @@ async def test_upload_auto_mode_no_cache_skips_lookup_and_writeback_key(temp_con
         "server.routers.temp_skill_runs.model_registry.validate_model",
         lambda _e, m: {"model": m},
     )
-    get_cached_run_mock = MagicMock(return_value="run-cached-temp-3")
+    get_cached_run_mock = AsyncMock(return_value="run-cached-temp-3")
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.run_store.get_temp_cached_run",
         get_cached_run_mock,
@@ -411,7 +411,11 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
             encoding="utf-8",
         )
         if temp_request_id:
-            temp_skill_run_manager.on_terminal(temp_request_id, RunStatus.SUCCEEDED, debug_keep_temp=False)
+            await temp_skill_run_manager.on_terminal(
+                temp_request_id,
+                RunStatus.SUCCEEDED,
+                debug_keep_temp=False,
+            )
 
     monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", _fake_run_job)
 
@@ -461,7 +465,7 @@ async def test_cancel_temp_skill_run_active_accepts(temp_config_dirs, monkeypatc
             runtime_options={},
         )
     )
-    temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-1")
+    await temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-1")
     run_dir = Path(temp_config_dirs / "runs" / "run-temp-1")
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "status.json").write_text(
@@ -497,7 +501,7 @@ async def test_cancel_temp_skill_run_terminal_idempotent(temp_config_dirs, monke
             runtime_options={},
         )
     )
-    temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-2")
+    await temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-2")
     run_dir = Path(temp_config_dirs / "runs" / "run-temp-2")
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "status.json").write_text(
@@ -549,7 +553,7 @@ async def test_upload_syncs_temp_request_into_run_store(temp_config_dirs, monkey
     )
     assert upload.status == RunStatus.QUEUED
 
-    regular_record = temp_skill_runs_router.run_store.get_request(create.request_id)
+    regular_record = await temp_skill_runs_router.run_store.get_request(create.request_id)
     assert regular_record is not None
     assert regular_record["request_id"] == create.request_id
     assert regular_record["skill_id"] == "temp-router-skill"
@@ -583,7 +587,7 @@ async def test_temp_interaction_pending_and_reply_parity(temp_config_dirs, monke
         skill_package=_build_upload_file("skill.zip", _build_skill_zip()),
         file=None,
     )
-    rec = temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    rec = await temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
     assert rec is not None
     run_id = rec["run_id"]
     assert isinstance(run_id, str)
@@ -600,7 +604,7 @@ async def test_temp_interaction_pending_and_reply_parity(temp_config_dirs, monke
         lambda candidate: run_dir if candidate == run_id else None,
     )
 
-    temp_skill_runs_router.run_store.set_pending_interaction(
+    await temp_skill_runs_router.run_store.set_pending_interaction(
         create.request_id,
         {
             "interaction_id": 3,

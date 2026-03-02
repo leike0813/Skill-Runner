@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from server.runtime.observability.run_observability import (
     RunObservabilityService,
     configure_run_observability_ports,
@@ -40,7 +42,16 @@ class _FakeWorkspace:
 
 
 class _FakeJobControl:
+    def __init__(self) -> None:
+        self.used_build_run_bundle = False
+        self.used_legacy_bundle = False
+
+    def build_run_bundle(self, run_dir: Path, debug: bool = False):
+        self.used_build_run_bundle = True
+        return self._build_run_bundle(run_dir, debug)
+
     def _build_run_bundle(self, run_dir: Path, debug: bool = False):
+        self.used_legacy_bundle = True
         bundle_dir = run_dir / "bundle"
         bundle_dir.mkdir(parents=True, exist_ok=True)
         bundle_path = bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
@@ -51,7 +62,8 @@ class _FakeJobControl:
         return True
 
 
-def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"
     run_dir.mkdir(parents=True, exist_ok=True)
     run_id = "run-1"
@@ -74,16 +86,21 @@ def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
             workspace_backend=fake_workspace,
             parser_resolver_backend=None,
         )
-        configure_run_read_facade_ports(job_control_backend=_FakeJobControl())
+        fake_job_control = _FakeJobControl()
+        configure_run_read_facade_ports(job_control_backend=fake_job_control)
 
         source_adapter = cast(RunSourceAdapter, InstalledRunSourceAdapter())
-        request_record, resolved_run_dir = get_request_and_run_dir(source_adapter, request_id)
+        request_record, resolved_run_dir = await get_request_and_run_dir(source_adapter, request_id)
         assert request_record["run_id"] == run_id
         assert resolved_run_dir == run_dir
 
         assert RunObservabilityService()._run_store() is fake_store
         assert RunObservabilityService()._workspace() is fake_workspace
         assert RunReadFacade()._job_control().__class__.__name__ == "_FakeJobControl"
+        _ = await RunReadFacade().get_bundle(source_adapter=source_adapter, request_id=request_id)
+        assert (run_dir / "bundle" / "run_bundle.zip").exists()
+        assert fake_job_control.used_build_run_bundle is True
+        assert fake_job_control.used_legacy_bundle is True
     finally:
         observability_module.run_store = previous_run_store
         observability_module.workspace_manager = previous_workspace

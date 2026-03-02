@@ -210,7 +210,7 @@ class IFlowAuthCliFlow:
         try:
             with session.output_path.open("a", encoding="utf-8") as stream:
                 stream.write(chunk)
-        except Exception:
+        except OSError:
             pass
 
         cleaned = _strip_ansi(chunk).replace("\r", "\n")
@@ -364,7 +364,7 @@ class IFlowAuthCliFlow:
             return None
         try:
             return int(match.group(1))
-        except Exception:
+        except ValueError:
             return None
 
     def _extract_auth_url(self, text: str) -> str | None:
@@ -422,7 +422,7 @@ class IFlowAuthCliFlow:
                         time.sleep(0.05)
                     if proc.poll() is None:
                         os.killpg(proc.pid, signal.SIGKILL)
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 pass
         if not session._closed_fd:
             try:

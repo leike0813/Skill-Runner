@@ -1,7 +1,9 @@
-import sqlite3
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import aiosqlite
 
 from server.config import config
 from server.models import SkillInstallStatus
@@ -13,16 +15,25 @@ class SkillInstallStore:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path or Path(config.SYSTEM.SKILL_INSTALLS_DB)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        self._init_lock = asyncio.Lock()
+        self._initialized = False
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _connect(self):
+        return aiosqlite.connect(str(self.db_path))
 
-    def _init_db(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
+    async def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            await self._init_db()
+            self._initialized = True
+
+    async def _init_db(self) -> None:
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS skill_installs (
                     request_id TEXT PRIMARY KEY,
@@ -36,11 +47,14 @@ class SkillInstallStore:
                 )
                 """
             )
+            await conn.commit()
 
-    def create_install(self, request_id: str) -> None:
+    async def create_install(self, request_id: str) -> None:
+        await self._ensure_initialized()
         now = datetime.utcnow().isoformat()
-        with self._connect() as conn:
-            conn.execute(
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
                 """
                 INSERT INTO skill_installs (
                     request_id, status, created_at, updated_at
@@ -48,22 +62,23 @@ class SkillInstallStore:
                 """,
                 (request_id, SkillInstallStatus.QUEUED.value, now, now)
             )
+            await conn.commit()
 
-    def update_running(self, request_id: str) -> None:
-        self._update(
+    async def update_running(self, request_id: str) -> None:
+        await self._update(
             request_id,
             status=SkillInstallStatus.RUNNING.value,
             error=None
         )
 
-    def update_succeeded(
+    async def update_succeeded(
         self,
         request_id: str,
         skill_id: str,
         version: str,
         action: str
     ) -> None:
-        self._update(
+        await self._update(
             request_id,
             status=SkillInstallStatus.SUCCEEDED.value,
             skill_id=skill_id,
@@ -72,45 +87,54 @@ class SkillInstallStore:
             error=None
         )
 
-    def update_failed(self, request_id: str, error: str) -> None:
-        self._update(
+    async def update_failed(self, request_id: str, error: str) -> None:
+        await self._update(
             request_id,
             status=SkillInstallStatus.FAILED.value,
             error=error
         )
 
-    def _update(self, request_id: str, **fields: Any) -> None:
+    async def _update(self, request_id: str, **fields: Any) -> None:
+        await self._ensure_initialized()
         if not fields:
             return
         fields["updated_at"] = datetime.utcnow().isoformat()
         columns = ", ".join(f"{key} = ?" for key in fields.keys())
         values = list(fields.values()) + [request_id]
-        with self._connect() as conn:
-            conn.execute(
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
                 f"UPDATE skill_installs SET {columns} WHERE request_id = ?",
                 values
             )
+            await conn.commit()
 
-    def get_install(self, request_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
-            row = conn.execute(
+    async def get_install(self, request_id: str) -> Optional[Dict[str, Any]]:
+        await self._ensure_initialized()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
                 "SELECT * FROM skill_installs WHERE request_id = ?",
                 (request_id,)
-            ).fetchone()
+            )
+            row = await cursor.fetchone()
         if not row:
             return None
         return dict(row)
 
-    def list_installs(self, limit: int = 50) -> List[Dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
+    async def list_installs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
                 """
                 SELECT * FROM skill_installs
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
                 (limit,)
-            ).fetchall()
+            )
+            rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
 

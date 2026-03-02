@@ -1,7 +1,8 @@
 # ui-home-navigation Specification
 
 ## Purpose
-TBD - created by archiving change ui-auth-shell-and-home-nav-polish. Update Purpose after archive.
+定义首页导航布局的 sidebar、breadcrumb 和路由映射约束。
+
 ## Requirements
 ### Requirement: UI 首页 MUST 提供清晰且美观的功能入口
 系统 MUST 将首页的核心管理入口（Engine 管理、Run 观测）以更易发现的视觉组件呈现，而非仅文本链接。

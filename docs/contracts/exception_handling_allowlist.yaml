@@ -1,0 +1,99 @@
+version: 1
+policy:
+  description: Broad-exception baseline allowlist; new broad catches require explicit approval.
+  default: deny
+  approved_exception_type: Exception
+  allowed_contexts:
+    - boundary_mapping
+    - best_effort_cleanup
+    - observability_non_blocking
+    - third_party_boundary
+  baseline_totals:
+    total: 16
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 16
+    other: 0
+baseline:
+  server/engines/common/callbacks/server_base.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+  server/routers/jobs.py:
+    total: 3
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 3
+    other: 0
+  server/routers/management.py:
+    total: 2
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 2
+    other: 0
+  server/routers/oauth_callback.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+  server/routers/skill_packages.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+  server/routers/temp_skill_runs.py:
+    total: 2
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 2
+    other: 0
+  server/services/orchestration/run_audit_service.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+  server/services/orchestration/run_interaction_lifecycle_service.py:
+    total: 3
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 3
+    other: 0
+  server/services/skill/skill_package_manager.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+  server/services/ui/ui_shell_manager.py:
+    total: 1
+    pass: 0
+    loop_control: 0
+    return: 0
+    log: 1
+    other: 0
+retained_contexts:
+  server/engines/common/callbacks/server_base.py: third_party_boundary
+  server/routers/jobs.py: boundary_mapping
+  server/routers/management.py: boundary_mapping
+  server/routers/oauth_callback.py: boundary_mapping
+  server/routers/skill_packages.py: boundary_mapping
+  server/routers/temp_skill_runs.py: boundary_mapping
+  server/services/orchestration/run_audit_service.py: observability_non_blocking
+  server/services/orchestration/run_interaction_lifecycle_service.py: third_party_boundary
+  server/services/skill/skill_package_manager.py: boundary_mapping
+  server/services/ui/ui_shell_manager.py: best_effort_cleanup

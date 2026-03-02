@@ -1,4 +1,5 @@
 import uuid
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile  # type: ignore[import-not-found]
@@ -18,6 +19,7 @@ router = APIRouter(
     tags=["skill-packages"],
     dependencies=[Depends(require_ui_basic_auth)],
 )
+logger = logging.getLogger(__name__)
 
 
 @router.post("/install", response_model=SkillInstallCreateResponse)
@@ -30,7 +32,7 @@ async def install_skill_package(
         if not payload:
             raise HTTPException(status_code=400, detail="Uploaded package is empty")
         request_id = str(uuid.uuid4())
-        skill_package_manager.create_install_request(request_id, payload)
+        await skill_package_manager.create_install_request(request_id, payload)
         background_tasks.add_task(skill_package_manager.run_install, request_id)
         return SkillInstallCreateResponse(
             request_id=request_id,
@@ -41,12 +43,22 @@ async def install_skill_package(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        # Boundary mapping for unexpected install failures.
+        logger.exception(
+            "skill_packages.install failed; returning HTTP 500",
+            extra={
+                "component": "router.skill_packages",
+                "action": "install_skill_package",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{request_id}", response_model=SkillInstallStatusResponse)
 async def get_install_status(request_id: str):
-    record = skill_install_store.get_install(request_id)
+    record = await skill_install_store.get_install(request_id)
     if not record:
         raise HTTPException(status_code=404, detail="Install request not found")
 

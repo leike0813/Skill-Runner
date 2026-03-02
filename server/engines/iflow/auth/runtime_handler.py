@@ -203,7 +203,7 @@ class IFlowAuthRuntimeHandler:
                 audit["callback_mode"] = "manual"
                 audit.update(flow_result)
                 self._manager._finalize_active_session(session)  # noqa: SLF001
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
                 session.auth_ready = self._manager._collect_auth_ready("iflow")  # noqa: SLF001
@@ -305,7 +305,7 @@ class IFlowAuthRuntimeHandler:
             audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
             audit["callback_mode"] = "auto"
             audit.update(flow_result)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = f"OAuth callback token exchange failed: {exc}"
             session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001

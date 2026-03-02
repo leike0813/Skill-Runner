@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.runtime.observability.job_control_port import JobControlPort
 from server.runtime.observability.run_observability import configure_run_observability_ports
 from server.runtime.observability.run_read_facade import configure_run_read_facade_ports
 from server.runtime.observability.run_source_adapter import configure_run_source_ports
@@ -19,4 +20,5 @@ def install_runtime_observability_ports() -> None:
         workspace_backend=workspace_manager,
         parser_resolver_backend=runtime_parser_resolver,
     )
-    configure_run_read_facade_ports(job_control_backend=job_orchestrator)
+    job_control: JobControlPort = job_orchestrator
+    configure_run_read_facade_ports(job_control_backend=job_control)

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from server.runtime.observability.run_source_adapter import (
     get_request_and_run_dir,
     installed_run_source_adapter,
@@ -23,20 +25,22 @@ def test_source_capability_parity_matrix() -> None:
     assert temp_run_source_adapter.cache_namespace == "temp_cache_entries"
 
 
-def test_cache_lookup_namespace_isolated(tmp_path, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_cache_lookup_namespace_isolated(tmp_path, monkeypatch) -> None:
     store = RunStore(db_path=tmp_path / "runs.db")
-    store.record_cache_entry("shared-key", "run-installed")
-    store.record_temp_cache_entry("shared-key", "run-temp")
+    await store.record_cache_entry("shared-key", "run-installed")
+    await store.record_temp_cache_entry("shared-key", "run-temp")
     monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
 
-    assert installed_run_source_adapter.get_cached_run("shared-key") == "run-installed"
-    assert temp_run_source_adapter.get_cached_run("shared-key") == "run-temp"
+    assert await installed_run_source_adapter.get_cached_run("shared-key") == "run-installed"
+    assert await temp_run_source_adapter.get_cached_run("shared-key") == "run-temp"
 
 
-def test_temp_bind_cached_run_updates_both_stores(tmp_path, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_temp_bind_cached_run_updates_both_stores(tmp_path, monkeypatch) -> None:
     store = RunStore(db_path=tmp_path / "runs.db")
     temp_store = TempSkillRunStore(db_path=tmp_path / "temp_runs.db")
-    temp_store.create_request(
+    await temp_store.create_request(
         request_id="temp-req-1",
         engine="gemini",
         parameter={},
@@ -44,7 +48,7 @@ def test_temp_bind_cached_run_updates_both_stores(tmp_path, monkeypatch) -> None
         engine_options={},
         runtime_options={"execution_mode": "interactive"},
     )
-    store.create_request(
+    await store.create_request(
         request_id="temp-req-1",
         skill_id="skill-temp",
         engine="gemini",
@@ -57,23 +61,24 @@ def test_temp_bind_cached_run_updates_both_stores(tmp_path, monkeypatch) -> None
     monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
     monkeypatch.setattr("server.runtime.observability.run_source_adapter.temp_skill_run_store", temp_store)
 
-    temp_run_source_adapter.bind_cached_run("temp-req-1", "run-cached-temp-1")
+    await temp_run_source_adapter.bind_cached_run("temp-req-1", "run-cached-temp-1")
 
-    temp_record = temp_store.get_request("temp-req-1")
+    temp_record = await temp_store.get_request("temp-req-1")
     assert temp_record is not None
     assert temp_record["run_id"] == "run-cached-temp-1"
 
-    regular_record = store.get_request("temp-req-1")
+    regular_record = await store.get_request("temp-req-1")
     assert regular_record is not None
     assert regular_record["run_id"] == "run-cached-temp-1"
 
 
-def test_get_request_and_run_dir_reads_source_request(tmp_path, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_get_request_and_run_dir_reads_source_request(tmp_path, monkeypatch) -> None:
     store = RunStore(db_path=tmp_path / "runs.db")
     runs_dir = tmp_path / "runs"
     run_dir = runs_dir / "run-1"
     run_dir.mkdir(parents=True, exist_ok=True)
-    store.create_request(
+    await store.create_request(
         request_id="req-1",
         skill_id="demo",
         engine="gemini",
@@ -82,7 +87,7 @@ def test_get_request_and_run_dir_reads_source_request(tmp_path, monkeypatch) -> 
         engine_options={},
         runtime_options={},
     )
-    store.update_request_run_id("req-1", "run-1")
+    await store.update_request_run_id("req-1", "run-1")
 
     monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
     monkeypatch.setattr(
@@ -90,7 +95,7 @@ def test_get_request_and_run_dir_reads_source_request(tmp_path, monkeypatch) -> 
         lambda run_id: run_dir if run_id == "run-1" else None,
     )
 
-    record, resolved_dir = get_request_and_run_dir(installed_run_source_adapter, "req-1")
+    record, resolved_dir = await get_request_and_run_dir(installed_run_source_adapter, "req-1")
     assert record["request_id"] == "req-1"
     assert isinstance(resolved_dir, Path)
     assert resolved_dir == run_dir

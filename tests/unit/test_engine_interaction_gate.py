@@ -1,6 +1,6 @@
 import pytest
 
-from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
+from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
 
 
 def test_engine_interaction_gate_allows_single_active_session():

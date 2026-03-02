@@ -1,7 +1,8 @@
 # ui-skill-browser Specification
 
 ## Purpose
-TBD - created by archiving change ui-skill-browser-and-auth-hardening. Update Purpose after archive.
+定义 Skill 浏览页面的列表渲染、搜索过滤和详情展示约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供单个 skill 的包结构浏览页面（只读）
 系统 MUST 提供 `/ui/skills/{skill_id}` 页面，用于浏览该 skill 包结构与元信息。

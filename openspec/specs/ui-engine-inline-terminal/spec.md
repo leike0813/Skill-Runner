@@ -1,7 +1,8 @@
 # ui-engine-inline-terminal Specification
 
 ## Purpose
-TBD - created by archiving change engine-ui-inline-tui-terminal. Update Purpose after archive.
+定义引擎管理页面内嵌终端面板的 xterm.js 集成和 WebSocket 连接约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供受控的 UI 鉴权终端会话
 系统 MUST 在 `/ui/engines` 页面内提供终端会话能力，并在 managed 环境中执行预置引擎命令。
@@ -34,6 +35,11 @@ TBD - created by archiving change engine-ui-inline-tui-terminal. Update Purpose 
 - **THEN** 系统仍尝试启动会话
 - **AND** UI 显示非阻断 warning
 - **AND** 会话状态中记录对应 `sandbox_status`
+
+#### Scenario: sandbox 仅在终端 banner 中展示
+- **WHEN** 用户启动或查看内嵌终端会话
+- **THEN** sandbox 信息在 terminal/banner 区域展示
+- **AND** 不再在 engine 管理列表摘要中复用该状态
 
 ### Requirement: 系统 MUST 将会话写入范围限制在隔离目录与 agent_home
 系统 MUST 为每个内嵌终端会话创建独立工作目录，并将写入范围限制在该会话目录与 `agent_home`。
@@ -84,4 +90,3 @@ TBD - created by archiving change engine-ui-inline-tui-terminal. Update Purpose 
 - **WHEN** 用户点击启动按钮但当前引擎 sandbox 不可用
 - **THEN** 页面立即展示错误反馈
 - **AND** 启动按钮保持可见以便用户重试
-

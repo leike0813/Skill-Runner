@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from server.config import config
@@ -40,7 +41,7 @@ class CacheManager:
                 logger.info("UV Cache Pruned: %s", stdout.decode())
             else:
                 logger.warning("UV Cache Prune Failed: %s", stderr.decode())
-        except Exception as e:
+        except (OSError, UnicodeDecodeError, subprocess.SubprocessError):
             logger.exception("Error checking cache")
 
 cache_manager = CacheManager()

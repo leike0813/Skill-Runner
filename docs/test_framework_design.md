@@ -106,33 +106,75 @@ Runner 将是一个 Python 脚本，负责读取 YAML 并在本地**黑盒调用
 ### 目录规划
 ```text
 tests/
-├── unit/                     # 单元测试
-│   ├── test_schema_validator.py
-│   ├── test_gemini_adapter.py
-│   └── test_workspace_manager.py
+├── unit/                     # 单元测试（120+ test files）
+│   ├── test_schema_validator.py        # Platform: Schema 校验
+│   ├── test_gemini_adapter.py          # Engines: Gemini 适配器
+│   ├── test_codex_adapter.py           # Engines: Codex 适配器
+│   ├── test_iflow_adapter.py           # Engines: iFlow 适配器
+│   ├── test_opencode_adapter.py        # Engines: OpenCode 适配器
+│   ├── test_job_orchestrator.py        # Orchestration: 作业编排
+│   ├── test_run_store.py               # Orchestration: Run 存储
+│   ├── test_runtime_event_protocol.py  # Protocol: FCMP 事件协议
+│   ├── test_run_observability.py       # Observability: 可观测性
+│   ├── test_session_invariant_contract.py  # Contract: 状态机不变量
+│   ├── test_session_state_model_properties.py  # Contract: 状态模型属性
+│   ├── test_fcmp_mapping_properties.py     # Contract: FCMP 映射
+│   ├── test_protocol_state_alignment.py    # Contract: 协议状态对齐
+│   ├── test_skill_registry.py          # Skill: 注册表
+│   ├── test_skill_patcher.py           # Skill: 运行时补丁
+│   ├── test_workspace_manager.py       # Orchestration: 工作区
+│   └── ...                             # (更多测试文件)
+├── common/                   # 共享测试合同与工具
+│   ├── session_invariant_contract.py   # 状态机不变量合同
+│   └── skill_fixture_loader.py         # Skill fixture 加载器
 ├── engine_integration/       # 引擎执行链路集成测试
 │   ├── run_engine_integration_tests.py
 │   └── suites/*.yaml
 ├── api_integration/          # API/UI 契约集成测试
 │   └── test_*.py
+├── e2e/                      # 端到端测试
+│   ├── run_e2e_tests.py
+│   ├── run_local_e2e_tests.py
+│   └── run_container_e2e_tests.py
+├── fixtures/                 # 测试数据
+│   └── skills/               # Skill fixture 包
+│       ├── demo-prime-number/
+│       ├── demo-bible-verse/
+│       ├── demo-auto-skill/
+│       ├── demo-interactive-skill/
+│       └── ...
+├── assets/                   # 测试资源文件
+└── config/                   # 测试配置
 ```
 
 ### 关键测试点
 
-1.  **SchemaValidator**:
-    *   纯逻辑测试。验证 `validate_schema` 对各种合法/非法 JSON 的反应。
-    *   验证 `files` vs `parameter` 的 schema 拆分逻辑。
+单元测试已按组件分类全面覆盖：
 
-2.  **GeminiAdapter** (Mocking):
-    *   Mock `subprocess.create_subprocess_exec`。
-    *   测试 Prompt 生成逻辑：
-        *   验证 Strict Key-Matching 逻辑（文件存在 vs 不存在）。
-        *   验证 Jinja2 模板渲染是否正确包含 `{{ input }}` 和 `{{ parameter }}`。
+1.  **Contract Tests（合同测试）**:
+    *   `test_session_invariant_contract.py` — 状态机不变量守护
+    *   `test_session_state_model_properties.py` — 状态模型属性测试
+    *   `test_fcmp_mapping_properties.py` — FCMP 映射属性
+    *   `test_protocol_state_alignment.py` — 协议状态对齐
 
-3.  **JobOrchestrator** (Mocking):
-    *   Mock `SkillRegistry` 和 `WorkspaceManager`。
-    *   验证 `strict validation` 失败时是否正确抛出异常。
-    *   验证状态更新逻辑。
+2.  **Adapter Tests（适配器测试）**:
+    *   每个引擎独立测试（`test_codex_adapter.py`、`test_gemini_adapter.py`、`test_iflow_adapter.py`、`test_opencode_adapter.py`）
+    *   共享组件测试（`test_adapter_command_profiles.py`、`test_adapter_parsing.py` 等）
+
+3.  **Orchestration Tests（编排测试）**:
+    *   `test_job_orchestrator.py` — 作业编排逻辑
+    *   `test_run_store.py` — Run 持久化
+    *   `test_workspace_manager.py` — 工作区管理
+
+4.  **Auth Tests（鉴权测试）**:
+    *   每个引擎 OAuth 流程测试
+    *   `test_auth_driver_registry.py` — 鉴权驱动注册
+    *   `test_engine_auth_flow_manager.py` — 鉴权流程管理
+
+5.  **Architecture Guard Tests（架构守护测试）**:
+    *   `test_runtime_core_import_boundaries.py` — 导入边界检查
+    *   `test_runtime_no_orchestration_imports.py` — Runtime 不依赖 Orchestration
+    *   `test_services_topology_rules.py` — 服务拓扑规则
 
 ### 工具栈
 - **Framework**: `pytest`

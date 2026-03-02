@@ -1,7 +1,8 @@
 # engine-execution-failfast Specification
 
 ## Purpose
-TBD - created by archiving change engine-auth-observability-and-failfast. Update Purpose after archive.
+定义任务执行的硬超时终止和失败分类（AUTH_REQUIRED/TIMEOUT）策略。
+
 ## Requirements
 ### Requirement: 任务执行 MUST 启用硬超时并终止阻塞子进程
 系统 MUST 对 Agent 子进程执行施加硬超时，超时后必须终止整个相关进程树并结束任务。

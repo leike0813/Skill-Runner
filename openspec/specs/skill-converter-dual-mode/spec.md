@@ -1,7 +1,8 @@
 # skill-converter-dual-mode Specification
 
 ## Purpose
-TBD - created by archiving change skill-converter-dual-mode. Update Purpose after archive.
+定义 converter 同时支持目录源和 zip 源输入的约束。
+
 ## Requirements
 ### Requirement: Converter supports directory source input
 The converter SHALL accept a local skill directory as source input for interactive-first conversion workflows.

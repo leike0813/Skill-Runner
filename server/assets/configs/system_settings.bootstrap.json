@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "logging": {
+    "level": "INFO",
+    "format": "text",
+    "retention_days": 7,
+    "dir_max_bytes": 536870912
+  }
+}

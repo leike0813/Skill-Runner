@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from server.services.orchestration import runtime_profile
+from server.services.engine_management import runtime_profile
 
 
 def test_runtime_profile_container_defaults(monkeypatch):

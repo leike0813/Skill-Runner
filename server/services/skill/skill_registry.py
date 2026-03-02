@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from server.config import config
 from server.models import ExecutionMode, SkillManifest
-from server.services.orchestration.engine_policy import apply_engine_policy_to_manifest
+from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class SkillRegistry:
                         self._missing_execution_modes_warned.add(skill_dir.name)
 
                 return SkillManifest(**data, path=skill_dir)
-        except Exception:
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
             logger.exception("Error loading skill %s", skill_dir.name)
             return None
 

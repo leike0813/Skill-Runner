@@ -33,12 +33,14 @@ def _allow_cleanup_skill(monkeypatch, tmp_path):
     )
 
 
-def _set_run_row(store: RunStore, run_id: str, status: str, created_at: str) -> None:
-    with store._connect() as conn:
-        conn.execute(
+async def _set_run_row(store: RunStore, run_id: str, status: str, created_at: str) -> None:
+    await store._ensure_initialized()
+    async with store._connect() as conn:
+        await conn.execute(
             "UPDATE runs SET status = ?, created_at = ? WHERE run_id = ?",
             (status, created_at, run_id)
         )
+        await conn.commit()
 
 
 @pytest.mark.asyncio
@@ -57,18 +59,18 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
     run_failed = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
     run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
 
-    store.create_run(run_old.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
-    store.create_run(run_failed.run_id, cache_key="k2", status=RunStatus.FAILED)
-    store.create_run(run_running.run_id, cache_key="k3", status=RunStatus.RUNNING)
+    await store.create_run(run_old.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
+    await store.create_run(run_failed.run_id, cache_key="k2", status=RunStatus.FAILED)
+    await store.create_run(run_running.run_id, cache_key="k3", status=RunStatus.RUNNING)
 
-    _set_run_row(store, run_old.run_id, RunStatus.SUCCEEDED, old_ts)
-    _set_run_row(store, run_failed.run_id, RunStatus.FAILED, current_ts)
-    _set_run_row(store, run_running.run_id, RunStatus.RUNNING, current_ts)
+    await _set_run_row(store, run_old.run_id, RunStatus.SUCCEEDED, old_ts)
+    await _set_run_row(store, run_failed.run_id, RunStatus.FAILED, current_ts)
+    await _set_run_row(store, run_running.run_id, RunStatus.RUNNING, current_ts)
 
     for idx, run_id in enumerate([run_old.run_id, run_failed.run_id, run_running.run_id], start=1):
         request_id = f"request-{idx}"
         workspace_manager.create_request(request_id, {"skill_id": "s"})
-        store.create_request(
+        await store.create_request(
             request_id=request_id,
             skill_id="s",
             engine="gemini",
@@ -76,7 +78,7 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
             engine_options={},
             runtime_options={}
         )
-        store.update_request_run_id(request_id, run_id)
+        await store.update_request_run_id(request_id, run_id)
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
     config.defrost()
@@ -94,8 +96,11 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
     assert not (runs_dir / run_failed.run_id).exists()
     assert (runs_dir / run_running.run_id).exists()
 
-    with store._connect() as conn:
-        remaining = {row["run_id"] for row in conn.execute("SELECT run_id FROM runs")}
+    async with store._connect() as conn:
+        conn.row_factory = None
+        cursor = await conn.execute("SELECT run_id FROM runs")
+        rows = await cursor.fetchall()
+        remaining = {row[0] for row in rows}
     assert run_running.run_id in remaining
     assert run_old.run_id not in remaining
     assert run_failed.run_id not in remaining
@@ -113,10 +118,10 @@ async def test_cleanup_skips_queued_and_running(monkeypatch, temp_config_dirs):
     run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
     run_queued = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
 
-    store.create_run(run_running.run_id, cache_key="k1", status=RunStatus.RUNNING)
-    store.create_run(run_queued.run_id, cache_key="k2", status=RunStatus.QUEUED)
-    _set_run_row(store, run_running.run_id, RunStatus.RUNNING, old_ts)
-    _set_run_row(store, run_queued.run_id, RunStatus.QUEUED, old_ts)
+    await store.create_run(run_running.run_id, cache_key="k1", status=RunStatus.RUNNING)
+    await store.create_run(run_queued.run_id, cache_key="k2", status=RunStatus.QUEUED)
+    await _set_run_row(store, run_running.run_id, RunStatus.RUNNING, old_ts)
+    await _set_run_row(store, run_queued.run_id, RunStatus.QUEUED, old_ts)
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
     config.defrost()
@@ -143,8 +148,8 @@ async def test_cleanup_handles_invalid_timestamp(monkeypatch, temp_config_dirs):
     manager = RunCleanupManager()
 
     run_bad = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    store.create_run(run_bad.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
-    _set_run_row(store, run_bad.run_id, RunStatus.SUCCEEDED, "bad-timestamp")
+    await store.create_run(run_bad.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
+    await _set_run_row(store, run_bad.run_id, RunStatus.SUCCEEDED, "bad-timestamp")
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
     config.defrost()
@@ -170,7 +175,7 @@ async def test_cleanup_handles_missing_run_dir(monkeypatch, temp_config_dirs):
     manager = RunCleanupManager()
 
     run_missing = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    store.create_run(run_missing.run_id, cache_key="k1", status=RunStatus.FAILED)
+    await store.create_run(run_missing.run_id, cache_key="k1", status=RunStatus.FAILED)
     workspace_manager.delete_run_dir(run_missing.run_id)
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
@@ -184,8 +189,10 @@ async def test_cleanup_handles_missing_run_dir(monkeypatch, temp_config_dirs):
         config.SYSTEM.RUN_RETENTION_DAYS = old_retention
         config.freeze()
 
-    with store._connect() as conn:
-        remaining = {row["run_id"] for row in conn.execute("SELECT run_id FROM runs")}
+    async with store._connect() as conn:
+        cursor = await conn.execute("SELECT run_id FROM runs")
+        rows = await cursor.fetchall()
+        remaining = {row[0] for row in rows}
     assert run_missing.run_id not in remaining
 
 
@@ -198,8 +205,8 @@ async def test_cleanup_disabled_when_retention_zero(monkeypatch, temp_config_dir
     manager = RunCleanupManager()
 
     run_old = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    store.create_run(run_old.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
-    _set_run_row(store, run_old.run_id, RunStatus.SUCCEEDED, (datetime.utcnow() - timedelta(days=10)).isoformat())
+    await store.create_run(run_old.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
+    await _set_run_row(store, run_old.run_id, RunStatus.SUCCEEDED, (datetime.utcnow() - timedelta(days=10)).isoformat())
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
     config.defrost()
@@ -214,12 +221,15 @@ async def test_cleanup_disabled_when_retention_zero(monkeypatch, temp_config_dir
 
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
     assert (runs_dir / run_old.run_id).exists()
-    with store._connect() as conn:
-        remaining = {row["run_id"] for row in conn.execute("SELECT run_id FROM runs")}
+    async with store._connect() as conn:
+        cursor = await conn.execute("SELECT run_id FROM runs")
+        rows = await cursor.fetchall()
+        remaining = {row[0] for row in rows}
     assert run_old.run_id in remaining
 
 
-def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
+@pytest.mark.asyncio
+async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
@@ -227,11 +237,11 @@ def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
     manager = RunCleanupManager()
 
     run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
+    await store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
 
     request_id = "request-clear"
     workspace_manager.create_request(request_id, {"skill_id": "s"})
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="s",
         engine="gemini",
@@ -239,13 +249,13 @@ def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={}
     )
-    store.update_request_run_id(request_id, run_response.run_id)
+    await store.update_request_run_id(request_id, run_response.run_id)
 
-    counts = manager.clear_all()
+    counts = await manager.clear_all()
     assert counts["runs"] >= 1
     assert counts["requests"] >= 1
 
-    second_counts = manager.clear_all()
+    second_counts = await manager.clear_all()
     assert second_counts["runs"] == 0
     assert second_counts["requests"] == 0
     assert second_counts["cache_entries"] == 0
@@ -263,7 +273,7 @@ async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, t
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
     run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.RUNNING)
+    await store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.RUNNING)
 
     class RecorderTrustManager:
         def __init__(self):

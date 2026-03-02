@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from server.config import config
 from server.models import RunCreateRequest, RunResponse, RunStatus, SkillManifest
-from server.services.orchestration.engine_policy import resolve_skill_engine_policy
+from server.services.engine_management.engine_policy import resolve_skill_engine_policy
 
 import zipfile
 import io

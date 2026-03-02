@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from server.runtime.observability.run_observability import RunObservabilityService
 
 
@@ -37,7 +39,8 @@ def _read_rows(path: Path) -> list[dict]:
     return rows
 
 
-def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-global-seq-file"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -71,13 +74,16 @@ def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_path: Pa
         (audit_dir / f"stdout.{attempt}.log").write_text("", encoding="utf-8")
         (audit_dir / f"stderr.{attempt}.log").write_text("", encoding="utf-8")
 
+    async def _materialize(_self, **_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
-        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+        _materialize,
     )
 
     service = RunObservabilityService()
-    service.list_protocol_history(
+    await service.list_protocol_history(
         run_dir=run_dir,
         request_id=None,
         stream="fcmp",

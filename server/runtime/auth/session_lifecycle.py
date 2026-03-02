@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -184,22 +185,29 @@ class AuthSessionStarter:
                 callback_base_url=callback_base_url,
                 context=context,
             )
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             handler = self._handlers.get(plan.engine)
             if handler is not None:
                 try:
                     handler.cleanup_start_error(context=context)
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
+                    # Best-effort cleanup: never mask the primary startup failure.
                     pass
             if context.trust_engine and context.trust_path:
                 try:
                     self._manager.trust_manager.remove_run_folder(context.trust_engine, context.trust_path)
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
+                    # Best-effort rollback: preserve original exception and release lock.
                     pass
+            try:
+                self._manager._auth_log_writer.cleanup_paths(log_paths)  # noqa: SLF001
+            except (OSError, RuntimeError, ValueError):
+                pass
             self._manager.interaction_gate.release("auth_flow", session_id)
+            # Boundary behavior: re-raise original startup exception after cleanup attempts.
             raise
 
-        session.log_root = session_dir
+        session.log_root = session_dir if log_paths.persisted else None
         session.log_paths = log_paths
         self._manager._sessions[session_id] = session  # noqa: SLF001
         self._manager._session_store.upsert(  # noqa: SLF001

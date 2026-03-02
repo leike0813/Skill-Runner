@@ -99,8 +99,17 @@ data/requests/
   - [iFlow CLI](https://cli.iflow.cn/)
 
 ## 日志配置
-日志默认输出到终端与 `data/logs/`，可通过环境变量控制：
-- `LOG_LEVEL`: 日志级别（默认 `INFO`）
-- `LOG_FILE`: 自定义日志文件路径（为空则使用默认文件）
-- `LOG_MAX_BYTES`: 单个日志文件大小上限（默认 5MB）
-- `LOG_BACKUP_COUNT`: 轮转备份文件数（默认 5）
+日志默认输出到终端与 `data/logs/`。
+
+- 持久化且可由 `/ui/settings` 修改的最小日志设置存放在 `data/system_settings.json`
+  - `level`
+  - `format`
+  - `retention_days`
+  - `dir_max_bytes`
+- 只读运行时日志输入继续由系统配置/环境变量提供
+  - `LOG_DIR`
+  - `LOG_FILE_BASENAME`
+  - `LOG_ROTATION_WHEN`
+  - `LOG_ROTATION_INTERVAL`
+
+管理首页 `/ui` 不再直接放置 data reset 危险区；危险操作与日志设置统一位于 `/ui/settings`。

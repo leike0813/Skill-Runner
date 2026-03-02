@@ -14,8 +14,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Optional, Protocol
 
-from server.services.orchestration.agent_cli_manager import AgentCliManager
-from server.services.orchestration.engine_interaction_gate import (
+from server.services.engine_management.agent_cli_manager import AgentCliManager
+from server.services.engine_management.engine_interaction_gate import (
     EngineInteractionBusyError,
     EngineInteractionGate,
     engine_interaction_gate,
@@ -147,7 +147,7 @@ class UiShellSession:
                     time.sleep(0.1)
                 if self._process.poll() is None:
                     os.killpg(self.pid, signal.SIGKILL)
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError):
             pass
 
         code = self._process.poll()
@@ -306,7 +306,7 @@ class UiShellManager:
                         check=False,
                         timeout=3,
                     )
-                except Exception as exc:
+                except (OSError, subprocess.SubprocessError, TypeError, ValueError) as exc:
                     runtime_errors.append(f"{runtime}: {str(exc)}")
                     continue
                 if result.returncode == 0:
@@ -345,7 +345,7 @@ class UiShellManager:
             return None
         try:
             payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             return None
         if not isinstance(payload, dict):
             return None
@@ -439,13 +439,13 @@ class UiShellManager:
     def _cleanup_trust_for_session(self, session: UiShellSession) -> None:
         try:
             self.trust_manager.remove_run_folder(session.trust_engine, session.cwd_path)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             logger.warning(
                 "Failed to cleanup UI TUI trust entry for engine=%s session_id=%s",
                 session.trust_engine,
-                    session.id,
-                    exc_info=True,
-                )
+                session.id,
+                exc_info=True,
+            )
 
     def _spawn_ttyd_process(
         self,
@@ -592,11 +592,21 @@ class UiShellManager:
                             f"{spec.engine} sandbox launch exited early (code {first_exit_code}); "
                             "retried without --sandbox."
                         )
-            except Exception:
+            except Exception as exc:
+                # Boundary rollback path: retain trust/gate cleanup behavior for unknown launch failures.
+                logger.exception(
+                    "ui shell start session failed; rolling back resources",
+                    extra={
+                        "component": "service.ui_shell_manager",
+                        "action": "start_session",
+                        "error_type": type(exc).__name__,
+                        "fallback": "rollback_trust_and_release_gate",
+                    },
+                )
                 if trust_registered:
                     try:
                         self.trust_manager.remove_run_folder(spec.engine, session_dir)
-                    except Exception:
+                    except (OSError, RuntimeError, ValueError):
                         logger.warning(
                             "Failed to rollback UI TUI trust entry for engine=%s session_dir=%s",
                             spec.engine,

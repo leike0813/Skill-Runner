@@ -7,6 +7,24 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import tomlkit
+from tomlkit.exceptions import TOMLKitError
+
+_PATH_RESOLVE_EXCEPTIONS = (
+    OSError,
+    RuntimeError,
+    ValueError,
+)
+_TOML_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    TOMLKitError,
+    ValueError,
+)
+_FILE_LOCK_EXCEPTIONS = (
+    ImportError,
+    OSError,
+    AttributeError,
+)
 
 
 class CodexTrustFolderStrategy:
@@ -68,7 +86,7 @@ class CodexTrustFolderStrategy:
     def _is_run_child_path(self, raw_path: str) -> bool:
         try:
             candidate = Path(raw_path).resolve()
-        except Exception:
+        except _PATH_RESOLVE_EXCEPTIONS:
             return False
         if candidate == self.runs_root:
             return False
@@ -81,7 +99,7 @@ class CodexTrustFolderStrategy:
     def _load_toml(self, path: Path) -> tomlkit.TOMLDocument:
         try:
             return tomlkit.parse(path.read_text(encoding="utf-8"))
-        except Exception:
+        except _TOML_LOAD_EXCEPTIONS:
             return tomlkit.document()
 
     def _write_toml(self, path: Path, doc: tomlkit.TOMLDocument) -> None:
@@ -113,7 +131,7 @@ class CodexTrustFolderStrategy:
                 import fcntl
 
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            except Exception:
+            except _FILE_LOCK_EXCEPTIONS:
                 pass
             try:
                 yield
@@ -122,6 +140,6 @@ class CodexTrustFolderStrategy:
                     import fcntl
 
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                except Exception:
+                except _FILE_LOCK_EXCEPTIONS:
                     pass
                 thread_lock.release()

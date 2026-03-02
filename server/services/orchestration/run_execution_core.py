@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import HTTPException  # type: ignore[import-not-found]
 
 from server.models import ExecutionMode
-from server.services.orchestration.engine_policy import SkillEnginePolicy
-from server.services.orchestration.model_registry import model_registry
+from server.services.engine_management.engine_policy import SkillEnginePolicy
+from server.services.engine_management.model_registry import model_registry
 from server.services.platform.options_policy import options_policy
 
 

@@ -1,7 +1,8 @@
 # skill-converter-directory-first Specification
 
 ## Purpose
-TBD - created by archiving change skill-converter-directory-first-dual-entry. Update Purpose after archive.
+定义目录原地改造作为主入口的策略和 zip 包装层行为。
+
 ## Requirements
 ### Requirement: 目录原地改造是主入口
 `skill-converter-agent` MUST 以“目标 skill 根目录”作为主输入入口，并在该目录中直接完成转换。

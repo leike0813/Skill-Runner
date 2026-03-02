@@ -37,7 +37,7 @@ def scan_output_schema_artifacts(schema_path: Path) -> List[Dict[str, Any]]:
                     "required": key in required_keys,
                 }
             )
-    except Exception:
+    except (OSError, ValueError, TypeError, AttributeError):
         logger.exception("Error scanning output schema artifacts: %s", schema_path)
 
     return artifacts

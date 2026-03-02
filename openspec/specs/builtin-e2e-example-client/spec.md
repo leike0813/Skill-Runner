@@ -1,7 +1,8 @@
 # builtin-e2e-example-client Specification
 
 ## Purpose
-TBD - created by archiving change interactive-33-builtin-e2e-example-client. Update Purpose after archive.
+定义内建 E2E 示例客户端的独立端口部署、低耦合边界和自测能力约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供独立端口运行的内建 E2E 示例客户端服务
 系统 MUST 提供一套与主服务分离的示例客户端服务，用于 E2E 测试和演示，且该服务 MUST 以独立端口启动。
@@ -137,3 +138,4 @@ The example client MUST present a product-style chat experience while preserving
 - **WHEN** 开发者查阅示例客户端设计约束
 - **THEN** 可以在 `docs/e2e_example_client_ui_reference.md` 获取页面结构、关键组件和状态说明
 - **AND** 文档内容可用于实现与测试对齐
+

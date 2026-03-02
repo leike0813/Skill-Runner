@@ -1,7 +1,8 @@
 # interactive-run-observability Specification
 
 ## Purpose
-TBD - created by archiving change interactive-30-observability-tests-and-doc-sync. Update Purpose after archive.
+定义 waiting_user 的可观测状态暴露和日志轮询建议区分策略。
+
 ## Requirements
 ### Requirement: 系统 MUST 暴露 waiting_user 的可观测状态
 系统 MUST 在状态接口中明确体现 run 是否处于等待用户输入阶段。
@@ -59,3 +60,4 @@ TBD - created by archiving change interactive-30-observability-tests-and-doc-syn
 - **WHEN** 历史文件中存在不合规行
 - **THEN** 该行被跳过
 - **AND** 合规行继续对外返回
+

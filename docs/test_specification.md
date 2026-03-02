@@ -130,13 +130,15 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 
 **常用变量**:
 - `LOG_LEVEL`: 日志级别（默认 `INFO`）。
-- `LOG_FILE`: 自定义日志文件路径（为空则使用默认文件）。
-- `LOG_MAX_BYTES`: 单个日志文件大小上限（默认 5MB）。
-- `LOG_BACKUP_COUNT`: 轮转备份文件数（默认 5）。
+- `LOG_DIR`: 全局应用日志目录（默认 `data/logs`）。
+- `LOG_FILE_BASENAME`: 全局应用日志文件名（默认 `skill_runner.log`）。
+- `LOG_FORMAT`: 日志格式（默认 `text`，可选 `json`）。
+- `LOG_RETENTION_DAYS`: 按天轮换保留天数（默认 `7`）。
+- `LOG_DIR_MAX_BYTES`: 日志目录总配额（默认 512MB）。
 
 **示例**:
 ```bash
-LOG_LEVEL=DEBUG LOG_FILE=/tmp/skill_runner.log LOG_MAX_BYTES=1048576 LOG_BACKUP_COUNT=3 \
+LOG_LEVEL=DEBUG LOG_DIR=/tmp LOG_FILE_BASENAME=run_tests.log LOG_RETENTION_DAYS=3 LOG_DIR_MAX_BYTES=10485760 \
 ./tests/engine_integration/run_engine_integration_tests.sh -k demo-bible-verse -e gemini -v
 ```
 

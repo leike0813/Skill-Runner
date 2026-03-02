@@ -1,19 +1,27 @@
+import asyncio
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request  # type: ignore[import-not-found]
 
+from ..config import config
+from ..logging_config import get_logging_settings_payload, reload_logging_from_settings
 from ..models import (
     CancelResponse,
     EngineModelInfo,
     InteractionPendingResponse,
     InteractionReplyRequest,
     InteractionReplyResponse,
+    ManagementDataResetRequest,
+    ManagementDataResetResponse,
     ManagementEngineDetail,
     ManagementEngineListResponse,
     ManagementEngineSummary,
+    ManagementSystemSettingsResponse,
+    ManagementSystemSettingsUpdateRequest,
     ManagementRunConversationState,
     ManagementRunFilePreviewResponse,
     ManagementRunFilesResponse,
@@ -26,24 +34,117 @@ from ..models import (
     RunStatus,
     SkillManifest,
 )
-from ..services.orchestration.agent_cli_manager import AgentCliManager
-from ..services.orchestration.model_registry import model_registry
+from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.orchestration.run_store import run_store
 from ..services.skill.skill_browser import list_skill_entries, resolve_skill_file_path
-from ..services.orchestration.engine_policy import resolve_skill_engine_policy
+from ..services.engine_management.engine_policy import resolve_skill_engine_policy
+from ..services.platform.data_reset_service import (
+    DATA_RESET_CONFIRMATION_TEXT,
+    DataResetBusyError,
+    DataResetOptions,
+    data_reset_service,
+)
+from ..services.platform.system_settings_service import (
+    SystemSettingsValidationError,
+    system_settings_service,
+)
 from ..services.skill.skill_registry import skill_registry
 from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
 
 router = APIRouter(prefix="/management", tags=["management"])
-agent_cli_manager = AgentCliManager()
+logger = logging.getLogger(__name__)
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
+
+
+def _build_system_settings_response() -> ManagementSystemSettingsResponse:
+    logging_payload = get_logging_settings_payload()
+    return ManagementSystemSettingsResponse(
+        logging=logging_payload,
+        engine_auth_session_log_persistence_enabled=bool(
+            config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED
+        ),
+        reset_confirmation_text=DATA_RESET_CONFIRMATION_TEXT,
+    )
+
+
+@router.get("/system/settings", response_model=ManagementSystemSettingsResponse)
+async def get_management_system_settings():
+    try:
+        return _build_system_settings_response()
+    except (SystemSettingsValidationError, OSError, ValueError) as exc:
+        logger.exception(
+            "management.get_system_settings failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "get_system_settings",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/system/settings", response_model=ManagementSystemSettingsResponse)
+async def update_management_system_settings(request: ManagementSystemSettingsUpdateRequest):
+    try:
+        system_settings_service.update_logging_settings(request.logging.model_dump())
+        reload_logging_from_settings()
+        return _build_system_settings_response()
+    except SystemSettingsValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.update_system_settings failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "update_system_settings",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/system/reset-data", response_model=ManagementDataResetResponse)
+async def reset_management_data(request: ManagementDataResetRequest):
+    if request.confirmation.strip() != DATA_RESET_CONFIRMATION_TEXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"confirmation must equal '{DATA_RESET_CONFIRMATION_TEXT}'",
+        )
+    options = DataResetOptions(
+        include_logs=request.include_logs,
+        include_engine_catalog=request.include_engine_catalog,
+        include_agent_status=request.include_agent_status,
+        include_engine_auth_sessions=(
+            request.include_engine_auth_sessions
+            and bool(config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED)
+        ),
+        dry_run=request.dry_run,
+    )
+    try:
+        result = await asyncio.to_thread(data_reset_service.execute_reset, options)
+    except DataResetBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.reset_data failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "reset_data",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+    return ManagementDataResetResponse(**result.to_payload())
 
 
 @router.get("/skills", response_model=ManagementSkillListResponse)
@@ -104,9 +205,7 @@ async def list_management_engines():
         for item in engine_rows
         if isinstance(item, dict) and isinstance(item.get("engine"), str)
     }
-    auth_status = agent_cli_manager.collect_auth_status()
-
-    engine_names = sorted(set(cli_versions.keys()) | set(auth_status.keys()))
+    engine_names = sorted(cli_versions.keys())
     summaries: list[ManagementEngineSummary] = []
     for engine in engine_names:
         models_count = 0
@@ -114,17 +213,24 @@ async def list_management_engines():
             catalog = model_registry.get_models(engine)
             models_count = len(catalog.models)
             cli_version = catalog.cli_version_detected
-        except Exception:
+        except (ValueError, RuntimeError, OSError) as exc:
+            # Boundary fallback: model discovery is best-effort for list view.
+            logger.exception(
+                "management.list_engines model discovery fallback",
+                extra={
+                    "component": "router.management",
+                    "action": "list_engines.get_models",
+                    "engine": engine,
+                    "error_type": type(exc).__name__,
+                    "fallback": "use_cli_version_snapshot",
+                },
+            )
             cli_version = cli_versions.get(engine)
 
-        auth_payload = auth_status.get(engine, {})
-        auth_ready = bool(auth_payload.get("auth_ready"))
         summaries.append(
             ManagementEngineSummary(
                 engine=engine,
                 cli_version=cli_version,
-                auth_ready=auth_ready,
-                sandbox_status=_derive_sandbox_status(engine, auth_ready),
                 models_count=models_count,
             )
         )
@@ -134,13 +240,10 @@ async def list_management_engines():
 
 @router.get("/engines/{engine}", response_model=ManagementEngineDetail)
 async def get_management_engine(engine: str):
-    auth_status = agent_cli_manager.collect_auth_status().get(engine, {})
     try:
         catalog = model_registry.get_models(engine)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
 
     models = [
         EngineModelInfo(
@@ -154,12 +257,9 @@ async def get_management_engine(engine: str):
         )
         for entry in catalog.models
     ]
-    auth_ready = bool(auth_status.get("auth_ready"))
     return ManagementEngineDetail(
         engine=engine,
         cli_version=catalog.cli_version_detected,
-        auth_ready=auth_ready,
-        sandbox_status=_derive_sandbox_status(engine, auth_ready),
         models_count=len(models),
         models=models,
         upgrade_status={"state": "idle"},
@@ -169,7 +269,7 @@ async def get_management_engine(engine: str):
 
 @router.get("/runs", response_model=ManagementRunListResponse)
 async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
-    rows = run_observability_service.list_runs(limit=limit)
+    rows = await run_observability_service.list_runs(limit=limit)
     runs: list[ManagementRunConversationState] = []
     for row in rows:
         request_id_obj = row.get("request_id")
@@ -179,11 +279,11 @@ async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
         request_id = request_id_obj
         run_status = _parse_run_status(row.get("status"))
         pending_interaction_id = (
-            _read_pending_interaction_id(request_id)
+            await _read_pending_interaction_id(request_id)
             if run_status == RunStatus.WAITING_USER
             else None
         )
-        auto_stats = run_store.get_auto_decision_stats(request_id)
+        auto_stats = await run_store.get_auto_decision_stats(request_id)
         runs.append(
             ManagementRunConversationState(
                 request_id=request_id,
@@ -193,7 +293,7 @@ async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
                 skill_id=str(row.get("skill_id", "unknown")),
                 updated_at=_parse_datetime(row.get("updated_at")),
                 pending_interaction_id=pending_interaction_id,
-                interaction_count=run_store.get_interaction_count(request_id),
+                interaction_count=await run_store.get_interaction_count(request_id),
                 auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
                 last_auto_decision_at=_parse_datetime_or_none(auto_stats.get("last_auto_decision_at")),
                 recovery_state=_parse_recovery_state(row.get("recovery_state")),
@@ -208,13 +308,13 @@ async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
 
 @router.get("/runs/{request_id}", response_model=ManagementRunConversationState)
 async def get_management_run(request_id: str):
-    detail = _get_run_detail_or_404(request_id)
-    return _build_run_state_from_detail(request_id, detail)
+    detail = await _get_run_detail_or_404(request_id)
+    return await _build_run_state_from_detail(request_id, detail)
 
 
 @router.get("/runs/{request_id}/files", response_model=ManagementRunFilesResponse)
 async def get_management_run_files(request_id: str):
-    detail = _get_run_detail_or_404(request_id)
+    detail = await _get_run_detail_or_404(request_id)
     return ManagementRunFilesResponse(
         request_id=request_id,
         run_id=str(detail.get("run_id", "")),
@@ -227,9 +327,9 @@ async def get_management_run_file(
     request_id: str,
     path: str = Query(..., min_length=1),
 ):
-    detail = _get_run_detail_or_404(request_id)
+    detail = await _get_run_detail_or_404(request_id)
     try:
-        preview = run_observability_service.build_run_file_preview(request_id, path)
+        preview = await run_observability_service.build_run_file_preview(request_id, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except FileNotFoundError as exc:
@@ -282,7 +382,7 @@ async def list_management_run_protocol_history(
     to_ts: str | None = Query(default=None),
     attempt: int | None = Query(default=None, ge=1),
 ):
-    request_record = run_store.get_request(request_id)
+    request_record = await run_store.get_request(request_id)
     if not request_record:
         raise HTTPException(status_code=404, detail="Request not found")
     run_id_obj = request_record.get("run_id")
@@ -297,7 +397,7 @@ async def list_management_run_protocol_history(
         raise HTTPException(status_code=400, detail="stream must be one of: fcmp, rasp, orchestrator")
 
     try:
-        payload = run_observability_service.list_protocol_history(
+        payload = await run_observability_service.list_protocol_history(
             run_dir=run_dir,
             request_id=request_id,
             stream=normalized_stream,
@@ -341,15 +441,20 @@ async def get_management_run_log_range(
     byte_to: int = Query(default=0, ge=0),
     attempt: int | None = Query(default=None, ge=1),
 ):
-    kwargs = {
-        "request_id": request_id,
-        "stream": stream,
-        "byte_from": byte_from,
-        "byte_to": byte_to,
-    }
-    if attempt is not None:
-        kwargs["attempt"] = attempt
-    return await jobs_router.get_run_log_range(**kwargs)
+    if attempt is None:
+        return await jobs_router.get_run_log_range(
+            request_id=request_id,
+            stream=stream,
+            byte_from=byte_from,
+            byte_to=byte_to,
+        )
+    return await jobs_router.get_run_log_range(
+        request_id=request_id,
+        stream=stream,
+        byte_from=byte_from,
+        byte_to=byte_to,
+        attempt=attempt,
+    )
 
 
 @router.get("/runs/{request_id}/pending", response_model=InteractionPendingResponse)
@@ -461,30 +566,22 @@ def _read_skill_schema_content(
     return payload
 
 
-def _derive_sandbox_status(engine: str, auth_ready: bool) -> str:
-    if engine in {"iflow", "opencode"}:
-        return "unsupported"
-    if auth_ready:
-        return "available"
-    return "unknown"
-
-
-def _get_run_detail_or_404(request_id: str) -> dict[str, Any]:
+async def _get_run_detail_or_404(request_id: str) -> dict[str, Any]:
     try:
-        return run_observability_service.get_run_detail(request_id)
+        return await run_observability_service.get_run_detail(request_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-def _build_run_state_from_detail(
+async def _build_run_state_from_detail(
     request_id: str,
     detail: dict[str, Any],
 ) -> ManagementRunConversationState:
     run_dir_obj = detail.get("run_dir")
     run_dir = Path(run_dir_obj) if isinstance(run_dir_obj, str) else None
-    auto_stats = run_store.get_auto_decision_stats(request_id)
+    auto_stats = await run_store.get_auto_decision_stats(request_id)
     status = _parse_run_status(detail.get("status"))
     timeout_obj = detail.get("interactive_reply_timeout_sec")
     timeout_sec = timeout_obj if isinstance(timeout_obj, int) and timeout_obj > 0 else None
@@ -496,11 +593,11 @@ def _build_run_state_from_detail(
         skill_id=str(detail.get("skill_id", "unknown")),
         updated_at=_parse_datetime(detail.get("updated_at")),
         pending_interaction_id=(
-            _read_pending_interaction_id(request_id)
+            await _read_pending_interaction_id(request_id)
             if status == RunStatus.WAITING_USER
             else None
         ),
-        interaction_count=run_store.get_interaction_count(request_id),
+        interaction_count=await run_store.get_interaction_count(request_id),
         auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
         last_auto_decision_at=_parse_datetime_or_none(auto_stats.get("last_auto_decision_at")),
         recovery_state=_parse_recovery_state(detail.get("recovery_state")),
@@ -517,8 +614,8 @@ def _build_run_state_from_detail(
     )
 
 
-def _read_pending_interaction_id(request_id: str) -> int | None:
-    pending = run_store.get_pending_interaction(request_id)
+async def _read_pending_interaction_id(request_id: str) -> int | None:
+    pending = await run_store.get_pending_interaction(request_id)
     if not isinstance(pending, dict):
         return None
     value = pending.get("interaction_id")
@@ -526,7 +623,7 @@ def _read_pending_interaction_id(request_id: str) -> int | None:
         return None
     try:
         interaction_id = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if interaction_id <= 0:
         return None
@@ -541,7 +638,7 @@ def _read_run_error(run_dir: Path | None) -> Any:
         return None
     try:
         payload = json.loads(status_file.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None

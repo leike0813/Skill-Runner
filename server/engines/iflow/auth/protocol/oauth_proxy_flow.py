@@ -141,7 +141,7 @@ class IFlowOAuthProxyFlow:
 
         try:
             parsed = urllib_parse.urlparse(normalized)
-        except Exception:
+        except ValueError:
             return normalized, None
 
         if parsed.scheme and parsed.netloc:
@@ -193,7 +193,7 @@ class IFlowOAuthProxyFlow:
         if isinstance(expires_in_raw, (int, float, str)):
             try:
                 expires_in = int(expires_in_raw)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 expires_in = 3600
         expires_in = max(expires_in, 1)
 
@@ -226,19 +226,19 @@ class IFlowOAuthProxyFlow:
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")
-            except Exception:
+            except (OSError, ValueError):
                 detail = ""
             raise IFlowOAuthProxyError(
                 f"iFlow user info endpoint returned status {exc.code}: {detail[:300]}"
             ) from exc
         except urllib_error.URLError as exc:
             raise IFlowOAuthProxyError(f"iFlow user info request failed: {exc.reason}") from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise IFlowOAuthProxyError(f"iFlow user info request failed: {exc}") from exc
 
         try:
             payload = json.loads(raw)
-        except Exception as exc:
+        except (json.JSONDecodeError, TypeError) as exc:
             raise IFlowOAuthProxyError("iFlow user info endpoint returned invalid JSON") from exc
         if not isinstance(payload, dict):
             raise IFlowOAuthProxyError("iFlow user info endpoint returned invalid payload")
@@ -275,19 +275,19 @@ class IFlowOAuthProxyFlow:
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")
-            except Exception:
+            except (OSError, ValueError):
                 detail = ""
             raise IFlowOAuthProxyError(
                 f"iFlow token endpoint returned status {exc.code}: {detail[:300]}"
             ) from exc
         except urllib_error.URLError as exc:
             raise IFlowOAuthProxyError(f"iFlow token endpoint request failed: {exc.reason}") from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise IFlowOAuthProxyError(f"iFlow token endpoint request failed: {exc}") from exc
 
         try:
             parsed = json.loads(raw)
-        except Exception as exc:
+        except (json.JSONDecodeError, TypeError) as exc:
             raise IFlowOAuthProxyError("iFlow token endpoint returned invalid JSON") from exc
         if not isinstance(parsed, dict):
             raise IFlowOAuthProxyError("iFlow token endpoint returned invalid payload")
@@ -316,7 +316,7 @@ class IFlowOAuthProxyFlow:
             return {}
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError):
             return {}
         if isinstance(payload, dict):
             return payload

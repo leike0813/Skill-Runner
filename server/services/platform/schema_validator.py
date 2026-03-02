@@ -6,6 +6,20 @@ import jsonschema  # type: ignore[import-untyped]
 
 from server.models import SkillManifest
 
+_SCHEMA_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+)
+_SCHEMA_VALIDATE_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    jsonschema.SchemaError,
+    TypeError,
+    ValueError,
+)
+
 
 class SchemaValidator:
     """
@@ -32,7 +46,7 @@ class SchemaValidator:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except _SCHEMA_LOAD_EXCEPTIONS:
             return None
 
     def get_schema_keys(self, skill: SkillManifest, schema_key: str) -> List[str]:
@@ -100,7 +114,7 @@ class SchemaValidator:
             return []
         except jsonschema.ValidationError as e:
             return [f"{schema_key} validation error: {e.message} (Path: {'/'.join(str(x) for x in e.path)})"]
-        except Exception as e:
+        except _SCHEMA_VALIDATE_EXCEPTIONS as e:
             return [f"Schema validation failed: {str(e)}"]
 
     def validate_inline_input_create(self, skill: SkillManifest, inline_input: Dict[str, Any]) -> List[str]:
@@ -135,7 +149,7 @@ class SchemaValidator:
             jsonschema.validate(instance=inline_input, schema=inline_schema)
         except jsonschema.ValidationError as e:
             errors.append(f"input validation error: {e.message} (Path: {'/'.join(str(x) for x in e.path)})")
-        except Exception as e:
+        except _SCHEMA_VALIDATE_EXCEPTIONS as e:
             errors.append(f"Schema validation failed: {str(e)}")
         return errors
 
@@ -185,7 +199,7 @@ class SchemaValidator:
             return []
         except jsonschema.ValidationError as e:
             return [f"Input validation error: {e.message} (Path: {'/'.join(str(x) for x in e.path)})"]
-        except Exception as e:
+        except _SCHEMA_VALIDATE_EXCEPTIONS as e:
             return [f"Schema validation failed: {str(e)}"]
 
     def validate_output(self, skill: SkillManifest, output_data: Dict[str, Any]) -> List[str]:
@@ -215,7 +229,7 @@ class SchemaValidator:
             return []
         except jsonschema.ValidationError as e:
             return [f"Output validation error: {e.message} (Path: {'/'.join(str(x) for x in e.path)})"]
-        except Exception as e:
+        except _SCHEMA_VALIDATE_EXCEPTIONS as e:
             return [f"Output schema validation failed: {str(e)}"]
 
     def build_input_context(

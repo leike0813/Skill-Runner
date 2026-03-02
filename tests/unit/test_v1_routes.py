@@ -1,12 +1,13 @@
 import pytest
 import json
+from unittest.mock import AsyncMock
 
 fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
-from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError
-from server.services.orchestration.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
+from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
+from server.services.engine_management.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -57,26 +58,9 @@ async def test_v1_engines_route_available(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_v1_engine_auth_status_route(monkeypatch):
-    monkeypatch.setattr(
-        "server.routers.engines.agent_cli_manager.collect_auth_status",
-        lambda: {
-            "codex": {
-                "managed_present": True,
-                "managed_cli_path": "/tmp/codex",
-                "global_available": False,
-                "global_cli_path": None,
-                "effective_cli_path": "/tmp/codex",
-                "effective_path_source": "managed",
-                "credential_files": {"auth.json": True},
-                "auth_ready": True,
-            }
-        },
-    )
+async def test_v1_engine_auth_status_route_removed():
     response = await _request("GET", "/v1/engines/auth-status")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["engines"]["codex"]["effective_path_source"] == "managed"
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -754,7 +738,7 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
 
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-1"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-1"}),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -762,15 +746,15 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
 
     response = await _request("GET", "/v1/jobs/req-1/events")
@@ -797,7 +781,7 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.temp_skill_run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-temp"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-temp"}),
     )
     monkeypatch.setattr(
         "server.routers.temp_skill_runs.workspace_manager.get_run_dir",
@@ -805,15 +789,15 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: {"interaction_id": 1, "kind": "open_text", "prompt": "continue"},
+        AsyncMock(return_value={"interaction_id": 1, "kind": "open_text", "prompt": "continue"}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
 
     response = await _request("GET", "/v1/temp-skill-runs/temp-1/events")
@@ -840,11 +824,11 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
 
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {
+        AsyncMock(side_effect=lambda request_id: {
             "request_id": request_id,
             "run_id": "run-2",
             "runtime_options": {"execution_mode": "interactive"},
-        },
+        }),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -852,15 +836,15 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: {"interaction_id": 1},
+        AsyncMock(return_value={"interaction_id": 1}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
 
     first = await _request("GET", "/v1/jobs/req-2/events")
@@ -901,7 +885,7 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-canceled"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-canceled"}),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -909,15 +893,15 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
 
     response = await _request("GET", "/v1/jobs/req-canceled/events")
@@ -932,7 +916,7 @@ async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-history"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-history"}),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -940,10 +924,10 @@ async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_observability_service.list_event_history",
-        lambda **_kwargs: [
+        AsyncMock(return_value=[
             {"seq": 2, "event": {"type": "agent.message.final"}},
             {"seq": 3, "event": {"type": "lifecycle.run.terminal"}},
-        ],
+        ]),
     )
 
     response = await _request(
@@ -963,7 +947,7 @@ async def test_v1_jobs_log_range_route(monkeypatch, tmp_path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-log-range"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-log-range"}),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -971,12 +955,12 @@ async def test_v1_jobs_log_range_route(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_observability_service.read_log_range",
-        lambda **_kwargs: {
+        AsyncMock(return_value={
             "stream": "stdout",
             "byte_from": 1,
             "byte_to": 4,
             "chunk": "abc",
-        },
+        }),
     )
 
     response = await _request(
@@ -993,7 +977,7 @@ async def test_v1_jobs_log_range_route(monkeypatch, tmp_path):
 async def test_v1_jobs_cleanup_route(monkeypatch):
     monkeypatch.setattr(
         "server.routers.jobs.run_cleanup_manager.clear_all",
-        lambda: {"runs": 1, "requests": 2, "cache_entries": 3},
+        AsyncMock(return_value={"runs": 1, "requests": 2, "cache_entries": 3}),
     )
     response = await _request("POST", "/v1/jobs/cleanup")
     assert response.status_code == 200
@@ -1013,7 +997,7 @@ async def test_v1_temp_skill_runs_route_available():
 async def test_v1_engine_upgrade_create_route(monkeypatch):
     monkeypatch.setattr(
         "server.routers.engines.engine_upgrade_manager.create_task",
-        lambda mode, engine: "upgrade-1",
+        AsyncMock(return_value="upgrade-1"),
     )
     response = await _request("POST", "/v1/engines/upgrades", json={"mode": "all"})
     assert response.status_code == 200
@@ -1024,7 +1008,7 @@ async def test_v1_engine_upgrade_create_route(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_v1_engine_upgrade_create_conflict(monkeypatch):
-    def _raise(_mode, _engine):
+    async def _raise(_mode, _engine):
         raise EngineUpgradeBusyError("busy")
 
     monkeypatch.setattr("server.routers.engines.engine_upgrade_manager.create_task", _raise)
@@ -1034,7 +1018,7 @@ async def test_v1_engine_upgrade_create_conflict(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_v1_engine_upgrade_create_validation_error(monkeypatch):
-    def _raise(_mode, _engine):
+    async def _raise(_mode, _engine):
         raise EngineUpgradeValidationError("bad payload")
 
     monkeypatch.setattr("server.routers.engines.engine_upgrade_manager.create_task", _raise)
@@ -1046,7 +1030,7 @@ async def test_v1_engine_upgrade_create_validation_error(monkeypatch):
 async def test_v1_engine_upgrade_status_route(monkeypatch):
     monkeypatch.setattr(
         "server.routers.engines.engine_upgrade_manager.get_task",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "request_id": "upgrade-1",
             "mode": "all",
             "requested_engine": None,
@@ -1056,7 +1040,7 @@ async def test_v1_engine_upgrade_status_route(monkeypatch):
             },
             "created_at": "2026-01-01T00:00:00",
             "updated_at": "2026-01-01T00:00:01",
-        },
+        }),
     )
     response = await _request("GET", "/v1/engines/upgrades/upgrade-1")
     assert response.status_code == 200

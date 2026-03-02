@@ -1,7 +1,8 @@
 # engine-command-profile-defaults Specification
 
 ## Purpose
-TBD - created by archiving change interactive-42-engine-runtime-adapter-decoupling. Update Purpose after archive.
+定义引擎命令行参数 profile 的默认值加载策略，区分 API 链路与 Harness 链路的参数注入行为。
+
 ## Requirements
 ### Requirement: API 链路 MUST 从配置文件加载引擎命令默认参数 Profile
 系统 MUST 从 `server/assets/configs/engine_command_profiles.json` 读取并应用 API 链路的引擎命令默认参数 Profile。

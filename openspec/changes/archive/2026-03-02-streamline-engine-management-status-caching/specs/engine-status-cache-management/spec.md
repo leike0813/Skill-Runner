@@ -1,0 +1,45 @@
+# engine-status-cache-management Specification
+
+## ADDED Requirements
+
+### Requirement: Engine 版本状态 MUST 持久化到磁盘缓存
+系统 MUST 将 engine 版本探测结果写入 `data/agent_status.json`，作为 engine 管理域的版本缓存 SSOT。
+
+#### Scenario: 完成版本探测后写缓存
+- **WHEN** 服务完成 engine 版本探测
+- **THEN** MUST 将结果写入 `data/agent_status.json`
+
+### Requirement: Engine 版本探测 MUST 仅在受控时机触发
+系统 MUST 将 engine 版本探测限制在 startup、升级成功后和每日后台任务，不允许页面/API 读路径触发探测。
+
+#### Scenario: startup 刷新
+- **WHEN** 服务启动
+- **THEN** MUST 执行一次全量版本探测并刷新缓存
+
+#### Scenario: 升级成功后局部刷新
+- **WHEN** 某个 engine 升级成功
+- **THEN** MUST 仅刷新该 engine 的缓存项
+
+#### Scenario: 每日后台刷新
+- **WHEN** 到达每日后台调度时机
+- **THEN** MUST 执行一次全量版本探测并刷新缓存
+
+#### Scenario: 页面和 management API 读路径
+- **WHEN** 用户访问 `/ui/engines` 或客户端调用 `GET /v1/management/engines*`
+- **THEN** 系统 MUST NOT 触发版本探测
+
+### Requirement: Engine 版本读取 MUST 对缺失或损坏缓存降级
+系统 MUST 在缓存缺失、损坏或部分引擎缺项时返回稳定结果，而不是现场探测。
+
+#### Scenario: 缓存缺失或损坏
+- **WHEN** `data/agent_status.json` 不存在、损坏或缺少部分引擎
+- **THEN** 页面/API 仍返回稳定结构
+- **AND** 缺失版本以 `null` 或 `-` 表示
+- **AND** 不在读路径上临时触发 CLI probe
+
+### Requirement: 旧 auth probe API MUST 下线
+系统 MUST 下线 engine 管理域的旧 auth probe API，避免继续暴露误导性摘要能力。
+
+#### Scenario: 调用旧 auth probe API
+- **WHEN** 客户端调用 `GET /v1/engines/auth-status`
+- **THEN** 该接口不再可用

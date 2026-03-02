@@ -1,7 +1,8 @@
 # skill-converter-agent Specification
 
 ## Purpose
-TBD - created by archiving change auto-skill-converter-agent. Update Purpose after archive.
+定义 converter skill 的输入接受、interactive 决策流和 agent 驱动转换约束。
+
 ## Requirements
 ### Requirement: Converter skill accepts an existing generic skill package as input
 The converter skill SHALL accept a source skill package and use it as the input for conversion.

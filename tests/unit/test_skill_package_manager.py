@@ -103,24 +103,26 @@ def isolated_skill_paths(tmp_path):
         config.freeze()
 
 
-def test_install_new_skill(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_install_new_skill(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
 
     manager = SkillPackageManager()
     payload = _build_skill_zip("demo-upload", "1.0.0")
-    manager.create_install_request("req-1", payload)
-    manager.run_install("req-1")
+    await manager.create_install_request("req-1", payload)
+    await manager.run_install("req-1")
 
-    row = store.get_install("req-1")
+    row = await store.get_install("req-1")
     assert row is not None
     assert row["status"] == "succeeded"
     assert row["action"] == "install"
     assert (Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json").exists()
 
 
-def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
@@ -135,10 +137,10 @@ def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monke
             "demo-upload/.gitignore": "*.pyc\n",
         },
     )
-    manager.create_install_request("req-1", payload)
-    manager.run_install("req-1")
+    await manager.create_install_request("req-1", payload)
+    await manager.run_install("req-1")
 
-    row = store.get_install("req-1")
+    row = await store.get_install("req-1")
     assert row is not None
     assert row["status"] == "succeeded"
     live_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"
@@ -147,18 +149,19 @@ def test_install_strips_git_directory_and_preserves_non_git_hidden_entries(monke
     assert (live_dir / ".gitignore").exists()
 
 
-def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
-    manager.run_install("req-1")
-    manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
-    manager.run_install("req-2")
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    await manager.run_install("req-1")
+    await manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
+    await manager.run_install("req-2")
 
-    row = store.get_install("req-2")
+    row = await store.get_install("req-2")
     assert row is not None
     assert row["status"] == "succeeded"
     assert row["action"] == "update"
@@ -169,15 +172,16 @@ def test_update_archives_old_version(monkeypatch, isolated_skill_paths):
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.1.0"
 
 
-def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
-    manager.run_install("req-1")
-    manager.create_install_request(
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    await manager.run_install("req-1")
+    await manager.create_install_request(
         "req-2",
         _build_skill_zip(
             "demo-upload",
@@ -185,9 +189,9 @@ def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_
             extra_entries={"demo-upload/.git": "gitdir: /tmp/external-repo\n"},
         ),
     )
-    manager.run_install("req-2")
+    await manager.run_install("req-2")
 
-    row = store.get_install("req-2")
+    row = await store.get_install("req-2")
     assert row is not None
     assert row["status"] == "succeeded"
     live_dir = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload"
@@ -196,85 +200,90 @@ def test_update_strips_git_file_in_uploaded_package(monkeypatch, isolated_skill_
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.1.0"
 
 
-def test_reject_downgrade(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_reject_downgrade(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "2.0.0"))
-    manager.run_install("req-1")
-    manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.9.0"))
-    manager.run_install("req-2")
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "2.0.0"))
+    await manager.run_install("req-1")
+    await manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.9.0"))
+    await manager.run_install("req-2")
 
-    row = store.get_install("req-2")
+    row = await store.get_install("req-2")
     assert row is not None
     assert row["status"] == "failed"
     assert "strictly higher version" in (row["error"] or "")
 
 
-def test_reject_missing_required_files(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_reject_missing_required_files(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     manager = SkillPackageManager()
 
-    manager.create_install_request(
+    await manager.create_install_request(
         "req-1",
         _build_skill_zip("demo-upload", "1.0.0", include_output_schema=False)
     )
-    manager.run_install("req-1")
+    await manager.run_install("req-1")
 
-    row = store.get_install("req-1")
+    row = await store.get_install("req-1")
     assert row is not None
     assert row["status"] == "failed"
     assert "missing required files" in (row["error"] or "")
 
 
-def test_reject_identity_mismatch(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_reject_identity_mismatch(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     manager = SkillPackageManager()
 
-    manager.create_install_request(
+    await manager.create_install_request(
         "req-1",
         _build_skill_zip("demo-upload", "1.0.0", skill_name="wrong-name")
     )
-    manager.run_install("req-1")
+    await manager.run_install("req-1")
 
-    row = store.get_install("req-1")
+    row = await store.get_install("req-1")
     assert row is not None
     assert row["status"] == "failed"
     assert "identity mismatch" in (row["error"] or "").lower()
 
 
-def test_reject_existing_archive_path(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_reject_existing_archive_path(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
-    manager.run_install("req-1")
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    await manager.run_install("req-1")
     archive_path = Path(config.SYSTEM.SKILLS_ARCHIVE_DIR) / "demo-upload" / "1.0.0"
     archive_path.mkdir(parents=True, exist_ok=True)
 
-    manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
-    manager.run_install("req-2")
+    await manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
+    await manager.run_install("req-2")
 
-    row = store.get_install("req-2")
+    row = await store.get_install("req-2")
     assert row is not None
     assert row["status"] == "failed"
     assert "archive already exists" in (row["error"] or "").lower()
 
 
-def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
     manager = SkillPackageManager()
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
-    manager.run_install("req-1")
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    await manager.run_install("req-1")
 
     import server.services.skill.skill_package_manager as mod
     real_move = mod.shutil.move
@@ -291,17 +300,18 @@ def test_rolls_back_when_swap_fails(monkeypatch, isolated_skill_paths):
         return real_move(src, dst)
 
     monkeypatch.setattr(mod.shutil, "move", flaky_move)
-    manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
-    manager.run_install("req-2")
+    await manager.create_install_request("req-2", _build_skill_zip("demo-upload", "1.1.0"))
+    await manager.run_install("req-2")
 
-    row = store.get_install("req-2")
+    row = await store.get_install("req-2")
     assert row is not None
     assert row["status"] == "failed"
     live_runner = Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json"
     assert json.loads(live_runner.read_text(encoding="utf-8"))["version"] == "1.0.0"
 
 
-def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, isolated_skill_paths):
+@pytest.mark.asyncio
+async def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, isolated_skill_paths):
     store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
@@ -311,10 +321,10 @@ def test_invalid_existing_directory_is_quarantined_and_reinstalled(monkeypatch, 
     broken_dir.mkdir(parents=True, exist_ok=True)
     (broken_dir / "SKILL.md").write_text("# Broken skill", encoding="utf-8")
 
-    manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
-    manager.run_install("req-1")
+    await manager.create_install_request("req-1", _build_skill_zip("demo-upload", "1.0.0"))
+    await manager.run_install("req-1")
 
-    row = store.get_install("req-1")
+    row = await store.get_install("req-1")
     assert row is not None
     assert row["status"] == "succeeded"
     assert row["action"] == "install"

@@ -1,7 +1,8 @@
 # trust-config-bootstrap Specification
 
 ## Purpose
-TBD - created by archiving change run-folder-trust-management. Update Purpose after archive.
+定义容器启动时 trust 配置文件的 bootstrap 和 trusted parent run 目录初始化策略。
+
 ## Requirements
 ### Requirement: Bootstrap trust config files at container startup
 At container startup, the system MUST ensure trust configuration artifacts required by Codex and Gemini exist and are valid.

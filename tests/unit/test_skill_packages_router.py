@@ -1,5 +1,6 @@
 from datetime import datetime
 from tempfile import SpooledTemporaryFile
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,12 +21,12 @@ def _build_upload_file(payload: bytes) -> UploadFile:
 async def test_install_skill_package_route(monkeypatch):
     called = {"create": False, "run": False}
 
-    def _create(request_id: str, package_bytes: bytes):
+    async def _create(request_id: str, package_bytes: bytes):
         called["create"] = True
         assert request_id
         assert package_bytes == b"zip-bytes"
 
-    def _run(request_id: str):
+    async def _run(request_id: str):
         called["run"] = True
         assert request_id
 
@@ -64,7 +65,7 @@ async def test_get_install_status(monkeypatch):
     now = datetime.utcnow().isoformat()
     monkeypatch.setattr(
         "server.routers.skill_packages.skill_install_store.get_install",
-        lambda request_id: {
+        AsyncMock(side_effect=lambda request_id: {
             "request_id": request_id,
             "status": "succeeded",
             "created_at": now,
@@ -73,7 +74,7 @@ async def test_get_install_status(monkeypatch):
             "version": "1.0.0",
             "action": "install",
             "error": None
-        }
+        })
     )
 
     response = await skill_packages_router.get_install_status("req-1")
@@ -86,7 +87,7 @@ async def test_get_install_status(monkeypatch):
 async def test_get_install_status_not_found(monkeypatch):
     monkeypatch.setattr(
         "server.routers.skill_packages.skill_install_store.get_install",
-        lambda _request_id: None
+        AsyncMock(return_value=None),
     )
     with pytest.raises(HTTPException) as exc:
         await skill_packages_router.get_install_status("missing")

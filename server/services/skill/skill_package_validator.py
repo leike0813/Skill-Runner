@@ -9,12 +9,12 @@ from typing import Any, Optional, Tuple
 import jsonschema  # type: ignore[import-untyped]
 import yaml  # type: ignore
 
-from server.services.orchestration.engine_policy import apply_engine_policy_to_manifest
+from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 
 _packaging_version: Any = None
 try:
     import packaging.version as _packaging_version  # type: ignore
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _packaging_version = None
 
 
@@ -154,7 +154,7 @@ class SkillPackageValidator:
         )
         try:
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, ValueError, TypeError) as exc:
             raise ValueError("Runner manifest schema is unreadable") from exc
         try:
             jsonschema.validate(instance=runner, schema=schema)
@@ -172,7 +172,7 @@ class SkillPackageValidator:
             raise ValueError(f"Invalid {schema_key} schema: not valid JSON") from exc
         try:
             meta_schema = json.loads(meta_schema_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, ValueError, TypeError) as exc:
             raise ValueError(f"{schema_key} meta-schema is unreadable") from exc
         try:
             jsonschema.validate(instance=schema_payload, schema=meta_schema)

@@ -1,7 +1,8 @@
 # ephemeral-skill-upload-and-run Specification
 
 ## Purpose
-TBD - created by archiving change temporary-skill-upload-run. Update Purpose after archive.
+定义临时 skill 的两步上传-执行 API 和文件接受约束。
+
 ## Requirements
 ### Requirement: Two-step temporary run API
 The system SHALL provide two-step endpoints under `/v1/temp-skill-runs` for temporary skill execution.
@@ -52,3 +53,4 @@ Temporary skill execution MUST use the same modular `SkillPatcher` pipeline as r
 - **WHEN** temporary skill package is copied into run workspace
 - **THEN** runtime patching uses unified `patch_skill_md` flow
 - **AND** does not use a separate completion-only injection branch
+

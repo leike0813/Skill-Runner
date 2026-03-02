@@ -7,6 +7,7 @@ Exposes endpoints for:
 - Uploading files to a job workspace (POST /jobs/{request_id}/upload)
 """
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
@@ -34,7 +35,7 @@ from ..services.orchestration.job_orchestrator import job_orchestrator
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..services.platform.schema_validator import schema_validator
-from ..services.orchestration.model_registry import model_registry
+from ..services.engine_management.model_registry import model_registry
 from ..services.platform.cache_key_builder import (
     compute_skill_fingerprint,
     compute_input_manifest_hash,
@@ -45,7 +46,7 @@ from ..services.orchestration.run_store import run_store
 from ..services.orchestration.run_cleanup_manager import run_cleanup_manager
 from ..services.platform.concurrency_manager import concurrency_manager
 from ..runtime.observability.run_observability import run_observability_service
-from ..services.orchestration.engine_policy import resolve_skill_engine_policy
+from ..services.engine_management.engine_policy import resolve_skill_engine_policy
 from ..services.orchestration.run_execution_core import (
     declared_execution_modes,
     ensure_skill_engine_supported,
@@ -60,6 +61,7 @@ import uuid
 import json
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
@@ -75,19 +77,19 @@ class _InstalledRouterSourceAdapter:
         supports_inline_input_create=True,
     )
 
-    def get_request(self, request_id: str):
-        return run_store.get_request(request_id)
+    async def get_request(self, request_id: str):
+        return await run_store.get_request(request_id)
 
-    def get_cached_run(self, cache_key: str):
-        return run_store.get_cached_run(cache_key)
+    async def get_cached_run(self, cache_key: str):
+        return await run_store.get_cached_run(cache_key)
 
-    def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        run_store.update_request_run_id(request_id, run_id)
+    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        await run_store.update_request_run_id(request_id, run_id)
 
-    def mark_run_started(self, request_id: str, run_id: str) -> None:
-        run_store.update_request_run_id(request_id, run_id)
+    async def mark_run_started(self, request_id: str, run_id: str) -> None:
+        await run_store.update_request_run_id(request_id, run_id)
 
-    def mark_failed(self, request_id: str, error_message: str) -> None:
+    async def mark_failed(self, request_id: str, error_message: str) -> None:
         _ = request_id
         _ = error_message
 
@@ -138,7 +140,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_payload["engine_options"] = engine_opts
         request_payload["runtime_options"] = runtime_opts
         workspace_manager.create_request(request_id, request_payload)
-        run_store.create_request(
+        await run_store.create_request(
             request_id=request_id,
             skill_id=request.skill_id,
             engine=request.engine,
@@ -164,12 +166,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 input_manifest_hash=manifest_hash,
                 inline_input_hash=inline_input_hash
             )
-            run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
-            run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+            await run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
+            await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
             if cache_enabled:
-                cached_run = installed_source_adapter.get_cached_run(cache_key)
+                cached_run = await installed_source_adapter.get_cached_run(cache_key)
                 if cached_run:
-                    installed_source_adapter.bind_cached_run(request_id, cached_run)
+                    await installed_source_adapter.bind_cached_run(request_id, cached_run)
                     return RunCreateResponse(
                         request_id=request_id,
                         cache_hit=True,
@@ -186,8 +188,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             )
             run_status = workspace_manager.create_run(run_request)
             run_cache_key: str | None = cache_key if cache_enabled else None
-            run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-            installed_source_adapter.mark_run_started(request_id, run_status.run_id)
+            await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+            await installed_source_adapter.mark_run_started(request_id, run_status.run_id)
             merged_options = {**engine_opts, **runtime_opts}
             admitted = await concurrency_manager.admit_or_reject()
             if not admitted:
@@ -216,11 +218,21 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
     except HTTPException:
         raise
     except Exception as e:
+        # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
+        logger.exception(
+            "jobs.create_run failed; returning HTTP 500",
+            extra={
+                "component": "router.jobs",
+                "action": "create_run",
+                "error_type": type(e).__name__,
+                "fallback": "http_500",
+            },
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{request_id}", response_model=RequestStatusResponse)
 async def get_run_status(request_id: str):
-    request_record = run_store.get_request(request_id)
+    request_record = await run_store.get_request(request_id)
     if not request_record:
         raise HTTPException(status_code=404, detail="Request not found")
     run_id = request_record.get("run_id")
@@ -270,7 +282,7 @@ async def get_run_status(request_id: str):
             updated_at_dt = datetime.now()
     else:
         updated_at_dt = datetime.now()
-    auto_stats = run_store.get_auto_decision_stats(request_id)
+    auto_stats = await run_store.get_auto_decision_stats(request_id)
     last_auto_decision_at_obj = auto_stats.get("last_auto_decision_at")
     last_auto_decision_at = None
     if isinstance(last_auto_decision_at_obj, str) and last_auto_decision_at_obj:
@@ -279,14 +291,14 @@ async def get_run_status(request_id: str):
         except ValueError:
             last_auto_decision_at = None
     pending_interaction_id = (
-        _read_pending_interaction_id(request_id)
+        await _read_pending_interaction_id(request_id)
         if current_status == RunStatus.WAITING_USER
         else None
     )
     runtime_options = request_record.get("runtime_options", {})
     interactive_auto_reply, interactive_reply_timeout_sec = _resolve_interactive_autoreply_runtime_options(runtime_options)
-    interaction_count = run_store.get_interaction_count(request_id)
-    recovery_info = run_store.get_recovery_info(run_id)
+    interaction_count = await run_store.get_interaction_count(request_id)
+    recovery_info = await run_store.get_recovery_info(run_id)
     recovered_at = None
     recovered_at_obj = recovery_info.get("recovered_at")
     if isinstance(recovered_at_obj, str) and recovered_at_obj:
@@ -317,28 +329,28 @@ async def get_run_status(request_id: str):
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
 async def get_run_result(request_id: str):
-    return run_read_facade.get_result(
+    return await run_read_facade.get_result(
         source_adapter=installed_source_adapter,
         request_id=request_id,
     )
 
 @router.get("/{request_id}/artifacts", response_model=RunArtifactsResponse)
 async def get_run_artifacts(request_id: str):
-    return run_read_facade.get_artifacts(
+    return await run_read_facade.get_artifacts(
         source_adapter=installed_source_adapter,
         request_id=request_id,
     )
 
 @router.get("/{request_id}/bundle")
 async def get_run_bundle(request_id: str):
-    return run_read_facade.get_bundle(
+    return await run_read_facade.get_bundle(
         source_adapter=installed_source_adapter,
         request_id=request_id,
     )
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_run_artifact(request_id: str, artifact_path: str):
-    return run_read_facade.get_artifact_file(
+    return await run_read_facade.get_artifact_file(
         source_adapter=installed_source_adapter,
         request_id=request_id,
         artifact_path=artifact_path,
@@ -346,7 +358,7 @@ async def download_run_artifact(request_id: str, artifact_path: str):
 
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_run_logs(request_id: str):
-    return run_read_facade.get_logs(
+    return await run_read_facade.get_logs(
         source_adapter=installed_source_adapter,
         request_id=request_id,
     )
@@ -382,7 +394,7 @@ async def list_run_event_history(
     from_ts: str | None = Query(default=None),
     to_ts: str | None = Query(default=None),
 ):
-    return run_read_facade.list_event_history(
+    return await run_read_facade.list_event_history(
         source_adapter=installed_source_adapter,
         request_id=request_id,
         from_seq=from_seq,
@@ -400,7 +412,7 @@ async def get_run_log_range(
     byte_to: int = Query(default=0, ge=0),
     attempt: int | None = Query(default=None, ge=1),
 ):
-    return run_read_facade.read_log_range(
+    return await run_read_facade.read_log_range(
         source_adapter=installed_source_adapter,
         request_id=request_id,
         stream=stream,
@@ -438,7 +450,7 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
     try:
         content = await file.read()
         result = workspace_manager.handle_upload(request_id, content)
-        request_record = run_store.get_request(request_id)
+        request_record = await run_store.get_request(request_id)
         if not request_record:
             raise ValueError(f"Request {request_id} not found")
 
@@ -458,14 +470,14 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
             input_manifest_hash=manifest_hash,
             inline_input_hash=compute_inline_input_hash(request_record.get("input", {}))
         )
-        run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
-        run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+        await run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
+        await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
         runtime_options = request_record.get("runtime_options", {})
         cache_enabled = is_cache_enabled(runtime_options)
         if cache_enabled:
-            cached_run = installed_source_adapter.get_cached_run(cache_key)
+            cached_run = await installed_source_adapter.get_cached_run(cache_key)
             if cached_run:
-                installed_source_adapter.bind_cached_run(request_id, cached_run)
+                await installed_source_adapter.bind_cached_run(request_id, cached_run)
                 return RunUploadResponse(
                     request_id=request_id,
                     cache_hit=True,
@@ -484,8 +496,8 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         )
         workspace_manager.promote_request_uploads(request_id, run_status.run_id)
         run_cache_key: str | None = cache_key if cache_enabled else None
-        run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-        installed_source_adapter.mark_run_started(request_id, run_status.run_id)
+        await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+        await installed_source_adapter.mark_run_started(request_id, run_status.run_id)
         merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
         admitted = await concurrency_manager.admit_or_reject()
         if not admitted:
@@ -508,11 +520,21 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
     except HTTPException:
         raise
     except Exception as e:
+        # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
+        logger.exception(
+            "jobs.upload_file failed; returning HTTP 500",
+            extra={
+                "component": "router.jobs",
+                "action": "upload_file",
+                "error_type": type(e).__name__,
+                "fallback": "http_500",
+            },
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _read_pending_interaction_id(request_id: str) -> int | None:
-    pending = run_store.get_pending_interaction(request_id)
+async def _read_pending_interaction_id(request_id: str) -> int | None:
+    pending = await run_store.get_pending_interaction(request_id)
     if not isinstance(pending, dict):
         return None
     value = pending.get("interaction_id")
@@ -520,7 +542,7 @@ def _read_pending_interaction_id(request_id: str) -> int | None:
         return None
     try:
         interaction_id = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if interaction_id <= 0:
         return None
@@ -563,11 +585,21 @@ def _parse_recovery_state(raw: Any) -> RecoveryState:
 @router.post("/cleanup", response_model=RunCleanupResponse)
 async def cleanup_runs():
     try:
-        counts = run_cleanup_manager.clear_all()
+        counts = await run_cleanup_manager.clear_all()
         return RunCleanupResponse(
             runs_deleted=counts.get("runs", 0),
             requests_deleted=counts.get("requests", 0),
             cache_entries_deleted=counts.get("cache_entries", 0)
         )
     except Exception as e:
+        # Router boundary mapping: preserve HTTP 500 contract for cleanup failures.
+        logger.exception(
+            "jobs.cleanup_runs failed; returning HTTP 500",
+            extra={
+                "component": "router.jobs",
+                "action": "cleanup_runs",
+                "error_type": type(e).__name__,
+                "fallback": "http_500",
+            },
+        )
         raise HTTPException(status_code=500, detail=str(e))

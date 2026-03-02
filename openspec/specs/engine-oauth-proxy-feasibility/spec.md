@@ -1,7 +1,8 @@
 # engine-oauth-proxy-feasibility Specification
 
 ## Purpose
-TBD - created by archiving change engine-oauth-proxy-feasibility. Update Purpose after archive.
+**DEPRECATED** — OAuth 代理可行性评估阶段已完成，结论已融入 `engine-auth-observability`。本 spec 保留历史评估约束作为决策依据参考。
+
 ## Requirements
 ### Requirement: OAuth 代理可行性评估产物
 在进入引擎 OAuth 代理实现阶段之前，系统规范流程 SHALL 先产出一份可审计的可行性评估结果。评估结果 MUST 覆盖 `codex`、`gemini`、`iflow`、`opencode` 四个引擎，并给出统一能力矩阵。

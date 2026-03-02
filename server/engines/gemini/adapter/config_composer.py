@@ -13,6 +13,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_JSON_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    TypeError,
+    ValueError,
+)
+
 
 class GeminiConfigComposer:
     def __init__(self, adapter: "GeminiExecutionAdapter") -> None:
@@ -31,8 +39,11 @@ class GeminiConfigComposer:
         if default_config_path.exists():
             try:
                 with open(default_config_path, "r", encoding="utf-8") as f:
-                    engine_defaults = json.load(f)
-            except Exception:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("Gemini engine defaults must be a JSON object")
+                engine_defaults = payload
+            except _JSON_LOAD_EXCEPTIONS:
                 logger.exception("Failed to load Gemini engine defaults")
 
         skill_defaults: dict[str, object] = {}
@@ -41,9 +52,12 @@ class GeminiConfigComposer:
             if gemini_settings_file.exists():
                 try:
                     with open(gemini_settings_file, "r", encoding="utf-8") as f:
-                        skill_defaults = json.load(f)
+                        payload = json.load(f)
+                    if not isinstance(payload, dict):
+                        raise ValueError("Gemini skill defaults must be a JSON object")
+                    skill_defaults = payload
                     logger.info("Loaded skill defaults from %s", gemini_settings_file)
-                except Exception:
+                except _JSON_LOAD_EXCEPTIONS:
                     logger.exception("Failed to load skill defaults")
 
         user_overrides: dict[str, object] = {}
@@ -63,8 +77,11 @@ class GeminiConfigComposer:
         if enforced_config_path.exists():
             try:
                 with open(enforced_config_path, "r", encoding="utf-8") as f:
-                    project_enforced = json.load(f)
-            except Exception:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("Gemini enforced config must be a JSON object")
+                project_enforced = payload
+            except _JSON_LOAD_EXCEPTIONS:
                 logger.exception("Failed to load project enforced config")
 
         layers = [engine_defaults, skill_defaults, user_overrides, runtime_engine_overrides, project_enforced]

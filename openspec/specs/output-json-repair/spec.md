@@ -1,7 +1,8 @@
 # output-json-repair Specification
 
 ## Purpose
-TBD - created by archiving change deterministic-generic-output-repair. Update Purpose after archive.
+定义输出解析阶段的 deterministic generic repair 策略和 Schema-first 成功标准。
+
 ## Requirements
 ### Requirement: 系统 MUST 在输出解析阶段执行 deterministic generic repair
 当引擎最终输出不是严格 JSON 时，系统 MUST 尝试可预测、无语义猜测的通用修复。

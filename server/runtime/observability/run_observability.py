@@ -22,6 +22,7 @@ from server.runtime.protocol.schema_registry import (
     validate_rasp_event,
 )
 from server.runtime.observability.contracts import RunStorePort, WorkspacePort
+from server.services.platform.async_compat import maybe_await
 from server.services.skill.skill_browser import (
     build_preview_payload,
     list_skill_entries,
@@ -139,7 +140,7 @@ class RunObservabilityService:
             "chunk": data.decode("utf-8", errors="replace"),
         }
 
-    def read_log_range(
+    async def read_log_range(
         self,
         *,
         run_dir: Path,
@@ -155,7 +156,7 @@ class RunObservabilityService:
         status_payload = self._read_status_payload(run_dir)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
-        attempt_number = self._resolve_attempt_number(
+        attempt_number = await self._resolve_attempt_number(
             request_id,
             status=status,
             run_dir=run_dir,
@@ -198,14 +199,14 @@ class RunObservabilityService:
             "status": status,
             "cursor": max(0, int(cursor)),
         }
-        pending_id = self._read_pending_interaction_id(request_id)
+        pending_id = await self._read_pending_interaction_id(request_id)
         if pending_id is not None:
             snapshot["pending_interaction_id"] = pending_id
         yield {"event": "snapshot", "data": snapshot}
 
         last_heartbeat_at = time.monotonic()
         last_chat_event_seq = max(0, int(cursor))
-        bootstrap_events = self.list_event_history(
+        bootstrap_events = await self.list_event_history(
             run_dir=run_dir,
             request_id=request_id,
             from_seq=last_chat_event_seq + 1,
@@ -230,7 +231,7 @@ class RunObservabilityService:
             status_obj = status_payload.get("status")
             current_status = status_obj if isinstance(status_obj, str) and status_obj else status
 
-            protocol_payload = self.list_event_history(
+            protocol_payload = await self.list_event_history(
                 run_dir=run_dir,
                 request_id=request_id,
                 from_seq=last_chat_event_seq + 1,
@@ -259,7 +260,7 @@ class RunObservabilityService:
                 last_heartbeat_at = now
             await asyncio.sleep(poll_interval_sec)
 
-    def list_event_history(
+    async def list_event_history(
         self,
         *,
         run_dir: Path,
@@ -274,7 +275,7 @@ class RunObservabilityService:
             attempts = [1]
         rows: List[Dict[str, Any]] = []
         for attempt_number in attempts:
-            payload = self.list_protocol_history(
+            payload = await self.list_protocol_history(
                 run_dir=run_dir,
                 request_id=request_id,
                 stream="fcmp",
@@ -300,7 +301,7 @@ class RunObservabilityService:
             to_ts=to_ts,
         )
 
-    def list_protocol_history(
+    async def list_protocol_history(
         self,
         *,
         run_dir: Path,
@@ -319,13 +320,13 @@ class RunObservabilityService:
         status_payload = self._read_status_payload(run_dir)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
-        runtime_attempt = self._resolve_attempt_number(
+        runtime_attempt = await self._resolve_attempt_number(
             request_id=request_id,
             status=status,
             run_dir=run_dir,
             requested_attempt=None,
         )
-        selected_attempt = self._resolve_attempt_number(
+        selected_attempt = await self._resolve_attempt_number(
             request_id=request_id,
             status=status,
             run_dir=run_dir,
@@ -342,7 +343,7 @@ class RunObservabilityService:
                 and paths["orchestrator"].exists()
             )
         if should_materialize:
-            self._materialize_protocol_stream(
+            await self._materialize_protocol_stream(
                 run_dir=run_dir,
                 request_id=request_id,
                 status_payload=status_payload,
@@ -482,10 +483,10 @@ class RunObservabilityService:
             "orchestrator": audit_dir / f"{ORCHESTRATOR_EVENTS_FILE_PREFIX}{suffix}.jsonl",
         }
 
-    def _resolve_engine_name(self, request_id: Optional[str]) -> str:
+    async def _resolve_engine_name(self, request_id: Optional[str]) -> str:
         if not request_id:
             return "unknown"
-        request_record = self._run_store().get_request(request_id)
+        request_record = await maybe_await(self._run_store().get_request(request_id))
         if not request_record:
             return "unknown"
         engine_obj = request_record.get("engine")
@@ -511,14 +512,14 @@ class RunObservabilityService:
                     continue
                 try:
                     value = int(matched.group(1))
-                except Exception:
+                except (TypeError, ValueError):
                     continue
                 if value > 0:
                     attempts.add(value)
                 break
         return sorted(attempts)
 
-    def _resolve_attempt_number(
+    async def _resolve_attempt_number(
         self,
         request_id: Optional[str],
         *,
@@ -536,7 +537,7 @@ class RunObservabilityService:
             return requested_value
         if not request_id:
             return available_attempts[-1] if available_attempts else 1
-        request_record = self._run_store().get_request(request_id)
+        request_record = await maybe_await(self._run_store().get_request(request_id))
         if not request_record:
             return available_attempts[-1] if available_attempts else 1
         runtime_options = request_record.get("runtime_options")
@@ -550,10 +551,10 @@ class RunObservabilityService:
         latest_attempt = self._latest_attempt_number(run_dir)
         if status in {"waiting_user", "succeeded", "failed", "canceled"} and latest_attempt > 0:
             return latest_attempt
-        interaction_count = self._run_store().get_interaction_count(request_id)
+        interaction_count = await maybe_await(self._run_store().get_interaction_count(request_id))
         return max(1, int(interaction_count) + 1)
 
-    def _materialize_protocol_stream(
+    async def _materialize_protocol_stream(
         self,
         *,
         run_dir: Path,
@@ -564,9 +565,9 @@ class RunObservabilityService:
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         run_id = run_dir.name
-        engine_name = self._resolve_engine_name(request_id)
+        engine_name = await self._resolve_engine_name(request_id)
         if attempt_number is None:
-            attempt_number = self._resolve_attempt_number(
+            attempt_number = await self._resolve_attempt_number(
                 request_id,
                 status=status,
                 run_dir=run_dir,
@@ -631,11 +632,11 @@ class RunObservabilityService:
             completion_obj if isinstance(completion_obj, dict) else None
         )
         interaction_history = (
-            self._run_store().list_interaction_history(request_id)
+            await maybe_await(self._run_store().list_interaction_history(request_id))
             if request_id
             else []
         )
-        pending_interaction = self._resolve_attempt_pending_interaction(
+        pending_interaction = await self._resolve_attempt_pending_interaction(
             request_id=request_id,
             attempt_number=attempt_number,
             attempt_status=attempt_status,
@@ -656,7 +657,7 @@ class RunObservabilityService:
             else None
         )
         effective_session_timeout_sec = (
-            self._run_store().get_effective_session_timeout(request_id)
+            await maybe_await(self._run_store().get_effective_session_timeout(request_id))
             if request_id
             else None
         )
@@ -717,11 +718,11 @@ class RunObservabilityService:
             return {}
         try:
             payload = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return {}
         return payload if isinstance(payload, dict) else {}
 
-    def _resolve_attempt_pending_interaction(
+    async def _resolve_attempt_pending_interaction(
         self,
         *,
         request_id: Optional[str],
@@ -741,7 +742,7 @@ class RunObservabilityService:
             if isinstance(payload_obj, dict):
                 return payload_obj
         if request_id and attempt_status == "waiting_user":
-            pending_obj = self._run_store().get_pending_interaction(request_id)
+            pending_obj = await maybe_await(self._run_store().get_pending_interaction(request_id))
             if isinstance(pending_obj, dict):
                 interaction_id_obj = pending_obj.get("interaction_id")
                 if isinstance(interaction_id_obj, int) and interaction_id_obj == attempt_number:
@@ -827,8 +828,8 @@ class RunObservabilityService:
         except ValueError:
             return None
 
-    def list_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
-        rows = self._run_store().list_requests_with_runs(limit=limit)
+    async def list_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
+        rows = await maybe_await(self._run_store().list_requests_with_runs(limit=limit))
         results: List[Dict[str, Any]] = []
         for row in rows:
             run_id_obj = row.get("run_id")
@@ -853,7 +854,7 @@ class RunObservabilityService:
                     "status": run_status,
                     "updated_at": updated_at,
                     "effective_session_timeout_sec": (
-                        self._run_store().get_effective_session_timeout(request_id)
+                        await maybe_await(self._run_store().get_effective_session_timeout(request_id))
                         if request_id
                         else None
                     ),
@@ -865,8 +866,8 @@ class RunObservabilityService:
             )
         return results
 
-    def get_run_detail(self, request_id: str) -> Dict[str, Any]:
-        record = self._run_store().get_request_with_run(request_id)
+    async def get_run_detail(self, request_id: str) -> Dict[str, Any]:
+        record = await maybe_await(self._run_store().get_request_with_run(request_id))
         if not record:
             raise ValueError("Request not found")
         run_id_obj = record.get("run_id")
@@ -899,7 +900,7 @@ class RunObservabilityService:
             "engine": record.get("engine"),
             "status": run_status,
             "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir, record),
-            "effective_session_timeout_sec": self._run_store().get_effective_session_timeout(request_id),
+            "effective_session_timeout_sec": await maybe_await(self._run_store().get_effective_session_timeout(request_id)),
             "recovery_state": record.get("recovery_state") or "none",
             "recovered_at": record.get("recovered_at"),
             "recovery_reason": record.get("recovery_reason"),
@@ -910,17 +911,17 @@ class RunObservabilityService:
             "interactive_reply_timeout_sec": interactive_reply_timeout_sec,
         }
 
-    def resolve_run_file_path(self, request_id: str, relative_path: str) -> Path:
-        detail = self.get_run_detail(request_id)
+    async def resolve_run_file_path(self, request_id: str, relative_path: str) -> Path:
+        detail = await self.get_run_detail(request_id)
         run_dir = Path(detail["run_dir"])
         return resolve_skill_file_path(run_dir, relative_path)
 
-    def build_run_file_preview(self, request_id: str, relative_path: str) -> Dict[str, Any]:
-        file_path = self.resolve_run_file_path(request_id, relative_path)
+    async def build_run_file_preview(self, request_id: str, relative_path: str) -> Dict[str, Any]:
+        file_path = await self.resolve_run_file_path(request_id, relative_path)
         return build_preview_payload(file_path)
 
-    def get_logs_tail(self, request_id: str, max_bytes: int = 64 * 1024) -> Dict[str, Any]:
-        detail = self.get_run_detail(request_id)
+    async def get_logs_tail(self, request_id: str, max_bytes: int = 64 * 1024) -> Dict[str, Any]:
+        detail = await self.get_run_detail(request_id)
         run_dir = Path(detail["run_dir"])
         latest_attempt = max(1, self._latest_attempt_number(run_dir))
         audit_dir = run_dir / AUDIT_DIR_NAME
@@ -947,7 +948,7 @@ class RunObservabilityService:
             if isinstance(payload, dict):
                 return payload
             return {}
-        except Exception:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return {}
 
     def _normalize_run_status(self, record: Dict[str, Any], status_payload: Dict[str, Any]) -> str:
@@ -989,7 +990,7 @@ class RunObservabilityService:
             try:
                 mtime = run_dir.stat().st_mtime
                 return datetime.fromtimestamp(mtime).isoformat()
-            except Exception:
+            except OSError:
                 pass
         request_created = record.get("request_created_at")
         return request_created if isinstance(request_created, str) else None
@@ -1007,10 +1008,10 @@ class RunObservabilityService:
             data = f.read(read_size)
         return data.decode("utf-8", errors="replace")
 
-    def _read_pending_interaction_id(self, request_id: Optional[str]) -> Optional[int]:
+    async def _read_pending_interaction_id(self, request_id: Optional[str]) -> Optional[int]:
         if not request_id:
             return None
-        pending = self._run_store().get_pending_interaction(request_id)
+        pending = await maybe_await(self._run_store().get_pending_interaction(request_id))
         if not isinstance(pending, dict):
             return None
         value = pending.get("interaction_id")
@@ -1018,7 +1019,7 @@ class RunObservabilityService:
             return None
         try:
             interaction_id = int(value)
-        except Exception:
+        except (TypeError, ValueError):
             return None
         if interaction_id <= 0:
             return None

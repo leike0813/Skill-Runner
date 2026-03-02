@@ -1,7 +1,8 @@
 # interactive-job-cancel-api Specification
 
 ## Purpose
-TBD - created by archiving change interactive-26-job-termination-api-and-frontend-control. Update Purpose after archive.
+定义前端可调用的 Job 终止接口及其幂等语义。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供前端可调用的 Job 终止接口
 系统 MUST 暴露标准 cancel 接口，使客户端可主动终止指定运行任务。

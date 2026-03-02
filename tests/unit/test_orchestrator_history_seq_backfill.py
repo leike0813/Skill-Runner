@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from server.runtime.observability.run_observability import RunObservabilityService
 
 
-def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-orchestrator"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -40,12 +43,15 @@ def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path:
         + "\n",
         encoding="utf-8",
     )
+    async def _materialize(_self, **_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
-        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+        _materialize,
     )
     service = RunObservabilityService()
-    payload = service.list_protocol_history(
+    payload = await service.list_protocol_history(
         run_dir=run_dir,
         request_id=None,
         stream="orchestrator",

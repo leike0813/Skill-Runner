@@ -1,7 +1,8 @@
 # interactive-decision-policy Specification
 
 ## Purpose
-TBD - created by archiving change interactive-29-decision-policy-and-auto-continue-switch. Update Purpose after archive.
+定义 interactive 模式下的交互决策策略，包括提问载荷结构、用户回复接受规则、完成证据优先级和 max_attempt 终止条件。
+
 ## Requirements
 ### Requirement: 系统 MUST 定义统一的交互决策问题分类
 The `kind` field MUST remain compatibility metadata for frontend display and MUST NOT be a backend control-plane prerequisite.
@@ -26,7 +27,7 @@ The `kind` field MUST remain compatibility metadata for frontend display and MUS
 - **GIVEN** 任意受支持 `kind`
 - **WHEN** 客户端提交自由文本回复
 - **THEN** 系统接受该回复并进入后续编排流程
-- **AND** 不因“未匹配固定回复结构”而拒绝
+- **AND** 不因"未匹配固定回复结构"而拒绝
 
 ### Requirement: interactive 模式 Skill patch MUST 约束 Agent 提问载荷
 This requirement MUST be interpreted as optional enrichment: interactive patch MUST NOT enforce ask_user JSON structure as mandatory output.
@@ -34,7 +35,7 @@ This requirement MUST be interpreted as optional enrichment: interactive patch M
 #### Scenario: interactive 模式不强制 ask_user 结构
 - **GIVEN** run 以 `execution_mode=interactive` 启动
 - **WHEN** 系统执行 Skill patch
-- **THEN** patch 可提示“必要时请求用户输入”
+- **THEN** patch 可提示"必要时请求用户输入"
 - **AND** 不把 ask_user JSON 结构作为必须产物
 
 ### Requirement: auto 模式 Skill patch MUST 不注入交互提问约束

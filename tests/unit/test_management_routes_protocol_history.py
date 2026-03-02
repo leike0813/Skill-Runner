@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,14 +23,14 @@ async def test_management_protocol_history_streams(monkeypatch, tmp_path: Path, 
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        lambda _request_id: {"request_id": "req-1", "run_id": "run-protocol"},
+        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
     )
     monkeypatch.setattr(
         "server.routers.management.workspace_manager.get_run_dir",
         lambda _run_id: run_dir,
     )
 
-    def _list_protocol_history(**kwargs):
+    async def _list_protocol_history(**kwargs):
         assert kwargs["stream"] == stream_name
         return {
             "attempt": 2,
@@ -63,14 +64,14 @@ async def test_management_protocol_history_filters(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        lambda _request_id: {"request_id": "req-1", "run_id": "run-protocol"},
+        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
     )
     monkeypatch.setattr(
         "server.routers.management.workspace_manager.get_run_dir",
         lambda _run_id: run_dir,
     )
 
-    def _list_protocol_history(**kwargs):
+    async def _list_protocol_history(**kwargs):
         assert kwargs["stream"] == "fcmp"
         assert kwargs["from_seq"] == 10
         assert kwargs["to_seq"] == 20
@@ -110,7 +111,7 @@ async def test_management_protocol_history_rejects_invalid_stream(monkeypatch, t
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        lambda _request_id: {"request_id": "req-1", "run_id": "run-protocol"},
+        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
     )
     monkeypatch.setattr(
         "server.routers.management.workspace_manager.get_run_dir",

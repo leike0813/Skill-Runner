@@ -34,12 +34,12 @@ class RunCleanupManager:
             logger.info("Run cleanup disabled (retention <= 0)")
             return
         logger.info("Run cleanup started at %s", datetime.utcnow().isoformat())
-        candidates = run_store.list_runs_for_cleanup(retention_days)
+        candidates = await run_store.list_runs_for_cleanup(retention_days)
         deleted_runs = 0
         deleted_requests = 0
         for row in candidates:
             run_id = row["run_id"]
-            request_ids = run_store.delete_run_records(run_id)
+            request_ids = await run_store.delete_run_records(run_id)
             for request_id in request_ids:
                 workspace_manager.delete_request_dir(request_id)
                 deleted_requests += 1
@@ -53,9 +53,9 @@ class RunCleanupManager:
             )
         await self.cleanup_stale_trust_entries()
 
-    def clear_all(self) -> dict:
-        request_ids = run_store.list_request_ids()
-        counts = run_store.clear_all()
+    async def clear_all(self) -> dict:
+        request_ids = await run_store.list_request_ids()
+        counts = await run_store.clear_all()
         for request_id in request_ids:
             workspace_manager.delete_request_dir(request_id)
         workspace_manager.purge_runs_dir()
@@ -63,7 +63,7 @@ class RunCleanupManager:
         return counts
 
     async def cleanup_stale_trust_entries(self) -> None:
-        active_run_ids = run_store.list_active_run_ids()
+        active_run_ids = await run_store.list_active_run_ids()
         active_run_dirs = []
         for run_id in active_run_ids:
             run_dir = workspace_manager.get_run_dir(run_id)
@@ -71,7 +71,7 @@ class RunCleanupManager:
                 active_run_dirs.append(run_dir)
         try:
             run_folder_trust_manager.cleanup_stale_entries(active_run_dirs)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             logger.warning("Stale trust cleanup failed", exc_info=True)
 
 

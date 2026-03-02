@@ -4,6 +4,7 @@ import uuid
 import inspect
 from collections.abc import Mapping
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import quote_plus
 
 from fastapi import (  # type: ignore[import-not-found]
@@ -19,6 +20,8 @@ from fastapi import (  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
+from ..config import config
+from ..logging_config import get_logging_settings_payload
 from ..models import (
     AuthSessionInputRequestV2,
     AuthSessionStartRequestV2,
@@ -30,18 +33,18 @@ from ..models import (
 )
 from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
 from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
-from ..services.orchestration.engine_upgrade_manager import (
+from ..services.engine_management.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
-from ..services.orchestration.engine_auth_flow_manager import engine_auth_flow_manager
-from ..services.orchestration.engine_interaction_gate import EngineInteractionBusyError
-from ..services.orchestration.model_registry import model_registry
+from ..services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.engine_management.engine_interaction_gate import EngineInteractionBusyError
+from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
-from ..services.orchestration.agent_cli_manager import AgentCliManager
+from ..services.engine_management.agent_cli_manager import AgentCliManager
 from ..services.skill.skill_browser import (
     build_preview_payload,
     list_skill_entries,
@@ -52,6 +55,7 @@ from ..services.skill.skill_install_store import skill_install_store
 from ..services.skill.skill_package_manager import skill_package_manager
 from ..services.skill.skill_registry import skill_registry
 from ..services.ui.ui_auth import require_ui_basic_auth
+from ..services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
 from ..services.ui.ui_shell_manager import (
     UiShellBusyError,
     UiShellRuntimeError,
@@ -84,6 +88,19 @@ LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
     "SKILL_RUNNER_UI_LEGACY_API_REPLACEMENT_DOC",
     "/docs/api_reference.md#management-api-recommended",
 )
+
+
+def _raise_ui_internal_server_error(*, action: str, exc: Exception) -> NoReturn:
+    logger.exception(
+        "ui router internal failure; returning HTTP 500",
+        extra={
+            "component": "router.ui",
+            "action": action,
+            "error_type": type(exc).__name__,
+            "fallback": "http_500",
+        },
+    )
+    raise HTTPException(status_code=500, detail=str(exc))
 
 
 def _build_auth_ui_capabilities(
@@ -223,7 +240,24 @@ async def ui_index(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="ui/index.html",
-        context={"skills": _payload_get(skills_payload, "skills", [])},
+        context={
+            "skills": _payload_get(skills_payload, "skills", []),
+        },
+    )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def ui_settings(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/settings.html",
+        context={
+            "logging_settings": get_logging_settings_payload(),
+            "reset_confirmation_text": DATA_RESET_CONFIRMATION_TEXT,
+            "engine_auth_session_log_persistence_enabled": bool(
+                config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED
+            ),
+        },
     )
 
 
@@ -381,7 +415,7 @@ async def ui_run_logs_tail(request: Request, request_id: str):
         f"/v1/management/runs/{request_id}/events",
     )
     try:
-        payload = run_observability_service.get_logs_tail(request_id)
+        payload = await run_observability_service.get_logs_tail(request_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except FileNotFoundError as exc:
@@ -400,6 +434,7 @@ async def ui_run_logs_tail(request: Request, request_id: str):
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
+    rows = _serialize_payload_list(engines_payload, "engines")
     opencode_providers = [
         {
             "provider_id": item.provider_id,
@@ -416,7 +451,8 @@ async def ui_engines(request: Request):
         request=request,
         name="ui/engines.html",
         context={
-            "engines": _serialize_payload_list(engines_payload, "engines"),
+            "engines": rows,
+            "rows": rows,
             "session": ui_shell_manager.get_session_snapshot(),
             "auth_session": engine_auth_flow_manager.get_active_session_snapshot(),
             "opencode_auth_providers": opencode_providers,
@@ -448,8 +484,8 @@ async def ui_engine_auth_oauth_proxy_start(request: Request, body: AuthSessionSt
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_start", exc=exc)
 
 
 @router.get("/engines/auth/oauth-proxy/sessions/{session_id}")
@@ -458,8 +494,8 @@ async def ui_engine_auth_oauth_proxy_status(session_id: str):
         return JSONResponse(oauth_proxy_orchestrator.get_session(session_id))
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_status", exc=exc)
 
 
 @router.post("/engines/auth/oauth-proxy/sessions/{session_id}/cancel")
@@ -474,8 +510,8 @@ async def ui_engine_auth_oauth_proxy_cancel(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_cancel", exc=exc)
 
 
 @router.post("/engines/auth/oauth-proxy/sessions/{session_id}/input")
@@ -493,8 +529,8 @@ async def ui_engine_auth_oauth_proxy_input(session_id: str, body: AuthSessionInp
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_input", exc=exc)
 
 
 @router.post("/engines/auth/cli-delegate/sessions")
@@ -514,8 +550,8 @@ async def ui_engine_auth_cli_delegate_start(request: Request, body: AuthSessionS
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_start", exc=exc)
 
 
 @router.get("/engines/auth/cli-delegate/sessions/{session_id}")
@@ -524,8 +560,8 @@ async def ui_engine_auth_cli_delegate_status(session_id: str):
         return JSONResponse(cli_delegate_orchestrator.get_session(session_id))
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_status", exc=exc)
 
 
 @router.post("/engines/auth/cli-delegate/sessions/{session_id}/cancel")
@@ -540,8 +576,8 @@ async def ui_engine_auth_cli_delegate_cancel(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_cancel", exc=exc)
 
 
 @router.post("/engines/auth/cli-delegate/sessions/{session_id}/input")
@@ -559,8 +595,8 @@ async def ui_engine_auth_cli_delegate_input(session_id: str, body: AuthSessionIn
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_input", exc=exc)
 
 
 @router.post("/engines/auth/sessions")
@@ -580,16 +616,16 @@ async def ui_engine_auth_start(request: Request, body: EngineAuthSessionStartReq
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_start", exc=exc)
 
 
 @router.get("/engines/auth/session/active")
 async def ui_engine_auth_active_session():
     try:
         return JSONResponse(engine_auth_flow_manager.get_active_session_snapshot())
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_active_session", exc=exc)
 
 
 @router.get("/engines/auth/sessions/{session_id}")
@@ -600,8 +636,8 @@ async def ui_engine_auth_status(session_id: str):
         return JSONResponse(payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_status", exc=exc)
 
 
 @router.post("/engines/auth/sessions/{session_id}/cancel")
@@ -617,8 +653,8 @@ async def ui_engine_auth_cancel(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_cancel", exc=exc)
 
 
 @router.post("/engines/auth/sessions/{session_id}/input")
@@ -637,8 +673,8 @@ async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequ
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        _raise_ui_internal_server_error(action="ui_engine_auth_input", exc=exc)
 
 
 @router.post("/engines/tui/session/start")
@@ -695,7 +731,7 @@ async def ui_create_engine_upgrade(
     engine: str | None = Form(None),
 ):
     try:
-        request_id = engine_upgrade_manager.create_task(mode, engine)
+        request_id = await engine_upgrade_manager.create_task(mode, engine)
     except EngineUpgradeBusyError as exc:
         return _render_engine_upgrade_status(
             request=request,
@@ -727,7 +763,7 @@ async def ui_create_engine_upgrade(
 
 @router.get("/engines/upgrades/{request_id}/status", response_class=HTMLResponse)
 async def ui_engine_upgrade_status(request: Request, request_id: str):
-    record = engine_upgrade_manager.get_task(request_id)
+    record = await engine_upgrade_manager.get_task(request_id)
     if not record:
         return _render_engine_upgrade_status(
             request=request,
@@ -841,7 +877,7 @@ async def ui_install_skill_package(
         raise HTTPException(status_code=400, detail="Uploaded package is empty")
 
     request_id = str(uuid.uuid4())
-    skill_package_manager.create_install_request(request_id, payload)
+    await skill_package_manager.create_install_request(request_id, payload)
     background_tasks.add_task(skill_package_manager.run_install, request_id)
 
     return templates.TemplateResponse(
@@ -859,7 +895,7 @@ async def ui_install_skill_package(
 
 @router.get("/skill-packages/{request_id}/status", response_class=HTMLResponse)
 async def ui_install_status(request: Request, request_id: str):
-    record = skill_install_store.get_install(request_id)
+    record = await skill_install_store.get_install(request_id)
     if not record:
         return templates.TemplateResponse(
             request=request,

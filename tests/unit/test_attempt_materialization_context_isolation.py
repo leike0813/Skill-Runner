@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
 
@@ -13,7 +16,8 @@ class _Model:
         return dict(self._payload)
 
 
-def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-materialize-context"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -49,30 +53,30 @@ def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path
     monkeypatch.setattr("server.runtime.observability.run_observability.validate_fcmp_event", lambda _row: None)
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "interactive"}},
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "interactive"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [
+        AsyncMock(return_value=[
             {
                 "interaction_id": 1,
                 "event_type": "ask_user",
                 "payload": {"interaction_id": 1, "kind": "open_text", "prompt": "attempt one prompt"},
                 "created_at": "2026-02-24T00:00:05",
             }
-        ],
+        ]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: {"interaction_id": 9, "kind": "open_text", "prompt": "latest pending"},
+        AsyncMock(return_value={"interaction_id": 9, "kind": "open_text", "prompt": "latest pending"}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: 1200,
+        AsyncMock(return_value=1200),
     )
 
     service = RunObservabilityService()
-    service._materialize_protocol_stream(
+    await service._materialize_protocol_stream(
         run_dir=run_dir,
         request_id="req-ctx",
         status_payload={"status": "succeeded", "updated_at": "2026-02-24T00:01:00"},

@@ -66,7 +66,8 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
 
     engines = await _request("GET", "/ui/engines")
     assert engines.status_code == 200
-    assert "/ui/management/engines/table" in engines.text
+    assert "/ui/management/engines/table" not in engines.text
+    assert "<table>" in engines.text
 
     runs = await _request("GET", "/ui/runs")
     assert runs.status_code == 200

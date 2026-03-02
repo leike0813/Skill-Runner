@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -73,13 +74,8 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
         ),
     )
     monkeypatch.setattr(
-        "server.routers.management.agent_cli_manager.collect_auth_status",
-        lambda: {"gemini": {"auth_ready": True}},
-    )
-
-    monkeypatch.setattr(
         "server.routers.management.run_observability_service.get_run_detail",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "request_id": "req-1",
             "run_id": "run-1",
             "run_dir": str(tmp_path / "runs" / "run-1"),
@@ -89,15 +85,19 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": False,
             "entries": [{"path": "logs/stdout.txt", "is_dir": False}],
-        },
+        }),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.run_store.get_auto_decision_stats",
+        AsyncMock(return_value={}),
     )
 
     skills_res = await _request("GET", "/v1/management/skills")
@@ -117,6 +117,8 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
     engines_res = await _request("GET", "/v1/management/engines")
     assert engines_res.status_code == 200
     assert engines_res.json()["engines"][0]["engine"] == "gemini"
+    assert "auth_ready" not in engines_res.json()["engines"][0]
+    assert "sandbox_status" not in engines_res.json()["engines"][0]
 
     run_res = await _request("GET", "/v1/management/runs/req-1")
     assert run_res.status_code == 200

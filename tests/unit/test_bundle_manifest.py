@@ -58,3 +58,18 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
         assert "logs/stdout.txt" not in entries
         assert "artifacts/text.md" in entries
         assert "result/result.json" in entries
+
+
+def test_build_run_bundle_public_api_keeps_compatibility(tmp_path):
+    run_dir = tmp_path / "run"
+    (run_dir / "artifacts").mkdir(parents=True)
+    (run_dir / "result").mkdir(parents=True)
+    (run_dir / "artifacts" / "report.txt").write_text("artifact")
+    (run_dir / "result" / "result.json").write_text('{"status":"success"}')
+
+    orchestrator = JobOrchestrator()
+    public_rel = orchestrator.build_run_bundle(run_dir, debug=False)
+    compat_rel = orchestrator._build_run_bundle(run_dir, debug=False)
+
+    assert public_rel == compat_rel
+    assert (run_dir / public_rel).exists()

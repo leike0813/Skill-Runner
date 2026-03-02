@@ -284,8 +284,8 @@ async def test_run_job_cancel_requested_before_execution_short_circuits(tmp_path
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
-        local_store.set_cancel_requested(run_id, True)
+        await local_store.create_run(run_id, None, "queued")
+        await local_store.set_cancel_requested(run_id, True)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": CancelShouldSkipAdapter()}
 
@@ -313,7 +313,7 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
         encoding="utf-8",
     )
     local_store = RunStore(db_path=tmp_path / "runs.db")
-    local_store.create_run(run_id, None, "running")
+    await local_store.create_run(run_id, None, "running")
 
     class _CancelableAdapter:
         async def cancel_run_process(self, _run_id: str) -> bool:
@@ -333,7 +333,7 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
 
     status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
     assert accepted is True
-    assert local_store.is_cancel_requested(run_id) is True
+    assert await local_store.is_cancel_requested(run_id) is True
     assert status_data["status"] == "canceled"
     assert status_data["error"]["code"] == "CANCELED_BY_USER"
 
@@ -589,7 +589,7 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, "cache-key-1", "queued")
+        await local_store.create_run(run_id, "cache-key-1", "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": TimeoutSuccessLikeAdapter()}
 
@@ -609,7 +609,7 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
         assert result_data["error"]["code"] == "TIMEOUT"
         assert "15s" in result_data["error"]["message"]
         assert "artifacts/partial.txt" in result_data["artifacts"]
-        assert local_store.get_cached_run("cache-key-1") is None
+        assert await local_store.get_cached_run("cache-key-1") is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -697,7 +697,7 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, "cache-key-repair", "queued")
+        await local_store.create_run(run_id, "cache-key-repair", "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
 
@@ -718,7 +718,7 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
         assert "OUTPUT_REPAIRED_GENERIC" in result_data["validation_warnings"]
         assert "OUTPUT_REPAIRED_GENERIC" in status_data["warnings"]
         assert result_data["repair_level"] == "deterministic_generic"
-        assert local_store.get_cached_run("cache-key-repair") == run_id
+        assert await local_store.get_cached_run("cache-key-repair") == run_id
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -751,7 +751,7 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, "cache-key-repair-fail", "queued")
+        await local_store.create_run(run_id, "cache-key-repair-fail", "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSchemaFailAdapter()}
 
@@ -772,7 +772,7 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
         assert result_data["repair_level"] == "deterministic_generic"
         assert "Output validation error" in result_data["error"]["message"]
         assert "OUTPUT_REPAIRED_GENERIC" not in result_data["validation_warnings"]
-        assert local_store.get_cached_run("cache-key-repair-fail") is None
+        assert await local_store.get_cached_run("cache-key-repair-fail") is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -921,7 +921,7 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-interactive",
             skill_id="test-skill",
             engine="codex",
@@ -930,8 +930,8 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
             runtime_options={"execution_mode": "interactive"},
             input_data={},
         )
-        local_store.update_request_run_id("req-interactive", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-interactive", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskAdapter()}
@@ -952,17 +952,17 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = json.loads((run_dir / "status.json").read_text())
         assert status_data["status"] == "waiting_user"
-        pending = local_store.get_pending_interaction("req-interactive")
+        pending = await local_store.get_pending_interaction("req-interactive")
         assert pending is not None
         assert pending["interaction_id"] == 1
         interactions_dir = run_dir / "interactions"
         assert (interactions_dir / "pending.json").exists()
         assert (interactions_dir / "history.jsonl").exists()
         assert (interactions_dir / "runtime_state.json").exists()
-        handle = local_store.get_engine_session_handle("req-interactive")
+        handle = await local_store.get_engine_session_handle("req-interactive")
         assert handle is not None
         assert handle["handle_value"] == "thread-1"
-        profile = local_store.get_interactive_profile("req-interactive")
+        profile = await local_store.get_interactive_profile("req-interactive")
         assert profile is not None
         assert profile["session_timeout_sec"] == int(config.SYSTEM.SESSION_TIMEOUT_SEC)
     finally:
@@ -1003,7 +1003,7 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-interactive-stderr-session",
             skill_id="test-skill-stderr-session",
             engine="codex",
@@ -1012,8 +1012,8 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
             runtime_options={"execution_mode": "interactive"},
             input_data={},
         )
-        local_store.update_request_run_id("req-interactive-stderr-session", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-interactive-stderr-session", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskSessionInStderrAdapter()}
@@ -1035,9 +1035,9 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
         status_data = json.loads((run_dir / "status.json").read_text())
         assert status_data["status"] == "waiting_user"
         assert status_data["error"] is None
-        pending = local_store.get_pending_interaction("req-interactive-stderr-session")
+        pending = await local_store.get_pending_interaction("req-interactive-stderr-session")
         assert pending is not None
-        handle = local_store.get_engine_session_handle("req-interactive-stderr-session")
+        handle = await local_store.get_engine_session_handle("req-interactive-stderr-session")
         assert handle is not None
         assert handle["handle_value"] == "iflow-session-1"
     finally:
@@ -1078,7 +1078,7 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-interactive-invalid",
             skill_id="test-skill",
             engine="codex",
@@ -1087,8 +1087,8 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
             runtime_options={"execution_mode": "interactive"},
             input_data={},
         )
-        local_store.update_request_run_id("req-interactive-invalid", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-interactive-invalid", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskMissingIdAdapter()}
@@ -1109,7 +1109,7 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = json.loads((run_dir / "status.json").read_text())
         assert status_data["status"] == "waiting_user"
-        pending = local_store.get_pending_interaction("req-interactive-invalid")
+        pending = await local_store.get_pending_interaction("req-interactive-invalid")
         assert pending is not None
         assert pending["interaction_id"] == 1
     finally:
@@ -1357,7 +1357,7 @@ async def test_run_job_output_validation_strips_done_marker(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DoneMarkerOutputAdapter()}
 
@@ -1411,7 +1411,7 @@ async def test_run_job_interactive_escaped_stream_done_marker_completes_without_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": EscapedDoneMarkerStreamOnlyAdapter()}
 
@@ -1471,7 +1471,7 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": EscapedDoneMarkerWithInvalidOutputAdapter()}
 
@@ -1532,7 +1532,7 @@ async def test_run_job_interactive_tool_use_done_marker_echo_does_not_complete(t
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": ToolUseDoneMarkerEchoAdapter()}
 
@@ -1594,7 +1594,7 @@ async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path)
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
 
@@ -1655,7 +1655,7 @@ async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path)
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
 
@@ -1717,7 +1717,7 @@ async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveNoEvidenceAdapter()}
 
@@ -1775,7 +1775,7 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
 
@@ -1834,7 +1834,7 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
 
@@ -1888,7 +1888,7 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_run(run_id, None, "queued")
+        await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveYamlAskUserSignalAdapter()}
 
@@ -1978,7 +1978,7 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-direct-interactive",
             skill_id=skill.id,
             engine="codex",
@@ -1987,8 +1987,8 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
             runtime_options={"execution_mode": "interactive"},
             input_data={},
         )
-        local_store.update_request_run_id("req-direct-interactive", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-direct-interactive", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveDirectStringInteractionAdapter()}
@@ -2009,7 +2009,7 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = json.loads((run_dir / "status.json").read_text())
         assert status_data["status"] == "waiting_user"
-        pending = local_store.get_pending_interaction("req-direct-interactive")
+        pending = await local_store.get_pending_interaction("req-direct-interactive")
         assert pending is not None
         assert pending["interaction_id"] == 1
         assert pending["prompt"] == "Please share a short self-introduction."
@@ -2207,8 +2207,8 @@ def test_load_skill_from_run_dir_reads_workspace_manifest(tmp_path):
     assert manifest.path == skill_dir
 
 
-def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> None:
-    store.create_request(
+async def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> None:
+    await store.create_request(
         request_id="req-turn",
         skill_id=skill_id,
         engine="codex",
@@ -2217,11 +2217,11 @@ def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> No
         runtime_options={"execution_mode": "interactive"},
         input_data={},
     )
-    store.update_request_run_id("req-turn", run_id)
-    store.create_run(run_id, None, "queued")
+    await store.update_request_run_id("req-turn", run_id)
+    await store.create_run(run_id, None, "queued")
 
 
-def _seed_recovery_run(
+async def _seed_recovery_run(
     store: RunStore,
     *,
     request_id: str,
@@ -2232,7 +2232,7 @@ def _seed_recovery_run(
     pending: dict | None = None,
     session_handle: dict | None = None,
 ) -> Path:
-    store.create_request(
+    await store.create_request(
         request_id=request_id,
         skill_id="recovery-skill",
         engine="codex",
@@ -2241,8 +2241,8 @@ def _seed_recovery_run(
         runtime_options=runtime_options,
         input_data={},
     )
-    store.update_request_run_id(request_id, run_id)
-    store.create_run(run_id, None, status)
+    await store.update_request_run_id(request_id, run_id)
+    await store.create_run(run_id, None, status)
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "status.json").write_text(
@@ -2257,11 +2257,11 @@ def _seed_recovery_run(
         encoding="utf-8",
     )
     if profile is not None:
-        store.set_interactive_profile(request_id, profile)
+        await store.set_interactive_profile(request_id, profile)
     if pending is not None:
-        store.set_pending_interaction(request_id, pending)
+        await store.set_pending_interaction(request_id, pending)
     if session_handle is not None:
-        store.set_engine_session_handle(request_id, session_handle)
+        await store.set_engine_session_handle(request_id, session_handle)
     return run_dir
 
 
@@ -2288,7 +2288,7 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        _seed_interactive_request(local_store, run_id, skill.id)
+        await _seed_interactive_request(local_store, run_id, skill.id)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
         orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
@@ -2348,7 +2348,7 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-auto-resume",
             skill_id=skill.id,
             engine="codex",
@@ -2361,8 +2361,8 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
             },
             input_data={},
         )
-        local_store.update_request_run_id("req-auto-resume", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-auto-resume", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
@@ -2387,7 +2387,7 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
 
         status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
         assert status_data["status"] == "succeeded"
-        stats = local_store.get_auto_decision_stats("req-auto-resume")
+        stats = await local_store.get_auto_decision_stats("req-auto-resume")
         assert stats["auto_decision_count"] == 1
         assert isinstance(stats["last_auto_decision_at"], str)
         assert events == ["acquire", "release", "acquire", "release"]
@@ -2429,7 +2429,7 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        local_store.create_request(
+        await local_store.create_request(
             request_id="req-missing-handle",
             skill_id="test-skill",
             engine="codex",
@@ -2438,8 +2438,8 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
             runtime_options={"execution_mode": "interactive"},
             input_data={},
         )
-        local_store.update_request_run_id("req-missing-handle", run_id)
-        local_store.create_run(run_id, None, "queued")
+        await local_store.update_request_run_id("req-missing-handle", run_id)
+        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskMissingHandleAdapter()}
@@ -2478,7 +2478,7 @@ async def test_recover_waiting_user_keeps_waiting_when_handle_valid(tmp_path):
     config.freeze()
     try:
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        _seed_recovery_run(
+        await _seed_recovery_run(
             local_store,
             request_id="req-recover-resumable",
             run_id="run-recover-resumable",
@@ -2498,13 +2498,13 @@ async def test_recover_waiting_user_keeps_waiting_when_handle_valid(tmp_path):
         with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
-        run_state = local_store.get_run("run-recover-resumable")
+        run_state = await local_store.get_run("run-recover-resumable")
         assert run_state is not None
         assert run_state["status"] == RunStatus.WAITING_USER.value
-        recovery = local_store.get_recovery_info("run-recover-resumable")
+        recovery = await local_store.get_recovery_info("run-recover-resumable")
         assert recovery["recovery_state"] == "recovered_waiting"
         assert recovery["recovery_reason"] == "resumable_waiting_preserved"
-        assert local_store.get_pending_interaction("req-recover-resumable") is not None
+        assert await local_store.get_pending_interaction("req-recover-resumable") is not None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2522,7 +2522,7 @@ async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
     config.freeze()
     try:
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        run_dir = _seed_recovery_run(
+        run_dir = await _seed_recovery_run(
             local_store,
             request_id="req-recover-missing-handle",
             run_id="run-recover-missing-handle",
@@ -2539,12 +2539,12 @@ async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
         status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
         assert status_data["status"] == RunStatus.FAILED.value
         assert status_data["error"]["code"] == "SESSION_RESUME_FAILED"
-        run_state = local_store.get_run("run-recover-missing-handle")
+        run_state = await local_store.get_run("run-recover-missing-handle")
         assert run_state is not None
         assert run_state["status"] == RunStatus.FAILED.value
-        recovery = local_store.get_recovery_info("run-recover-missing-handle")
+        recovery = await local_store.get_recovery_info("run-recover-missing-handle")
         assert recovery["recovery_state"] == "failed_reconciled"
-        assert local_store.get_pending_interaction("req-recover-missing-handle") is None
+        assert await local_store.get_pending_interaction("req-recover-missing-handle") is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2562,7 +2562,7 @@ async def test_recover_running_or_queued_fails_with_restart_interrupted(tmp_path
     config.freeze()
     try:
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        run_dir = _seed_recovery_run(
+        run_dir = await _seed_recovery_run(
             local_store,
             request_id="req-recover-running",
             run_id="run-recover-running",
@@ -2577,7 +2577,7 @@ async def test_recover_running_or_queued_fails_with_restart_interrupted(tmp_path
         status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
         assert status_data["status"] == RunStatus.FAILED.value
         assert status_data["error"]["code"] == "ORCHESTRATOR_RESTART_INTERRUPTED"
-        recovery = local_store.get_recovery_info("run-recover-running")
+        recovery = await local_store.get_recovery_info("run-recover-running")
         assert recovery["recovery_state"] == "failed_reconciled"
     finally:
         config.defrost()
@@ -2604,7 +2604,7 @@ async def test_recover_orphan_cleanup_is_noop_and_idempotent(tmp_path):
     config.freeze()
     try:
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        _seed_recovery_run(
+        await _seed_recovery_run(
             local_store,
             request_id="req-recover-idempotent",
             run_id="run-recover-idempotent",

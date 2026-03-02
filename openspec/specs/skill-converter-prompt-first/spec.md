@@ -1,7 +1,8 @@
 # skill-converter-prompt-first Specification
 
 ## Purpose
-TBD - created by archiving change skill-converter-prompt-first-validator. Update Purpose after archive.
+定义 converter 以 prompt-first、SKILL.md 驱动的转换逻辑和三态可转换性分类。
+
 ## Requirements
 ### Requirement: Converter logic is prompt-first and SKILL.md-driven
 The converter skill MUST define conversion orchestration in `SKILL.md`, including semantic analysis, task-type classification, convertibility decision, and conversion strategy execution.

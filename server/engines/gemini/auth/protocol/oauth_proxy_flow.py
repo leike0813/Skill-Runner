@@ -141,7 +141,7 @@ class GeminiOAuthProxyFlow:
 
         try:
             parsed = urllib_parse.urlparse(normalized)
-        except Exception:
+        except ValueError:
             return normalized, None
 
         if parsed.scheme and parsed.netloc:
@@ -189,7 +189,7 @@ class GeminiOAuthProxyFlow:
         expires_in: int | None
         try:
             expires_in = int(expires_raw) if expires_raw is not None else None
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             expires_in = None
 
         if not access_token:
@@ -231,19 +231,19 @@ class GeminiOAuthProxyFlow:
             detail = ""
             try:
                 detail = exc.read().decode("utf-8", errors="replace")
-            except Exception:
+            except (OSError, ValueError):
                 detail = ""
             raise GeminiOAuthProxyError(
                 f"Google token endpoint returned status {exc.code}: {detail[:300]}"
             ) from exc
         except urllib_error.URLError as exc:
             raise GeminiOAuthProxyError(f"Google token endpoint request failed: {exc.reason}") from exc
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise GeminiOAuthProxyError(f"Google token endpoint request failed: {exc}") from exc
 
         try:
             parsed = json.loads(raw)
-        except Exception as exc:
+        except (json.JSONDecodeError, TypeError) as exc:
             raise GeminiOAuthProxyError("Google token endpoint returned invalid JSON") from exc
         if not isinstance(parsed, dict):
             raise GeminiOAuthProxyError("Google token endpoint returned invalid payload")
@@ -258,11 +258,11 @@ class GeminiOAuthProxyFlow:
         try:
             with urllib_request.urlopen(request, timeout=20) as response:
                 raw = response.read().decode("utf-8", errors="replace")
-        except Exception:
+        except (urllib_error.URLError, OSError, ValueError):
             return None
         try:
             payload = json.loads(raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return None
         if not isinstance(payload, dict):
             return None
@@ -300,7 +300,7 @@ class GeminiOAuthProxyFlow:
                     active_email = existing_active.strip()
                 if isinstance(existing_old, list):
                     old_emails = [str(item) for item in existing_old if isinstance(item, str)]
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError):
             pass
 
         normalized_email = (email or "").strip()
@@ -329,7 +329,7 @@ class GeminiOAuthProxyFlow:
             if chmod_mode is not None:
                 try:
                     os.chmod(path, chmod_mode)
-                except Exception:
+                except OSError:
                     pass
         finally:
             if tmp_path and os.path.exists(tmp_path):

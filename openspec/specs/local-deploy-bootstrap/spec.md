@@ -1,7 +1,8 @@
 # local-deploy-bootstrap Specification
 
 ## Purpose
-TBD - created by archiving change runtime-parity-local-container. Update Purpose after archive.
+定义本地一键部署脚本的依赖检查、路径初始化和运行时解析统一规则。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供本地一键部署脚本
 系统 MUST 提供 Linux/macOS 与 Windows 两套本地一键部署脚本，完成基础目录初始化与服务启动准备。

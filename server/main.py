@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import os
 from pathlib import Path
 
@@ -29,12 +30,15 @@ from fastapi import FastAPI, APIRouter  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, temp_skill_runs, ui
-from .services.orchestration.runtime_profile import get_runtime_profile
+from .services.engine_management.runtime_profile import get_runtime_profile
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     setup_logging()
-    from .services.orchestration.agent_cli_manager import AgentCliManager
+    from .services.engine_management.agent_cli_manager import AgentCliManager
+    from .services.engine_management.engine_status_cache_service import engine_status_cache_service
     from .services.platform.cache_manager import cache_manager
     from .services.platform.concurrency_manager import concurrency_manager
     from .services.orchestration.run_cleanup_manager import run_cleanup_manager
@@ -49,6 +53,19 @@ async def lifespan(_app: FastAPI):
     runtime_profile.ensure_directories()
     cli_manager = AgentCliManager(runtime_profile)
     cli_manager.ensure_layout()
+    try:
+        await engine_status_cache_service.refresh_all()
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        logger.warning(
+            "Engine version cache refresh failed during startup; continuing with existing cache",
+            extra={
+                "component": "main",
+                "action": "startup_engine_status_refresh",
+                "error_type": type(exc).__name__,
+                "fallback": "keep_existing_engine_status_cache",
+            },
+            exc_info=True,
+        )
     opencode_model_catalog.start()
     install_runtime_protocol_ports()
     install_runtime_observability_ports()
@@ -56,12 +73,14 @@ async def lifespan(_app: FastAPI):
     validate_ui_basic_auth_config()
     concurrency_manager.start()
     cache_manager.start()
+    engine_status_cache_service.start()
     run_cleanup_manager.start()
     temp_skill_cleanup_manager.start()
     await job_orchestrator.recover_incomplete_runs_on_startup()
     try:
         yield
     finally:
+        engine_status_cache_service.stop()
         opencode_model_catalog.stop()
 
 app = FastAPI(

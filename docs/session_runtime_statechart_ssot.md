@@ -6,7 +6,7 @@
 
 - 核心范式：单一可恢复（single resumable）
 - `auto`：`interactive` 的受限子集（不进入 `waiting_user` 交互闭环）
-- 状态机实现锚点：`server/services/session_statechart.py`
+- 状态机实现锚点：`server/runtime/session/statechart.py`
 
 ## 2. Layer A: Run Lifecycle Main Chart
 
@@ -60,7 +60,7 @@ stateDiagram-v2
 
 ## 5. Canonical States / Events / Guards / Actions
 
-来源：`server/services/session_statechart.py`
+来源：`server/runtime/session/statechart.py`
 
 - States: `queued`, `running`, `waiting_user`, `succeeded`, `failed`, `canceled`
 - Events:
@@ -115,7 +115,7 @@ stateDiagram-v2
 该合同覆盖：
 
 1. `canonical` 状态集合与初始/终态定义。
-2. `transitions` 状态机转移（与 `server/services/session_statechart.py` 对齐）。
+2. `transitions` 状态机转移（与 `server/runtime/session/statechart.py` 对齐）。
 3. `fcmp_mapping`（状态迁移到 FCMP 事件的映射、配对规则）。
 4. `ordering_rules`（终态唯一性、waiting_user 输入配对、`seq` 连续递增、续跑 reply 先于 assistant 输出）。
 

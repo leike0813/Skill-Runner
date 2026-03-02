@@ -1,7 +1,8 @@
 # engine-hard-timeout-policy Specification
 
 ## Purpose
-TBD - created by archiving change run-observability-streaming-and-timeout. Update Purpose after archive.
+定义引擎执行的可配置硬超时策略及其与 interactive 模式的协同行为。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供可配置的引擎硬超时策略
 系统 MUST 为引擎执行提供硬超时，并允许通过环境变量或运行时参数覆盖默认值；超时错误信息必须反映本次实际生效值。

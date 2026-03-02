@@ -1,7 +1,8 @@
 # ephemeral-skill-validation Specification
 
 ## Purpose
-TBD - created by archiving change temporary-skill-upload-run. Update Purpose after archive.
+定义临时 skill 包结构和 AutoSkill 必需文件的校验规则。
+
 ## Requirements
 ### Requirement: Temporary skill package structure is mandatory
 The system MUST require temporary skill packages to contain exactly one top-level directory and treat that directory name as the temporary `skill_id`.

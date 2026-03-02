@@ -51,7 +51,7 @@ Use the upgrade script to refresh installed CLIs:
 
 ## Agent CLI status
 
-The entrypoint runs an agent check on startup and writes a status file:
+The entrypoint and application startup refresh engine versions and write a status file:
 
 - Path: `${SKILL_RUNNER_DATA_DIR:-/data}/agent_status.json`
 - Fields: `present` and `version` per CLI
@@ -75,6 +75,10 @@ The entrypoint runs an agent check on startup and writes a status file:
   - `UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv`
 - Runtime data remains independent:
   - `SKILL_RUNNER_DATA_DIR=/data`
+- Runtime-editable system settings persist at:
+  - `${SKILL_RUNNER_DATA_DIR}/system_settings.json`
+  - This file stores the UI-editable logging settings shown on `/ui/settings`
+  - If missing, the service bootstraps it from `server/assets/configs/system_settings.bootstrap.json`
 - Concurrency policy (optional env overrides):
   - `SKILL_RUNNER_MAX_CONCURRENT_HARD_CAP`
   - `SKILL_RUNNER_MAX_QUEUE_SIZE`
@@ -117,6 +121,7 @@ docker run --rm -p 8000:8000 -p 7681:7681 \
     - `/ui/skills/{skill_id}`
     - `/ui/skills/{skill_id}/view?path=<relative_path>`
   - UI also provides inline managed TUI on `/ui/engines`:
+    - engine table reads cached versions from `agent_status.json`
     - per-engine “start TUI” buttons (predefined commands only)
     - single active session globally
     - powered by `ttyd` gateway (default port `7681`)
@@ -203,9 +208,20 @@ OpenAI OAuth proxy note:
 - OpenCode Google（Antigravity）OAuth 代理需要注入：
   - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID`
   - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_SECRET`
-- Auth session logs are separated by transport:
+- Auth session logs are optional debug artifacts (disabled by default).
+  Enable with `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=true`:
   - `data/engine_auth_sessions/oauth_proxy/<session_id>/events.jsonl`, `http_trace.log`
   - `data/engine_auth_sessions/cli_delegate/<session_id>/events.jsonl`, `pty.log`, `stdin.log`
+
+### Logging settings in containers
+
+- UI-editable logging settings are managed through `/ui/settings` and stored in `/data/system_settings.json`
+- Non-UI logging inputs still come from runtime env:
+  - `LOG_DIR`
+  - `LOG_FILE_BASENAME`
+  - `LOG_ROTATION_WHEN`
+  - `LOG_ROTATION_INTERVAL`
+- If you want Settings changes to survive container recreation, persist `/data`
 
 ### Web inline terminal notes
 

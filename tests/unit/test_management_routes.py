@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +17,7 @@ from server.models import (
     RunStatus,
     SkillManifest,
 )
+from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -134,13 +136,6 @@ async def test_management_engines_list_and_detail(monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        "server.routers.management.agent_cli_manager.collect_auth_status",
-        lambda: {
-            "codex": {"auth_ready": True},
-            "opencode": {"auth_ready": True},
-        },
-    )
-    monkeypatch.setattr(
         "server.routers.management.model_registry.get_models",
         lambda engine: (
             SimpleNamespace(
@@ -179,8 +174,9 @@ async def test_management_engines_list_and_detail(monkeypatch):
     assert list_res.status_code == 200
     body = list_res.json()
     assert body["engines"][0]["engine"] == "codex"
-    assert body["engines"][0]["auth_ready"] is True
     assert body["engines"][0]["models_count"] == 1
+    assert "auth_ready" not in body["engines"][0]
+    assert "sandbox_status" not in body["engines"][0]
 
     detail_res = await _request("GET", "/v1/management/engines/codex")
     assert detail_res.status_code == 200
@@ -188,6 +184,8 @@ async def test_management_engines_list_and_detail(monkeypatch):
     assert detail["engine"] == "codex"
     assert detail["models"][0]["id"] == "gpt-5.2-codex"
     assert "upgrade_status" in detail
+    assert "auth_ready" not in detail
+    assert "sandbox_status" not in detail
 
     opencode_detail_res = await _request("GET", "/v1/management/engines/opencode")
     assert opencode_detail_res.status_code == 200
@@ -212,7 +210,7 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
     )
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.get_run_detail",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "request_id": "req-1",
             "run_id": "run-1",
             "run_dir": str(run_dir),
@@ -227,22 +225,22 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
             "recovered_at": "2026-02-16T00:01:00",
             "recovery_reason": "resumable_waiting_preserved",
             "entries": [],
-        },
+        }),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_pending_interaction",
-        lambda _request_id: {"interaction_id": 9, "prompt": "x"},
+        AsyncMock(return_value={"interaction_id": 9, "prompt": "x"}),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_interaction_count",
-        lambda _request_id: 3,
+        AsyncMock(return_value=3),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_auto_decision_stats",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "auto_decision_count": 2,
             "last_auto_decision_at": "2026-02-16T00:10:00",
-        },
+        }),
     )
 
     response = await _request("GET", "/v1/management/runs/req-1")
@@ -264,7 +262,7 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
 async def test_management_run_files_and_preview(monkeypatch):
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.get_run_detail",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "request_id": "req-2",
             "run_id": "run-2",
             "run_dir": "/tmp/run-2",
@@ -274,19 +272,19 @@ async def test_management_run_files_and_preview(monkeypatch):
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": True,
             "entries": [{"path": "artifacts/out.txt", "is_dir": False}],
-        },
+        }),
     )
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.build_run_file_preview",
-        lambda _request_id, _path: {"type": "text", "content": "ok"},
+        AsyncMock(return_value={"type": "text", "content": "ok"}),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
     )
 
     files_res = await _request("GET", "/v1/management/runs/req-2/files")
@@ -311,7 +309,7 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        lambda request_id: {"request_id": request_id, "run_id": "run-events"},
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-events"}),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -319,15 +317,15 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
 
     response = await _request("GET", "/v1/management/runs/req-events/events")
@@ -445,3 +443,256 @@ async def test_management_run_pending_reply_cancel_delegate_to_jobs(monkeypatch)
     cancel = await _request("POST", "/v1/management/runs/req-3/cancel")
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_management_reset_data_rejects_invalid_confirmation(monkeypatch):
+    called = {"value": False}
+
+    def _execute(_options):  # noqa: ANN001
+        called["value"] = True
+        raise AssertionError("execute_reset should not be called")
+
+    monkeypatch.setattr("server.routers.management.data_reset_service.execute_reset", _execute)
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/reset-data",
+        json={"confirmation": "WRONG"},
+    )
+    assert response.status_code == 400
+    assert "confirmation must equal" in response.text
+    assert called["value"] is False
+
+
+@pytest.mark.asyncio
+async def test_management_reset_data_dry_run(monkeypatch):
+    captured = {}
+
+    class _FakeResult:
+        def to_payload(self):  # noqa: ANN201
+            return {
+                "dry_run": True,
+                "data_dir": "/tmp/data",
+                "db_files": ["/tmp/data/runs.db"],
+                "data_dirs": ["/tmp/data/runs"],
+                "optional_paths": ["/tmp/data/ui_shell_sessions"],
+                "recreate_dirs": ["/tmp/data"],
+                "targets": ["/tmp/data/runs.db", "/tmp/data/runs", "/tmp/data/ui_shell_sessions"],
+                "deleted_count": 0,
+                "missing_count": 0,
+                "recreated_count": 0,
+                "path_results": [],
+            }
+
+    def _execute(options):  # noqa: ANN001
+        captured["options"] = options
+        return _FakeResult()
+
+    monkeypatch.setattr("server.routers.management.data_reset_service.execute_reset", _execute)
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/reset-data",
+        json={
+            "confirmation": DATA_RESET_CONFIRMATION_TEXT,
+            "dry_run": True,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["deleted_count"] == 0
+    assert body["missing_count"] == 0
+    assert body["recreated_count"] == 0
+    assert captured["options"].dry_run is True
+
+
+@pytest.mark.asyncio
+async def test_management_get_system_settings(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.management.get_logging_settings_payload",
+        lambda: {
+            "editable": {
+                "level": "INFO",
+                "format": "text",
+                "retention_days": 7,
+                "dir_max_bytes": 1024,
+            },
+            "read_only": {
+                "dir": "/tmp/logs",
+                "file_basename": "skill_runner.log",
+                "rotation_when": "midnight",
+                "rotation_interval": 1,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.management.config",
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=False)),
+    )
+
+    response = await _request("GET", "/v1/management/system/settings")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["logging"]["editable"]["level"] == "INFO"
+    assert body["logging"]["read_only"]["dir"] == "/tmp/logs"
+    assert body["engine_auth_session_log_persistence_enabled"] is False
+    assert body["reset_confirmation_text"] == DATA_RESET_CONFIRMATION_TEXT
+
+
+@pytest.mark.asyncio
+async def test_management_update_system_settings(monkeypatch):
+    captured = {}
+
+    def _update(payload):  # noqa: ANN001
+        captured["payload"] = payload
+
+    monkeypatch.setattr("server.routers.management.system_settings_service.update_logging_settings", _update)
+    monkeypatch.setattr("server.routers.management.reload_logging_from_settings", lambda: None)
+    monkeypatch.setattr(
+        "server.routers.management.get_logging_settings_payload",
+        lambda: {
+            "editable": {
+                "level": "DEBUG",
+                "format": "json",
+                "retention_days": 3,
+                "dir_max_bytes": 2048,
+            },
+            "read_only": {
+                "dir": "/tmp/logs",
+                "file_basename": "skill_runner.log",
+                "rotation_when": "midnight",
+                "rotation_interval": 1,
+            },
+        },
+    )
+
+    response = await _request(
+        "PUT",
+        "/v1/management/system/settings",
+        json={
+            "logging": {
+                "level": "DEBUG",
+                "format": "json",
+                "retention_days": 3,
+                "dir_max_bytes": 2048,
+            }
+        },
+    )
+    assert response.status_code == 200
+    assert captured["payload"]["level"] == "DEBUG"
+    assert response.json()["logging"]["editable"]["format"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_management_update_system_settings_rejects_invalid_payload():
+    response = await _request(
+        "PUT",
+        "/v1/management/system/settings",
+        json={
+            "logging": {
+                "level": "INFO",
+                "format": "text",
+                "retention_days": 1,
+                "dir_max_bytes": 1,
+                "rotation_when": "midnight",
+            }
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_management_reset_data_execute_with_include_flags(monkeypatch):
+    captured = {}
+
+    class _FakeResult:
+        def to_payload(self):  # noqa: ANN201
+            return {
+                "dry_run": False,
+                "data_dir": "/tmp/data",
+                "db_files": ["/tmp/data/runs.db"],
+                "data_dirs": ["/tmp/data/runs"],
+                "optional_paths": ["/tmp/data/logs", "/tmp/data/ui_shell_sessions"],
+                "recreate_dirs": ["/tmp/data", "/tmp/data/runs"],
+                "targets": ["/tmp/data/runs.db"],
+                "deleted_count": 3,
+                "missing_count": 1,
+                "recreated_count": 2,
+                "path_results": [{"path": "/tmp/data/runs.db", "status": "deleted"}],
+            }
+
+    def _execute(options):  # noqa: ANN001
+        captured["options"] = options
+        return _FakeResult()
+
+    monkeypatch.setattr("server.routers.management.data_reset_service.execute_reset", _execute)
+    monkeypatch.setattr(
+        "server.routers.management.config",
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=True)),
+    )
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/reset-data",
+        json={
+            "confirmation": DATA_RESET_CONFIRMATION_TEXT,
+            "dry_run": False,
+            "include_logs": True,
+            "include_engine_catalog": True,
+            "include_agent_status": True,
+            "include_engine_auth_sessions": True,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted_count"] == 3
+    assert body["missing_count"] == 1
+    assert body["recreated_count"] == 2
+    assert captured["options"].include_logs is True
+    assert captured["options"].include_engine_catalog is True
+    assert captured["options"].include_agent_status is True
+    assert captured["options"].include_engine_auth_sessions is True
+
+
+@pytest.mark.asyncio
+async def test_management_reset_data_normalizes_engine_auth_flag_when_feature_disabled(monkeypatch):
+    captured = {}
+
+    class _FakeResult:
+        def to_payload(self):  # noqa: ANN201
+            return {
+                "dry_run": False,
+                "data_dir": "/tmp/data",
+                "db_files": [],
+                "data_dirs": [],
+                "optional_paths": [],
+                "recreate_dirs": [],
+                "targets": [],
+                "deleted_count": 0,
+                "missing_count": 0,
+                "recreated_count": 0,
+                "path_results": [],
+            }
+
+    def _execute(options):  # noqa: ANN001
+        captured["options"] = options
+        return _FakeResult()
+
+    monkeypatch.setattr("server.routers.management.data_reset_service.execute_reset", _execute)
+    monkeypatch.setattr(
+        "server.routers.management.config",
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=False)),
+    )
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/reset-data",
+        json={
+            "confirmation": DATA_RESET_CONFIRMATION_TEXT,
+            "include_engine_auth_sessions": True,
+        },
+    )
+    assert response.status_code == 200
+    assert captured["options"].include_engine_auth_sessions is False

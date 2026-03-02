@@ -5,7 +5,24 @@ import jsonschema  # type: ignore[import-untyped]
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, cast
-from server.services.orchestration.runtime_profile import get_runtime_profile
+from tomlkit.exceptions import TOMLKitError
+from server.services.engine_management.runtime_profile import get_runtime_profile
+
+_TOML_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    TOMLKitError,
+    TypeError,
+    ValueError,
+)
+_SCHEMA_LOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    TypeError,
+    ValueError,
+    jsonschema.SchemaError,
+)
 
 class CodexConfigManager:
     """
@@ -108,7 +125,7 @@ class CodexConfigManager:
             if isinstance(parsed, dict):
                 return dict(parsed)
             return {}
-        except Exception:
+        except _TOML_LOAD_EXCEPTIONS:
             logger.exception("Error loading default codex config")
             return {}
 
@@ -124,7 +141,7 @@ class CodexConfigManager:
             jsonschema.validate(instance=config, schema=schema)
         except jsonschema.ValidationError as e:
             raise ValueError(f"Configuration validation failed: {e.message}")
-        except Exception as e:
+        except _SCHEMA_LOAD_EXCEPTIONS as e:
             raise ValueError(f"Schema validation error: {e}")
 
     def _load_enforced_config(self) -> Dict[str, Any]:
@@ -134,7 +151,7 @@ class CodexConfigManager:
         try:
             with open(self.ENFORCED_CONFIG_PATH, "r") as f:
                 return tomlkit.parse(f.read())
-        except Exception as e:
+        except _TOML_LOAD_EXCEPTIONS:
             logger.exception("Error loading enforced config")
             return {}
 

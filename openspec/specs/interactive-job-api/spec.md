@@ -1,7 +1,8 @@
 # interactive-job-api Specification
 
 ## Purpose
-TBD - created by archiving change interactive-00-api-mode-and-interaction-contract. Update Purpose after archive.
+定义任务执行模式选择、待决交互查询和交互回复提交的 API 约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 支持任务执行模式选择
 系统 MUST 支持 `auto` 与 `interactive` 两种执行模式，并保持默认向后兼容。
@@ -140,3 +141,4 @@ The reply protocol MUST remain `interaction_id + response` driven and MUST NOT i
 #### Scenario: events/history 返回 FCMP 序列
 - **WHEN** 客户端调用 `/events/history`
 - **THEN** 响应事件为 FCMP envelope（`protocol_version=fcmp/1.0`）
+

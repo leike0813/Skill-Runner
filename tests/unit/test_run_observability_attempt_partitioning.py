@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
 
@@ -23,7 +26,8 @@ def _fcmp_state_event(*, seq: int, attempt: int, to_state: str) -> dict:
     }
 
 
-def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -43,11 +47,10 @@ def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
     (audit_dir / "orchestrator_events.2.jsonl").write_text("", encoding="utf-8")
 
     service = RunObservabilityService()
-    monkeypatch.setattr(
-        service,
-        "_materialize_protocol_stream",
-        lambda **_kwargs: {"rasp_events": [], "fcmp_events": []},
-    )
+    async def _materialize(**_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
+    monkeypatch.setattr(service, "_materialize_protocol_stream", _materialize)
     monkeypatch.setattr(
         service,
         "_read_status_payload",
@@ -55,14 +58,14 @@ def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"runtime_options": {"execution_mode": "interactive"}, "engine": "codex"},
+        AsyncMock(return_value={"runtime_options": {"execution_mode": "interactive"}, "engine": "codex"}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
-        lambda _request_id: 1,
+        AsyncMock(return_value=1),
     )
 
-    payload_attempt_1 = service.list_protocol_history(
+    payload_attempt_1 = await service.list_protocol_history(
         run_dir=run_dir,
         request_id="req-1",
         stream="fcmp",
@@ -72,7 +75,7 @@ def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
     assert payload_attempt_1["available_attempts"] == [1, 2]
     assert payload_attempt_1["events"][0]["meta"]["attempt"] == 1
 
-    payload_attempt_2 = service.list_protocol_history(
+    payload_attempt_2 = await service.list_protocol_history(
         run_dir=run_dir,
         request_id="req-1",
         stream="fcmp",

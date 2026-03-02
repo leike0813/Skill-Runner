@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from pydantic import ValidationError
+
 from server.models import ManifestArtifact
 from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER, generate_output_schema_patch
 from .skill_patch_templates import (
@@ -25,6 +27,19 @@ MODE_AUTO_PATCH_MARKER = MODE_AUTO_TEMPLATE.marker
 MODE_INTERACTIVE_PATCH_MARKER = MODE_INTERACTIVE_TEMPLATE.marker
 RUNTIME_ENFORCEMENT_MARKER = RUNTIME_ENFORCEMENT_TEMPLATE.marker
 OUTPUT_FORMAT_CONTRACT_MARKER = OUTPUT_FORMAT_CONTRACT_TEMPLATE.marker
+
+_JSON_PAYLOAD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+)
+_PATCH_SKILL_MD_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 @dataclass(frozen=True)
@@ -50,7 +65,7 @@ class SkillPatcher:
                 parsed.append(
                     item if isinstance(item, ManifestArtifact) else ManifestArtifact.model_validate(item)
                 )
-            except Exception:
+            except (ValidationError, TypeError, ValueError):
                 logger.warning("Ignore invalid manifest artifact payload: %r", item)
         return parsed
 
@@ -85,7 +100,7 @@ class SkillPatcher:
             return None
         try:
             payload = json.loads(schema_path.read_text(encoding="utf-8"))
-        except Exception:
+        except _JSON_PAYLOAD_EXCEPTIONS:
             logger.warning("Failed to parse output schema: %s", schema_path, exc_info=True)
             return None
         if not isinstance(payload, dict):
@@ -105,7 +120,7 @@ class SkillPatcher:
                         output_rel = schemas_obj.get("output")
                         if isinstance(output_rel, str) and output_rel.strip():
                             candidates.append(skill_dir / output_rel.strip())
-            except Exception:
+            except _JSON_PAYLOAD_EXCEPTIONS:
                 logger.warning("Failed to parse runner.json for output schema: %s", runner_path)
         candidates.extend(
             [
@@ -122,7 +137,7 @@ class SkillPatcher:
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+            except _JSON_PAYLOAD_EXCEPTIONS:
                 logger.warning("Failed to parse output schema: %s", path, exc_info=True)
                 continue
             if isinstance(payload, dict):
@@ -233,7 +248,7 @@ class SkillPatcher:
             skill_md_path.write_text(updated, encoding="utf-8")
             logger.info("Patched SKILL.md definition at %s", skill_md_path)
             return True
-        except Exception:
+        except _PATCH_SKILL_MD_EXCEPTIONS:
             logger.exception("Failed to patch SKILL.md")
             raise
 

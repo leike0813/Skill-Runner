@@ -1,0 +1,56 @@
+<div class="card">
+    <h2>Logging Settings</h2>
+    <div class="muted">仅以下字段可由 Settings 页面修改；只读项继续由系统配置或环境变量控制。</div>
+    <form id="logging-settings-form" class="stack" style="margin-top:12px;">
+        <div class="field-grid">
+            <label>
+                Level
+                <select id="logging-level" name="level">
+                    {% for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "NOTSET"] %}
+                    <option value="{{ level }}" {% if logging_settings.editable.level == level %}selected{% endif %}>{{ level }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Format
+                <select id="logging-format" name="format">
+                    <option value="text" {% if logging_settings.editable.format == "text" %}selected{% endif %}>text</option>
+                    <option value="json" {% if logging_settings.editable.format == "json" %}selected{% endif %}>json</option>
+                </select>
+            </label>
+            <label>
+                Retention Days
+                <input id="logging-retention-days" type="number" min="1" value="{{ logging_settings.editable.retention_days }}">
+            </label>
+            <label>
+                Directory Max Bytes
+                <input id="logging-dir-max-bytes" type="number" min="0" value="{{ logging_settings.editable.dir_max_bytes }}">
+            </label>
+        </div>
+        <div class="row">
+            <button type="submit">保存日志设置</button>
+            <div class="muted">保存后会立即重载应用日志配置。</div>
+        </div>
+        <div id="logging-settings-result" class="status-box"></div>
+    </form>
+
+    <h3 style="margin:18px 0 6px;">Read-only Runtime Inputs</h3>
+    <div class="readonly-grid">
+        <div class="readonly-item">
+            <div class="readonly-label">Log Directory</div>
+            <div class="readonly-value">{{ logging_settings.read_only.dir }}</div>
+        </div>
+        <div class="readonly-item">
+            <div class="readonly-label">File Basename</div>
+            <div class="readonly-value">{{ logging_settings.read_only.file_basename }}</div>
+        </div>
+        <div class="readonly-item">
+            <div class="readonly-label">Rotation When</div>
+            <div class="readonly-value">{{ logging_settings.read_only.rotation_when }}</div>
+        </div>
+        <div class="readonly-item">
+            <div class="readonly-label">Rotation Interval</div>
+            <div class="readonly-value">{{ logging_settings.read_only.rotation_interval }}</div>
+        </div>
+    </div>
+</div>

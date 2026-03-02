@@ -2,12 +2,15 @@ import pytest
 import json
 from pathlib import Path
 
-from server.services.orchestration.model_registry import ModelRegistry
+from server.services.engine_management.model_registry import ModelRegistry
 
 
 def test_get_models_uses_latest_snapshot_when_version_unknown(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
 
     catalog = registry.get_models("gemini", refresh=True)
 
@@ -24,7 +27,10 @@ def test_get_models_uses_latest_snapshot_when_version_unknown(monkeypatch):
 
 def test_get_models_uses_exact_or_lower_version(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: "0.25.2")
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.25.2",
+    )
 
     catalog = registry.get_models("gemini", refresh=True)
 
@@ -34,7 +40,10 @@ def test_get_models_uses_exact_or_lower_version(monkeypatch):
 
 def test_get_models_no_semver_match(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: "dev-build")
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "dev-build",
+    )
 
     catalog = registry.get_models("iflow", refresh=True)
 
@@ -49,7 +58,10 @@ def test_get_models_no_semver_match(monkeypatch):
 
 def test_validate_model_codex_effort(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
 
     result = registry.validate_model("codex", "gpt-5.2-codex@high")
     assert result["model"] == "gpt-5.2-codex"
@@ -58,7 +70,10 @@ def test_validate_model_codex_effort(monkeypatch):
 
 def test_validate_model_codex_unsupported_effort(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
 
     with pytest.raises(ValueError, match="Reasoning effort"):
         registry.validate_model("codex", "gpt-5.1-codex-mini@xhigh")
@@ -66,7 +81,10 @@ def test_validate_model_codex_unsupported_effort(monkeypatch):
 
 def test_validate_model_non_codex_rejects_suffix(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
 
     with pytest.raises(ValueError, match="does not support"):
         registry.validate_model("gemini", "gemini-2.5-pro@high")
@@ -74,9 +92,12 @@ def test_validate_model_non_codex_rejects_suffix(monkeypatch):
 
 def test_validate_model_opencode_requires_provider_model(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda engine: None)
     monkeypatch.setattr(
-        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
@@ -109,9 +130,12 @@ def test_validate_model_unknown_engine():
 
 def test_get_models_opencode_runtime_probe_cache(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
     monkeypatch.setattr(
-        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.1.0",
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
@@ -138,9 +162,12 @@ def test_get_models_opencode_runtime_probe_cache(monkeypatch):
 
 def test_get_manifest_view_opencode_dynamic_compat(monkeypatch):
     registry = ModelRegistry()
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
     monkeypatch.setattr(
-        "server.services.orchestration.model_registry.opencode_model_catalog.get_snapshot",
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.1.0",
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
         lambda: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
@@ -216,7 +243,10 @@ def test_get_manifest_view(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     _build_models_fixture(tmp_path, "gemini")
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(tmp_path / "gemini"))
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.1.0")
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.1.0",
+    )
 
     view = registry.get_manifest_view("gemini")
 
@@ -230,7 +260,10 @@ def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     engine_root = _build_models_fixture(tmp_path, "gemini")
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.2.0",
+    )
 
     view = registry.add_snapshot_for_detected_version(
         "gemini",
@@ -257,7 +290,10 @@ def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_pat
     with open(engine_root / "models_0.2.0.json", "w", encoding="utf-8") as f:
         json.dump({"engine": "gemini", "version": "0.2.0", "models": []}, f)
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: "0.2.0")
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: "0.2.0",
+    )
 
     with pytest.raises(ValueError, match="Snapshot already exists"):
         registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])
@@ -267,7 +303,10 @@ def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_pat
     registry = ModelRegistry()
     engine_root = _build_models_fixture(tmp_path, "gemini")
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
-    monkeypatch.setattr(registry, "_detect_cli_version", lambda _engine: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
 
     with pytest.raises(ValueError, match="CLI version not detected"):
         registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])

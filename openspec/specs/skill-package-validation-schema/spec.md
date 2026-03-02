@@ -1,7 +1,8 @@
 # skill-package-validation-schema Specification
 
 ## Purpose
-TBD - created by archiving change interactive-34-skill-package-schema-and-engine-policy. Update Purpose after archive.
+定义 skill 包校验合同的独立 schema 文件声明和安装/临时上传共用同一 manifest 合同的约束。
+
 ## Requirements
 ### Requirement: Skill package 校验合同 MUST 以独立 schema 文件声明
 系统 MUST 提供独立的 schema 文件来声明 skill package 与 `assets/runner.json` 的校验合同，而非仅依赖服务内硬编码规则。

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from server.runtime.auth.driver_registry import AuthDriverRegistry
-from server.services.orchestration.engine_auth_bootstrap import (
+from server.services.engine_management.engine_auth_bootstrap import (
     AuthBootstrapBundle,
     build_engine_auth_bootstrap,
 )

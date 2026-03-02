@@ -25,7 +25,7 @@
 - `GET /v1/management/skills/{skill_id}/schemas`：返回 `input/parameter/output` schema 内容（用于动态表单构建）
 
 ### Engine 管理
-- `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/auth_ready/sandbox_status/models_count`）
+- `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/models_count`，版本来自后台缓存）
 - `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`）
 
 ### Run 管理（对话窗口）
@@ -548,16 +548,16 @@
 `GET /ui/engines`
 
 页面能力：
-- 查看 Engine 状态与检测到的 CLI 版本；
+- 查看缓存化的 Engine 版本；
 - 触发“升级全部”与“按引擎升级”；
 - 跳转到 Engine 模型管理页。
 - 鉴权交互收敛为“全局后台 + 引擎单入口菜单”：
   - 全局“鉴权后台”下拉：`oauth_proxy` / `cli_delegate`（默认 `oauth_proxy`）
   - 引擎表格每行一个“连接”入口；OpenCode 为 `provider -> 鉴权方式` 两级菜单
-  - 主鉴权状态区仅保留状态展示、输入区和“取消”按钮
+- 主鉴权状态区仅保留状态展示、输入区和“取消”按钮
 - 在页面下方内嵌 TUI 终端（ttyd 网关）。
 - 每个引擎提供“在内嵌终端中启动 TUI”按钮（同一时刻仅允许一个活跃会话）。
-- 启动返回包含 `sandbox_status`/`sandbox_message`（观测信息，默认不阻断启动）。
+- sandbox 状态只在内嵌终端 banner 和 TUI 启动响应中展示，不再出现在 engine 表格中。
 - Gemini 内嵌 TUI 在容器沙箱运行时可用时会显式追加 `--sandbox`（不可用时降级启动并保留状态提示）。
 - 若 Gemini 当前认证模式是 API key（`security.auth.selectedType=gemini-api-key`），内嵌 TUI 会强制禁用 `--sandbox`，以避免该模式下 CLI 因 `GEMINI_API_KEY` 前置校验导致启动即退出。
 - iFlow 内嵌 TUI 当前固定非沙箱运行，并返回告警状态（其沙箱依赖 Docker 镜像执行，不符合当前内嵌 TUI 设计）。
@@ -580,6 +580,10 @@
 
 ### Engine 列表数据（Management Adapter）
 `GET /ui/management/engines/table`
+
+说明：
+- `/ui/engines` 首屏直接服务端渲染表格。
+- 该 partial 路由仅用于兼容局部刷新，不在首屏加载时触发版本探测。
 
 兼容旧接口（已弃用）：
 - `GET /ui/engines/table`
@@ -778,51 +782,6 @@
   ]
 }
 ```
-
-### 获取引擎鉴权与路径状态（受 Basic Auth 保护）
-`GET /v1/engines/auth-status`
-
-说明：
-- 用于诊断服务当前实际使用的 CLI 路径来源（managed/global）及鉴权文件就绪情况。
-- 该接口返回静态就绪判断（不触发真实模型调用，不消耗 token）。
-
-**Response** (`EngineAuthStatusResponse`):
-```json
-{
-  "engines": {
-    "opencode": {
-      "managed_present": true,
-      "managed_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/opencode",
-      "global_available": true,
-      "global_cli_path": "/usr/local/bin/opencode",
-      "effective_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/opencode",
-      "effective_path_source": "managed",
-      "credential_files": {
-        "auth.json": true,
-        "antigravity-accounts.json": false
-      },
-      "auth_ready": true
-    },
-    "iflow": {
-      "managed_present": true,
-      "managed_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/iflow",
-      "global_available": true,
-      "global_cli_path": "/usr/local/bin/iflow",
-      "effective_cli_path": "/home/foo/.local/share/skill-runner/agent-cache/npm/bin/iflow",
-      "effective_path_source": "managed",
-      "credential_files": {
-        "iflow_accounts.json": true,
-        "oauth_creds.json": false
-      },
-      "auth_ready": false
-    }
-  }
-}
-```
-
-说明（OpenCode）：
-- `auth_ready` 判定为：CLI 可用且 `auth.json` 存在。
-- `antigravity-accounts.json` 仅用于插件附加诊断，不作为 ready 必要条件。
 
 ### 引擎鉴权会话接口（受 Basic Auth 保护）
 V2（transport 分组）：

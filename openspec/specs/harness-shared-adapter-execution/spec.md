@@ -1,7 +1,8 @@
 # harness-shared-adapter-execution Specification
 
 ## Purpose
-TBD - created by archiving change interactive-42-engine-runtime-adapter-decoupling. Update Purpose after archive.
+定义 harness 复用 adapter 命令构建接口和运行时解析接口的约束。
+
 ## Requirements
 ### Requirement: Harness MUST 复用 Adapter 命令构建接口
 系统 MUST 使 Harness 的 start/resume 执行路径调用与主服务相同的 Adapter 命令构建接口，禁止在 Harness 内维护独立命令拼接分支。  

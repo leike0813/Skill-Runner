@@ -356,12 +356,19 @@ class EngineExecutionAdapter:
     ) -> ProcessExecutionResult:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
+        logs_dir = run_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log_path = logs_dir / "stdout.txt"
+        stderr_log_path = logs_dir / "stderr.txt"
+        stdout_log = stdout_log_path.open("w", encoding="utf-8")
+        stderr_log = stderr_log_path.open("w", encoding="utf-8")
 
         async def read_stream(
             stream: asyncio.StreamReader | None,
             chunks: list[str],
             tag: str,
             should_print: bool,
+            log_file: Any,
         ) -> None:
             if stream is None:
                 return
@@ -371,14 +378,16 @@ class EngineExecutionAdapter:
                     break
                 decoded_chunk = chunk.decode("utf-8", errors="replace")
                 chunks.append(decoded_chunk)
+                log_file.write(decoded_chunk)
+                log_file.flush()
                 if should_print:
                     logger.info("[%s]%s", tag, decoded_chunk.rstrip())
 
         stdout_task = asyncio.create_task(
-            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False)
+            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False, stdout_log)
         )
         stderr_task = asyncio.create_task(
-            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False)
+            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False, stderr_log)
         )
 
         run_id_obj = options.get("__run_id")
@@ -405,6 +414,8 @@ class EngineExecutionAdapter:
                 stdout_task.cancel()
                 stderr_task.cancel()
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            stdout_log.close()
+            stderr_log.close()
             if run_id:
                 self._active_processes().pop(run_id, None)
 
@@ -454,7 +465,7 @@ class EngineExecutionAdapter:
     async def _terminate_process_tree_posix(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
         try:
             pgid = os.getpgid(proc.pid)
-        except Exception:
+        except OSError:
             pgid = None
 
         if pgid is not None and pgid == proc.pid:
@@ -468,11 +479,15 @@ class EngineExecutionAdapter:
                     os.killpg(pgid, signal.SIGKILL)
                     await asyncio.wait_for(proc.wait(), timeout=5)
                     return
-                except Exception:
-                    pass
+                except (OSError, asyncio.TimeoutError):
+                    logger.warning(
+                        "[%s] process group SIGKILL failed; fallback terminate/kill path",
+                        prefix,
+                        exc_info=True,
+                    )
             except ProcessLookupError:
                 return
-            except Exception:
+            except OSError:
                 logger.warning("[%s] process group termination failed", prefix, exc_info=True)
         elif pgid is not None:
             logger.warning(
@@ -485,11 +500,11 @@ class EngineExecutionAdapter:
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=3)
-        except Exception:
+        except (OSError, asyncio.TimeoutError):
             try:
                 proc.kill()
                 await asyncio.wait_for(proc.wait(), timeout=3)
-            except Exception:
+            except (OSError, asyncio.TimeoutError):
                 logger.warning("[%s] fallback terminate/kill failed", prefix, exc_info=True)
 
     async def _terminate_process_tree_windows(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
@@ -499,20 +514,28 @@ class EngineExecutionAdapter:
                 proc.send_signal(ctrl_break)
                 await asyncio.wait_for(proc.wait(), timeout=3)
                 return
-            except Exception:
-                pass
+            except (OSError, ValueError, RuntimeError, asyncio.TimeoutError):
+                logger.warning(
+                    "[%s] CTRL_BREAK signaling failed; fallback terminate path",
+                    prefix,
+                    exc_info=True,
+                )
 
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=3)
             return
-        except Exception:
-            pass
+        except (OSError, asyncio.TimeoutError):
+            logger.warning(
+                "[%s] windows terminate failed; fallback kill path",
+                prefix,
+                exc_info=True,
+            )
 
         try:
             proc.kill()
             await asyncio.wait_for(proc.wait(), timeout=3)
-        except Exception:
+        except (OSError, asyncio.TimeoutError):
             logger.warning("[%s] windows terminate/kill failed", prefix, exc_info=True)
 
     def _resolve_hard_timeout(self, options: dict[str, Any]) -> int:
@@ -522,8 +545,13 @@ class EngineExecutionAdapter:
             parsed = int(candidate)
             if parsed > 0:
                 return parsed
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            logger.debug(
+                "[%s] invalid hard_timeout_seconds=%r; using default=%s",
+                self.__class__.__name__,
+                candidate,
+                default_timeout,
+            )
         return default_timeout
 
     def _looks_like_auth_required(self, stdout: str, stderr: str) -> bool:
@@ -574,7 +602,7 @@ class EngineExecutionAdapter:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return None
         return None
 
@@ -659,7 +687,7 @@ class EngineExecutionAdapter:
             return None, "missing interaction_id"
         try:
             interaction_id = int(interaction_id_raw)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return None, "missing interaction_id"
         if interaction_id <= 0:
             return None, "invalid interaction_id"

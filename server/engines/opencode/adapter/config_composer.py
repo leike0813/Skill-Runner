@@ -22,7 +22,7 @@ class OpencodeConfigComposer:
             return {}
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError, TypeError):
             logger.warning("Failed to load %s config: %s", label, config_path, exc_info=True)
             return {}
         return payload if isinstance(payload, dict) else {}

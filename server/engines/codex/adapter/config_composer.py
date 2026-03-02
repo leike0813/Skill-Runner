@@ -73,7 +73,7 @@ class CodexConfigComposer:
                     with open(settings_path, "r", encoding="utf-8") as f:
                         skill_defaults = tomlkit.parse(f.read())
                     logger.info("Loaded skill defaults from %s", settings_path)
-                except Exception as exc:
+                except (ImportError, OSError, ValueError, TypeError) as exc:
                     logger.warning("Failed to load skill settings: %s", exc)
 
         try:
@@ -96,7 +96,7 @@ class CodexConfigComposer:
                 else:
                     try:
                         setattr(config_manager, "profile_name", profile_name)
-                    except Exception:
+                    except (AttributeError, TypeError):
                         pass
             codex_overrides = self.extract_codex_overrides(options)
             fused_settings = config_manager.generate_profile_settings(skill_defaults, codex_overrides)

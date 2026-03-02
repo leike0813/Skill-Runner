@@ -1,7 +1,8 @@
 # ui-basic-auth Specification
 
 ## Purpose
-TBD - created by archiving change web-management-ui. Update Purpose after archive.
+定义 Basic Auth 鉴权的前端凭据表单和认证状态持久化约束。
+
 ## Requirements
 ### Requirement: 管理界面 MUST 支持基础鉴权并可由环境变量初始化
 系统 MUST 支持通过配置启用 HTTP Basic Auth，且配置项 MUST 支持环境变量覆盖。

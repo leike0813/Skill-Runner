@@ -19,7 +19,8 @@ def _fcmp_event(*, attempt: int, seq: int, type_name: str, data: dict) -> dict:
     }
 
 
-def test_list_event_history_rewrites_seq_to_global_monotonic(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_event_history_rewrites_seq_to_global_monotonic(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-global"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -91,13 +92,16 @@ def test_list_event_history_rewrites_seq_to_global_monotonic(monkeypatch, tmp_pa
         (audit_dir / f"orchestrator_events.{attempt}.jsonl").write_text("", encoding="utf-8")
         (audit_dir / f"stdout.{attempt}.log").write_text("", encoding="utf-8")
 
+    async def _materialize(_self, **_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
-        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+        _materialize,
     )
 
     service = RunObservabilityService()
-    rows = service.list_event_history(run_dir=run_dir, request_id=None)
+    rows = await service.list_event_history(run_dir=run_dir, request_id=None)
     assert [row["seq"] for row in rows] == [1, 2, 3, 4]
     assert [row["meta"]["local_seq"] for row in rows] == [1, 2, 1, 2]
     assert [row["meta"]["attempt"] for row in rows] == [1, 1, 2, 2]
@@ -170,9 +174,12 @@ async def test_iter_sse_events_respects_global_cursor_across_attempts(monkeypatc
         (audit_dir / f"orchestrator_events.{attempt}.jsonl").write_text("", encoding="utf-8")
         (audit_dir / f"stdout.{attempt}.log").write_text("", encoding="utf-8")
 
+    async def _materialize(_self, **_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
-        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+        _materialize,
     )
 
     service = RunObservabilityService()

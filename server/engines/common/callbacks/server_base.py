@@ -89,7 +89,18 @@ class LocalOAuthCallbackServer:
                         )
                         return
                     except Exception as exc:  # pragma: no cover - defensive
-                        logger.exception("%s local callback handling failed: %s", listener_name, exc)
+                        # Third-party callback handler boundary: preserve HTTP error mapping contract.
+                        logger.exception(
+                            "%s local callback handling failed: %s",
+                            listener_name,
+                            exc,
+                            extra={
+                                "component": "engine.callbacks.local_oauth_server",
+                                "action": "handle_callback",
+                                "error_type": type(exc).__name__,
+                                "fallback": "http_500_response",
+                            },
+                        )
                         self._respond(
                             status=500,
                             title="OAuth callback failed",
@@ -173,4 +184,3 @@ class LocalOAuthCallbackServer:
     @property
     def endpoint(self) -> str:
         return f"http://{self._host}:{self._bound_port}{self._callback_path}"
-

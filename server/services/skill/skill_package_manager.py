@@ -22,27 +22,37 @@ class SkillPackageManager:
         self._apply_lock = threading.Lock()
         self.validator = SkillPackageValidator()
 
-    def create_install_request(self, request_id: str, package_bytes: bytes) -> Path:
+    async def create_install_request(self, request_id: str, package_bytes: bytes) -> Path:
         requests_root = Path(config.SYSTEM.SKILL_INSTALLS_DIR) / "requests" / request_id
         requests_root.mkdir(parents=True, exist_ok=True)
         package_path = requests_root / "skill_package.zip"
         package_path.write_bytes(package_bytes)
-        skill_install_store.create_install(request_id)
+        await skill_install_store.create_install(request_id)
         return package_path
 
-    def run_install(self, request_id: str) -> None:
-        skill_install_store.update_running(request_id)
+    async def run_install(self, request_id: str) -> None:
+        await skill_install_store.update_running(request_id)
         try:
             skill_id, version, action = self._process_install(request_id)
-            skill_install_store.update_succeeded(
+            await skill_install_store.update_succeeded(
                 request_id=request_id,
                 skill_id=skill_id,
                 version=version,
                 action=action
             )
         except Exception as exc:
-            logger.exception("Skill package install failed for request %s", request_id)
-            skill_install_store.update_failed(request_id, str(exc))
+            # Boundary mapping: keep async install request semantics stable on unexpected failures.
+            logger.exception(
+                "Skill package install failed for request %s",
+                request_id,
+                extra={
+                    "component": "skill.skill_package_manager",
+                    "action": "run_install",
+                    "error_type": type(exc).__name__,
+                    "fallback": "update_failed_and_cleanup",
+                },
+            )
+            await skill_install_store.update_failed(request_id, str(exc))
         finally:
             self._cleanup_request_files(request_id)
 
@@ -105,7 +115,7 @@ class SkillPackageManager:
                 else:
                     git_path.unlink(missing_ok=True)
                 logger.info("Removed git metadata from staged skill package: %s", git_path)
-            except Exception as exc:
+            except OSError as exc:
                 logger.exception(
                     "Failed to remove git metadata from staged skill package: %s",
                     git_path,
@@ -145,7 +155,7 @@ class SkillPackageManager:
             return None
         try:
             return self._read_installed_version(live_skill_dir)
-        except Exception:
+        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError):
             logger.warning(
                 "Found invalid existing skill directory; will treat as fresh install: %s",
                 live_skill_dir,
@@ -178,7 +188,7 @@ class SkillPackageManager:
         shutil.move(str(live_skill_dir), str(archive_dir))
         try:
             shutil.move(str(staged_skill_dir), str(live_skill_dir))
-        except Exception as exc:
+        except (OSError, shutil.Error, RuntimeError) as exc:
             # Attempt rollback to keep active skill unchanged.
             if not live_skill_dir.exists() and archive_dir.exists():
                 shutil.move(str(archive_dir), str(live_skill_dir))

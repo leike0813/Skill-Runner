@@ -30,7 +30,7 @@ def _is_container_runtime() -> bool:
         try:
             lowered = cgroup.read_text(encoding="utf-8", errors="ignore").lower()
             return "docker" in lowered or "containerd" in lowered or "kubepods" in lowered
-        except Exception:
+        except OSError:
             return False
     return False
 
@@ -63,6 +63,27 @@ _C.SYSTEM.ROOT = str(Path(__file__).parent.parent)
 # Check env SKILL_RUNNER_DATA_DIR first, then default to PROJECT_ROOT/data
 _default_data_dir = "/data" if _is_container_runtime() else os.path.join(_C.SYSTEM.ROOT, "data")
 _C.SYSTEM.DATA_DIR = os.environ.get("SKILL_RUNNER_DATA_DIR", _default_data_dir)
+
+# Global application logging policy
+_C.SYSTEM.LOGGING = CN()
+_C.SYSTEM.LOGGING.LEVEL = "INFO"
+_C.SYSTEM.LOGGING.DIR = os.environ.get("LOG_DIR", os.path.join(_C.SYSTEM.DATA_DIR, "logs"))
+_C.SYSTEM.LOGGING.FILE_BASENAME = os.environ.get("LOG_FILE_BASENAME", "skill_runner.log")
+_C.SYSTEM.LOGGING.FORMAT = "text"
+_C.SYSTEM.LOGGING.ROTATION_WHEN = os.environ.get("LOG_ROTATION_WHEN", "midnight")
+_C.SYSTEM.LOGGING.ROTATION_INTERVAL = int(os.environ.get("LOG_ROTATION_INTERVAL", "1"))
+_C.SYSTEM.LOGGING.RETENTION_DAYS = 7
+_C.SYSTEM.LOGGING.DIR_MAX_BYTES = 512 * 1024 * 1024
+
+# Runtime settings persistence
+_C.SYSTEM.SETTINGS_FILE = os.path.join(_C.SYSTEM.DATA_DIR, "system_settings.json")
+_C.SYSTEM.SETTINGS_BOOTSTRAP_FILE = os.path.join(
+    _C.SYSTEM.ROOT,
+    "server",
+    "assets",
+    "configs",
+    "system_settings.bootstrap.json",
+)
 
 # Agent managed cache root (independent from data dir)
 _default_agent_cache = (
@@ -182,6 +203,10 @@ _C.SYSTEM.ENGINE_AUTH_DEVICE_PROXY_TTL_SECONDS = int(
 _C.SYSTEM.ENGINE_AUTH_OAUTH_CALLBACK_BASE_URL = os.environ.get(
     "ENGINE_AUTH_OAUTH_CALLBACK_BASE_URL",
     "",
+)
+_C.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED = _env_bool(
+    "ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED",
+    False,
 )
 
 # Interactive session timeout (seconds)

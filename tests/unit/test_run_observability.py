@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
 
 
-def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
     (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -20,7 +22,7 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
-        lambda limit=200: [
+        AsyncMock(return_value=[
             {
                 "request_id": "req-1",
                 "run_id": "run-1",
@@ -29,18 +31,18 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
                 "request_created_at": "2026-01-01T00:00:00",
                 "run_status": "running",
             }
-        ],
+        ]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request_with_run",
-        lambda request_id: {
+        AsyncMock(side_effect=lambda request_id: {
             "request_id": request_id,
             "run_id": "run-1",
             "skill_id": "demo",
             "engine": "gemini",
             "request_created_at": "2026-01-01T00:00:00",
             "run_status": "running",
-        },
+        }),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
@@ -48,12 +50,12 @@ def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     )
 
     service = RunObservabilityService()
-    rows = service.list_runs()
+    rows = await service.list_runs()
     assert len(rows) == 1
     assert rows[0]["request_id"] == "req-1"
     assert rows[0]["status"] == "running"
 
-    tail = service.get_logs_tail("req-1", max_bytes=5)
+    tail = await service.get_logs_tail("req-1", max_bytes=5)
     assert tail["poll"] is True
     assert tail["stdout"].endswith("ne2\n")
     assert "err1" in tail["stderr"]
@@ -74,7 +76,8 @@ def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
     assert chunk3 == {"from": 5, "to": 6, "chunk": "f"}
 
 
-def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -117,32 +120,36 @@ def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Pat
         + "\n",
         encoding="utf-8",
     )
+    async def _materialize(_self, **_kwargs):
+        return {"rasp_events": [], "fcmp_events": []}
+
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
-        lambda self, **_kwargs: {"rasp_events": [], "fcmp_events": []},
+        _materialize,
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService._read_status_payload",
         lambda self, _run_dir: {"status": "succeeded"},
     )
     service = RunObservabilityService()
-    rows = service.list_event_history(run_dir=run_dir, request_id="req-hist")
+    rows = await service.list_event_history(run_dir=run_dir, request_id="req-hist")
     assert len(rows) == 1
     assert rows[0]["seq"] == 1
 
 
-def test_list_event_history_delegates_to_fcmp_protocol_history(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_event_history_delegates_to_fcmp_protocol_history(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history-delegate"
     run_dir.mkdir(parents=True, exist_ok=True)
     service = RunObservabilityService()
     captured: dict[str, object] = {}
 
-    def _list_protocol_history(**kwargs):
+    async def _list_protocol_history(**kwargs):
         captured.update(kwargs)
         return {"events": [{"seq": 9}], "attempt": 1, "available_attempts": [1]}
 
     monkeypatch.setattr(service, "list_protocol_history", _list_protocol_history)
-    rows = service.list_event_history(run_dir=run_dir, request_id="req-1", from_seq=None, to_seq=None)
+    rows = await service.list_event_history(run_dir=run_dir, request_id="req-1", from_seq=None, to_seq=None)
     assert rows == [{"seq": 1, "meta": {"local_seq": 9}}]
     assert captured["stream"] == "fcmp"
     assert captured["request_id"] == "req-1"
@@ -150,12 +157,13 @@ def test_list_event_history_delegates_to_fcmp_protocol_history(monkeypatch, tmp_
     assert captured["to_seq"] is None
 
 
-def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
     run_dir = tmp_path / "run-history-invalid-stream"
     run_dir.mkdir(parents=True, exist_ok=True)
     service = RunObservabilityService()
     with pytest.raises(ValueError, match="stream must be one of"):
-        service.list_protocol_history(
+        await service.list_protocol_history(
             run_dir=run_dir,
             request_id="req-1",
             stream="unknown",
@@ -165,23 +173,23 @@ def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": execution_mode}},
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": execution_mode}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: 1200,
+        AsyncMock(return_value=1200),
     )
     _ = status
 
@@ -244,23 +252,23 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        lambda _request_id: {"interaction_id": 7, "kind": "open_text", "prompt": "请继续输入"},
+        AsyncMock(return_value={"interaction_id": 7, "kind": "open_text", "prompt": "请继续输入"}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "interactive"}},
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "interactive"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        lambda _request_id: [],
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        lambda _request_id: 1200,
+        AsyncMock(return_value=1200),
     )
 
     service = RunObservabilityService()
@@ -330,7 +338,8 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
     assert second_chat_events == []
 
 
-def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -348,7 +357,7 @@ def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     _patch_protocol_defaults(monkeypatch, status="succeeded")
 
     service = RunObservabilityService()
-    rows = service.list_event_history(
+    rows = await service.list_event_history(
         run_dir=run_dir,
         request_id="req-history",
         from_seq=2,
@@ -364,7 +373,8 @@ def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     assert metrics["event_count"] >= 1
 
 
-def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-range"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -380,15 +390,15 @@ def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "auto"}},
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "auto"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
     )
 
     service = RunObservabilityService()
-    payload = service.read_log_range(
+    payload = await service.read_log_range(
         run_dir=run_dir,
         request_id="req-range",
         stream="stdout",
@@ -398,7 +408,8 @@ def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     assert payload["chunk"] == "audit"
 
 
-def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-no-fallback"
     logs_dir = run_dir / "logs"
     audit_dir = run_dir / ".audit"
@@ -413,15 +424,15 @@ def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        lambda _request_id: {"engine": "codex", "runtime_options": {"execution_mode": "auto"}},
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "auto"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
-        lambda _request_id: 0,
+        AsyncMock(return_value=0),
     )
 
     service = RunObservabilityService()
-    payload = service.read_log_range(
+    payload = await service.read_log_range(
         run_dir=run_dir,
         request_id="req-no-fallback",
         stream="stdout",

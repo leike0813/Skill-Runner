@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from server.services.orchestration.engine_auth_flow_manager import EngineAuthFlowManager
-from server.services.orchestration.engine_interaction_gate import EngineInteractionGate
+from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
+from server.services.engine_management.engine_interaction_gate import EngineInteractionGate
 
 
 class _FakeProfile:

@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from server.services.orchestration.engine_interaction_gate import EngineInteractionGate
+from server.services.engine_management.engine_interaction_gate import EngineInteractionGate
 from server.services.ui.ui_shell_manager import (
     UiShellBusyError,
     UiShellManager,

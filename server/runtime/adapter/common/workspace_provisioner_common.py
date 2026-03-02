@@ -26,7 +26,7 @@ def install_skill_package(
         try:
             shutil.copytree(skill.path, skills_target_dir)
             logger.info("Installed skill %s to %s", skill.id, skills_target_dir)
-        except Exception:
+        except (OSError, shutil.Error):
             logger.exception("Failed to install skill package")
 
     output_schema_relpath = (

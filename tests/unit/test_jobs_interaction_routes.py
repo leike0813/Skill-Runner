@@ -87,13 +87,13 @@ async def _create_interactive_request(
 @pytest.mark.asyncio
 async def test_get_interaction_pending_returns_pending(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
 
     _write_status(run_id, RunStatus.WAITING_USER)
-    store.set_pending_interaction(
+    await store.set_pending_interaction(
         request_id,
         {
             "interaction_id": 1,
@@ -113,13 +113,13 @@ async def test_get_interaction_pending_returns_pending(monkeypatch, temp_config_
 @pytest.mark.asyncio
 async def test_get_run_status_exposes_waiting_user_pending_fields(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
 
     _write_status(run_id, RunStatus.WAITING_USER)
-    store.set_pending_interaction(
+    await store.set_pending_interaction(
         request_id,
         {
             "interaction_id": 11,
@@ -148,7 +148,7 @@ async def test_get_run_status_exposes_interactive_auto_reply_fields(monkeypatch,
             "interactive_reply_timeout_sec": 5,
         },
     )
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
@@ -164,13 +164,13 @@ async def test_get_run_status_exposes_interactive_auto_reply_fields(monkeypatch,
 async def test_reply_interaction_accepts_and_transitions_to_queued(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
     monkeypatch.setattr(jobs_router.concurrency_manager, "admit_or_reject", AsyncMock(return_value=True))
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
 
     _write_status(run_id, RunStatus.WAITING_USER)
-    store.set_pending_interaction(
+    await store.set_pending_interaction(
         request_id,
         {
             "interaction_id": 3,
@@ -216,13 +216,13 @@ async def test_reply_interaction_accepts_free_text_for_all_supported_kinds(
 ):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
     monkeypatch.setattr(jobs_router.concurrency_manager, "admit_or_reject", AsyncMock(return_value=True))
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
 
     _write_status(run_id, RunStatus.WAITING_USER)
-    store.set_pending_interaction(
+    await store.set_pending_interaction(
         request_id,
         {
             "interaction_id": 30,
@@ -248,13 +248,13 @@ async def test_reply_interaction_accepts_free_text_for_all_supported_kinds(
 @pytest.mark.asyncio
 async def test_reply_interaction_rejects_stale_interaction(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
 
     _write_status(run_id, RunStatus.WAITING_USER)
-    store.set_pending_interaction(
+    await store.set_pending_interaction(
         request_id,
         {
             "interaction_id": 5,
@@ -305,7 +305,7 @@ async def test_interaction_endpoints_require_interactive_mode(monkeypatch, temp_
 @pytest.mark.asyncio
 async def test_cancel_run_running_accepts(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None
@@ -326,7 +326,7 @@ async def test_cancel_run_running_accepts(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_cancel_run_terminal_is_idempotent(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
-    request_record = store.get_request(request_id)
+    request_record = await store.get_request(request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
     assert run_id is not None

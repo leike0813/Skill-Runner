@@ -10,8 +10,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 
 from server.config import config
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
-from server.services.orchestration.agent_cli_manager import AgentCliManager
-from server.services.orchestration.runtime_profile import RuntimeProfile, get_runtime_profile
+from server.services.engine_management.agent_cli_manager import AgentCliManager
+from server.services.engine_management.runtime_profile import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class OpencodeModelCatalog:
             return self._build_payload(models=[], status="seed_fallback", last_error=seed_fallback_error)
         try:
             payload_obj = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError, TypeError):
             logger.warning("Failed to load opencode seed models from %s", path, exc_info=True)
             return self._build_payload(models=[], status="seed_fallback", last_error=seed_fallback_error)
 
@@ -156,7 +156,7 @@ class OpencodeModelCatalog:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, ValueError, TypeError):
             logger.warning("Failed to read opencode model cache: %s", path, exc_info=True)
             return None
         if not isinstance(payload, dict):
@@ -261,7 +261,7 @@ class OpencodeModelCatalog:
                     payload = self._load_seed_payload(
                         last_error="opencode models returned empty output",
                     )
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 logger.warning("Failed to refresh opencode model catalog", exc_info=True)
                 if self._cache.get("models"):
                     payload = deepcopy(self._cache)

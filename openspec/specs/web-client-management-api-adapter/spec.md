@@ -1,7 +1,8 @@
 # web-client-management-api-adapter Specification
 
 ## Purpose
-TBD - created by archiving change interactive-28-web-client-management-api-migration. Update Purpose after archive.
+**DEFERRED** — 当前 Management UI 已通过 Jinja2 服务端渲染（SSR）内建于 `server/routers/ui.py`，独立 Web 客户端 API adapter 层暂不推进。
+
 ## Requirements
 ### Requirement: 内建 Web 客户端 MUST 优先消费 management API
 系统 MUST 确保内建 Web 客户端在 Skill/Engine/Run 三域的数据读取与操作优先通过 `/v1/management/*` 完成。

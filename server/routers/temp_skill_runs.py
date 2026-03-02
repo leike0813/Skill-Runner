@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -24,7 +25,7 @@ from ..models import (
 )
 from ..services.platform.concurrency_manager import concurrency_manager
 from ..services.orchestration.job_orchestrator import job_orchestrator
-from ..services.orchestration.model_registry import model_registry
+from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..services.platform.cache_key_builder import (
@@ -38,7 +39,7 @@ from ..services.orchestration.run_store import run_store
 from ..services.skill.temp_skill_run_manager import temp_skill_run_manager
 from ..services.skill.temp_skill_run_store import temp_skill_run_store
 from ..services.orchestration.workspace_manager import workspace_manager
-from ..services.orchestration.engine_policy import resolve_skill_engine_policy
+from ..services.engine_management.engine_policy import resolve_skill_engine_policy
 from ..services.orchestration.run_execution_core import (
     declared_execution_modes,
     ensure_skill_engine_supported,
@@ -52,6 +53,7 @@ from ..runtime.observability.run_source_adapter import RunSourceCapabilities
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
+logger = logging.getLogger(__name__)
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
@@ -67,24 +69,24 @@ class _TempRouterSourceAdapter:
         supports_inline_input_create=False,
     )
 
-    def get_request(self, request_id: str):
-        return temp_skill_run_store.get_request(request_id)
+    async def get_request(self, request_id: str):
+        return await temp_skill_run_store.get_request(request_id)
 
-    def get_cached_run(self, cache_key: str):
-        return run_store.get_temp_cached_run(cache_key)
+    async def get_cached_run(self, cache_key: str):
+        return await run_store.get_temp_cached_run(cache_key)
 
-    def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        temp_skill_run_store.bind_cached_run(request_id, run_id)
-        if run_store.get_request(request_id):
-            run_store.update_request_run_id(request_id, run_id)
+    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        await temp_skill_run_store.bind_cached_run(request_id, run_id)
+        if await run_store.get_request(request_id):
+            await run_store.update_request_run_id(request_id, run_id)
 
-    def mark_run_started(self, request_id: str, run_id: str) -> None:
-        temp_skill_run_store.update_run_started(request_id, run_id)
-        if run_store.get_request(request_id):
-            run_store.update_request_run_id(request_id, run_id)
+    async def mark_run_started(self, request_id: str, run_id: str) -> None:
+        await temp_skill_run_store.update_run_started(request_id, run_id)
+        if await run_store.get_request(request_id):
+            await run_store.update_request_run_id(request_id, run_id)
 
-    def mark_failed(self, request_id: str, error_message: str) -> None:
-        temp_skill_run_store.update_status(
+    async def mark_failed(self, request_id: str, error_message: str) -> None:
+        await temp_skill_run_store.update_status(
             request_id=request_id,
             status=RunStatus.FAILED,
             error=error_message,
@@ -120,7 +122,7 @@ async def create_temp_skill_run(request: TempSkillRunCreateRequest):
         }
         workspace_manager.create_request(request_id, request_payload)
         temp_skill_run_manager.create_request_dirs(request_id)
-        temp_skill_run_store.create_request(
+        await temp_skill_run_store.create_request(
             request_id=request_id,
             engine=request.engine,
             parameter=request.parameter,
@@ -134,6 +136,16 @@ async def create_temp_skill_run(request: TempSkillRunCreateRequest):
     except HTTPException:
         raise
     except Exception as exc:
+        # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
+        logger.exception(
+            "temp_skill_runs.create failed; returning HTTP 500",
+            extra={
+                "component": "router.temp_skill_runs",
+                "action": "create_temp_skill_run",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -144,7 +156,7 @@ async def upload_temp_skill_and_start(
     skill_package: UploadFile = File(...),
     file: UploadFile | None = File(default=None),
 ):
-    record = temp_skill_run_store.get_request(request_id)
+    record = await temp_skill_run_store.get_request(request_id)
     if not record:
         raise HTTPException(status_code=404, detail="Request not found")
     if record.get("run_id"):
@@ -155,7 +167,7 @@ async def upload_temp_skill_and_start(
     try:
         skill_bytes = await skill_package.read()
         skill_package_hash = compute_bytes_hash(skill_bytes)
-        skill = temp_skill_run_manager.stage_skill_package(request_id, skill_bytes)
+        skill = await temp_skill_run_manager.stage_skill_package(request_id, skill_bytes)
         engine_policy = resolve_skill_engine_policy(skill)
         ensure_skill_engine_supported(
             skill_id=skill.id,
@@ -178,7 +190,7 @@ async def upload_temp_skill_and_start(
 
         runtime_options = record.get("runtime_options", {})
         cache_enabled = is_cache_enabled(runtime_options)
-        _ensure_temp_request_synced_in_run_store(
+        await _ensure_temp_request_synced_in_run_store(
             request_id=request_id,
             temp_record=record,
             skill_id=skill.id,
@@ -187,7 +199,7 @@ async def upload_temp_skill_and_start(
         manifest_hash = compute_input_manifest_hash(
             json.loads(manifest_path.read_text(encoding="utf-8"))
         )
-        run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
+        await run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
         skill_fingerprint = compute_skill_fingerprint(skill, record["engine"])
         cache_key = compute_cache_key(
             skill_id=skill.id,
@@ -199,12 +211,12 @@ async def upload_temp_skill_and_start(
             inline_input_hash=compute_inline_input_hash({}),
             temp_skill_package_hash=skill_package_hash,
         )
-        run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+        await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
         if cache_enabled:
-            cached_run = temp_source_adapter.get_cached_run(cache_key)
+            cached_run = await temp_source_adapter.get_cached_run(cache_key)
             if cached_run:
-                temp_source_adapter.bind_cached_run(request_id, cached_run)
-                temp_skill_run_manager.on_terminal(
+                await temp_source_adapter.bind_cached_run(request_id, cached_run)
+                await temp_skill_run_manager.on_terminal(
                     request_id,
                     RunStatus.SUCCEEDED,
                     debug_keep_temp=bool(runtime_options.get("debug_keep_temp")),
@@ -226,8 +238,8 @@ async def upload_temp_skill_and_start(
         run_status = workspace_manager.create_run_for_skill(run_request, skill)
         workspace_manager.promote_request_uploads(request_id, run_status.run_id)
         run_cache_key: str | None = cache_key if cache_enabled else None
-        run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-        temp_source_adapter.mark_run_started(request_id, run_status.run_id)
+        await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+        await temp_source_adapter.mark_run_started(request_id, run_status.run_id)
 
         merged_options = {**record["engine_options"], **record["runtime_options"]}
         admitted = await concurrency_manager.admit_or_reject()
@@ -256,21 +268,31 @@ async def upload_temp_skill_and_start(
         else:
             error_message = str(detail)
         if run_status is not None:
-            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
+            await temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
         elif record.get("run_id") is None:
-            temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
+            await temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=error_message)
         raise
     except ValueError as exc:
-        temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=str(exc))
+        await temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=str(exc))
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=str(exc))
+        # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
+        logger.exception(
+            "temp_skill_runs.upload failed; returning HTTP 500",
+            extra={
+                "component": "router.temp_skill_runs",
+                "action": "upload_temp_skill_and_start",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500_after_status_update",
+            },
+        )
+        await temp_skill_run_store.update_status(request_id, RunStatus.FAILED, error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{request_id}", response_model=RequestStatusResponse)
 async def get_temp_skill_run_status(request_id: str):
-    rec = temp_skill_run_store.get_request(request_id)
+    rec = await temp_skill_run_store.get_request(request_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Request not found")
     runtime_options = rec.get("runtime_options", {})
@@ -281,7 +303,7 @@ async def get_temp_skill_run_status(request_id: str):
     run_id = rec.get("run_id")
 
     if not run_id:
-        auto_stats = run_store.get_auto_decision_stats(request_id)
+        auto_stats = await run_store.get_auto_decision_stats(request_id)
         return RequestStatusResponse(
             request_id=request_id,
             status=RunStatus(rec.get("status", RunStatus.QUEUED.value)),
@@ -294,7 +316,7 @@ async def get_temp_skill_run_status(request_id: str):
             auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
             last_auto_decision_at=_parse_optional_dt(auto_stats.get("last_auto_decision_at")),
             pending_interaction_id=None,
-            interaction_count=run_store.get_interaction_count(request_id),
+            interaction_count=await run_store.get_interaction_count(request_id),
             recovery_state=RecoveryState.NONE,
             recovered_at=None,
             recovery_reason=None,
@@ -316,12 +338,12 @@ async def get_temp_skill_run_status(request_id: str):
         warnings = payload.get("warnings", [])
         error = payload.get("error")
         updated_at = _parse_dt(payload.get("updated_at"))
-    recovery_info = run_store.get_recovery_info(run_id)
+    recovery_info = await run_store.get_recovery_info(run_id)
     recovered_at_raw = recovery_info.get("recovered_at")
     recovered_at = _parse_dt(recovered_at_raw) if recovered_at_raw else None
-    auto_stats = run_store.get_auto_decision_stats(request_id)
+    auto_stats = await run_store.get_auto_decision_stats(request_id)
     pending_interaction_id = (
-        _read_pending_interaction_id(request_id)
+        await _read_pending_interaction_id(request_id)
         if status == RunStatus.WAITING_USER
         else None
     )
@@ -338,7 +360,7 @@ async def get_temp_skill_run_status(request_id: str):
         auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
         last_auto_decision_at=_parse_optional_dt(auto_stats.get("last_auto_decision_at")),
         pending_interaction_id=pending_interaction_id,
-        interaction_count=run_store.get_interaction_count(request_id),
+        interaction_count=await run_store.get_interaction_count(request_id),
         recovery_state=_parse_recovery_state(recovery_info.get("recovery_state")),
         recovered_at=recovered_at,
         recovery_reason=_coerce_str_or_none(recovery_info.get("recovery_reason")),
@@ -349,7 +371,7 @@ async def get_temp_skill_run_status(request_id: str):
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
 async def get_temp_skill_run_result(request_id: str):
-    return run_read_facade.get_result(
+    return await run_read_facade.get_result(
         source_adapter=temp_source_adapter,
         request_id=request_id,
     )
@@ -357,7 +379,7 @@ async def get_temp_skill_run_result(request_id: str):
 
 @router.get("/{request_id}/artifacts", response_model=RunArtifactsResponse)
 async def get_temp_skill_run_artifacts(request_id: str):
-    return run_read_facade.get_artifacts(
+    return await run_read_facade.get_artifacts(
         source_adapter=temp_source_adapter,
         request_id=request_id,
     )
@@ -365,7 +387,7 @@ async def get_temp_skill_run_artifacts(request_id: str):
 
 @router.get("/{request_id}/bundle")
 async def get_temp_skill_run_bundle(request_id: str):
-    return run_read_facade.get_bundle(
+    return await run_read_facade.get_bundle(
         source_adapter=temp_source_adapter,
         request_id=request_id,
     )
@@ -373,7 +395,7 @@ async def get_temp_skill_run_bundle(request_id: str):
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_temp_skill_artifact(request_id: str, artifact_path: str):
-    return run_read_facade.get_artifact_file(
+    return await run_read_facade.get_artifact_file(
         source_adapter=temp_source_adapter,
         request_id=request_id,
         artifact_path=artifact_path,
@@ -382,7 +404,7 @@ async def download_temp_skill_artifact(request_id: str, artifact_path: str):
 
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_temp_skill_run_logs(request_id: str):
-    return run_read_facade.get_logs(
+    return await run_read_facade.get_logs(
         source_adapter=temp_source_adapter,
         request_id=request_id,
     )
@@ -418,7 +440,7 @@ async def list_temp_skill_run_event_history(
     from_ts: str | None = Query(default=None),
     to_ts: str | None = Query(default=None),
 ):
-    return run_read_facade.list_event_history(
+    return await run_read_facade.list_event_history(
         source_adapter=temp_source_adapter,
         request_id=request_id,
         from_seq=from_seq,
@@ -436,7 +458,7 @@ async def get_temp_skill_run_log_range(
     byte_to: int = Query(default=0, ge=0),
     attempt: int | None = Query(default=None, ge=1),
 ):
-    return run_read_facade.read_log_range(
+    return await run_read_facade.read_log_range(
         source_adapter=temp_source_adapter,
         request_id=request_id,
         stream=stream,
@@ -470,15 +492,15 @@ async def reply_temp_skill_interaction(
     )
 
 
-def _ensure_temp_request_synced_in_run_store(
+async def _ensure_temp_request_synced_in_run_store(
     *,
     request_id: str,
     temp_record: dict[str, Any],
     skill_id: str,
 ) -> None:
-    if run_store.get_request(request_id):
+    if await run_store.get_request(request_id):
         return
-    run_store.create_request(
+    await run_store.create_request(
         request_id=request_id,
         skill_id=skill_id,
         engine=str(temp_record.get("engine", "")),
@@ -489,8 +511,8 @@ def _ensure_temp_request_synced_in_run_store(
     )
 
 
-def _read_pending_interaction_id(request_id: str) -> int | None:
-    pending = run_store.get_pending_interaction(request_id)
+async def _read_pending_interaction_id(request_id: str) -> int | None:
+    pending = await run_store.get_pending_interaction(request_id)
     if not isinstance(pending, dict):
         return None
     value = pending.get("interaction_id")
@@ -498,7 +520,7 @@ def _read_pending_interaction_id(request_id: str) -> int | None:
         return None
     try:
         interaction_id = int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if interaction_id <= 0:
         return None

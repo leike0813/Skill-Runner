@@ -1,7 +1,8 @@
 # ephemeral-skill-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change temporary-skill-upload-run. Update Purpose after archive.
+定义临时 skill 资产在 run 终态后的自动清理生命周期。
+
 ## Requirements
 ### Requirement: Temporary skill assets must be deleted after terminal run state
 The system SHALL remove temporary skill package files and extracted temporary skill content after the associated run reaches a terminal state.

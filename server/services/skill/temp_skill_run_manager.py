@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from server.config import config
 from server.models import RunStatus, SkillManifest
-from server.services.orchestration.engine_policy import apply_engine_policy_to_manifest
+from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from .skill_package_validator import SkillPackageValidator
 from .temp_skill_run_store import temp_skill_run_store
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
@@ -28,7 +28,7 @@ class TempSkillRunManager:
     def request_root(self, request_id: str) -> Path:
         return Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / request_id
 
-    def stage_skill_package(self, request_id: str, package_bytes: bytes) -> SkillManifest:
+    async def stage_skill_package(self, request_id: str, package_bytes: bytes) -> SkillManifest:
         max_bytes = int(config.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES)
         if max_bytes > 0 and len(package_bytes) > max_bytes:
             raise ValueError(f"Skill package exceeds size limit ({max_bytes} bytes)")
@@ -56,7 +56,7 @@ class TempSkillRunManager:
         if manifest.id != skill_id:
             raise ValueError("Skill identity mismatch after manifest load")
 
-        temp_skill_run_store.update_staged_skill(
+        await temp_skill_run_store.update_staged_skill(
             request_id,
             skill_id=skill_id,
             skill_package_path=str(package_path),
@@ -64,8 +64,8 @@ class TempSkillRunManager:
         )
         return manifest
 
-    def cleanup_temp_assets(self, request_id: str) -> None:
-        rec = temp_skill_run_store.get_request(request_id)
+    async def cleanup_temp_assets(self, request_id: str) -> None:
+        rec = await temp_skill_run_store.get_request(request_id)
         if not rec:
             return
         package_path = rec.get("skill_package_path")
@@ -78,9 +78,9 @@ class TempSkillRunManager:
             root = Path(staged_dir).parent
             if root.exists():
                 shutil.rmtree(root, ignore_errors=True)
-        temp_skill_run_store.clear_temp_paths(request_id)
+        await temp_skill_run_store.clear_temp_paths(request_id)
 
-    def on_terminal(
+    async def on_terminal(
         self,
         request_id: str,
         status: RunStatus,
@@ -88,12 +88,12 @@ class TempSkillRunManager:
         error: str | None = None,
         debug_keep_temp: bool = False,
     ) -> None:
-        temp_skill_run_store.update_status(request_id, status=status, error=error)
+        await temp_skill_run_store.update_status(request_id, status=status, error=error)
         if debug_keep_temp:
             return
         try:
-            self.cleanup_temp_assets(request_id)
-        except Exception:
+            await self.cleanup_temp_assets(request_id)
+        except (OSError, RuntimeError, ValueError):
             logger.warning(
                 "Temporary skill cleanup failed for request %s; deferred to scheduled cleanup",
                 request_id,
@@ -103,13 +103,13 @@ class TempSkillRunManager:
     async def cleanup_orphans(self) -> Dict[str, int]:
         retention_hours = int(config.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS)
         removed = 0
-        candidates = temp_skill_run_store.list_orphan_candidates(retention_hours)
+        candidates = await temp_skill_run_store.list_orphan_candidates(retention_hours)
         for row in candidates:
             request_id = row["request_id"]
             try:
-                self.cleanup_temp_assets(request_id)
+                await self.cleanup_temp_assets(request_id)
                 removed += 1
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 logger.warning("Failed orphan cleanup for temp request %s", request_id, exc_info=True)
         return {"removed": removed}
 

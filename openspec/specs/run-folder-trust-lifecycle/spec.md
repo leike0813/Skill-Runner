@@ -1,7 +1,8 @@
 # run-folder-trust-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change run-folder-trust-management. Update Purpose after archive.
+定义 Codex/Gemini 的 run folder trust 注册/移除生命周期和 iFlow 的无操作行为。
+
 ## Requirements
 ### Requirement: Register and remove run folder trust for Codex and Gemini
 The system MUST register trust for the current `run_dir` before invoking Codex or Gemini, and MUST remove the same trust record after execution completes.

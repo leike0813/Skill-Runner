@@ -7,6 +7,23 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+_PATH_RESOLVE_EXCEPTIONS = (
+    OSError,
+    RuntimeError,
+    ValueError,
+)
+_TRUSTED_FOLDER_PARSE_EXCEPTIONS = (
+    OSError,
+    UnicodeDecodeError,
+    json.JSONDecodeError,
+    ValueError,
+)
+_FILE_LOCK_EXCEPTIONS = (
+    ImportError,
+    OSError,
+    AttributeError,
+)
+
 
 class GeminiTrustFolderStrategy:
     def __init__(self, trusted_folders_path: Path, runs_root: Path) -> None:
@@ -53,7 +70,7 @@ class GeminiTrustFolderStrategy:
     def _is_run_child_path(self, raw_path: str) -> bool:
         try:
             candidate = Path(raw_path).resolve()
-        except Exception:
+        except _PATH_RESOLVE_EXCEPTIONS:
             return False
         if candidate == self.runs_root:
             return False
@@ -74,7 +91,7 @@ class GeminiTrustFolderStrategy:
             if not isinstance(loaded, dict):
                 raise ValueError("trustedFolders.json must be an object")
             return {str(k): str(v) for k, v in loaded.items()}
-        except Exception:
+        except _TRUSTED_FOLDER_PARSE_EXCEPTIONS:
             self._backup_file(self.trusted_folders_path)
             self._write_json_atomically(self.trusted_folders_path, {})
             return {}
@@ -96,7 +113,7 @@ class GeminiTrustFolderStrategy:
         backup = path.with_name(f"{path.name}.bak")
         try:
             backup.write_bytes(path.read_bytes())
-        except Exception:
+        except OSError:
             pass
 
     def _get_thread_lock(self, target: Path) -> threading.Lock:
@@ -117,7 +134,7 @@ class GeminiTrustFolderStrategy:
                 import fcntl
 
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            except Exception:
+            except _FILE_LOCK_EXCEPTIONS:
                 pass
             try:
                 yield
@@ -126,6 +143,6 @@ class GeminiTrustFolderStrategy:
                     import fcntl
 
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-                except Exception:
+                except _FILE_LOCK_EXCEPTIONS:
                     pass
                 thread_lock.release()

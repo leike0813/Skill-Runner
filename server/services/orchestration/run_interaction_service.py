@@ -25,6 +25,7 @@ from server.runtime.protocol.schema_registry import ProtocolSchemaViolation, val
 from server.runtime.session.statechart import waiting_reply_target_status
 from server.services.orchestration.job_orchestrator import job_orchestrator
 from server.services.orchestration.run_store import run_store
+from server.services.platform.async_compat import maybe_await
 from server.services.platform.concurrency_manager import concurrency_manager
 
 
@@ -37,10 +38,10 @@ class RunInteractionService:
         run_store_backend: Any = run_store,
     ) -> InteractionPendingResponse:
         require_capability(source_adapter, capability="supports_pending_reply")
-        request_record, run_dir = get_request_and_run_dir(source_adapter, request_id)
+        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
         _ensure_interactive_mode(request_record)
         status, _, _, _ = _read_run_status(run_dir)
-        pending_payload = run_store_backend.get_pending_interaction(request_id)
+        pending_payload = await maybe_await(run_store_backend.get_pending_interaction(request_id))
         pending = None
         if pending_payload and status == RunStatus.WAITING_USER:
             pending = PendingInteraction.model_validate(pending_payload)
@@ -60,11 +61,11 @@ class RunInteractionService:
         run_store_backend: Any = run_store,
     ) -> InteractionReplyResponse:
         require_capability(source_adapter, capability="supports_pending_reply")
-        request_record, run_dir = get_request_and_run_dir(source_adapter, request_id)
+        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
         _ensure_interactive_mode(request_record)
         status, warnings, _, _ = _read_run_status(run_dir)
         if status != RunStatus.WAITING_USER:
-            replay = _resolve_idempotent_replay(
+            replay = await _resolve_idempotent_replay(
                 request_id=request_id,
                 request=request,
                 status=status,
@@ -74,9 +75,9 @@ class RunInteractionService:
                 return replay
             raise HTTPException(status_code=409, detail="Run is not waiting for user interaction")
 
-        pending_payload = run_store_backend.get_pending_interaction(request_id)
+        pending_payload = await maybe_await(run_store_backend.get_pending_interaction(request_id))
         if not pending_payload:
-            replay = _resolve_idempotent_replay(
+            replay = await _resolve_idempotent_replay(
                 request_id=request_id,
                 request=request,
                 status=status,
@@ -99,12 +100,12 @@ class RunInteractionService:
         if request.interaction_id != current_interaction_id:
             raise HTTPException(status_code=409, detail="stale interaction")
 
-        reply_state = run_store_backend.submit_interaction_reply(
+        reply_state = await maybe_await(run_store_backend.submit_interaction_reply(
             request_id=request_id,
             interaction_id=request.interaction_id,
             response=request.response,
             idempotency_key=request.idempotency_key,
-        )
+        ))
         if reply_state == "idempotent":
             return InteractionReplyResponse(request_id=request_id, status=status, accepted=True)
         if reply_state == "idempotency_conflict":
@@ -121,7 +122,7 @@ class RunInteractionService:
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id:
-            run_store_backend.update_run_status(run_id, next_status)
+            await maybe_await(run_store_backend.update_run_status(run_id, next_status))
             resume_command = make_resume_command(
                 interaction_id=request.interaction_id,
                 response=request.response,
@@ -204,7 +205,7 @@ def _write_run_status(
         try:
             existing = json.loads(status_file.read_text(encoding="utf-8"))
             existing_timeout = existing.get("effective_session_timeout_sec")
-        except Exception:
+        except (OSError, ValueError, TypeError):
             existing_timeout = None
     payload = {
         "status": status.value if isinstance(status, RunStatus) else str(status),
@@ -223,7 +224,7 @@ def _write_run_status(
     )
 
 
-def _resolve_idempotent_replay(
+async def _resolve_idempotent_replay(
     request_id: str,
     request: InteractionReplyRequest,
     status: RunStatus,
@@ -231,11 +232,11 @@ def _resolve_idempotent_replay(
 ) -> InteractionReplyResponse | None:
     if not request.idempotency_key:
         return None
-    existing_reply = run_store_backend.get_interaction_reply(
+    existing_reply = await maybe_await(run_store_backend.get_interaction_reply(
         request_id=request_id,
         interaction_id=request.interaction_id,
         idempotency_key=request.idempotency_key,
-    )
+    ))
     if existing_reply is None:
         return None
     if existing_reply != request.response:

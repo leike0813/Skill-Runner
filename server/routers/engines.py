@@ -1,4 +1,6 @@
+import logging
 from datetime import datetime
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse  # type: ignore[import-not-found]
@@ -14,7 +16,6 @@ from ..models import (
     EngineAuthSessionInputResponse,
     EngineAuthSessionSnapshot,
     EngineAuthSessionStartRequest,
-    EngineAuthStatusResponse,
     EngineManifestModelInfo,
     EngineManifestViewResponse,
     EngineModelInfo,
@@ -30,21 +31,49 @@ from ..models import (
 from ..runtime.auth.orchestrators.cli_delegate import CliDelegateOrchestrator
 from ..runtime.auth.orchestrators.oauth_proxy import OAuthProxyOrchestrator
 from ..runtime.auth.callbacks import oauth_callback_router
-from ..services.orchestration.engine_upgrade_manager import (
+from ..services.engine_management.engine_upgrade_manager import (
     EngineUpgradeBusyError,
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
-from ..services.orchestration.engine_auth_flow_manager import engine_auth_flow_manager
-from ..services.orchestration.engine_interaction_gate import EngineInteractionBusyError
-from ..services.orchestration.model_registry import model_registry
-from ..services.orchestration.agent_cli_manager import AgentCliManager
+from ..services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
+from ..services.engine_management.engine_interaction_gate import EngineInteractionBusyError
+from ..services.engine_management.model_registry import model_registry
 from ..services.ui.ui_auth import require_ui_basic_auth
 
 router = APIRouter(prefix="/engines", tags=["engines"])
-agent_cli_manager = AgentCliManager()
 oauth_proxy_orchestrator = OAuthProxyOrchestrator(engine_auth_flow_manager)
 cli_delegate_orchestrator = CliDelegateOrchestrator(engine_auth_flow_manager)
+logger = logging.getLogger(__name__)
+
+
+def _raise_internal_server_error(*, action: str, exc: Exception) -> NoReturn:
+    logger.exception(
+        "engines router internal failure; returning HTTP 500",
+        extra={
+            "component": "router.engines",
+            "action": action,
+            "error_type": type(exc).__name__,
+            "fallback": "http_500",
+        },
+    )
+    raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _render_callback_internal_error(*, action: str, exc: Exception) -> HTMLResponse:
+    logger.exception(
+        "engines callback failure; rendering HTTP 500 error page",
+        extra={
+            "component": "router.engines",
+            "action": action,
+            "error_type": type(exc).__name__,
+            "fallback": "callback_error_page_500",
+        },
+    )
+    return oauth_callback_router.render_error(
+        str(exc),
+        http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
 
 
 @router.get("", response_model=EnginesResponse)
@@ -77,17 +106,8 @@ async def list_models(engine: str):
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get(
-    "/auth-status",
-    response_model=EngineAuthStatusResponse,
-    dependencies=[Depends(require_ui_basic_auth)],
-)
-async def get_engine_auth_status():
-    return EngineAuthStatusResponse(engines=agent_cli_manager.collect_auth_status())
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="list_models", exc=e)
 
 
 @router.post(
@@ -110,8 +130,8 @@ async def start_oauth_proxy_auth_session(request: Request, body: AuthSessionStar
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="start_oauth_proxy_auth_session", exc=e)
 
 
 @router.get(
@@ -125,8 +145,8 @@ async def get_oauth_proxy_auth_session(session_id: str):
         return AuthSessionSnapshotV2(**payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="get_oauth_proxy_auth_session", exc=e)
 
 
 @router.post(
@@ -145,8 +165,8 @@ async def input_oauth_proxy_auth_session(session_id: str, body: AuthSessionInput
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="input_oauth_proxy_auth_session", exc=e)
 
 
 @router.post(
@@ -163,8 +183,8 @@ async def cancel_oauth_proxy_auth_session(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="cancel_oauth_proxy_auth_session", exc=e)
 
 
 @router.get("/auth/oauth-proxy/callback/openai", response_class=HTMLResponse)
@@ -193,10 +213,10 @@ async def handle_openai_oauth_proxy_callback(
             str(exc),
             http_status=status.HTTP_400_BAD_REQUEST,
         )
-    except Exception as exc:
-        return oauth_callback_router.render_error(
-            str(exc),
-            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        return _render_callback_internal_error(
+            action="handle_openai_oauth_proxy_callback",
+            exc=exc,
         )
     return oauth_callback_router.render(payload)
 
@@ -221,8 +241,8 @@ async def start_cli_delegate_auth_session(request: Request, body: AuthSessionSta
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="start_cli_delegate_auth_session", exc=e)
 
 
 @router.get(
@@ -236,8 +256,8 @@ async def get_cli_delegate_auth_session(session_id: str):
         return AuthSessionSnapshotV2(**payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="get_cli_delegate_auth_session", exc=e)
 
 
 @router.post(
@@ -256,8 +276,8 @@ async def input_cli_delegate_auth_session(session_id: str, body: AuthSessionInpu
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="input_cli_delegate_auth_session", exc=e)
 
 
 @router.post(
@@ -274,8 +294,8 @@ async def cancel_cli_delegate_auth_session(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="cancel_cli_delegate_auth_session", exc=e)
 
 
 @router.post(
@@ -299,8 +319,8 @@ async def start_engine_auth_session(request: Request, body: EngineAuthSessionSta
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="start_engine_auth_session", exc=e)
 
 
 @router.get("/auth/callback/openai", response_class=HTMLResponse)
@@ -329,10 +349,10 @@ async def handle_openai_oauth_callback(
             str(exc),
             http_status=status.HTTP_400_BAD_REQUEST,
         )
-    except Exception as exc:
-        return oauth_callback_router.render_error(
-            str(exc),
-            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
+        return _render_callback_internal_error(
+            action="handle_openai_oauth_callback",
+            exc=exc,
         )
     return oauth_callback_router.render(payload)
 
@@ -349,8 +369,8 @@ async def get_engine_auth_session(session_id: str):
         return EngineAuthSessionSnapshot(**payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="get_engine_auth_session", exc=e)
 
 
 @router.post(
@@ -368,8 +388,8 @@ async def cancel_engine_auth_session(session_id: str):
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="cancel_engine_auth_session", exc=e)
 
 
 @router.post(
@@ -390,8 +410,8 @@ async def input_engine_auth_session(session_id: str, body: EngineAuthSessionInpu
         raise HTTPException(status_code=404, detail="Auth session not found")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="input_engine_auth_session", exc=e)
 
 
 @router.get(
@@ -424,8 +444,8 @@ async def get_manifest_view(engine: str):
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="get_manifest_view", exc=e)
 
 
 @router.post(
@@ -468,8 +488,8 @@ async def add_manifest_snapshot(engine: str, body: EngineSnapshotCreateRequest):
         if "CLI version not detected" in detail:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         raise HTTPException(status_code=400, detail=detail)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="add_manifest_snapshot", exc=e)
 
 
 @router.post(
@@ -479,13 +499,13 @@ async def add_manifest_snapshot(engine: str, body: EngineSnapshotCreateRequest):
 )
 async def create_engine_upgrade(body: EngineUpgradeCreateRequest):
     try:
-        request_id = engine_upgrade_manager.create_task(body.mode, body.engine)
+        request_id = await engine_upgrade_manager.create_task(body.mode, body.engine)
     except EngineUpgradeBusyError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except EngineUpgradeValidationError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (RuntimeError, OSError, TypeError, LookupError, ValueError) as e:
+        _raise_internal_server_error(action="create_engine_upgrade", exc=e)
 
     return EngineUpgradeCreateResponse(
         request_id=request_id,
@@ -499,7 +519,7 @@ async def create_engine_upgrade(body: EngineUpgradeCreateRequest):
     dependencies=[Depends(require_ui_basic_auth)],
 )
 async def get_engine_upgrade(request_id: str):
-    record = engine_upgrade_manager.get_task(request_id)
+    record = await engine_upgrade_manager.get_task(request_id)
     if not record:
         raise HTTPException(status_code=404, detail="Upgrade request not found")
 

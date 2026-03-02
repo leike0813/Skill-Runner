@@ -1,7 +1,8 @@
 # runtime-environment-parity Specification
 
 ## Purpose
-TBD - created by archiving change runtime-parity-local-container. Update Purpose after archive.
+定义运行时配置的统一解析和 Managed Prefix 管理 Engine CLI 的约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 统一解析运行时配置
 系统 MUST 通过统一解析逻辑确定运行模式、平台和默认路径，供服务与脚本共同使用。

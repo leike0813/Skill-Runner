@@ -1,7 +1,8 @@
 # web-management-ui Specification
 
 ## Purpose
-TBD - created by archiving change web-management-ui. Update Purpose after archive.
+定义基于 Jinja2 SSR 的 Management Web UI 的页面结构、路由和数据绑定约束。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供 `/ui` 管理界面用于技能可视化管理
 系统 MUST 暴露 `/ui` 页面，用户可在页面中查看当前已安装技能列表。
@@ -10,6 +11,7 @@ TBD - created by archiving change web-management-ui. Update Purpose after archiv
 - **WHEN** 用户访问 `/ui`
 - **THEN** 系统返回可用页面
 - **AND** 页面包含技能列表区域与技能包上传区域
+- **AND** data reset 危险区不再直接出现在首页
 
 ### Requirement: 管理界面 MUST 展示技能用途信息
 管理界面技能列表 MUST 至少展示每个技能的 `id`、`name`、`description`、`version` 与 `engines`。
@@ -38,6 +40,53 @@ TBD - created by archiving change web-management-ui. Update Purpose after archiv
 - **WHEN** 某次安装状态进入 `failed`
 - **THEN** 页面展示后端返回的错误原因
 
+### Requirement: 管理界面 MUST 提供独立 Settings 页面
+系统 MUST 提供 `/ui/settings` 页面，承载运行时设置与高危维护操作。
+
+#### Scenario: 打开 Settings 页面
+- **WHEN** 用户访问 `/ui/settings`
+- **THEN** 页面展示日志设置区域与 data reset 危险区
+
+### Requirement: 管理界面 MUST 让 data reset 选项反映真实系统能力
+系统 MUST 依据当前系统能力显示或隐藏可选清理项，避免暴露未启用能力的伪选项。
+
+#### Scenario: engine auth session 日志持久化关闭
+- **WHEN** `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED` 为关闭状态
+- **THEN** `/ui/settings` 页面完全隐藏 engine auth session 清理选项
+
+### Requirement: 管理界面 MUST 支持最小运行时日志设置管理
+系统 MUST 在 Settings 页面提供最小可写日志设置，并展示不可在页面修改的只读运行时输入。
+
+#### Scenario: 查看 Settings 页面日志设置
+- **WHEN** 用户访问 `/ui/settings`
+- **THEN** 页面展示可写日志设置 `level`、`format`、`retention_days`、`dir_max_bytes`
+- **AND** 页面展示只读日志输入 `dir`、`file_basename`、`rotation_when`、`rotation_interval`
+
+### Requirement: Engine 管理页面 MUST 服务端直出首屏表格
+系统 MUST 在 `/ui/engines` 首屏直接返回 engine 表格，而不是依赖首次 HTMX 拉取来补全内容。
+
+#### Scenario: 打开 engine 管理页
+- **WHEN** 用户访问 `/ui/engines`
+- **THEN** 页面首屏直接包含 engine 表格
+- **AND** 不依赖 `hx-get` 首次加载表格
+- **AND** 不展示“正在检测 Engine 版本与状态，请稍候...”之类延迟探测文案
+
+### Requirement: Engine 表格 MUST 仅展示缓存化版本
+系统 MUST 让 engine 管理表格只展示后台缓存的版本信息，不在页面访问时触发 CLI 版本探测。
+
+#### Scenario: 查看 engine 表格版本列
+- **WHEN** 用户查看 engine 管理表格
+- **THEN** `CLI Version` 列来自持久化缓存
+- **AND** 页面加载时不会触发 CLI 版本探测
+
+### Requirement: Engine 表格 MUST 移除 auth 与 sandbox 列
+系统 MUST 从 engine 管理表格中删除 auth 和 sandbox 摘要列。
+
+#### Scenario: 查看 engine 表格列定义
+- **WHEN** 用户查看 `/ui/engines`
+- **THEN** 表格不包含 `Auth Ready`
+- **AND** 表格不包含 `Sandbox`
+
 ### Requirement: 旧 UI 数据接口 MUST 进入弃用生命周期
 系统 MUST 为历史 UI 专用数据接口提供可执行的弃用路径，并给出替代 management API。
 
@@ -63,4 +112,3 @@ TBD - created by archiving change web-management-ui. Update Purpose after archiv
 - **WHEN** 文件树、文件预览或日志内容持续增长
 - **THEN** 对应分区在内部容器滚动
 - **AND** 页面主结构保持稳定，不出现无限增高导致的交互退化
-

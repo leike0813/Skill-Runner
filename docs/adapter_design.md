@@ -36,7 +36,7 @@ graph TD
 
 **Interface Definition**:
 ```python
-def _construct_config(self, skill: SkillManifest, run_dir: Path, options: Dict) -> Path:
+def _construct_config(self, skill: SkillManifest, run_dir: Path, options: dict[str, Any]) -> Path:
     """
     Merges config layers and writes the result to the workspace.
     Returns: Path to the generated config file.
@@ -81,7 +81,7 @@ def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: P
 
 **Interface Definition**:
 ```python
-def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: Dict) -> str:
+def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: dict[str, Any]) -> str:
     """
     Resolves files, renders Jinja2 template, and logs prompt.
     Returns: The final prompt string.
@@ -124,7 +124,7 @@ def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: Dict) -
 
 **Interface Definition**:
 ```python
-async def _execute_process(self, cmd: List[str], run_dir: Path, env: Dict) -> Tuple[int, str, str]:
+async def _execute_process(self, cmd: list[str], run_dir: Path, env: dict[str, str]) -> tuple[int, str, str]:
     """
     Spawns subprocess and captures output.
     Returns: (exit_code, stdout, stderr)
@@ -146,16 +146,16 @@ async def _execute_process(self, cmd: List[str], run_dir: Path, env: Dict) -> Tu
 
 **Interface Definition**:
 ```python
-def _parse_output(self, raw_stdout: str) -> Optional[Dict]:
+def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
     """
     Extracts result JSON from raw text.
     """
 ```
 
-## 3. Implementation Plan (Refactoring)
+## 3. Implementation Status
 
-The **GeminiAdapter** already follows this closely. The **CodexAdapter** needs to be refactored to align with this lifecycle:
-
-1.  **Refactor Codex Config**: Move from `CodexConfigManager` (Global state modification) to **Workspace-Isolated Config** (passed via `-c` or specific profile path inside workspace). *Note: Codex CLI might require a named profile in `~/.codex/config.toml`; if so, we must ensure it points to workspace paths.*
-2.  **Refactor Codex Env**: Stop executing "in place" (`skill.path`). Instead, copy to workspace and execute there to allow patching.
-3.  **Refactor Codex Prompt**: Implement strict file resolution matching Gemini's logic.
+> [!NOTE]
+> **✅ COMPLETED** — 本节描述的重构计划已于 v0.3 中完成。
+>
+> 所有引擎（Codex / Gemini / iFlow / OpenCode）现已统一继承 `server/runtime/adapter/base_execution_adapter.py`，
+> 遵循 5 阶段生命周期。工作区隔离配置、信任文件夹管理等均已实现。

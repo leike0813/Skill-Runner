@@ -97,7 +97,7 @@ def extract_code_from_user_input(value: str) -> str:
 
     try:
         parsed = urllib_parse.urlparse(normalized)
-    except Exception:
+    except ValueError:
         return normalized
 
     if parsed.scheme and parsed.netloc:
@@ -136,7 +136,7 @@ def _post_form(
         detail = ""
         try:
             detail = exc.read().decode("utf-8", errors="replace")
-        except Exception:
+        except (OSError, ValueError):
             detail = ""
         message = f"OAuth endpoint returned status {exc.code}"
         if detail:
@@ -144,12 +144,12 @@ def _post_form(
         raise OpenAIOAuthError(message, status_code=exc.code) from exc
     except urllib_error.URLError as exc:
         raise OpenAIOAuthError(f"OAuth endpoint request failed: {exc.reason}") from exc
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         raise OpenAIOAuthError(f"OAuth endpoint request failed: {exc}") from exc
 
     try:
         parsed = json.loads(payload)
-    except Exception as exc:
+    except (json.JSONDecodeError, TypeError) as exc:
         raise OpenAIOAuthError("OAuth endpoint returned invalid JSON") from exc
     if not isinstance(parsed, dict):
         raise OpenAIOAuthError("OAuth endpoint returned invalid payload type")
@@ -183,11 +183,11 @@ def _post_json(
         status_code = int(exc.code)
         try:
             raw = exc.read().decode("utf-8", errors="replace")
-        except Exception:
+        except (OSError, ValueError):
             raw = ""
     except urllib_error.URLError as exc:
         raise OpenAIOAuthError(f"OAuth endpoint request failed: {exc.reason}") from exc
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         raise OpenAIOAuthError(f"OAuth endpoint request failed: {exc}") from exc
 
     parsed: Dict[str, Any] | None = None
@@ -196,7 +196,7 @@ def _post_json(
             payload_obj = json.loads(raw)
             if isinstance(payload_obj, dict):
                 parsed = payload_obj
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             parsed = None
     return status_code, parsed, raw
 
@@ -228,7 +228,7 @@ def request_openai_device_code(
     interval_raw = payload.get("interval")
     try:
         interval_seconds = int(str(interval_raw).strip()) if interval_raw is not None else 5
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         interval_seconds = 5
     interval_seconds = max(interval_seconds, 1)
     if not device_auth_id or not user_code:
@@ -307,7 +307,7 @@ def exchange_authorization_code(
     expires_in: int | None
     try:
         expires_in = int(expires_raw) if expires_raw is not None else None
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         expires_in = None
     if not id_token or not access_token or not refresh_token:
         raise OpenAIOAuthError("OAuth token exchange payload missing required tokens")
@@ -350,7 +350,7 @@ def extract_account_id_from_id_token(id_token: str) -> Optional[str]:
     try:
         decoded = base64.urlsafe_b64decode(padded.encode("utf-8"))
         claims = json.loads(decoded.decode("utf-8"))
-    except Exception:
+    except (ValueError, json.JSONDecodeError):
         return None
     if not isinstance(claims, dict):
         return None

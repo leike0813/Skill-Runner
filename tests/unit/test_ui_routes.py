@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +11,8 @@ httpx = pytest.importorskip("httpx")
 
 from server.main import app
 from server.routers.ui import _build_auth_ui_capabilities
-from server.services.orchestration.engine_interaction_gate import EngineInteractionBusyError
+from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
+from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -49,6 +51,85 @@ async def test_ui_index_available_when_auth_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_index_links_to_settings_and_hides_danger_zone(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+
+    response = await _request("GET", "/ui")
+    assert response.status_code == 200
+    assert "Danger Zone：重置项目数据" not in response.text
+    assert "/ui/settings" in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_settings_contains_logging_and_reset_controls(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.get_logging_settings_payload",
+        lambda: {
+            "editable": {
+                "level": "INFO",
+                "format": "text",
+                "retention_days": 7,
+                "dir_max_bytes": 1024,
+            },
+            "read_only": {
+                "dir": "/tmp/logs",
+                "file_basename": "skill_runner.log",
+                "rotation_when": "midnight",
+                "rotation_interval": 1,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.config",
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=False)),
+    )
+
+    response = await _request("GET", "/ui/settings")
+    assert response.status_code == 200
+    assert "Logging Settings" in response.text
+    assert "Danger Zone：重置项目数据" in response.text
+    assert 'id="danger-reset-open-btn"' in response.text
+    assert "/v1/management/system/reset-data" in response.text
+    assert "/v1/management/system/settings" in response.text
+    assert DATA_RESET_CONFIRMATION_TEXT in response.text
+    assert 'id="reset-include-engine-auth-sessions"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_settings_shows_engine_auth_reset_toggle_when_feature_enabled(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.get_logging_settings_payload",
+        lambda: {
+            "editable": {
+                "level": "INFO",
+                "format": "text",
+                "retention_days": 7,
+                "dir_max_bytes": 1024,
+            },
+            "read_only": {
+                "dir": "/tmp/logs",
+                "file_basename": "skill_runner.log",
+                "rotation_when": "midnight",
+                "rotation_interval": 1,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.config",
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=True)),
+    )
+
+    response = await _request("GET", "/ui/settings")
+    assert response.status_code == 200
+    assert 'id="reset-include-engine-auth-sessions"' in response.text
+
+
+@pytest.mark.asyncio
 async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: True)
@@ -58,7 +139,7 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.engines.engine_upgrade_manager.create_task",
-        lambda *_args, **_kwargs: "upgrade-1",
+        AsyncMock(return_value="upgrade-1"),
     )
     monkeypatch.setattr(
         "server.routers.engines.model_registry.get_manifest_view",
@@ -70,21 +151,6 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
             "resolved_snapshot_file": "models_0.89.0.json",
             "fallback_reason": None,
             "models": [],
-        },
-    )
-    monkeypatch.setattr(
-        "server.routers.engines.agent_cli_manager.collect_auth_status",
-        lambda: {
-            "codex": {
-                "managed_present": True,
-                "managed_cli_path": "/tmp/codex",
-                "global_available": False,
-                "global_cli_path": None,
-                "effective_cli_path": "/tmp/codex",
-                "effective_path_source": "managed",
-                "credential_files": {"auth.json": True},
-                "auth_ready": True,
-            }
         },
     )
     monkeypatch.setattr(
@@ -140,10 +206,6 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
     assert response.status_code == 401
     response = await _request("GET", "/v1/engines/codex/models/manifest", auth=("admin", "secret"))
     assert response.status_code == 200
-    response = await _request("GET", "/v1/engines/auth-status")
-    assert response.status_code == 401
-    response = await _request("GET", "/v1/engines/auth-status", auth=("admin", "secret"))
-    assert response.status_code == 200
     response = await _request(
         "POST",
         "/v1/engines/auth/sessions",
@@ -197,11 +259,11 @@ async def test_ui_install_status_succeeded_refreshes_table(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.skill_install_store.get_install",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "status": "succeeded",
             "skill_id": "demo-uploaded",
             "error": None,
-        },
+        }),
     )
 
     response = await _request("GET", "/ui/skill-packages/req-1/status")
@@ -295,10 +357,11 @@ async def test_ui_engines_page(monkeypatch):
     response = await _request("GET", "/ui/engines")
     assert response.status_code == 200
     assert "Engine 管理" in response.text
-    assert "正在检测 Engine 版本与状态，请稍候..." in response.text
-    assert 'hx-get="/ui/management/engines/table"' in response.text
+    assert "正在检测 Engine 版本与状态，请稍候..." not in response.text
+    assert 'hx-get="/ui/management/engines/table"' not in response.text
+    assert "<table>" in response.text
     assert "内嵌终端（ttyd）" in response.text
-    assert "Engine Auth（实验）" in response.text
+    assert "Engine Auth" in response.text
     assert 'id="auth-transport-select"' in response.text
     assert "OAuth 代理（oauth_proxy）" in response.text
     assert "CLI 委托（cli_delegate）" in response.text
@@ -417,15 +480,11 @@ async def test_ui_engines_table_partial(monkeypatch):
                 SimpleNamespace(
                     engine="codex",
                     cli_version="0.89.0",
-                    auth_ready=True,
-                    sandbox_status="available",
                     models_count=12,
                 ),
                 SimpleNamespace(
                     engine="iflow",
                     cli_version="1.2.3",
-                    auth_ready=False,
-                    sandbox_status="unsupported",
                     models_count=8,
                 ),
             ]
@@ -439,8 +498,8 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "iflow" in response.text
     assert "/ui/engines/codex/models" in response.text
     assert "/ui/engines/iflow/models" in response.text
-    assert "available" in response.text
-    assert "yes" in response.text
+    assert "Auth Ready" not in response.text
+    assert "Sandbox" not in response.text
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-entry="codex"' in response.text
     assert 'data-engine-auth-entry="iflow"' in response.text
@@ -758,12 +817,12 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.engine_upgrade_manager.get_task",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "status": "running",
             "results": {
                 "gemini": {"status": "succeeded", "stdout": "ok", "stderr": "", "error": None}
             },
-        },
+        }),
     )
 
     response = await _request("GET", "/ui/engines/upgrades/req-1/status")
@@ -906,14 +965,14 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.ui.run_observability_service.get_logs_tail",
-        lambda _request_id: {
+        AsyncMock(return_value={
             "request_id": "req-1",
             "run_id": "run-1",
             "status": "running",
             "poll": True,
             "stdout": "stream-out",
             "stderr": "stream-err",
-        },
+        }),
     )
 
     detail_res = await _request("GET", "/ui/runs/req-1")
@@ -1012,7 +1071,8 @@ async def test_ui_pages_use_management_data_endpoints(monkeypatch):
 
     engines_res = await _request("GET", "/ui/engines")
     assert engines_res.status_code == 200
-    assert '/ui/management/engines/table' in engines_res.text
+    assert '/ui/management/engines/table' not in engines_res.text
+    assert "<table>" in engines_res.text
 
     runs_res = await _request("GET", "/ui/runs")
     assert runs_res.status_code == 200

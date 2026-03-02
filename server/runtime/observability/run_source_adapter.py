@@ -7,23 +7,24 @@ from typing import Any, Dict, Optional, Protocol
 from fastapi import HTTPException  # type: ignore[import-not-found]
 
 from server.models import RunStatus
+from server.services.platform.async_compat import maybe_await
 from server.services.skill.temp_skill_run_store import temp_skill_run_store
 from server.runtime.observability.contracts import RunStorePort, WorkspacePort
 
 class _UnconfiguredRunStore:
-    def get_request(self, request_id: str):
+    async def get_request(self, request_id: str):
         _ = request_id
         raise RuntimeError("Run source run_store port is not configured")
 
-    def get_cached_run(self, cache_key: str):
+    async def get_cached_run(self, cache_key: str):
         _ = cache_key
         raise RuntimeError("Run source run_store port is not configured")
 
-    def get_temp_cached_run(self, cache_key: str):
+    async def get_temp_cached_run(self, cache_key: str):
         _ = cache_key
         raise RuntimeError("Run source run_store port is not configured")
 
-    def update_request_run_id(self, request_id: str, run_id: str):
+    async def update_request_run_id(self, request_id: str, run_id: str):
         _ = request_id
         _ = run_id
         raise RuntimeError("Run source run_store port is not configured")
@@ -70,19 +71,19 @@ class RunSourceAdapter(Protocol):
     cache_namespace: str
     capabilities: RunSourceCapabilities
 
-    def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
+    async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
         ...
 
-    def get_cached_run(self, cache_key: str) -> Optional[str]:
+    async def get_cached_run(self, cache_key: str) -> Optional[str]:
         ...
 
-    def bind_cached_run(self, request_id: str, run_id: str) -> None:
+    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
         ...
 
-    def mark_run_started(self, request_id: str, run_id: str) -> None:
+    async def mark_run_started(self, request_id: str, run_id: str) -> None:
         ...
 
-    def mark_failed(self, request_id: str, error_message: str) -> None:
+    async def mark_failed(self, request_id: str, error_message: str) -> None:
         ...
 
     def get_run_job_temp_request_id(self, request_id: str) -> str | None:
@@ -103,19 +104,19 @@ class InstalledRunSourceAdapter:
         supports_inline_input_create=True,
     )
 
-    def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
-        return _require_run_store().get_request(request_id)
+    async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
+        return await maybe_await(_require_run_store().get_request(request_id))
 
-    def get_cached_run(self, cache_key: str) -> Optional[str]:
-        return _require_run_store().get_cached_run(cache_key)
+    async def get_cached_run(self, cache_key: str) -> Optional[str]:
+        return await maybe_await(_require_run_store().get_cached_run(cache_key))
 
-    def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        _require_run_store().update_request_run_id(request_id, run_id)
+    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        await maybe_await(_require_run_store().update_request_run_id(request_id, run_id))
 
-    def mark_run_started(self, request_id: str, run_id: str) -> None:
-        _require_run_store().update_request_run_id(request_id, run_id)
+    async def mark_run_started(self, request_id: str, run_id: str) -> None:
+        await maybe_await(_require_run_store().update_request_run_id(request_id, run_id))
 
-    def mark_failed(self, request_id: str, error_message: str) -> None:
+    async def mark_failed(self, request_id: str, error_message: str) -> None:
         # installed source uses run status sidecar + run table for failure persistence.
         _ = error_message
         _ = request_id
@@ -139,30 +140,30 @@ class TempRunSourceAdapter:
         supports_inline_input_create=False,
     )
 
-    def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
-        return temp_skill_run_store.get_request(request_id)
+    async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
+        return await maybe_await(temp_skill_run_store.get_request(request_id))
 
-    def get_cached_run(self, cache_key: str) -> Optional[str]:
-        return _require_run_store().get_temp_cached_run(cache_key)
+    async def get_cached_run(self, cache_key: str) -> Optional[str]:
+        return await maybe_await(_require_run_store().get_temp_cached_run(cache_key))
 
-    def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        temp_skill_run_store.bind_cached_run(request_id, run_id)
+    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
+        await maybe_await(temp_skill_run_store.bind_cached_run(request_id, run_id))
         store = _require_run_store()
-        if store.get_request(request_id):
-            store.update_request_run_id(request_id, run_id)
+        if await maybe_await(store.get_request(request_id)):
+            await maybe_await(store.update_request_run_id(request_id, run_id))
 
-    def mark_run_started(self, request_id: str, run_id: str) -> None:
-        temp_skill_run_store.update_run_started(request_id, run_id)
+    async def mark_run_started(self, request_id: str, run_id: str) -> None:
+        await maybe_await(temp_skill_run_store.update_run_started(request_id, run_id))
         store = _require_run_store()
-        if store.get_request(request_id):
-            store.update_request_run_id(request_id, run_id)
+        if await maybe_await(store.get_request(request_id)):
+            await maybe_await(store.update_request_run_id(request_id, run_id))
 
-    def mark_failed(self, request_id: str, error_message: str) -> None:
-        temp_skill_run_store.update_status(
+    async def mark_failed(self, request_id: str, error_message: str) -> None:
+        await maybe_await(temp_skill_run_store.update_status(
             request_id,
             status=RunStatus.FAILED,
             error=error_message,
-        )
+        ))
 
     def get_run_job_temp_request_id(self, request_id: str) -> str | None:
         return request_id
@@ -193,11 +194,11 @@ def require_capability(
     )
 
 
-def get_request_and_run_dir(
+async def get_request_and_run_dir(
     source_adapter: RunSourceAdapter,
     request_id: str,
 ) -> tuple[Dict[str, Any], Path]:
-    request_record = source_adapter.get_request(request_id)
+    request_record = await maybe_await(source_adapter.get_request(request_id))
     if not request_record:
         raise HTTPException(status_code=404, detail="Request not found")
     run_id_obj = request_record.get("run_id")

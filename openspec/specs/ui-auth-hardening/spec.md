@@ -1,7 +1,8 @@
 # ui-auth-hardening Specification
 
 ## Purpose
-TBD - created by archiving change ui-skill-browser-and-auth-hardening. Update Purpose after archive.
+定义 UI 鉴权状态可观测性和受保护路由的 401 返回约束。
+
 ## Requirements
 ### Requirement: UI 鉴权状态 MUST 可观测
 系统 MUST 在启动时输出 UI 鉴权是否启用及受保护路由范围。
