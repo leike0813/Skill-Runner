@@ -112,16 +112,11 @@ data/requests/<request_id>/
 ### Run 目录（`data/runs/<run_id>/`）
 ```
 data/runs/<run_id>/
-  input.json               # 输入 payload
-  status.json              # run 状态快照（status/engine/skill_id 等）
-  result/
-    result.json            # 最终结构化结果（满足 output_schema）
-  artifacts/               # skill 产物（初始为空目录）
-  interactions/            # interactive 会话交互记录
-  .<engine>/               # 引擎隔离工作区
-    skills/<skill_id>/     # skill 包副本（安装到引擎目录）
-    ...                    # 引擎配置文件（settings.json / config.toml 等）
-  .audit/                  # 审计日志（按 attempt 编号分区）
+  .state/
+    state.json             # run 当前状态真相（唯一 current truth）
+    dispatch.json          # queued 内部 dispatch 生命周期真相
+  .audit/
+    request_input.json     # 请求输入快照（仅审计/回放）
     stdout.<N>.log         # 第 N 次 attempt 的 stdout
     stderr.<N>.log         # 第 N 次 attempt 的 stderr
     stdin.<N>.log          # 第 N 次 attempt 的 stdin
@@ -135,6 +130,12 @@ data/runs/<run_id>/
     fs-after.<N>.json      # 执行后文件系统快照
     fs-diff.<N>.json       # 文件系统差异
     meta.<N>.json          # attempt 元信息
+  result/
+    result.json            # 最终结构化结果（满足 output_schema）
+  artifacts/               # skill 产物（初始为空目录）
+  .<engine>/               # 引擎隔离工作区
+    skills/<skill_id>/     # skill 包副本（安装到引擎目录）
+    ...                    # 引擎配置文件（settings.json / config.toml 等）
   bundle/                  # 产物打包（执行完成后生成）
     manifest.json          # artifacts 索引（role/path/mime/sha256/size）
     manifest_debug.json    # 含调试信息的索引
@@ -144,7 +145,7 @@ data/runs/<run_id>/
 
 写入策略：
 - Adapter 写入 `.audit/`（stdout/stderr/events 等，按 attempt 编号）
-- Orchestrator 写入 `status.json`、`result/result.json`
+- `RunStateService` 写入 `.state/state.json`、`.state/dispatch.json`、`result/result.json`
 - Bundle 生成器写入 `bundle/`
 - Skill 仅可写 `artifacts/`（通过引擎工作区间接写入）
 

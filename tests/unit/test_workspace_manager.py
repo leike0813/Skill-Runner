@@ -45,11 +45,13 @@ def test_create_run_structure(tmp_path):
         
         run_dir = Path(config.SYSTEM.RUNS_DIR) / resp.run_id
         assert run_dir.exists()
-        assert (run_dir / "input.json").exists()
         assert (run_dir / "artifacts").exists()
         assert (run_dir / "result").exists()
-        assert (run_dir / "interactions").exists()
-        assert (run_dir / "uploads").exists() == False
+        assert (run_dir / ".state").exists()
+        assert (run_dir / ".audit").exists()
+        assert not (run_dir / ".audit" / "request_input.json").exists()
+        assert not (run_dir / "interactions").exists()
+        assert not (run_dir / "uploads").exists()
         
     finally:
         config.defrost()

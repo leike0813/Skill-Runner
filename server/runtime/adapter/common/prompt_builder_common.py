@@ -99,12 +99,14 @@ class ProfiledPromptBuilder:
         if params_json is not None:
             context["params_json"] = params_json
         if prompt_profile.include_input_file_name:
-            context["input_file"] = (run_dir / "input.json").name
+            context["input_file"] = (run_dir / ".audit" / "request_input.json").name
         if prompt_profile.include_skill_dir:
-            skill_dir = self._profile.skills_root_from(
-                run_dir=run_dir,
-                config_path=run_dir / self._profile.workspace_provisioner.workspace_subdir / "settings.json",
-            ) / skill.id
+            skill_dir = skill.path or (
+                self._profile.skills_root_from(
+                    run_dir=run_dir,
+                    config_path=run_dir / self._profile.attempt_workspace.workspace_subdir / "settings.json",
+                ) / skill.id
+            )
             context["skill_dir"] = str(skill_dir)
 
         if prompt_profile.main_prompt_source == "parameter.prompt":

@@ -9,6 +9,11 @@ from server.models import RunStatus
 class SessionEvent:
     TURN_STARTED = "turn.started"
     TURN_NEEDS_INPUT = "turn.needs_input"
+    AUTH_REQUIRED = "auth.required"
+    AUTH_CHALLENGE_UPDATED = "auth.challenge.updated"
+    AUTH_INPUT_ACCEPTED = "auth.input.accepted"
+    AUTH_COMPLETED = "auth.completed"
+    AUTH_FAILED = "auth.failed"
     USER_REPLY_ACCEPTED = "interaction.reply.accepted"
     AUTO_DECIDE_TIMEOUT = "interaction.auto_decide.timeout"
     TURN_SUCCEEDED = "turn.succeeded"
@@ -37,10 +42,16 @@ class Transition:
 TRANSITIONS: tuple[Transition, ...] = (
     Transition("queued", SessionEvent.TURN_STARTED, "running", action="acquire_slot"),
     Transition("running", SessionEvent.TURN_NEEDS_INPUT, "waiting_user", action="persist_pending"),
+    Transition("running", SessionEvent.AUTH_REQUIRED, "waiting_auth", action="persist_pending_auth"),
+    Transition("waiting_auth", SessionEvent.AUTH_INPUT_ACCEPTED, "waiting_auth", action="process_auth_input"),
+    Transition("waiting_auth", SessionEvent.AUTH_CHALLENGE_UPDATED, "waiting_auth", action="persist_pending_auth"),
+    Transition("waiting_auth", SessionEvent.AUTH_COMPLETED, "queued", action="requeue_auth_resume_turn"),
+    Transition("waiting_auth", SessionEvent.AUTH_FAILED, "failed", action="persist_auth_failure"),
     Transition("waiting_user", SessionEvent.USER_REPLY_ACCEPTED, "queued", action="requeue_resume_turn"),
     Transition("waiting_user", SessionEvent.AUTO_DECIDE_TIMEOUT, "queued", action="requeue_auto_resume_turn"),
     Transition("running", SessionEvent.TURN_SUCCEEDED, "succeeded"),
     Transition("running", SessionEvent.TURN_FAILED, "failed"),
+    Transition("waiting_auth", SessionEvent.CANCELED, "canceled"),
     Transition("waiting_user", SessionEvent.CANCELED, "canceled"),
     Transition("queued", SessionEvent.CANCELED, "canceled"),
     Transition("running", SessionEvent.CANCELED, "canceled"),
@@ -60,6 +71,10 @@ def timeout_requires_auto_decision(interactive_auto_reply: bool) -> bool:
 
 
 def waiting_reply_target_status() -> RunStatus:
+    return RunStatus.QUEUED
+
+
+def waiting_auth_resume_target_status() -> RunStatus:
     return RunStatus.QUEUED
 
 

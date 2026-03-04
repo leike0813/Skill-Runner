@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
+from .config import config
 
 
 def _load_local_env_file() -> None:
@@ -48,9 +49,11 @@ async def lifespan(_app: FastAPI):
     from .services.ui.ui_auth import validate_ui_basic_auth_config
     from .services.orchestration.job_orchestrator import job_orchestrator
     from .engines.opencode.models.catalog_service import opencode_model_catalog
+    from .runtime.auth_detection.service import auth_detection_service
 
     runtime_profile = get_runtime_profile()
     runtime_profile.ensure_directories()
+    auth_detection_service.preload()
     cli_manager = AgentCliManager(runtime_profile)
     cli_manager.ensure_layout()
     try:
@@ -67,6 +70,20 @@ async def lifespan(_app: FastAPI):
             exc_info=True,
         )
     opencode_model_catalog.start()
+    if bool(config.SYSTEM.OPENCODE_MODELS_STARTUP_PROBE):
+        try:
+            await opencode_model_catalog.refresh(reason="startup")
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            logger.warning(
+                "Opencode model catalog refresh failed during startup; continuing with existing cache",
+                extra={
+                    "component": "main",
+                    "action": "startup_opencode_model_refresh",
+                    "error_type": type(exc).__name__,
+                    "fallback": "keep_existing_opencode_model_cache",
+                },
+                exc_info=True,
+            )
     install_runtime_protocol_ports()
     install_runtime_observability_ports()
 
@@ -91,9 +108,6 @@ app = FastAPI(
 )
 
 runtime_profile = get_runtime_profile()
-ui_static_dir = runtime_profile.data_dir / "ui_static"
-ui_static_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/ui-static", StaticFiles(directory=str(ui_static_dir)), name="ui-static")
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(skills.router)

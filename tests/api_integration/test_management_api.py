@@ -84,7 +84,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
             "status": "succeeded",
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": False,
-            "entries": [{"path": "logs/stdout.txt", "is_dir": False}],
+            "entries": [{"path": ".audit/stdout.1.log", "is_dir": False}],
         }),
     )
     monkeypatch.setattr(

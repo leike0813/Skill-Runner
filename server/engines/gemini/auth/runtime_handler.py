@@ -199,7 +199,6 @@ class GeminiAuthRuntimeHandler:
                 flow_result = self._manager._gemini_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("gemini")  # noqa: SLF001
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
                 audit["callback_mode"] = "manual"
                 audit.update(flow_result)
@@ -207,7 +206,6 @@ class GeminiAuthRuntimeHandler:
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
-                session.auth_ready = self._manager._collect_auth_ready("gemini")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return
         if runtime is None or not isinstance(runtime, GeminiAuthCliSession):
@@ -223,7 +221,6 @@ class GeminiAuthRuntimeHandler:
             if runtime is None or not isinstance(runtime, GeminiAuthCliSession):
                 session.status = "failed"
                 session.error = "Gemini auth session driver is missing"
-                session.auth_ready = False
                 if self._manager._active_session_id == session.session_id:  # noqa: SLF001
                     self._manager._active_session_id = None  # noqa: SLF001
                 self._manager.interaction_gate.release("auth_flow", session.session_id)
@@ -235,7 +232,6 @@ class GeminiAuthRuntimeHandler:
             session.user_code = None
             session.error = runtime.error
             session.exit_code = runtime.exit_code
-            session.auth_ready = runtime.status == "succeeded"
             if runtime.status in _TERMINAL_STATUSES:
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
@@ -243,24 +239,20 @@ class GeminiAuthRuntimeHandler:
             if runtime is None or not isinstance(runtime, GeminiOAuthProxySession):
                 session.status = "failed"
                 session.error = "Gemini OAuth proxy session driver is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             now = _utc_now()
             session.updated_at = now
             runtime.updated_at = now
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if now > session.expires_at:
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status == "starting":
                 session.status = "waiting_user"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         return False
 
@@ -279,20 +271,17 @@ class GeminiAuthRuntimeHandler:
         if runtime is None or not isinstance(runtime, GeminiOAuthProxySession):
             session.status = "failed"
             session.error = "OAuth callback session does not support Gemini callback"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if error and error.strip():
             session.status = "failed"
             session.error = f"OAuth callback error: {error.strip()}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         normalized_code = (code or "").strip()
         if not normalized_code:
             session.status = "failed"
             session.error = "OAuth callback code is missing"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         try:
@@ -303,7 +292,6 @@ class GeminiAuthRuntimeHandler:
             )
             session.status = "succeeded"
             session.error = None
-            session.auth_ready = self._manager._collect_auth_ready("gemini")  # noqa: SLF001
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
             audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
             audit["callback_mode"] = "auto"
@@ -311,7 +299,6 @@ class GeminiAuthRuntimeHandler:
         except (OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = f"OAuth callback token exchange failed: {exc}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
         self._manager._finalize_active_session(session)  # noqa: SLF001
         return True
 

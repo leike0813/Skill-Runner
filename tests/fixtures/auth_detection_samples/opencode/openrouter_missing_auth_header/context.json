@@ -1,0 +1,22 @@
+{
+  "sample_id": "openrouter_missing_auth_header",
+  "source_run_id": "20260302T124207-opencode-92cb26a3",
+  "engine": "opencode",
+  "provider_id": "openrouter",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "missing Authentication header in provider response",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "api_key_missing",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Provider responseBody contains code 401 and explicit missing auth header text."
+  ]
+}

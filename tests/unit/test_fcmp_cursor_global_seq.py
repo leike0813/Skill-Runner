@@ -19,15 +19,48 @@ def _fcmp_event(*, attempt: int, seq: int, type_name: str, data: dict) -> dict:
     }
 
 
+def _write_state_file(run_dir: Path, *, status: str) -> None:
+    state_path = run_dir / ".state" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "request_id": run_dir.name,
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-02-24T00:00:00",
+                "current_attempt": 2,
+                "state_phase": {
+                    "waiting_auth_phase": None,
+                    "dispatch_phase": None,
+                },
+                "pending": {
+                    "owner": "waiting_user" if status == "waiting_user" else None,
+                    "interaction_id": 1 if status == "waiting_user" else None,
+                    "auth_session_id": None,
+                    "payload": None,
+                },
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {},
+                "error": None,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_event_history_rewrites_seq_to_global_monotonic(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-global"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-02-24T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, status="waiting_user")
     (audit_dir / "fcmp_events.1.jsonl").write_text(
         "\n".join(
             [
@@ -112,10 +145,7 @@ async def test_iter_sse_events_respects_global_cursor_across_attempts(monkeypatc
     run_dir = tmp_path / "run-global-cursor"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-02-24T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, status="waiting_user")
     (audit_dir / "fcmp_events.1.jsonl").write_text(
         "\n".join(
             [

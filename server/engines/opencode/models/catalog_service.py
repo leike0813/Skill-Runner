@@ -188,8 +188,6 @@ class OpencodeModelCatalog:
                     self.scheduler.add_job(self._scheduled_refresh, "interval", minutes=interval_minutes)
                     self._job_added = True
                     self.scheduler.start()
-        if bool(config.SYSTEM.OPENCODE_MODELS_STARTUP_PROBE):
-            self.request_refresh_async(reason="startup")
 
     def stop(self) -> None:
         if self.scheduler.running:

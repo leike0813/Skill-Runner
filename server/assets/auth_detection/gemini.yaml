@@ -1,0 +1,18 @@
+version: 1
+engine: gemini
+rules:
+  - id: gemini_auth_method_not_configured
+    enabled: true
+    priority: 900
+    match:
+      all:
+        - field: combined_text
+          op: regex
+          value: "Please set an Auth method"
+        - field: combined_text
+          op: regex
+          value: "GEMINI_API_KEY|GOOGLE_GENAI_USE_VERTEXAI|GOOGLE_GENAI_USE_GCA"
+    classify:
+      classification: auth_required
+      subcategory: api_key_missing
+      confidence: high

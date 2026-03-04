@@ -1,0 +1,36 @@
+version: 1
+name: ask_user_minimal_schema
+fallback_prompt: "Please reply to continue."
+
+ask_user:
+  kind:
+    required: true
+    enum:
+      - open_text
+      - choose_one
+      - confirm
+    default: open_text
+  prompt:
+    required: false
+    type: string
+  options:
+    required_when_kind:
+      - choose_one
+    item:
+      label: string
+      value: any
+  hint:
+    required: false
+    type: string
+    purpose: ui_hint
+
+example:
+  ask_user:
+    kind: open_text
+    prompt: "请描述一下你的基本情况，如年龄、职业等。"
+    hint: "例如：男，38，程序员"
+
+rules:
+  - keep_the_block_short_and_optional
+  - include_only_fields_you_can_produce_stably
+  - parsing_failure_must_not_block_core_runtime_flow

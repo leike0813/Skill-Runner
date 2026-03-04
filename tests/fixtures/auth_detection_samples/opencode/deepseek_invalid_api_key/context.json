@@ -1,0 +1,22 @@
+{
+  "sample_id": "deepseek_invalid_api_key",
+  "source_run_id": "20260302T124608-opencode-d6802254",
+  "engine": "opencode",
+  "provider_id": "deepseek",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "provider returns invalid api key authentication failure",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "invalid_api_key",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Masked key appears in message; fixture keeps provider semantics but strips local path context."
+  ]
+}

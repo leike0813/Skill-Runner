@@ -26,6 +26,49 @@ async def _request(method: str, path: str, **kwargs):
         return await client.request(method, path, **kwargs)
 
 
+def _write_state_file(run_dir: Path, status: str) -> None:
+    state_dir = run_dir / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "request_id": f"req-{run_dir.name}",
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-02-16T00:00:00",
+                "current_attempt": 1,
+                "state_phase": {
+                    "waiting_auth_phase": None,
+                    "dispatch_phase": None,
+                },
+                "pending": {
+                    "owner": None,
+                    "interaction_id": None,
+                    "auth_session_id": None,
+                    "payload": None,
+                },
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {
+                    "conversation_mode": "session",
+                    "requested_execution_mode": None,
+                    "effective_execution_mode": None,
+                    "effective_interactive_require_user_reply": None,
+                    "effective_interactive_reply_timeout_sec": None,
+                    "effective_session_timeout_sec": None,
+                },
+                "error": None,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.asyncio
 async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     skill_dir = tmp_path / "demo-skill"
@@ -198,16 +241,7 @@ async def test_management_engines_list_and_detail(monkeypatch):
 async def test_management_run_state_includes_pending_and_interaction_count(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps(
-            {
-                "status": "waiting_user",
-                "updated_at": "2026-02-16T00:00:00",
-                "error": None,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "waiting_user")
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.get_run_detail",
         AsyncMock(return_value={
@@ -299,17 +333,20 @@ async def test_management_run_files_and_preview(monkeypatch):
 @pytest.mark.asyncio
 async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-events"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("hello", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-02-16T00:00:00"}),
-        encoding="utf-8",
-    )
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("hello", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    _write_state_file(run_dir, "succeeded")
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-events"}),
+        AsyncMock(
+            side_effect=lambda request_id: {
+                "request_id": request_id,
+                "run_id": "run-events",
+                "engine": "gemini",
+            }
+        ),
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -331,8 +368,10 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
     response = await _request("GET", "/v1/management/runs/req-events/events")
     assert response.status_code == 200
     assert "event: snapshot" in response.text
-    # Strict audit-only mode: without .audit attempt logs, stream emits snapshot only.
-    assert "event: chat_event" not in response.text
+    # Strict audit-only mode: without attempt event logs, stream may still emit
+    # diagnostics, but must not synthesize assistant/user conversation events.
+    assert '"type": "assistant.message.final"' not in response.text
+    assert '"type": "user.input.required"' not in response.text
     assert "event: end" not in response.text
 
 
@@ -367,6 +406,42 @@ async def test_management_run_events_history_delegate(monkeypatch):
     assert payload["request_id"] == "req-events"
     assert payload["count"] == 1
     assert payload["events"][0]["seq"] == 3
+
+
+@pytest.mark.asyncio
+async def test_management_run_chat_history_delegate(monkeypatch):
+    async def _history(
+        request_id: str,
+        from_seq: int | None = None,
+        to_seq: int | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+    ):
+        assert request_id == "req-chat"
+        assert from_seq == 2
+        assert to_seq == 4
+        assert from_ts is None
+        assert to_ts is None
+        return {
+            "request_id": request_id,
+            "count": 2,
+            "events": [
+                {"seq": 3, "role": "user", "text": "API key submitted"},
+                {"seq": 4, "role": "system", "text": "Authentication completed. Resuming task..."},
+            ],
+        }
+
+    monkeypatch.setattr("server.routers.management.jobs_router.list_run_chat_history", _history)
+
+    response = await _request(
+        "GET",
+        "/v1/management/runs/req-chat/chat/history?from_seq=2&to_seq=4",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request_id"] == "req-chat"
+    assert payload["count"] == 2
+    assert payload["events"][0]["role"] == "user"
 
 
 @pytest.mark.asyncio

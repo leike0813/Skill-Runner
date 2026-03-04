@@ -11,6 +11,7 @@ class RunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     WAITING_USER = "waiting_user"
+    WAITING_AUTH = "waiting_auth"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -21,6 +22,19 @@ class ExecutionMode(str, Enum):
 
     AUTO = "auto"
     INTERACTIVE = "interactive"
+
+
+class ClientConversationMode(str, Enum):
+    """Whether the client can sustain multi-turn replies within one run."""
+
+    SESSION = "session"
+    NON_SESSION = "non_session"
+
+
+class ClientMetadata(BaseModel):
+    """Client-declared runtime capabilities."""
+
+    conversation_mode: ClientConversationMode = ClientConversationMode.SESSION
 
 
 class EngineSessionHandleType(str, Enum):
@@ -46,6 +60,16 @@ class RecoveryState(str, Enum):
     NONE = "none"
     RECOVERED_WAITING = "recovered_waiting"
     FAILED_RECONCILED = "failed_reconciled"
+
+
+class DispatchPhase(str, Enum):
+    """Durable queued-state dispatch lifecycle."""
+
+    CREATED = "created"
+    ADMITTED = "admitted"
+    DISPATCH_SCHEDULED = "dispatch_scheduled"
+    WORKER_CLAIMED = "worker_claimed"
+    ATTEMPT_MATERIALIZING = "attempt_materializing"
 
 
 class AdapterTurnOutcome(str, Enum):

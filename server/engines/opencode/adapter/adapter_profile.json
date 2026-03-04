@@ -22,7 +22,7 @@
     "json_lines_finder": "find_session_id",
     "regex_pattern": null
   },
-  "workspace_provisioner": {
+  "attempt_workspace": {
     "workspace_subdir": ".opencode",
     "skills_subdir": "skills",
     "use_config_parent_as_workspace": false,

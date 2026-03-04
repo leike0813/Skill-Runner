@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from server.runtime.adapter.types import RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
+from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
@@ -265,3 +265,67 @@ class GeminiStreamParser:
             "diagnostics": list(dict.fromkeys(diagnostics)),
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+
+    def start_live_session(self) -> "_GeminiLiveSession":
+        return _GeminiLiveSession(self)
+
+
+class _GeminiLiveSession:
+    def __init__(self, parser: GeminiStreamParser) -> None:
+        self._parser = parser
+        self._stdout = bytearray()
+        self._stderr = bytearray()
+        self._pty = bytearray()
+
+    def feed(
+        self,
+        *,
+        stream: str,
+        text: str,
+        byte_from: int,
+        byte_to: int,
+    ) -> list[LiveParserEmission]:
+        _ = byte_from
+        _ = byte_to
+        encoded = text.encode("utf-8", errors="replace")
+        if stream == "stderr":
+            self._stderr.extend(encoded)
+        elif stream == "pty":
+            self._pty.extend(encoded)
+        else:
+            self._stdout.extend(encoded)
+        return []
+
+    def finish(
+        self,
+        *,
+        exit_code: int,
+        failure_reason: str | None,
+    ) -> list[LiveParserEmission]:
+        _ = exit_code
+        _ = failure_reason
+        parsed = self._parser.parse_runtime_stream(
+            stdout_raw=bytes(self._stdout),
+            stderr_raw=bytes(self._stderr),
+            pty_raw=bytes(self._pty),
+        )
+        emissions: list[LiveParserEmission] = []
+        session_id = parsed.get("session_id")
+        for item in parsed.get("assistant_messages", []):
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            emission: LiveParserEmission = {"kind": "assistant_message", "text": text}
+            if isinstance(session_id, str) and session_id:
+                emission["session_id"] = session_id
+            emissions.append(emission)
+        for code in parsed.get("diagnostics", []):
+            if not isinstance(code, str) or not code:
+                continue
+            diagnostic_emission: LiveParserEmission = {"kind": "diagnostic", "code": code}
+            if isinstance(session_id, str) and session_id:
+                diagnostic_emission["session_id"] = session_id
+            emissions.append(diagnostic_emission)
+        return emissions

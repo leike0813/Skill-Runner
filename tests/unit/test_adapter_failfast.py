@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,8 +17,8 @@ class _NoopComposer:
         return ctx.run_dir / "dummy.json"
 
 
-class _NoopWorkspace:
-    def prepare(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:  # noqa: ARG002
+class _NoopRunFolderValidator:
+    def validate(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:  # noqa: ARG002
         return ctx.run_dir
 
 
@@ -54,11 +55,20 @@ class _NoopSessionCodec:
         )
 
 
+class _TrackingRunFolderValidator:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Path, Path]] = []
+
+    def validate(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:
+        self.calls.append((ctx.run_dir, config_path))
+        return ctx.run_dir
+
+
 class _TestAdapter(EngineExecutionAdapter):
     def __init__(self) -> None:
         super().__init__(
             config_composer=_NoopComposer(),
-            workspace_provisioner=_NoopWorkspace(),
+            run_folder_validator=_NoopRunFolderValidator(),
             prompt_builder=_NoopPromptBuilder(),
             command_builder=_NoopCommandBuilder(),
             stream_parser=_NoopStreamParser(),
@@ -126,7 +136,7 @@ async def test_capture_process_output_stream_writes_logs_during_run(tmp_path: Pa
     )
     task = asyncio.create_task(adapter._capture_process_output(proc, run_dir, {"hard_timeout_seconds": 10}, "Test"))
     await asyncio.sleep(0.2)
-    stdout_log = run_dir / "logs" / "stdout.txt"
+    stdout_log = run_dir / ".audit" / "stdout.1.log"
     assert stdout_log.exists()
     partial = stdout_log.read_text(encoding="utf-8")
     assert "tick" in partial
@@ -159,3 +169,38 @@ async def test_timeout_terminates_process_group_and_returns_promptly(tmp_path: P
     elapsed = time.monotonic() - start
     assert result.failure_reason == "TIMEOUT"
     assert elapsed < 20
+
+
+@pytest.mark.asyncio
+async def test_auth_completed_resume_revalidates_run_folder_before_execute(tmp_path: Path):
+    validator = _TrackingRunFolderValidator()
+    adapter = EngineExecutionAdapter(
+        config_composer=_NoopComposer(),
+        run_folder_validator=validator,
+        prompt_builder=_NoopPromptBuilder(),
+        command_builder=_NoopCommandBuilder(),
+        stream_parser=_NoopStreamParser(),
+        session_codec=_NoopSessionCodec(),
+        process_prefix="Test",
+    )
+    adapter._execute_process = AsyncMock(  # type: ignore[method-assign]
+        return_value=ProcessExecutionResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+        )
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    await adapter.run(
+        SkillManifest(id="x", path=run_dir),
+        input_data={},
+        run_dir=run_dir,
+        options={
+            "__resume_ticket_id": "ticket-1",
+            "__resume_cause": "auth_completed",
+        },
+    )
+
+    assert validator.calls == [(run_dir, run_dir / "dummy.json")]

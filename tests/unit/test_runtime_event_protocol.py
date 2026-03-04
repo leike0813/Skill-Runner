@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 
 from server.runtime.protocol import event_protocol as runtime_event_protocol
-from server.runtime.protocol.event_protocol import build_fcmp_events, build_rasp_events
+from server.runtime.protocol.event_protocol import (
+    build_fcmp_events,
+    build_rasp_events,
+    translate_orchestrator_event_to_fcmp_specs,
+)
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
     validate_fcmp_event,
@@ -143,7 +147,12 @@ def test_completion_conflict_maps_to_failed_conversation(tmp_path: Path):
         },
     )
     fcmp_events = build_fcmp_events(rasp_events)
-    assert any(event.type == "conversation.failed" for event in fcmp_events)
+    terminal_event = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    )
+    assert terminal_event.data["terminal"]["status"] == "failed"
     assert any(
         event.type == "diagnostic.warning"
         and event.data.get("code") == "DONE_MARKER_PROCESS_FAILURE_CONFLICT"
@@ -217,8 +226,12 @@ def test_soft_completion_reason_and_warning_propagate_to_fcmp(tmp_path: Path):
         },
     )
     fcmp_events = build_fcmp_events(rasp_events)
-    completed_event = next(event for event in fcmp_events if event.type == "conversation.completed")
-    assert completed_event.data["reason_code"] == "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER"
+    completed_event = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "succeeded"
+    )
+    assert completed_event.data["terminal"]["reason_code"] == "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER"
     assert any(
         event.type == "diagnostic.warning"
         and event.data.get("code") == "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER"
@@ -248,11 +261,55 @@ def test_max_attempt_exceeded_maps_to_failed_conversation(tmp_path: Path):
         },
     )
     fcmp_events = build_fcmp_events(rasp_events)
-    failed_event = next(event for event in fcmp_events if event.type == "conversation.failed")
-    assert failed_event.data["error"]["code"] == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
+    failed_event = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    )
+    assert failed_event.data["terminal"]["error"]["code"] == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
     assert any(
         event.type == "diagnostic.warning"
         and event.data.get("code") == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
+        for event in fcmp_events
+    )
+
+
+def test_completed_completion_does_not_override_failed_terminal_status(tmp_path: Path):
+    run_dir = tmp_path / "run-completion-conflict"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-completion-conflict",
+        engine="codex",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={
+            "state": "completed",
+            "reason_code": "DONE_MARKER_FOUND",
+            "diagnostics": [],
+        },
+    )
+    fcmp_events = build_fcmp_events(rasp_events)
+
+    failed_event = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    )
+    assert failed_event.data["terminal"]["status"] == "failed"
+    assert not any(
+        event.type == "conversation.state.changed" and event.data.get("to") == "succeeded"
+        for event in fcmp_events
+    )
+    assert any(
+        event.type == "diagnostic.warning"
+        and event.data.get("code") == "TERMINAL_STATUS_COMPLETION_CONFLICT"
         for event in fcmp_events
     )
 
@@ -289,6 +346,368 @@ def test_fcmp_emits_state_changed_for_waiting_user(tmp_path: Path):
     assert user_required.data.get("prompt") != "Provide next user turn"
 
 
+def test_fcmp_emits_auth_required_and_waiting_auth_transition(tmp_path: Path):
+    run_dir = tmp_path / "run-state-auth"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending_auth = {
+        "auth_session_id": "auth-1",
+        "engine": "opencode",
+        "provider_id": "deepseek",
+        "auth_method": "api_key",
+        "challenge_kind": "api_key",
+        "prompt": "Authentication is required.",
+        "auth_url": None,
+        "user_code": None,
+        "instructions": "Paste API key into chat.",
+        "accepts_chat_input": True,
+        "input_kind": "api_key",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "challenge_active",
+        "timeout_sec": 900,
+        "created_at": "2026-03-03T00:00:00Z",
+        "expires_at": "2026-03-03T00:15:00Z",
+    }
+
+    rasp_events = build_rasp_events(
+        run_id="run-state-auth",
+        engine="opencode",
+        attempt_number=1,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "awaiting_auth", "reason_code": "WAITING_AUTH_REQUIRED", "diagnostics": []},
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-02-24T00:00:00",
+        pending_auth=pending_auth,
+        orchestrator_events=[
+            {
+                "ts": "2026-02-24T00:00:00",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.session.created",
+                "data": pending_auth,
+            }
+        ],
+    )
+
+    auth_required = next(event for event in fcmp_events if event.type == "auth.required")
+    assert auth_required.data["auth_session_id"] == "auth-1"
+    assert auth_required.data["provider_id"] == "deepseek"
+    assert auth_required.data["phase"] == "challenge_active"
+    state_changed = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "waiting_auth"
+    )
+    assert state_changed.data["trigger"] == "auth.required"
+    assert state_changed.data["pending_auth_session_id"] == "auth-1"
+
+
+def test_fcmp_auth_required_prefers_pending_auth_provider_when_orchestrator_payload_is_missing_it(tmp_path: Path):
+    run_dir = tmp_path / "run-state-auth-fallback-provider"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending_auth = {
+        "auth_session_id": "auth-1",
+        "engine": "opencode",
+        "provider_id": "deepseek",
+        "auth_method": "api_key",
+        "challenge_kind": "api_key",
+        "prompt": "Authentication is required.",
+        "auth_url": None,
+        "user_code": None,
+        "instructions": "Paste API key into chat.",
+        "accepts_chat_input": True,
+        "input_kind": "api_key",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "challenge_active",
+        "timeout_sec": 900,
+        "created_at": "2026-03-03T00:00:00Z",
+        "expires_at": "2026-03-03T00:15:00Z",
+    }
+
+    rasp_events = build_rasp_events(
+        run_id="run-state-auth-fallback-provider",
+        engine="opencode",
+        attempt_number=1,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "awaiting_auth", "reason_code": "WAITING_AUTH_REQUIRED", "diagnostics": []},
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-02-24T00:00:00",
+        pending_auth=pending_auth,
+        orchestrator_events=[
+            {
+                "ts": "2026-02-24T00:00:00",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.session.created",
+                "data": {
+                    "auth_session_id": "auth-1",
+                    "engine": "opencode",
+                    "provider_id": None,
+                    "phase": "challenge_active",
+                },
+            }
+        ],
+    )
+
+    auth_required = next(event for event in fcmp_events if event.type == "auth.required")
+    assert auth_required.data["provider_id"] == "deepseek"
+
+
+def test_fcmp_emits_auth_required_for_method_selection(tmp_path: Path):
+    run_dir = tmp_path / "run-auth-selection"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending_selection = {
+        "engine": "codex",
+        "provider_id": None,
+        "available_methods": ["callback", "device_auth"],
+        "prompt": "Authentication is required. Choose how to continue.",
+        "instructions": "Select an authentication method to continue.",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "method_selection",
+        "ui_hints": {"widget": "choice"},
+    }
+
+    rasp_events = build_rasp_events(
+        run_id="run-auth-selection",
+        engine="codex",
+        attempt_number=1,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "awaiting_auth", "reason_code": "WAITING_AUTH_REQUIRED", "diagnostics": []},
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-03-03T00:00:00",
+        pending_auth_method_selection=pending_selection,
+        orchestrator_events=[
+            {
+                "ts": "2026-03-03T00:00:00",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.method.selection.required",
+                "data": pending_selection,
+            }
+        ],
+    )
+
+    auth_required = next(event for event in fcmp_events if event.type == "auth.required")
+    assert auth_required.data["phase"] == "method_selection"
+    assert auth_required.data["available_methods"] == ["callback", "device_auth"]
+    state_changed = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "waiting_auth"
+    )
+    assert state_changed.data["pending_auth_session_id"] is None
+
+
+def test_fcmp_waiting_auth_suppresses_process_exit_failed_event(tmp_path: Path):
+    run_dir = tmp_path / "run-auth-selection-no-fail"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending_selection = {
+        "engine": "codex",
+        "provider_id": None,
+        "available_methods": ["callback", "device_auth"],
+        "prompt": "Authentication is required. Choose how to continue.",
+        "instructions": "Select an authentication method to continue.",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "method_selection",
+        "ui_hints": {"widget": "choice"},
+    }
+
+    rasp_events = build_rasp_events(
+        run_id="run-auth-selection-no-fail",
+        engine="codex",
+        attempt_number=1,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "interrupted", "reason_code": "PROCESS_EXIT_NONZERO", "diagnostics": []},
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-03-03T00:00:00",
+        pending_auth_method_selection=pending_selection,
+        orchestrator_events=[
+            {
+                "ts": "2026-03-03T00:00:00",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.method.selection.required",
+                "data": pending_selection,
+            }
+        ],
+    )
+
+    assert any(event.type == "auth.required" for event in fcmp_events)
+    assert not any(
+        event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+        for event in fcmp_events
+    )
+
+
+def test_fcmp_emits_auth_completion_transition(tmp_path: Path):
+    run_dir = tmp_path / "run-auth-completed"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-auth-completed",
+        engine="opencode",
+        attempt_number=1,
+        status="queued",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="queued",
+        status_updated_at="2026-02-24T00:00:01",
+        orchestrator_events=[
+            {
+                "ts": "2026-02-24T00:00:01",
+                "attempt_number": 1,
+                "seq": 2,
+                "category": "interaction",
+                "type": "auth.session.completed",
+                "data": {
+                    "auth_session_id": "auth-1",
+                    "resume_attempt": 2,
+                    "source_attempt": 1,
+                    "target_attempt": 2,
+                    "resume_ticket_id": "ticket-1",
+                    "ticket_consumed": True,
+                    "completed_at": "2026-02-24T00:00:01Z",
+                },
+            }
+        ],
+    )
+
+    auth_completed = next(event for event in fcmp_events if event.type == "auth.completed")
+    assert auth_completed.data["auth_session_id"] == "auth-1"
+    state_changed = next(
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("from") == "waiting_auth"
+    )
+    assert state_changed.data["to"] == "queued"
+    assert state_changed.data["trigger"] == "auth.completed"
+
+
+def test_translate_orchestrator_interaction_reply_accepted_to_fcmp_pair() -> None:
+    specs = translate_orchestrator_event_to_fcmp_specs(
+        engine="gemini",
+        type_name="interaction.reply.accepted",
+        data={
+            "interaction_id": 7,
+            "resolution_mode": "user_reply",
+            "accepted_at": "2026-03-04T00:00:05Z",
+            "response_preview": "男，38，程序员",
+        },
+        updated_at="2026-03-04T00:00:05Z",
+        default_attempt_number=2,
+    )
+
+    assert [spec["type_name"] for spec in specs] == [
+        "interaction.reply.accepted",
+        "conversation.state.changed",
+    ]
+    accepted = specs[0]["data"]
+    assert accepted["interaction_id"] == 7
+    assert accepted["resolution_mode"] == "user_reply"
+    assert accepted["response_preview"] == "男，38，程序员"
+    state_changed = specs[1]["data"]
+    assert state_changed["from"] == "waiting_user"
+    assert state_changed["to"] == "queued"
+    assert state_changed["trigger"] == "interaction.reply.accepted"
+    assert state_changed["pending_owner"] == "waiting_user"
+    assert state_changed["resume_cause"] == "interaction_reply"
+
+
+def test_fcmp_maps_auth_session_busy_to_diagnostic_warning(tmp_path: Path):
+    run_dir = tmp_path / "run-auth-busy"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-auth-busy",
+        engine="opencode",
+        attempt_number=2,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-03-04T00:00:00",
+        orchestrator_events=[
+            {
+                "ts": "2026-03-04T00:00:00",
+                "attempt_number": 2,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.session.busy",
+                "data": {
+                    "engine": "opencode",
+                    "provider_id": "google",
+                    "last_error": "Auth session already active: auth-1",
+                },
+            }
+        ],
+    )
+
+    diagnostic = next(
+        event
+        for event in fcmp_events
+        if event.type == "diagnostic.warning" and event.data.get("code") == "AUTH_SESSION_BUSY"
+    )
+    assert diagnostic.data["code"] == "AUTH_SESSION_BUSY"
+    assert not any(event.type == "auth.challenge.updated" for event in fcmp_events)
+
+
 def test_fcmp_emits_only_current_attempt_reply_event(tmp_path: Path):
     run_dir = tmp_path / "run-state-reply"
     logs_dir = run_dir / "logs"
@@ -298,7 +717,7 @@ def test_fcmp_emits_only_current_attempt_reply_event(tmp_path: Path):
     rasp_events = build_rasp_events(
         run_id="run-state-reply",
         engine="codex",
-        attempt_number=2,
+        attempt_number=3,
         status="running",
         pending_interaction=None,
         stdout_path=logs_dir / "stdout.txt",
@@ -306,22 +725,26 @@ def test_fcmp_emits_only_current_attempt_reply_event(tmp_path: Path):
     )
     interaction_history = [
         {
-            "interaction_id": 1,
+            "interaction_id": 2,
+            "source_attempt": 2,
             "event_type": "reply",
             "payload": {
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:01",
                 "response": {"text": "user answer"},
+                "source_attempt": 2,
             },
             "created_at": "2026-02-24T00:00:01",
         },
         {
-            "interaction_id": 2,
+            "interaction_id": 1,
+            "source_attempt": 1,
             "event_type": "reply",
             "payload": {
                 "resolution_mode": "auto_decide_timeout",
                 "resolved_at": "2026-02-24T00:00:02",
                 "auto_decide_policy": "engine_judgement",
+                "source_attempt": 1,
             },
             "created_at": "2026-02-24T00:00:02",
         },

@@ -7,7 +7,7 @@ def _template() -> str:
 
 def test_completion_event_does_not_render_chat_bubble() -> None:
     content = _template()
-    assert 'if (type === "conversation.completed")' in content
+    assert 'if (type === "conversation.state.changed")' in content
     assert 'appendChatBubble("agent", "任务已完成。"' not in content
     assert "maybeAppendFinalSummary().catch(() => {});" in content
 

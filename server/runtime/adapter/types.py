@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NotRequired, Optional, TypedDict
+from typing import Any, Literal, NotRequired, Optional, TypedDict
 
 from ...models import AdapterTurnResult
 
@@ -40,6 +40,15 @@ class RuntimeAssistantMessage(TypedDict):
     raw_ref: NotRequired[RuntimeStreamRawRef | None]
 
 
+class LiveParserEmission(TypedDict):
+    kind: Literal["assistant_message", "diagnostic"]
+    text: NotRequired[str]
+    code: NotRequired[str]
+    raw_ref: NotRequired[RuntimeStreamRawRef | None]
+    session_id: NotRequired[str | None]
+    structured_type: NotRequired[str | None]
+
+
 class RuntimeStreamParseResult(TypedDict):
     parser: str
     confidence: float
@@ -48,6 +57,7 @@ class RuntimeStreamParseResult(TypedDict):
     raw_rows: list[RuntimeStreamRawRow]
     diagnostics: list[str]
     structured_types: list[str]
+    structured_payloads: NotRequired[list[dict[str, Any]]]
 
 
 class EngineRunResult:
@@ -61,7 +71,6 @@ class EngineRunResult:
         exit_code: int,
         raw_stdout: str,
         raw_stderr: str,
-        output_file_path: Path | None = None,
         artifacts_created: list[Path] | None = None,
         failure_reason: str | None = None,
         repair_level: str = "none",
@@ -70,7 +79,6 @@ class EngineRunResult:
         self.exit_code = exit_code
         self.raw_stdout = raw_stdout
         self.raw_stderr = raw_stderr
-        self.output_file_path = output_file_path
         self.artifacts_created = artifacts_created or []
         self.failure_reason = failure_reason
         self.repair_level = repair_level

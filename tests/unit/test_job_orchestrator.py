@@ -2,10 +2,13 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import pytest
 
 from server.models import (
+    AdapterTurnInteraction,
+    AdapterTurnOutcome,
+    AdapterTurnResult,
     EngineInteractiveProfile,
     InteractiveErrorCode,
     RunCreateRequest,
@@ -19,6 +22,58 @@ from server.config import config
 from server.runtime.adapter.types import EngineRunResult
 
 
+def _final_engine_result(
+    *,
+    final_data: dict[str, object],
+    raw_stdout: str = "",
+    raw_stderr: str = "",
+    exit_code: int = 0,
+    artifacts_created: list[Path] | None = None,
+    failure_reason: str | None = None,
+    repair_level: str = "none",
+) -> EngineRunResult:
+    return EngineRunResult(
+        exit_code=exit_code,
+        raw_stdout=raw_stdout,
+        raw_stderr=raw_stderr,
+        artifacts_created=artifacts_created or [],
+        failure_reason=failure_reason,
+        repair_level=repair_level,
+        turn_result=AdapterTurnResult(
+            outcome=AdapterTurnOutcome.FINAL,
+            final_data=final_data,
+            repair_level=repair_level,
+            failure_reason=failure_reason,
+        ),
+    )
+
+
+def _ask_user_engine_result(
+    *,
+    interaction: dict[str, object],
+    raw_stdout: str = "",
+    raw_stderr: str = "",
+    exit_code: int = 0,
+    artifacts_created: list[Path] | None = None,
+    failure_reason: str | None = None,
+    repair_level: str = "none",
+) -> EngineRunResult:
+    return EngineRunResult(
+        exit_code=exit_code,
+        raw_stdout=raw_stdout,
+        raw_stderr=raw_stderr,
+        artifacts_created=artifacts_created or [],
+        failure_reason=failure_reason,
+        repair_level=repair_level,
+        turn_result=AdapterTurnResult(
+            outcome=AdapterTurnOutcome.ASK_USER,
+            interaction=AdapterTurnInteraction.model_validate(interaction),
+            repair_level=repair_level,
+            failure_reason=failure_reason,
+        ),
+    )
+
+
 class FailingAdapter:
     async def run(self, *args, **kwargs):
         raise AssertionError("Adapter should not be called on input validation failure")
@@ -26,16 +81,7 @@ class FailingAdapter:
 
 class DummyAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "bad"}))
-        return EngineRunResult(
-            exit_code=0,
-            raw_stdout="",
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[]
-        )
+        return _final_engine_result(final_data={"value": "bad"})
 
 
 class NoOutputAdapter:
@@ -44,23 +90,13 @@ class NoOutputAdapter:
             exit_code=0,
             raw_stdout="",
             raw_stderr="",
-            output_file_path=None,
             artifacts_created=[]
         )
 
 
 class MissingArtifactsAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "ok"}))
-        return EngineRunResult(
-            exit_code=0,
-            raw_stdout="",
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[]
-        )
+        return _final_engine_result(final_data={"value": "ok"})
 
 
 class AuthRequiredAdapter:
@@ -69,7 +105,6 @@ class AuthRequiredAdapter:
             exit_code=1,
             raw_stdout="",
             raw_stderr="SERVER_OAUTH2_REQUIRED",
-            output_file_path=None,
             artifacts_created=[],
             failure_reason="AUTH_REQUIRED",
         )
@@ -81,7 +116,6 @@ class TimeoutAdapter:
             exit_code=1,
             raw_stdout="",
             raw_stderr="",
-            output_file_path=None,
             artifacts_created=[],
             failure_reason="TIMEOUT",
         )
@@ -92,14 +126,9 @@ class TimeoutSuccessLikeAdapter:
         artifacts_dir = run_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         (artifacts_dir / "partial.txt").write_text("partial")
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "ok"}))
-        return EngineRunResult(
-            exit_code=0,
+        return _final_engine_result(
+            final_data={"value": "ok"},
             raw_stdout='{"value":"ok"}',
-            raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[artifacts_dir / "partial.txt"],
             failure_reason="TIMEOUT",
         )
@@ -107,30 +136,18 @@ class TimeoutSuccessLikeAdapter:
 
 class RepairSuccessAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "ok"}))
-        return EngineRunResult(
-            exit_code=0,
+        return _final_engine_result(
+            final_data={"value": "ok"},
             raw_stdout="fenced output",
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
             repair_level="deterministic_generic",
         )
 
 
 class RepairSchemaFailAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "not-an-integer"}))
-        return EngineRunResult(
-            exit_code=0,
+        return _final_engine_result(
+            final_data={"value": "not-an-integer"},
             raw_stdout="fenced output",
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
             repair_level="deterministic_generic",
         )
 
@@ -160,6 +177,57 @@ def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
         resp = workspace_manager.create_run(req)
     return resp.run_id
+
+
+def _read_state_data(run_dir: Path) -> dict:
+    return json.loads((run_dir / ".state" / "state.json").read_text(encoding="utf-8"))
+
+
+def _write_state_data(
+    run_dir: Path,
+    *,
+    status: str,
+    request_id: str | None = None,
+    current_attempt: int = 1,
+    error: object = None,
+    warnings: list[object] | None = None,
+) -> None:
+    state_dir = run_dir / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "request_id": request_id or f"req-{run_dir.name}",
+        "run_id": run_dir.name,
+        "status": status,
+        "updated_at": "2026-01-01T00:00:00",
+        "current_attempt": current_attempt,
+        "state_phase": {
+            "waiting_auth_phase": None,
+            "dispatch_phase": None,
+        },
+        "pending": {
+            "owner": None,
+            "interaction_id": None,
+            "auth_session_id": None,
+            "payload": None,
+        },
+        "resume": {
+            "resume_ticket_id": None,
+            "resume_cause": None,
+            "source_attempt": None,
+            "target_attempt": None,
+        },
+        "runtime": {
+            "conversation_mode": "session",
+            "requested_execution_mode": None,
+            "effective_execution_mode": None,
+            "effective_interactive_require_user_reply": None,
+            "effective_interactive_reply_timeout_sec": None,
+            "effective_session_timeout_sec": None,
+        },
+        "error": error,
+        "warnings": warnings or [],
+    }
+    (state_dir / "state.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -200,8 +268,7 @@ async def test_run_job_missing_required_input_marks_failed(tmp_path):
              patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
-        status_path = Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json"
-        status_data = json.loads(status_path.read_text())
+        status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
         assert status_data["status"] == "failed"
         assert "Missing required input files" in status_data["error"]["message"]
     finally:
@@ -250,7 +317,7 @@ async def test_run_job_writes_output_warnings(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["error"]
@@ -293,7 +360,7 @@ async def test_run_job_cancel_requested_before_execution_short_circuits(tmp_path
              patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
+        status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
         assert status_data["status"] == "canceled"
         assert status_data["error"]["code"] == "CANCELED_BY_USER"
     finally:
@@ -308,10 +375,7 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
     run_id = "run-cancel"
     run_dir = tmp_path / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_data(run_dir, status="running")
     local_store = RunStore(db_path=tmp_path / "runs.db")
     await local_store.create_run(run_id, None, "running")
 
@@ -331,7 +395,7 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
             request_id=None,
         )
 
-    status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+    status_data = _read_state_data(run_dir)
     assert accepted is True
     assert await local_store.is_cancel_requested(run_id) is True
     assert status_data["status"] == "canceled"
@@ -418,7 +482,7 @@ async def test_run_job_fails_when_output_json_missing(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert "Output JSON missing" in result_data["error"]["message"]
@@ -469,7 +533,7 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert "Missing required artifacts" in result_data["error"]["message"]
@@ -712,7 +776,7 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert "OUTPUT_REPAIRED_GENERIC" in result_data["validation_warnings"]
@@ -766,7 +830,7 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["repair_level"] == "deterministic_generic"
@@ -782,26 +846,14 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
 
 class InteractiveAskAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "interaction_id": 1,
-                        "kind": "choose_one",
-                        "prompt": "continue?",
-                        "options": [{"label": "Yes", "value": "yes"}],
-                    }
-                }
-            )
-        )
-        return EngineRunResult(
-            exit_code=0,
+        return _ask_user_engine_result(
+            interaction={
+                "interaction_id": 1,
+                "kind": "choose_one",
+                "prompt": "continue?",
+                "options": [{"label": "Yes", "value": "yes"}],
+            },
             raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -822,25 +874,14 @@ class InteractiveAskMissingHandleAdapter(InteractiveAskAdapter):
 
 class InteractiveAskSessionInStderrAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "interaction_id": 1,
-                        "kind": "open_text",
-                        "prompt": "continue?",
-                    }
-                }
-            )
-        )
-        return EngineRunResult(
-            exit_code=0,
+        return _ask_user_engine_result(
+            interaction={
+                "interaction_id": 1,
+                "kind": "open_text",
+                "prompt": "continue?",
+            },
             raw_stdout="assistant: please continue\n",
             raw_stderr='{"session-id":"iflow-session-1"}\n',
-            output_file_path=output_path,
-            artifacts_created=[],
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -859,24 +900,16 @@ class InteractiveAskSessionInStderrAdapter:
 
 class InteractiveAskMissingIdAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "kind": "choose_one",
-                        "prompt": "continue?",
-                    }
-                }
-            )
-        )
         return EngineRunResult(
             exit_code=0,
             raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
+            turn_result=AdapterTurnResult(
+                outcome=AdapterTurnOutcome.ERROR,
+                final_data={"code": "ADAPTER_TURN_ERROR", "message": "invalid ask_user payload: missing interaction_id"},
+                failure_reason="ADAPTER_TURN_ERROR",
+            ),
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -950,15 +983,13 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         pending = await local_store.get_pending_interaction("req-interactive")
         assert pending is not None
         assert pending["interaction_id"] == 1
-        interactions_dir = run_dir / "interactions"
-        assert (interactions_dir / "pending.json").exists()
-        assert (interactions_dir / "history.jsonl").exists()
-        assert (interactions_dir / "runtime_state.json").exists()
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert status_data["pending"]["interaction_id"] == 1
         handle = await local_store.get_engine_session_handle("req-interactive")
         assert handle is not None
         assert handle["handle_value"] == "thread-1"
@@ -1032,7 +1063,7 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         assert status_data["error"] is None
         pending = await local_store.get_pending_interaction("req-interactive-stderr-session")
@@ -1107,7 +1138,7 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         pending = await local_store.get_pending_interaction("req-interactive-invalid")
         assert pending is not None
@@ -1121,22 +1152,9 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
 
 class DoneMarkerOutputAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "value": 7,
-                    "__SKILL_DONE__": True,
-                }
-            )
-        )
-        return EngineRunResult(
-            exit_code=0,
+        return _final_engine_result(
+            final_data={"value": 7, "__SKILL_DONE__": True},
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":7,\\"__SKILL_DONE__\\":true}"}}\n',
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
         )
 
 
@@ -1194,46 +1212,30 @@ class _CodexAgentMessageParseMixin:
 
 class EscapedDoneMarkerStreamOnlyAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "stream-marker-only"}))
         return EngineRunResult(
             exit_code=0,
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":\\"stream-marker-only\\",\\"__SKILL_DONE__\\": true}"}}\n',
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
         )
 
 
 class EscapedDoneMarkerWithInvalidOutputAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("{")
         return EngineRunResult(
             exit_code=0,
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"{\\"value\\":\\"bad\\",\\"__SKILL_DONE__\\": true}"}}\n',
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
+            turn_result=AdapterTurnResult(
+                outcome=AdapterTurnOutcome.FINAL,
+                final_data={"value": 7, "__SKILL_DONE__": True},
+            ),
         )
 
 
 class ToolUseDoneMarkerEchoAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "interaction_id": "bad-id",
-                        "kind": "open_text",
-                    }
-                }
-            )
-        )
         tool_use_line = json.dumps(
             {
                 "type": "tool_use",
@@ -1261,53 +1263,30 @@ class ToolUseDoneMarkerEchoAdapter(_CodexAgentMessageParseMixin):
             exit_code=0,
             raw_stdout=f"{tool_use_line}\n{message_line}\n",
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
         )
 
 
 class InteractiveSoftCompletionAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"value": "soft-complete"}))
-        return EngineRunResult(
-            exit_code=0,
+        return _final_engine_result(
+            final_data={"value": "soft-complete"},
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"soft-complete"}}\n',
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
         )
 
 
 class InteractiveNoEvidenceAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "interaction_id": "bad-id",
-                        "kind": "open_text",
-                    }
-                }
-            )
-        )
         return EngineRunResult(
             exit_code=0,
             raw_stdout="",
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
         )
 
 
 class InteractiveYamlAskUserSignalAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps({"note": "this still passes permissive schema"}))
         stdout = (
             "<ASK_USER_YAML>\n"
             "ask_user:\n"
@@ -1320,8 +1299,11 @@ class InteractiveYamlAskUserSignalAdapter:
             exit_code=0,
             raw_stdout=stdout,
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
+            turn_result=AdapterTurnResult(
+                outcome=AdapterTurnOutcome.FINAL,
+                final_data={"note": "this still passes permissive schema"},
+            ),
         )
 
 
@@ -1366,7 +1348,7 @@ async def test_run_job_output_validation_strips_done_marker(tmp_path):
             await orchestrator.run_job(run_id, skill.id, "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
@@ -1425,7 +1407,7 @@ async def test_run_job_interactive_escaped_stream_done_marker_completes_without_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
@@ -1485,12 +1467,11 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["status"] == "failed"
-        assert result_data["pending_interaction"] is None
-        assert "Failed to validate output schema" in result_data["error"]["message"]
+        assert "Output validation error" in result_data["error"]["message"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1546,14 +1527,14 @@ async def test_run_job_interactive_tool_use_done_marker_echo_does_not_complete(t
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        status_data = _read_state_data(run_dir)
         meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
         assert status_data["status"] == "waiting_user"
-        assert result_data["status"] == "waiting_user"
-        assert result_data["error"] is None
+        assert status_data["error"] is None
+        assert status_data["pending"]["owner"] == "waiting_user"
         assert meta_data["completion"]["done_marker_found"] is False
         assert meta_data["completion"]["reason_code"] == "WAITING_USER_INPUT"
+        assert status_data["pending"]["interaction_id"] == 1
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1608,7 +1589,7 @@ async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path)
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
@@ -1669,13 +1650,11 @@ async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path)
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
-        assert result_data["status"] == "waiting_user"
-        assert result_data["error"] is None
-        assert result_data["pending_interaction"] is not None
-        assert result_data["pending_interaction"]["interaction_id"] == 1
+        assert status_data["error"] is None
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert status_data["pending"]["interaction_id"] == 1
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1731,7 +1710,7 @@ async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["status"] == "failed"
@@ -1789,7 +1768,7 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
@@ -1848,13 +1827,11 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
-        assert result_data["status"] == "waiting_user"
-        assert result_data["pending_interaction"] is not None
-        assert result_data["pending_interaction"]["interaction_id"] == 3
-        assert result_data["pending_interaction"]["prompt"] == "Please provide missing details."
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert status_data["pending"]["interaction_id"] == 3
+        assert status_data["pending"]["payload"]["prompt"] == "Please provide missing details."
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1902,7 +1879,7 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
@@ -1916,23 +1893,19 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
 
 class InteractiveDirectStringInteractionAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "interaction_id": "demo-interactive-1",
-                    "kind": "open_text",
-                    "prompt": "Please share a short self-introduction.",
-                }
-            )
-        )
         return EngineRunResult(
             exit_code=0,
             raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
             raw_stderr="",
-            output_file_path=output_path,
             artifacts_created=[],
+            turn_result=AdapterTurnResult(
+                outcome=AdapterTurnOutcome.FINAL,
+                final_data={
+                    "interaction_id": "demo-interactive-1",
+                    "kind": "open_text",
+                    "prompt": "Please share a short self-introduction.",
+                },
+            ),
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -2007,7 +1980,7 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         pending = await local_store.get_pending_interaction("req-direct-interactive")
         assert pending is not None
@@ -2024,35 +1997,19 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
 
 class InteractiveTwoTurnAdapter:
     async def run(self, skill, input_data, run_dir, options):
-        output_path = run_dir / "raw" / "output.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         if "__interactive_reply_payload" in options:
-            output_path.write_text(json.dumps({"value": "ok", "__SKILL_DONE__": True}))
-            return EngineRunResult(
-                exit_code=0,
+            return _final_engine_result(
+                final_data={"value": "ok", "__SKILL_DONE__": True},
                 raw_stdout='{"type":"item.completed"}',
-                raw_stderr="",
-                output_file_path=output_path,
-                artifacts_created=[],
             )
-        output_path.write_text(
-            json.dumps(
-                {
-                    "ask_user": {
-                        "interaction_id": 1,
-                        "kind": "choose_one",
-                        "prompt": "continue?",
-                        "options": [{"label": "Yes", "value": "yes"}],
-                    }
-                }
-            )
-        )
-        return EngineRunResult(
-            exit_code=0,
+        return _ask_user_engine_result(
+            interaction={
+                "interaction_id": 1,
+                "kind": "choose_one",
+                "prompt": "continue?",
+                "options": [{"label": "Yes", "value": "yes"}],
+            },
             raw_stdout='{"type":"thread.started","thread_id":"thread-1"}',
-            raw_stderr="",
-            output_file_path=output_path,
-            artifacts_created=[],
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -2207,6 +2164,136 @@ def test_load_skill_from_run_dir_reads_workspace_manifest(tmp_path):
     assert manifest.path == skill_dir
 
 
+def _seed_run_dir_skill(run_dir: Path, skill: SkillManifest) -> None:
+    skill_dir = run_dir / ".codex" / "skills" / skill.id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("demo", encoding="utf-8")
+    for schema_name, relative_path in (skill.schemas or {}).items():
+        source_path = skill.path / relative_path
+        target_path = assets_dir / Path(relative_path).name
+        target_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": skill.id,
+                "name": skill.id,
+                "version": "0.1.0",
+                "engines": skill.engines,
+                "execution_modes": ["interactive"],
+                "schemas": {
+                    schema_name: f"assets/{Path(relative_path).name}"
+                    for schema_name, relative_path in (skill.schemas or {}).items()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_job_temp_resume_loads_skill_from_run_dir_when_registry_misses(tmp_path, monkeypatch):
+    skill = _build_interactive_skill(tmp_path)
+    monkeypatch.setattr(
+        "server.services.orchestration.job_orchestrator.concurrency_manager.acquire_slot",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.services.orchestration.job_orchestrator.concurrency_manager.release_slot",
+        AsyncMock(return_value=None),
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        _seed_run_dir_skill(run_dir, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": RepairSuccessAdapter()}
+        monkeypatch.setattr(
+            "server.services.skill.temp_skill_run_manager.temp_skill_run_manager.on_terminal",
+            AsyncMock(return_value=None),
+        )
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+                temp_request_id="temp-req-1",
+            )
+
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": "ok"}
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_failure_overwrites_stale_waiting_auth_result(tmp_path):
+    skill = _build_interactive_skill(tmp_path)
+    with patch("server.services.orchestration.job_orchestrator.concurrency_manager.acquire_slot", new=AsyncMock(return_value=None)), \
+         patch("server.services.orchestration.job_orchestrator.concurrency_manager.release_slot", new=AsyncMock(return_value=None)):
+
+        old_runs_dir = config.SYSTEM.RUNS_DIR
+        old_runs_db = config.SYSTEM.RUNS_DB
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+        config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+        config.freeze()
+        try:
+            run_id = _create_run_with_skill(tmp_path, skill)
+            run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+            stale_result_path = run_dir / "result" / "result.json"
+            stale_result_path.parent.mkdir(parents=True, exist_ok=True)
+            stale_result_path.write_text(
+                json.dumps(
+                    {
+                        "status": "waiting_auth",
+                        "data": {"message": "stale auth wrapper"},
+                        "artifacts": [],
+                        "repair_level": "none",
+                        "validation_warnings": [],
+                        "error": None,
+                        "pending_interaction": None,
+                        "pending_auth_method_selection": {"phase": "method_selection"},
+                        "pending_auth": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            orchestrator = JobOrchestrator()
+
+            with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None):
+                await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+            status_data = _read_state_data(run_dir)
+            result_data = json.loads(stale_result_path.read_text(encoding="utf-8"))
+            assert status_data["status"] == "failed"
+            assert result_data["status"] == "failed"
+            assert result_data["data"] is None
+            assert "pending_auth_method_selection" not in result_data
+            assert "pending_auth" not in result_data
+            assert "not found during execution" in result_data["error"]["message"]
+        finally:
+            config.defrost()
+            config.SYSTEM.RUNS_DIR = old_runs_dir
+            config.SYSTEM.RUNS_DB = old_runs_db
+            config.freeze()
+
+
 async def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> None:
     await store.create_request(
         request_id="req-turn",
@@ -2245,17 +2332,7 @@ async def _seed_recovery_run(
     await store.create_run(run_id, None, status)
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps(
-            {
-                "status": status,
-                "updated_at": "2026-02-16T00:00:00",
-                "warnings": [],
-                "error": None,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_state_data(run_dir, status=status, request_id=request_id)
     if profile is not None:
         await store.set_interactive_profile(request_id, profile)
     if pending is not None:
@@ -2315,9 +2392,63 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
                 },
             )
 
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
+        status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
         assert status_data["status"] == "succeeded"
         assert events == ["acquire", "release", "acquire", "release"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_missing_run_dir_releases_slot_and_does_not_block_following_run(monkeypatch, tmp_path):
+    events: list[str] = []
+
+    async def _acquire():
+        events.append("acquire")
+
+    async def _release():
+        events.append("release")
+
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.acquire_slot", _acquire)
+    monkeypatch.setattr("server.services.orchestration.job_orchestrator.concurrency_manager.release_slot", _release)
+
+    skill = _build_interactive_skill(tmp_path)
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await _seed_interactive_request(local_store, run_id, skill.id)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": RepairSuccessAdapter()}
+        original_get_run_dir = workspace_manager.get_run_dir
+
+        def _get_run_dir(target_run_id: str):
+            if target_run_id == "missing-run":
+                return None
+            return original_get_run_dir(target_run_id)
+
+        monkeypatch.setattr(
+            "server.services.orchestration.job_orchestrator.workspace_manager.get_run_dir",
+            _get_run_dir,
+        )
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
+            await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
+            await orchestrator.run_job(run_id, skill.id, "codex", options={"execution_mode": "interactive"})
+
+        status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
+        assert status_data["status"] == "succeeded"
+        assert events == ["acquire", "release", "acquire", "release", "acquire", "release"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2385,7 +2516,7 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
             )
             await asyncio.sleep(1.3)
 
-        status_data = json.loads((Path(config.SYSTEM.RUNS_DIR) / run_id / "status.json").read_text())
+        status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
         assert status_data["status"] == "succeeded"
         stats = await local_store.get_auto_decision_stats("req-auto-resume")
         assert stats["auto_decision_count"] == 1
@@ -2458,7 +2589,7 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = json.loads((run_dir / "status.json").read_text())
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == "failed"
         assert status_data["error"]["code"] == "SESSION_RESUME_FAILED"
     finally:
@@ -2495,6 +2626,7 @@ async def test_recover_waiting_user_keeps_waiting_when_handle_valid(tmp_path):
         )
 
         orchestrator = JobOrchestrator()
+        orchestrator.adapters = {}
         with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
@@ -2536,7 +2668,7 @@ async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
         with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
-        status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == RunStatus.FAILED.value
         assert status_data["error"]["code"] == "SESSION_RESUME_FAILED"
         run_state = await local_store.get_run("run-recover-missing-handle")
@@ -2550,6 +2682,8 @@ async def test_recover_waiting_user_fails_when_handle_missing(tmp_path):
         config.SYSTEM.RUNS_DIR = old_runs_dir
         config.SYSTEM.RUNS_DB = old_runs_db
         config.freeze()
+
+
 
 
 @pytest.mark.asyncio
@@ -2574,7 +2708,7 @@ async def test_recover_running_or_queued_fails_with_restart_interrupted(tmp_path
         with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.recover_incomplete_runs_on_startup()
 
-        status_data = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+        status_data = _read_state_data(run_dir)
         assert status_data["status"] == RunStatus.FAILED.value
         assert status_data["error"]["code"] == "ORCHESTRATOR_RESTART_INTERRUPTED"
         recovery = await local_store.get_recovery_info("run-recover-running")

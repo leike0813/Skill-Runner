@@ -66,6 +66,10 @@ class GeminiOAuthProxyFlow:
     def google_accounts_path(self) -> Path:
         return self.agent_home / ".gemini" / "google_accounts.json"
 
+    @property
+    def settings_path(self) -> Path:
+        return self.agent_home / ".gemini" / "settings.json"
+
     def start_session(
         self,
         *,
@@ -131,6 +135,7 @@ class GeminiOAuthProxyFlow:
         email = self._fetch_email(token_payload.access_token)
         self._write_oauth_creds(token_payload)
         self._upsert_google_accounts(email=email)
+        self._ensure_oauth_personal_selected()
         runtime.updated_at = datetime.now(timezone.utc)
         return {"google_account_email": email}
 
@@ -317,6 +322,28 @@ class GeminiOAuthProxyFlow:
 
         self.google_accounts_path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write_json(self.google_accounts_path, payload)
+
+    def _ensure_oauth_personal_selected(self) -> None:
+        try:
+            existing = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            if not isinstance(existing, dict):
+                existing = {}
+        except (OSError, json.JSONDecodeError, TypeError):
+            existing = {}
+
+        security = existing.get("security")
+        if not isinstance(security, dict):
+            security = {}
+        auth = security.get("auth")
+        if not isinstance(auth, dict):
+            auth = {}
+
+        auth["selectedType"] = "oauth-personal"
+        security["auth"] = auth
+        existing["security"] = security
+
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write_json(self.settings_path, existing)
 
     def _atomic_write_json(self, path: Path, payload: Dict[str, Any], *, chmod_mode: int | None = None) -> None:
         content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"

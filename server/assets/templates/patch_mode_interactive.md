@@ -9,32 +9,18 @@ Interaction policy:
 
 When you ask a question, you MAY optionally append an `<ASK_USER_YAML>` block at the END of your output in that turn. This block provides structured UI hints to help the frontend guide the user's response. It is purely optional metadata and does not affect execution.
 
-Format:
-```
-<ASK_USER_YAML>
-ask_user:
-  kind: <one of: open_text | single_select | confirm>
-  options:              # required for single_select; omit for open_text/confirm
-    - label: "<display text>"
-      value: "<machine value>"
-  default: "<suggested default value, if any>"
-  ui_hints:
-    type: "<expected data type: string | integer | float | boolean | enum>"
-    min: <minimum value, if applicable>
-    max: <maximum value, if applicable>
-    hint: "<input reply hint>"
-</ASK_USER_YAML>
-```
+{ask_user_schema_block}
 
 Rules for `<ASK_USER_YAML>`:
 1. The block MUST NOT contain the question text itself — the question must appear in your natural language output above the block, not inside this block.
 2. `kind` is the only required field. All other fields are optional. Omit any field that is not applicable.
 3. `kind` semantics:
    - `open_text`: free-form text input
-   - `single_select`: choose one from `options` list
+   - `choose_one`: choose one from `options` list
    - `confirm`: yes/no confirmation
 4. User replies are free-form text. Do NOT require users to respond in JSON or any structured format.
 5. Keep the YAML block as concise as possible. Only include fields that provide meaningful guidance.
+6. If the block is missing or malformed, runtime will fall back to a short generic prompt. This does not block execution.
 
 Completion constraint:
 - You MUST NOT emit the `__SKILL_DONE__` completion marker until all required user interactions are completed and the final output is ready.

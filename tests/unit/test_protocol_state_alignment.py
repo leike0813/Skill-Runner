@@ -79,7 +79,6 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         status="succeeded",
         status_updated_at="2026-02-24T00:00:00",
     )
-    assert any(event.type == "conversation.completed" for event in succeeded_fcmp)
     succeeded_state_changes = [
         event
         for event in succeeded_fcmp
@@ -89,6 +88,7 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
     for event in succeeded_state_changes:
         triple = (event.data.get("from"), event.data.get("to"), event.data.get("trigger"))
         assert triple in mapped_state_changed
+        assert event.data.get("terminal", {}).get("status") == "succeeded"
 
     failed_stdout, failed_stderr = _write_logs(tmp_path / "run-failed" / "logs")
     failed_stderr.write_text(json.dumps({"error": "boom"}), encoding="utf-8")
@@ -106,7 +106,6 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         status="failed",
         status_updated_at="2026-02-24T00:00:00",
     )
-    assert any(event.type == "conversation.failed" for event in failed_fcmp)
     failed_state_changes = [
         event
         for event in failed_fcmp
@@ -116,3 +115,4 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
     for event in failed_state_changes:
         triple = (event.data.get("from"), event.data.get("to"), event.data.get("trigger"))
         assert triple in mapped_state_changed
+        assert event.data.get("terminal", {}).get("status") == "failed"

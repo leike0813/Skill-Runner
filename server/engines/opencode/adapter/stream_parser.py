@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from server.runtime.adapter.types import RuntimeAssistantMessage, RuntimeStreamParseResult
+from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
@@ -149,3 +149,79 @@ class OpencodeStreamParser:
             "diagnostics": diagnostics,
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+
+    def start_live_session(self) -> "_OpencodeLiveSession":
+        return _OpencodeLiveSession(self)
+
+
+class _OpencodeLiveSession:
+    def __init__(self, parser: OpencodeStreamParser) -> None:
+        self._parser = parser
+        self._buffers: dict[str, str] = {"stdout": "", "pty": ""}
+        self._last_text: str | None = None
+
+    def feed(
+        self,
+        *,
+        stream: str,
+        text: str,
+        byte_from: int,
+        byte_to: int,
+    ) -> list[LiveParserEmission]:
+        if stream not in {"stdout", "pty"}:
+            return []
+        combined = f"{self._buffers.get(stream, '')}{text}"
+        if "\n" not in combined:
+            self._buffers[stream] = combined
+            return []
+        lines = combined.splitlines(keepends=True)
+        complete = lines[:-1]
+        tail = lines[-1]
+        if tail.endswith("\n"):
+            complete.append(tail)
+            tail = ""
+        self._buffers[stream] = tail
+        emissions: list[LiveParserEmission] = []
+        cursor = max(0, int(byte_to) - len(text.encode("utf-8", errors="replace")))
+        for line in complete:
+            clean = line.strip()
+            encoded = line.encode("utf-8", errors="replace")
+            row_from = cursor
+            row_to = cursor + len(encoded)
+            cursor = row_to
+            if not clean:
+                continue
+            try:
+                payload = json.loads(clean)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            extracted = self._parser._extract_text_event(payload)  # noqa: SLF001
+            if not isinstance(extracted, str) or not extracted.strip() or extracted == self._last_text:
+                continue
+            self._last_text = extracted
+            emission: LiveParserEmission = {
+                "kind": "assistant_message",
+                "text": extracted,
+                "raw_ref": {
+                    "stream": stream,
+                    "byte_from": row_from,
+                    "byte_to": row_to,
+                },
+            }
+            session_id = find_session_id(payload)
+            if session_id:
+                emission["session_id"] = session_id
+            emissions.append(emission)
+        return emissions
+
+    def finish(
+        self,
+        *,
+        exit_code: int,
+        failure_reason: str | None,
+    ) -> list[LiveParserEmission]:
+        _ = exit_code
+        _ = failure_reason
+        return []

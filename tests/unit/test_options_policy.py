@@ -90,10 +90,10 @@ def test_legacy_interactive_policy_key_rejected():
         policy.validate_runtime_options({"interactive_require_user_reply": False})
 
 
-def test_interactive_reply_timeout_must_be_positive_integer():
+def test_interactive_reply_timeout_zero_allowed():
     policy = OptionsPolicy()
-    with pytest.raises(ValueError, match="interactive_reply_timeout_sec must be a positive integer"):
-        policy.validate_runtime_options({"interactive_reply_timeout_sec": 0})
+    runtime_opts = policy.validate_runtime_options({"interactive_reply_timeout_sec": 0})
+    assert runtime_opts["interactive_reply_timeout_sec"] == 0
 
 
 def test_interactive_auto_reply_must_be_boolean():

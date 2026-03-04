@@ -1,0 +1,26 @@
+{
+  "run_id": "20260302T125912-iflow-d5c11e1c",
+  "engine": "iflow",
+  "status": "failed",
+  "exit_code": 1,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:59:14.539300",
+  "finished_at": "2026-03-02T12:59:14.539306",
+  "completion": {
+    "state": "interrupted",
+    "reason_code": "NON_ZERO_EXIT",
+    "exit_code": 1
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/iflow",
+      "--yolo",
+      "--thinking",
+      "--model=glm-5",
+      "-p",
+      "Hello"
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

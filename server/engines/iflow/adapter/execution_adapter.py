@@ -7,7 +7,9 @@ from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
 from server.runtime.adapter.common.session_codec_common import ProfiledSessionCodec
-from server.runtime.adapter.common.workspace_provisioner_common import ProfiledWorkspaceProvisioner
+from server.runtime.adapter.common.run_folder_validator_common import (
+    ProfiledAttemptRunFolderValidator,
+)
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.engine_command_profile import engine_command_profile
 from .command_builder import IFlowCommandBuilder
@@ -23,7 +25,7 @@ class IFlowExecutionAdapter(EngineExecutionAdapter):
         self.profile = profile
         self.agent_manager = AgentCliManager()
         self.config_composer = IFlowConfigComposer(self)
-        self.workspace_provisioner = ProfiledWorkspaceProvisioner(adapter=self, profile=profile)
+        self.run_folder_validator = ProfiledAttemptRunFolderValidator(adapter=self, profile=profile)
         self.prompt_builder = ProfiledPromptBuilder(adapter=self, profile=profile)
         self.command_builder = IFlowCommandBuilder(self)
         self.stream_parser = IFlowStreamParser(self)

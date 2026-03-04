@@ -4,14 +4,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-
 from server.config import config
 from server.models import RunStatus
+from server.services.platform import aiosqlite_compat as aiosqlite
 
 
 class TempSkillRunStore:
-    """SQLite-backed lifecycle store for /v1/temp-skill-runs."""
+    """SQLite-backed import metadata store for /v1/temp-skill-runs."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path or Path(config.SYSTEM.TEMP_SKILL_RUNS_DB)
@@ -43,6 +42,8 @@ class TempSkillRunStore:
                     model TEXT,
                     engine_options_json TEXT NOT NULL,
                     runtime_options_json TEXT NOT NULL,
+                    effective_runtime_options_json TEXT NOT NULL DEFAULT '{}',
+                    client_metadata_json TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL,
                     skill_id TEXT,
                     run_id TEXT,
@@ -54,6 +55,25 @@ class TempSkillRunStore:
                 )
                 """
             )
+            table_info_cur = await conn.execute("PRAGMA table_info(temp_skill_runs)")
+            existing_cols = {row["name"] for row in await table_info_cur.fetchall()}
+            if "effective_runtime_options_json" not in existing_cols:
+                await conn.execute(
+                    "ALTER TABLE temp_skill_runs ADD COLUMN effective_runtime_options_json TEXT NOT NULL DEFAULT '{}'"
+                )
+                await conn.execute(
+                    """
+                    UPDATE temp_skill_runs
+                    SET effective_runtime_options_json = runtime_options_json
+                    WHERE effective_runtime_options_json IS NULL
+                       OR effective_runtime_options_json = ''
+                       OR effective_runtime_options_json = '{}'
+                    """
+                )
+            if "client_metadata_json" not in existing_cols:
+                await conn.execute(
+                    "ALTER TABLE temp_skill_runs ADD COLUMN client_metadata_json TEXT NOT NULL DEFAULT '{}'"
+                )
             await conn.commit()
 
     async def create_request(
@@ -63,7 +83,9 @@ class TempSkillRunStore:
         parameter: Dict[str, Any],
         model: Optional[str],
         engine_options: Dict[str, Any],
-        runtime_options: Dict[str, Any]
+        runtime_options: Dict[str, Any],
+        effective_runtime_options: Optional[Dict[str, Any]] = None,
+        client_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         await self._ensure_initialized()
         now = datetime.utcnow().isoformat()
@@ -73,9 +95,9 @@ class TempSkillRunStore:
                 """
                 INSERT INTO temp_skill_runs (
                     request_id, engine, parameter_json, model,
-                    engine_options_json, runtime_options_json, status,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    engine_options_json, runtime_options_json, effective_runtime_options_json,
+                    client_metadata_json, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
@@ -84,6 +106,8 @@ class TempSkillRunStore:
                     model,
                     json.dumps(engine_options, sort_keys=True),
                     json.dumps(runtime_options, sort_keys=True),
+                    json.dumps(effective_runtime_options or runtime_options, sort_keys=True),
+                    json.dumps(client_metadata or {}, sort_keys=True),
                     RunStatus.QUEUED.value,
                     now,
                     now,
@@ -106,6 +130,9 @@ class TempSkillRunStore:
             staged_skill_dir=staged_skill_dir,
         )
 
+    async def update_skill_identity(self, request_id: str, *, skill_id: str) -> None:
+        await self._update(request_id, skill_id=skill_id)
+
     async def update_run_started(self, request_id: str, run_id: str) -> None:
         await self._update(request_id, run_id=run_id, status=RunStatus.RUNNING.value, error=None)
 
@@ -114,6 +141,23 @@ class TempSkillRunStore:
 
     async def update_status(self, request_id: str, status: RunStatus, error: Optional[str] = None) -> None:
         await self._update(request_id, status=status.value, error=error)
+
+    async def update_effective_runtime(
+        self,
+        request_id: str,
+        *,
+        effective_runtime_options: Dict[str, Any],
+        client_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        fields: Dict[str, Any] = {
+            "effective_runtime_options_json": json.dumps(
+                effective_runtime_options,
+                sort_keys=True,
+            )
+        }
+        if client_metadata is not None:
+            fields["client_metadata_json"] = json.dumps(client_metadata, sort_keys=True)
+        await self._update(request_id, **fields)
 
     async def clear_temp_paths(self, request_id: str) -> None:
         await self._update(request_id, skill_package_path=None, staged_skill_dir=None)
@@ -145,6 +189,10 @@ class TempSkillRunStore:
         data["parameter"] = json.loads(data["parameter_json"])
         data["engine_options"] = json.loads(data["engine_options_json"])
         data["runtime_options"] = json.loads(data["runtime_options_json"])
+        data["effective_runtime_options"] = json.loads(
+            data.get("effective_runtime_options_json") or data["runtime_options_json"]
+        )
+        data["client_metadata"] = json.loads(data.get("client_metadata_json") or "{}")
         return data
 
     async def list_orphan_candidates(self, retention_hours: int) -> List[Dict[str, Any]]:

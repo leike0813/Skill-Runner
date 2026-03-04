@@ -14,7 +14,7 @@ class RunFilesystemSnapshotService:
         snapshot: dict[str, dict[str, Any]] = {}
         ignored_prefixes = (
             ".audit/",
-            "interactions/",
+            ".state/",
             ".codex/",
             ".gemini/",
             ".iflow/",

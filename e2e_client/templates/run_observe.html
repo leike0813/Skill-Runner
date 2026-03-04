@@ -35,21 +35,43 @@
     <div id="prompt-card" class="prompt-card hidden">
         <div style="font-weight: 700; margin-bottom: 6px;">Pending Input Request</div>
         <div id="prompt-card-text"></div>
+        <div id="prompt-card-hint" class="prompt-list hidden"></div>
         <div class="prompt-meta">
             <span>interaction_id: <code id="prompt-card-id">-</code></span>
             <span>kind: <code id="prompt-card-kind">-</code></span>
         </div>
-        <div id="prompt-card-options" class="prompt-list hidden"></div>
         <div id="prompt-card-required" class="prompt-list hidden"></div>
+        <div id="prompt-card-actions" class="action-button-group hidden"></div>
+    </div>
+
+    <div id="auth-card" class="prompt-card hidden">
+        <div style="font-weight: 700; margin-bottom: 6px;">Authentication Required</div>
+        <div id="auth-card-text"></div>
+        <div id="auth-card-hint" class="prompt-list hidden"></div>
+        <div class="prompt-meta">
+            <span>auth_session_id: <code id="auth-card-id">-</code></span>
+            <span>engine: <code id="auth-card-engine">-</code></span>
+            <span>provider: <code id="auth-card-provider">-</code></span>
+        </div>
+        <div id="auth-card-actions" class="action-button-group hidden"></div>
+        <div id="auth-card-link" class="prompt-list hidden"></div>
+        <div id="auth-card-code" class="prompt-list hidden"></div>
+        <div id="auth-card-error" class="prompt-list hidden"></div>
     </div>
 
     <form id="reply-form" class="reply-box">
         <input type="hidden" id="interaction-id" value="">
-        <textarea id="reply-text" rows="3" placeholder="Reply to agent..." disabled></textarea>
-        <div class="reply-actions">
-            <button class="btn" id="reply-submit" type="submit" disabled>Send Reply</button>
-            <span class="muted" id="reply-shortcut-hint">Ctrl+Enter / Cmd+Enter to send</span>
+        <input type="hidden" id="auth-session-id" value="">
+        <input type="hidden" id="auth-reply-mode" value="">
+        <input type="hidden" id="auth-input-kind" value="">
+        <div id="reply-composer">
+            <textarea id="reply-text" rows="3" placeholder="Reply to agent..." disabled></textarea>
+            <div class="reply-actions">
+                <button class="btn" id="reply-submit" type="submit" disabled>Send Reply</button>
+                <span class="muted" id="reply-shortcut-hint">Ctrl+Enter / Cmd+Enter to send</span>
+            </div>
         </div>
+        <div id="reply-error" class="prompt-list hidden"></div>
     </form>
 </section>
 
@@ -82,6 +104,9 @@
     .chat-row.agent {
         justify-content: flex-start;
     }
+    .chat-row.system {
+        justify-content: center;
+    }
     .chat-row.user {
         justify-content: flex-end;
     }
@@ -102,6 +127,11 @@
         background: #dff4e8;
         color: #0e3b25;
         border-color: #b8e1c8;
+    }
+    .chat-bubble.system {
+        background: #f3f4f6;
+        color: #374151;
+        border-color: #d1d5db;
     }
     .chat-role {
         display: block;
@@ -201,6 +231,34 @@
         background: #fff;
         font: inherit;
     }
+    .action-button-group {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .action-button-group.hidden {
+        display: none;
+    }
+    .action-chip {
+        border: 1px solid #a9ceb9;
+        background: #ffffff;
+        color: #15452d;
+        border-radius: 999px;
+        padding: 8px 14px;
+        font: inherit;
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    .action-chip:hover:not(:disabled) {
+        background: #f7fcf9;
+        border-color: #7cb190;
+        transform: translateY(-1px);
+    }
+    .action-chip:disabled {
+        cursor: default;
+        opacity: 0.6;
+    }
     .reply-actions {
         margin-top: 8px;
         display: flex;
@@ -279,18 +337,34 @@
     const cursorEl = document.getElementById("run-cursor");
     const chatEl = document.getElementById("chat-panel");
     const replyForm = document.getElementById("reply-form");
+    const replyComposerEl = document.getElementById("reply-composer");
     const interactionIdEl = document.getElementById("interaction-id");
+    const authSessionIdEl = document.getElementById("auth-session-id");
+    const authReplyModeEl = document.getElementById("auth-reply-mode");
+    const authInputKindEl = document.getElementById("auth-input-kind");
     const replyTextEl = document.getElementById("reply-text");
     const replySubmitEl = document.getElementById("reply-submit");
+    const replyErrorEl = document.getElementById("reply-error");
     const thinkingCardEl = document.getElementById("thinking-card");
     const finalSummaryCardEl = document.getElementById("final-summary-card");
     const finalSummaryTextEl = document.getElementById("final-summary-text");
     const promptCardEl = document.getElementById("prompt-card");
     const promptTextEl = document.getElementById("prompt-card-text");
+    const promptHintEl = document.getElementById("prompt-card-hint");
     const promptIdEl = document.getElementById("prompt-card-id");
     const promptKindEl = document.getElementById("prompt-card-kind");
-    const promptOptionsEl = document.getElementById("prompt-card-options");
     const promptRequiredEl = document.getElementById("prompt-card-required");
+    const promptActionsEl = document.getElementById("prompt-card-actions");
+    const authCardEl = document.getElementById("auth-card");
+    const authTextEl = document.getElementById("auth-card-text");
+    const authHintEl = document.getElementById("auth-card-hint");
+    const authIdEl = document.getElementById("auth-card-id");
+    const authEngineEl = document.getElementById("auth-card-engine");
+    const authProviderEl = document.getElementById("auth-card-provider");
+    const authActionsEl = document.getElementById("auth-card-actions");
+    const authLinkEl = document.getElementById("auth-card-link");
+    const authCodeEl = document.getElementById("auth-card-code");
+    const authErrorEl = document.getElementById("auth-card-error");
     const fileTreeToggleEl = document.getElementById("file-tree-toggle");
     const fileTreeSectionEl = document.getElementById("file-tree-section");
     const fileTreePanelEl = document.getElementById("file-tree-panel");
@@ -309,14 +383,21 @@
     let fileTreeExpanded = false;
     const renderedChatKeys = new Set();
     const renderedPromptKeys = new Set();
+    let lastPromptRenderSignature = "";
+    let lastAuthRenderSignature = "";
+    const DEFAULT_INTERACTION_PROMPT = "Please reply to continue.";
     const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
     const WATCHDOG_RETRY_INTERVAL_MS = 2000;
     const WATCHDOG_RETRY_WINDOW_MS = 30000;
+    const AUTH_WATCHDOG_INTERVAL_MS = 1500;
+    let conversationMode = "session";
     let interactiveAutoReplyEnabled = false;
     let interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
     let waitingUserWatchdogTimer = null;
     let waitingUserWatchdogStartAt = 0;
     let waitingUserWatchdogInFlight = false;
+    let waitingAuthWatchdogTimer = null;
+    let waitingAuthWatchdogInFlight = false;
 
     function apiUrl(path) {
         const separator = path.includes("?") ? "&" : "?";
@@ -337,6 +418,61 @@
         return values;
     }
 
+    function normalizeChoiceOptions(raw) {
+        if (!Array.isArray(raw)) return [];
+        const options = [];
+        for (const item of raw) {
+            if (typeof item === "string") {
+                const text = item.trim();
+                if (text) options.push({ label: text, value: text });
+                continue;
+            }
+            if (!item || typeof item !== "object") continue;
+            const label = safeText(item.label).trim();
+            const value = Object.prototype.hasOwnProperty.call(item, "value") ? item.value : label;
+            if (label) {
+                options.push({ label, value });
+            }
+        }
+        return options;
+    }
+
+    function deriveAskUserView(payload) {
+        const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
+        const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim();
+        const kind = safeText((askUser && askUser.kind) || payload.kind).trim() || "open_text";
+        const optionsRaw = askUser && Array.isArray(askUser.options) ? askUser.options : payload.options;
+        const options = normalizeChoiceOptions(optionsRaw);
+        const askHint = askUser
+            ? (
+                safeText(askUser.hint).trim()
+                || (
+                    askUser.ui_hints && typeof askUser.ui_hints === "object"
+                        ? safeText(askUser.ui_hints.hint).trim()
+                        : ""
+                )
+            )
+            : "";
+        const directHint = payload && payload.ui_hints && typeof payload.ui_hints === "object"
+            ? safeText(payload.ui_hints.hint).trim()
+            : safeText(payload && payload.hint).trim();
+        const hint = askHint || directHint;
+        return {
+            prompt: prompt || DEFAULT_INTERACTION_PROMPT,
+            kind,
+            options,
+            hint,
+        };
+    }
+
+    function stableSerialize(value) {
+        try {
+            return JSON.stringify(value);
+        } catch (_err) {
+            return "";
+        }
+    }
+
     function updateCursor(next) {
         if (typeof next !== "number" || !Number.isFinite(next)) return;
         if (next <= cursor) return;
@@ -353,15 +489,31 @@
         waitingUserWatchdogInFlight = false;
     }
 
+    function clearWaitingAuthWatchdog() {
+        if (waitingAuthWatchdogTimer) {
+            clearTimeout(waitingAuthWatchdogTimer);
+            waitingAuthWatchdogTimer = null;
+        }
+        waitingAuthWatchdogInFlight = false;
+    }
+
     function updateInteractiveAutoReplyConfig(payload) {
         if (!payload || typeof payload !== "object") return;
+        if (typeof payload.conversation_mode === "string" && payload.conversation_mode) {
+            conversationMode = payload.conversation_mode;
+        }
         if (typeof payload.interactive_auto_reply === "boolean") {
             interactiveAutoReplyEnabled = payload.interactive_auto_reply;
+        }
+        const effectiveTimeout = payload.effective_interactive_reply_timeout_sec;
+        if (typeof effectiveTimeout === "number" && Number.isFinite(effectiveTimeout) && effectiveTimeout >= 0) {
+            interactiveReplyTimeoutSec = Math.floor(effectiveTimeout);
+            return;
         }
         if (
             typeof payload.interactive_reply_timeout_sec === "number"
             && Number.isFinite(payload.interactive_reply_timeout_sec)
-            && payload.interactive_reply_timeout_sec > 0
+            && payload.interactive_reply_timeout_sec >= 0
         ) {
             interactiveReplyTimeoutSec = Math.floor(payload.interactive_reply_timeout_sec);
         } else if (typeof payload.interactive_reply_timeout_sec === "number") {
@@ -396,6 +548,50 @@
         waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, WATCHDOG_RETRY_INTERVAL_MS);
     }
 
+    async function executeWaitingAuthWatchdogTick() {
+        if (waitingAuthWatchdogInFlight) return;
+        if (currentStatus !== "waiting_auth" || isTerminal(currentStatus)) {
+            clearWaitingAuthWatchdog();
+            return;
+        }
+        waitingAuthWatchdogInFlight = true;
+        try {
+            await refreshState();
+            if (currentStatus !== "waiting_auth") {
+                clearWaitingAuthWatchdog();
+                if (!stream && !isTerminal(currentStatus)) {
+                    await startStream();
+                }
+                return;
+            }
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/auth/session`));
+            if (!res.ok) {
+                return;
+            }
+            const payload = await res.json();
+            if (!payload || typeof payload !== "object") {
+                return;
+            }
+            if (payload.waiting_auth !== true) {
+                await refreshState();
+                if (!stream && !isTerminal(currentStatus)) {
+                    await startStream();
+                }
+                if (currentStatus !== "waiting_auth") {
+                    clearWaitingAuthWatchdog();
+                    return;
+                }
+            }
+        } finally {
+            waitingAuthWatchdogInFlight = false;
+        }
+        if (currentStatus !== "waiting_auth" || isTerminal(currentStatus)) {
+            clearWaitingAuthWatchdog();
+            return;
+        }
+        waitingAuthWatchdogTimer = setTimeout(executeWaitingAuthWatchdogTick, AUTH_WATCHDOG_INTERVAL_MS);
+    }
+
     function maybeStartWaitingUserWatchdog() {
         if (!interactiveAutoReplyEnabled) {
             clearWaitingUserWatchdog();
@@ -411,13 +607,51 @@
         waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, initialDelayMs);
     }
 
+    function maybeStartWaitingAuthWatchdog() {
+        if (currentStatus !== "waiting_auth" || isTerminal(currentStatus)) {
+            clearWaitingAuthWatchdog();
+            return;
+        }
+        if (waitingAuthWatchdogTimer || waitingAuthWatchdogInFlight) return;
+        waitingAuthWatchdogTimer = setTimeout(executeWaitingAuthWatchdogTick, AUTH_WATCHDOG_INTERVAL_MS);
+    }
+
     function isTerminal(status) {
         return ["succeeded", "failed", "canceled"].includes(status);
     }
 
-    function setReplyEnabled(enabled) {
-        replyTextEl.disabled = !enabled;
+    function clearReplyError() {
+        replyErrorEl.textContent = "";
+        replyErrorEl.classList.add("hidden");
+    }
+
+    function showReplyError(message) {
+        const text = safeText(message).trim();
+        if (!text) {
+            clearReplyError();
+            return;
+        }
+        replyErrorEl.textContent = text;
+        replyErrorEl.classList.remove("hidden");
+    }
+
+    function setReplyEnabled(enabled, options = {}) {
+        const textEnabled = enabled && options.textEnabled !== false;
+        replyTextEl.disabled = !textEnabled;
         replySubmitEl.disabled = !enabled;
+    }
+
+    function setReplyComposerVisible(visible) {
+        replyComposerEl.classList.toggle("hidden", !visible);
+    }
+
+    function resetReplyComposer() {
+        clearReplyError();
+        replyTextEl.placeholder = "Reply to agent...";
+        replyTextEl.value = "";
+        replySubmitEl.textContent = "Send Reply";
+        setReplyComposerVisible(true);
+        authReplyModeEl.value = "";
     }
 
     function updateThinkingCard(status) {
@@ -439,7 +673,7 @@
 
         const roleEl = document.createElement("span");
         roleEl.className = "chat-role";
-        roleEl.textContent = role === "user" ? "You" : "Agent";
+        roleEl.textContent = role === "user" ? "You" : role === "assistant" ? "Agent" : "System";
         bubble.appendChild(roleEl);
 
         const content = document.createElement("div");
@@ -452,16 +686,41 @@
     }
 
     function clearPromptCard() {
+        lastPromptRenderSignature = "";
         promptCardEl.classList.add("hidden");
         promptTextEl.textContent = "";
+        promptHintEl.textContent = "";
+        promptHintEl.classList.add("hidden");
         promptIdEl.textContent = "-";
         promptKindEl.textContent = "-";
-        promptOptionsEl.textContent = "";
         promptRequiredEl.textContent = "";
-        promptOptionsEl.classList.add("hidden");
         promptRequiredEl.classList.add("hidden");
+        promptActionsEl.textContent = "";
+        promptActionsEl.classList.add("hidden");
         interactionIdEl.value = "";
-        pendingIdEl.textContent = "-";
+        resetReplyComposer();
+    }
+
+    function clearAuthCard() {
+        lastAuthRenderSignature = "";
+        authCardEl.classList.add("hidden");
+        authTextEl.textContent = "";
+        authHintEl.textContent = "";
+        authHintEl.classList.add("hidden");
+        authIdEl.textContent = "-";
+        authEngineEl.textContent = "-";
+        authProviderEl.textContent = "-";
+        authActionsEl.textContent = "";
+        authLinkEl.textContent = "";
+        authCodeEl.textContent = "";
+        authErrorEl.textContent = "";
+        authActionsEl.classList.add("hidden");
+        authLinkEl.classList.add("hidden");
+        authCodeEl.classList.add("hidden");
+        authErrorEl.classList.add("hidden");
+        authSessionIdEl.value = "";
+        authInputKindEl.value = "";
+        resetReplyComposer();
     }
 
     function clearFinalSummaryCard() {
@@ -475,34 +734,159 @@
         }
     }
 
+    function setActionButtonsDisabled(container, disabled) {
+        if (!container) return;
+        const buttons = container.querySelectorAll("button");
+        for (const button of buttons) {
+            button.disabled = disabled;
+        }
+    }
+
+    async function submitPayload(payload, options = {}) {
+        clearWaitingUserWatchdog();
+        clearReplyError();
+
+        if (options.actionContainer) {
+            setActionButtonsDisabled(options.actionContainer, true);
+        }
+        if (options.disableComposer === true) {
+            setReplyEnabled(false, { textEnabled: options.textEnabled !== false });
+        }
+
+        const res = await fetch(apiUrl(`/api/runs/${requestId}/reply`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            let errorMessage = `提交失败: HTTP ${res.status}`;
+            try {
+                const errorPayload = await res.json();
+                const detailObj = errorPayload?.detail;
+                if (typeof detailObj === "string" && detailObj.trim()) {
+                    errorMessage = detailObj.trim();
+                } else if (detailObj) {
+                    errorMessage = stableSerialize(detailObj) || errorMessage;
+                }
+            } catch (_err) {
+                // Fall back to HTTP status when backend detail is unavailable.
+            }
+            showReplyError(errorMessage);
+            if (options.actionContainer) {
+                setActionButtonsDisabled(options.actionContainer, false);
+            }
+            if (options.disableComposer === true) {
+                setReplyEnabled(true, { textEnabled: options.textEnabled !== false });
+            }
+            return false;
+        }
+
+        replyTextEl.value = "";
+        if (options.clearPromptCard) {
+            clearPromptCard();
+        }
+        if (options.disableComposer === true) {
+            setReplyEnabled(false, { textEnabled: options.textEnabled !== false });
+        }
+
+        setTimeout(async () => {
+            await startStream();
+            await refreshState();
+        }, 150);
+        return true;
+    }
+
+    function renderActionButtons(container, actions) {
+        container.textContent = "";
+        if (!Array.isArray(actions) || !actions.length) {
+            container.classList.add("hidden");
+            return;
+        }
+        for (const action of actions) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "action-chip";
+            button.textContent = safeText(action.label).trim() || "Continue";
+            button.addEventListener("click", async () => {
+                await action.onClick();
+            });
+            container.appendChild(button);
+        }
+        container.classList.remove("hidden");
+    }
+
     function renderPromptCard(payload) {
-        const prompt = safeText(payload.prompt).trim();
-        const hint = safeText(payload.ui_hints?.hint || payload.hint).trim();
+        const view = deriveAskUserView(payload);
+        const choiceOptions = view.options;
+        const signature = stableSerialize({
+            interaction_id: Number(payload.interaction_id || 0),
+            kind: view.kind,
+            prompt: view.prompt,
+            options: choiceOptions,
+            required_fields: normalizeList(payload.required_fields),
+            hint: view.hint,
+        });
+        if (signature && signature === lastPromptRenderSignature && !promptCardEl.classList.contains("hidden")) {
+            return;
+        }
+        lastPromptRenderSignature = signature;
+
+        clearAuthCard();
+        const prompt = view.prompt;
+        const hint = view.hint;
         const interactionId = Number(payload.interaction_id || 0);
-        const kind = safeText(payload.kind).trim() || "open_text";
+        const kind = view.kind;
         const key = `${interactionId || 0}|${hint || prompt}`;
         renderedPromptKeys.add(key);
 
         promptCardEl.classList.remove("hidden");
-        if (hint) {
-            promptTextEl.textContent = hint;
+        if (prompt) {
+            promptTextEl.textContent = prompt;
             promptTextEl.classList.remove("hidden");
         } else {
             promptTextEl.textContent = "";
             promptTextEl.classList.add("hidden");
         }
+        promptHintEl.textContent = "";
+        promptHintEl.classList.add("hidden");
         promptIdEl.textContent = interactionId > 0 ? String(interactionId) : "-";
         promptKindEl.textContent = kind;
         interactionIdEl.value = interactionId > 0 ? String(interactionId) : "";
         pendingIdEl.textContent = interactionId > 0 ? String(interactionId) : "-";
 
-        const options = normalizeList(payload.options);
-        if (options.length) {
-            promptOptionsEl.classList.remove("hidden");
-            promptOptionsEl.textContent = `options: ${options.join(" | ")}`;
+        if (choiceOptions.length) {
+            if (hint) {
+                promptHintEl.textContent = hint;
+                promptHintEl.classList.remove("hidden");
+            }
+            renderActionButtons(
+                promptActionsEl,
+                choiceOptions.map((option) => ({
+                    label: option.label,
+                    onClick: async () => {
+                        await submitPayload(
+                            {
+                                mode: "interaction",
+                                interaction_id: interactionId,
+                                response: option.value,
+                            },
+                            {
+                                clearPromptCard: true,
+                                actionContainer: promptActionsEl,
+                            },
+                        );
+                    },
+                })),
+            );
+            setReplyComposerVisible(false);
+            setReplyEnabled(false);
         } else {
-            promptOptionsEl.classList.add("hidden");
-            promptOptionsEl.textContent = "";
+            promptActionsEl.classList.add("hidden");
+            promptActionsEl.textContent = "";
+            replyTextEl.placeholder = hint || "Reply to agent...";
+            setReplyComposerVisible(true);
+            setReplyEnabled(interactionId > 0);
         }
 
         const requiredFields = normalizeList(payload.required_fields);
@@ -515,108 +899,153 @@
         }
     }
 
-    function cleanYamlScalar(raw) {
-        const value = safeText(raw).trim();
-        if (!value) return "";
-        if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
-            return value.slice(1, -1).trim();
-        }
-        return value;
-    }
-
-    function parseYamlScalar(block, key) {
-        const regex = new RegExp(`^\\s*${key}:\\s*(.+)$`, "mi");
-        const matched = block.match(regex);
-        if (!matched) return "";
-        return cleanYamlScalar(matched[1]);
-    }
-
-    function parseYamlList(block, key) {
-        const lines = block.split(/\r?\n/);
-        let startIndex = -1;
-        let baseIndent = 0;
-        for (let idx = 0; idx < lines.length; idx += 1) {
-            const line = lines[idx];
-            const matched = line.match(/^(\s*)([A-Za-z_][\w-]*):\s*$/);
-            if (!matched) continue;
-            if (matched[2] !== key) continue;
-            startIndex = idx;
-            baseIndent = matched[1].length;
-            break;
-        }
-        if (startIndex < 0) {
-            const inlineRaw = parseYamlScalar(block, key);
-            if (!inlineRaw.startsWith("[") || !inlineRaw.endsWith("]")) return [];
-            return inlineRaw
-                .slice(1, -1)
-                .split(",")
-                .map((item) => cleanYamlScalar(item))
-                .filter((item) => item);
-        }
-        const values = [];
-        for (let idx = startIndex + 1; idx < lines.length; idx += 1) {
-            const line = lines[idx];
-            if (!line.trim()) continue;
-            const indent = (line.match(/^(\s*)/) || ["", ""])[1].length;
-            if (indent <= baseIndent) break;
-            const itemMatched = line.match(/^\s*-\s*(.+)\s*$/);
-            if (!itemMatched) continue;
-            const value = cleanYamlScalar(itemMatched[1]);
-            if (value) values.push(value);
-        }
-        return values;
-    }
-
-    function extractAskUserBlocks(text) {
-        const source = safeText(text);
-        const patterns = [
-            /<ASK_USER_YAML>\s*([\s\S]*?)\s*<\/ASK_USER_YAML>/gim,
-            /```(?:ask_user_yaml|ask-user-yaml)\s*([\s\S]*?)```/gim,
-        ];
-        const blocks = [];
-        let stripped = source;
-        for (const pattern of patterns) {
-            const matches = Array.from(stripped.matchAll(pattern));
-            if (!matches.length) continue;
-            for (const matched of matches) {
-                const body = safeText(matched[1]).trim();
-                if (body) blocks.push(body);
-            }
-            stripped = stripped.replace(pattern, " ").trim();
-        }
-        return { blocks, stripped: stripped.trim() };
-    }
-
-    function parseAskUserYaml(block) {
-        if (!block) return null;
-        const scoped = block.includes("ask_user:") ? block.split(/ask_user:\s*/i)[1] || block : block;
-        const prompt = parseYamlScalar(scoped, "prompt");
-        const interactionRaw = parseYamlScalar(scoped, "interaction_id");
-        const interactionId = interactionRaw ? Number(interactionRaw) : 0;
-        const kind = parseYamlScalar(scoped, "kind") || "open_text";
-        const hint = parseYamlScalar(scoped, "hint");
-        const uiHints = {};
-        if (hint) {
-            uiHints.hint = hint;
-        }
-        return {
-            interaction_id: Number.isFinite(interactionId) ? interactionId : 0,
-            kind,
+    function renderAuthCard(payload) {
+        const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
+        const phase = safeText(payload.phase).trim() || "challenge_active";
+        const availableMethods = normalizeList(payload.available_methods);
+        const askUserOptions = normalizeChoiceOptions(askUser && askUser.options);
+        const selectionOptions = askUserOptions.length
+            ? askUserOptions
+            : availableMethods.map((method) => ({ label: method, value: method }));
+        const askHint = askUser
+            ? (
+                safeText(askUser.hint).trim()
+                || (
+                    askUser.ui_hints && typeof askUser.ui_hints === "object"
+                        ? safeText(askUser.ui_hints.hint).trim()
+                        : ""
+                )
+            )
+            : "";
+        const directHint = payload && payload.ui_hints && typeof payload.ui_hints === "object"
+            ? safeText(payload.ui_hints.hint).trim()
+            : "";
+        const hint = askHint || directHint;
+        const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim()
+            || "Authentication is required to continue.";
+        const signature = stableSerialize({
+            auth_session_id: safeText(payload.auth_session_id).trim(),
+            engine: safeText(payload.engine).trim(),
+            provider_id: safeText(payload.provider_id).trim(),
             prompt,
-            options: parseYamlList(scoped, "options"),
-            required_fields: parseYamlList(scoped, "required_fields"),
-            ui_hints: uiHints,
+            auth_url: safeText(payload.auth_url).trim(),
+            user_code: safeText(payload.user_code).trim(),
+            last_error: safeText(payload.last_error).trim(),
+            accepts_chat_input: payload.accepts_chat_input === true,
+            input_kind: safeText(payload.input_kind).trim(),
+            phase,
+            available_methods: selectionOptions.map((item) => safeText(item.value).trim()),
             hint,
-        };
-    }
-
-    function parseAskUserBlocks(blocks) {
-        if (!Array.isArray(blocks) || !blocks.length) return null;
-        for (const block of blocks) {
-            const parsed = parseAskUserYaml(block);
-            if (parsed) return parsed;
+        });
+        if (signature && signature === lastAuthRenderSignature && !authCardEl.classList.contains("hidden")) {
+            return;
         }
-        return null;
+        lastAuthRenderSignature = signature;
+
+        clearPromptCard();
+        authCardEl.classList.remove("hidden");
+        const authSessionId = safeText(payload.auth_session_id).trim();
+        const engineName = safeText(payload.engine).trim() || "-";
+        const providerId = safeText(payload.provider_id).trim() || "-";
+        const authUrl = safeText(payload.auth_url).trim();
+        const userCode = safeText(payload.user_code).trim();
+        const lastError = safeText(payload.last_error).trim();
+        const acceptsChatInput = payload.accepts_chat_input === true;
+        const inputKind = safeText(payload.input_kind).trim();
+        const isMethodSelection = phase === "method_selection";
+
+        authTextEl.textContent = prompt;
+        authHintEl.textContent = "";
+        authHintEl.classList.add("hidden");
+        authIdEl.textContent = authSessionId || "-";
+        authEngineEl.textContent = engineName;
+        authProviderEl.textContent = providerId;
+        authSessionIdEl.value = authSessionId;
+        authInputKindEl.value = inputKind;
+        authReplyModeEl.value = isMethodSelection ? "selection" : "submission";
+        pendingIdEl.textContent = authSessionId || (isMethodSelection ? "method-selection" : "-");
+
+        if (isMethodSelection && selectionOptions.length) {
+            if (hint) {
+                authHintEl.textContent = hint;
+                authHintEl.classList.remove("hidden");
+            }
+            renderActionButtons(
+                authActionsEl,
+                selectionOptions.map((option) => ({
+                    label: option.label,
+                    onClick: async () => {
+                        await submitPayload(
+                            {
+                                mode: "auth",
+                                selection: {
+                                    kind: "auth_method",
+                                    value: option.value,
+                                },
+                            },
+                            {
+                                actionContainer: authActionsEl,
+                            },
+                        );
+                    },
+                })),
+            );
+            setReplyComposerVisible(false);
+            setReplyEnabled(false);
+        } else {
+            authActionsEl.classList.add("hidden");
+            authActionsEl.textContent = "";
+        }
+
+        if (authUrl) {
+            authLinkEl.innerHTML = "";
+            const label = document.createElement("span");
+            label.textContent = "auth_url: ";
+            const link = document.createElement("a");
+            link.href = authUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = authUrl;
+            authLinkEl.appendChild(label);
+            authLinkEl.appendChild(link);
+            authLinkEl.classList.remove("hidden");
+        } else {
+            authLinkEl.classList.add("hidden");
+            authLinkEl.textContent = "";
+        }
+
+        if (userCode) {
+            authCodeEl.textContent = `user_code: ${userCode}`;
+            authCodeEl.classList.remove("hidden");
+        } else {
+            authCodeEl.classList.add("hidden");
+            authCodeEl.textContent = "";
+        }
+
+        if (lastError) {
+            authErrorEl.textContent = `last_error: ${lastError}`;
+            authErrorEl.classList.remove("hidden");
+        } else {
+            authErrorEl.classList.add("hidden");
+            authErrorEl.textContent = "";
+        }
+
+        if (isMethodSelection) {
+            setReplyComposerVisible(false);
+            setReplyEnabled(false);
+        } else if (acceptsChatInput && inputKind) {
+            setReplyComposerVisible(true);
+            replyTextEl.placeholder = hint || (inputKind === "api_key"
+                ? "Paste API key here..."
+                : "Paste authorization code here...");
+            replySubmitEl.textContent = inputKind === "api_key" ? "Submit API Key" : "Submit Code";
+            setReplyEnabled(true);
+        } else {
+            setReplyComposerVisible(false);
+            replyTextEl.placeholder = "Authentication is in progress...";
+            replySubmitEl.textContent = "Awaiting Auth";
+            setReplyEnabled(false);
+        }
     }
 
     function parseResultStatusFromPreview(preview) {
@@ -650,15 +1079,15 @@
     }
 
     function applyPendingPrompt(payload) {
-        const prompt = safeText(payload.prompt).trim();
-        const hint = safeText(payload.ui_hints?.hint || payload.hint).trim();
+        const view = deriveAskUserView(payload);
+        const prompt = view.prompt;
+        const hint = view.hint;
         const interactionId = Number(payload.interaction_id || 0);
         const key = `${interactionId || 0}|${hint || prompt}`;
         renderPromptCard(payload);
         if (!renderedPromptKeys.has(key)) {
             renderedPromptKeys.add(key);
         }
-        setReplyEnabled(interactionId > 0);
     }
 
     async function maybeAppendFinalSummary() {
@@ -820,13 +1249,31 @@
         if (!res.ok) {
             setReplyEnabled(false);
             clearPromptCard();
+            clearAuthCard();
+            pendingIdEl.textContent = "-";
             return;
         }
         const payload = await res.json();
+        const pendingAuthMethodSelection = (
+            payload && typeof payload.pending_auth_method_selection === "object"
+                ? payload.pending_auth_method_selection
+                : null
+        );
+        if (pendingAuthMethodSelection) {
+            renderAuthCard(pendingAuthMethodSelection);
+            return;
+        }
+        const pendingAuth = payload && typeof payload.pending_auth === "object" ? payload.pending_auth : null;
+        if (pendingAuth) {
+            renderAuthCard(pendingAuth);
+            return;
+        }
         const pending = payload && typeof payload.pending === "object" ? payload.pending : null;
         if (!pending) {
             setReplyEnabled(false);
             clearPromptCard();
+            clearAuthCard();
+            pendingIdEl.textContent = "-";
             return;
         }
         applyPendingPrompt({
@@ -836,6 +1283,7 @@
             options: Array.isArray(pending.options) ? pending.options : [],
             required_fields: Array.isArray(pending.required_fields) ? pending.required_fields : [],
             ui_hints: pending.ui_hints && typeof pending.ui_hints === "object" ? pending.ui_hints : {},
+            ask_user: pending.ask_user && typeof pending.ask_user === "object" ? pending.ask_user : null,
         });
     }
 
@@ -851,14 +1299,27 @@
         if (typeof payload.cursor === "number") updateCursor(payload.cursor);
 
         if (currentStatus === "waiting_user") {
+            clearWaitingAuthWatchdog();
             clearFinalSummaryCard();
             await refreshPending();
+            await catchUpHistory();
             maybeStartWaitingUserWatchdog();
+        } else if (currentStatus === "waiting_auth") {
+            clearWaitingUserWatchdog();
+            clearFinalSummaryCard();
+            await refreshPending();
+            await catchUpHistory();
+            maybeStartWaitingAuthWatchdog();
         } else {
             clearWaitingUserWatchdog();
+            clearWaitingAuthWatchdog();
             setReplyEnabled(false);
             if (currentStatus !== "waiting_user") {
                 clearPromptCard();
+            }
+            if (currentStatus !== "waiting_auth") {
+                clearAuthCard();
+                pendingIdEl.textContent = "-";
             }
             if (!isTerminal(currentStatus)) {
                 clearFinalSummaryCard();
@@ -866,12 +1327,9 @@
         }
         if (isTerminal(currentStatus)) {
             clearWaitingUserWatchdog();
-            if (stream) {
-                stream.close();
-                stream = null;
-            }
             setReplyEnabled(false);
             clearPromptCard();
+            await catchUpHistory();
             await maybeAppendFinalSummary();
             await maybeLoadFileTreeOnTerminal();
         }
@@ -888,118 +1346,21 @@
         }, delay);
     }
 
-    function handleConversationStateChanged(event) {
-        const data = event && typeof event.data === "object" ? event.data : {};
-        const nextStatus = safeText(data.to || currentStatus);
-        if (!nextStatus) return;
-        currentStatus = nextStatus;
-        statusEl.textContent = currentStatus;
-        updateThinkingCard(currentStatus);
-        if (data.pending_interaction_id != null) {
-            pendingIdEl.textContent = String(data.pending_interaction_id);
-        }
-        if (nextStatus === "waiting_user") {
-            clearFinalSummaryCard();
-            refreshPending().catch(() => {});
-            maybeStartWaitingUserWatchdog();
-            return;
-        }
-        clearWaitingUserWatchdog();
-        if (!isTerminal(nextStatus)) {
-            clearFinalSummaryCard();
-        }
-        if (isTerminal(nextStatus)) {
-            setReplyEnabled(false);
-            clearPromptCard();
-            maybeAppendFinalSummary().catch(() => {});
-            maybeLoadFileTreeOnTerminal().catch(() => {});
-        }
-    }
-
-    function handleAssistantMessageFinal(event) {
-        const text = safeText(event?.data?.text);
-        const parsed = extractAskUserBlocks(text);
-        const cleaned = parsed.stripped;
-        if (cleaned) {
-            appendChatBubble(
-                "agent",
-                cleaned,
-                `assistant.message.final:${event.seq || 0}:${cleaned}`,
-            );
-        }
-        const askPayload = parseAskUserBlocks(parsed.blocks);
-        if (askPayload) {
-            applyPendingPrompt(askPayload);
-        }
-    }
-
-    function handleUserInputRequired(event) {
-        const payload = {
-            interaction_id: Number(event?.data?.interaction_id || 0),
-            kind: safeText(event?.data?.kind || "open_text"),
-            prompt: safeText(event?.data?.prompt),
-            options: Array.isArray(event?.data?.options) ? event.data.options : [],
-            required_fields: Array.isArray(event?.data?.required_fields) ? event.data.required_fields : [],
-            ui_hints: event?.data?.ui_hints && typeof event.data.ui_hints === "object" ? event.data.ui_hints : {},
-        };
-        applyPendingPrompt(payload);
-    }
-
     function handleChatEvent(event) {
-        const type = safeText(event.type);
         if (typeof event.seq === "number") {
             updateCursor(event.seq);
         }
-        if (!type) return;
-        if (type === "conversation.state.changed") {
-            handleConversationStateChanged(event);
-            return;
-        }
-        if (type === "interaction.reply.accepted") {
-            clearWaitingUserWatchdog();
-            clearPromptCard();
-            setReplyEnabled(false);
-            const interactionId = Number(event?.data?.interaction_id || 0);
-            const preview = safeText(event?.data?.response_preview).trim();
-            if (preview) {
-                appendChatBubble("user", preview, `user.reply:${interactionId}:${preview}`);
-            } else {
-                appendChatBubble("agent", "已收到你的回复，继续处理中。", `reply.accepted:${event.seq || 0}`);
-            }
-            return;
-        }
-        if (type === "interaction.auto_decide.timeout") {
-            clearWaitingUserWatchdog();
-            clearPromptCard();
-            setReplyEnabled(false);
-            appendChatBubble("agent", "等待超时，系统已自动决策并继续执行。", `auto.timeout:${event.seq || 0}`);
-            return;
-        }
-        if (type === "assistant.message.final") {
-            handleAssistantMessageFinal(event);
-            return;
-        }
-        if (type === "user.input.required") {
-            handleUserInputRequired(event);
-            return;
-        }
-        if (type === "conversation.completed") {
-            maybeAppendFinalSummary().catch(() => {});
-            maybeLoadFileTreeOnTerminal().catch(() => {});
-            return;
-        }
-        if (type === "conversation.failed") {
-            const code = safeText(event?.data?.error?.code || "");
-            const message = code ? `任务失败（${code}）。` : "任务失败。";
-            appendChatBubble("agent", message, `conversation.failed:${event.seq || 0}:${code}`);
-        }
+        const role = safeText(event.role).trim();
+        const text = safeText(event.text);
+        if (!role || !text.trim()) return;
+        appendChatBubble(role, text, `chat:${event.seq || 0}:${role}:${text}`);
     }
 
     async function loadHistory() {
         if (historyLoaded) return;
         historyLoaded = true;
         try {
-            const res = await fetch(apiUrl(`/api/runs/${requestId}/events/history`));
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/chat/history`));
             if (!res.ok) return;
             const payload = await res.json();
             const events = Array.isArray(payload.events) ? payload.events : [];
@@ -1011,12 +1372,31 @@
         }
     }
 
+    async function catchUpHistory() {
+        try {
+            const query = new URLSearchParams();
+            if (cursor > 0) {
+                query.set("from_seq", String(cursor + 1));
+            }
+            const suffix = query.toString() ? `?${query.toString()}` : "";
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/chat/history${suffix}`));
+            if (!res.ok) return;
+            const payload = await res.json();
+            const events = Array.isArray(payload.events) ? payload.events : [];
+            for (const event of events) {
+                handleChatEvent(event);
+            }
+        } catch (_err) {
+            // Keep running even if catch-up fails.
+        }
+    }
+
     async function startStream() {
         if (stream) {
             stream.close();
             stream = null;
         }
-        stream = new EventSource(apiUrl(`/api/runs/${requestId}/events?cursor=${cursor}`));
+        stream = new EventSource(apiUrl(`/api/runs/${requestId}/chat?cursor=${cursor}`));
         stream.addEventListener("snapshot", (evt) => {
             reconnectAttempts = 0;
             const payload = JSON.parse(evt.data || "{}");
@@ -1029,6 +1409,9 @@
             if (typeof payload.cursor === "number") {
                 updateCursor(payload.cursor);
             }
+            if (currentStatus === "waiting_user" || currentStatus === "waiting_auth" || isTerminal(currentStatus)) {
+                catchUpHistory().catch(() => {});
+            }
         });
         stream.addEventListener("chat_event", (evt) => {
             reconnectAttempts = 0;
@@ -1040,33 +1423,52 @@
                 stream.close();
                 stream = null;
             }
-            scheduleReconnect();
+            catchUpHistory()
+                .catch(() => {})
+                .finally(() => {
+                    scheduleReconnect();
+                });
         });
     }
 
     async function submitReply() {
         const interactionId = Number(interactionIdEl.value || "0");
+        const authSessionId = safeText(authSessionIdEl.value).trim();
+        const authReplyMode = safeText(authReplyModeEl.value).trim();
+        const authInputKind = safeText(authInputKindEl.value).trim();
         const text = safeText(replyTextEl.value).trim();
-        if (!interactionId) return;
-        clearWaitingUserWatchdog();
-        const payload = {
-            interaction_id: interactionId,
-            response: { text },
-        };
-        const res = await fetch(apiUrl(`/api/runs/${requestId}/reply`), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) return;
-        appendChatBubble("user", text || "(empty reply)", `user.reply:${interactionId}:${text}`);
-        replyTextEl.value = "";
-        clearPromptCard();
-        setReplyEnabled(false);
-        setTimeout(async () => {
-            await startStream();
-            await refreshState();
-        }, 150);
+        if (currentStatus === "waiting_auth" && authReplyMode === "selection") {
+            return;
+        }
+        if (!interactionId && !authSessionId) return;
+
+        const isAuthMode = currentStatus === "waiting_auth" && !!authSessionId;
+        const payload = isAuthMode
+            ? {
+                mode: "auth",
+                auth_session_id: authSessionId,
+                submission: {
+                    kind: authInputKind || "authorization_code",
+                    value: text,
+                },
+            }
+            : {
+                mode: "interaction",
+                interaction_id: interactionId,
+                response: { text },
+            };
+        const accepted = await submitPayload(
+            payload,
+            {
+                clearPromptCard: !isAuthMode,
+                disableComposer: true,
+                textEnabled: true,
+            },
+        );
+        if (!accepted) {
+            setReplyEnabled(true);
+            return;
+        }
     }
 
     replyForm.addEventListener("submit", async (evt) => {
@@ -1099,6 +1501,7 @@
 
     window.addEventListener("beforeunload", () => {
         clearWaitingUserWatchdog();
+        clearWaitingAuthWatchdog();
     });
 })();
 </script>

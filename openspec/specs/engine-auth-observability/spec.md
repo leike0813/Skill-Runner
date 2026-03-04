@@ -2,7 +2,6 @@
 
 ## Purpose
 定义引擎鉴权生命周期的统一状态接口、审计字段、日志分目录组织和 UI 可观测性约束。
-
 ## Requirements
 ### Requirement: 系统 MUST 提供统一 Engine 鉴权状态接口
 系统 MUST 提供统一接口返回各 Engine 的鉴权可观测状态，且输出结构可被 UI 与脚本复用。
@@ -73,6 +72,19 @@
 - **THEN** 既有 `GET /v1/engines/auth-status` 判定逻辑保持不变
 - **AND** 不要求与会话状态实时联动
 
+### Requirement: Gemini oauth_proxy 成功后 MUST 固化 oauth-personal 认证模式
+系统 MUST 在 Gemini `oauth_proxy` 的 callback 或 auth code 路线成功后，确保 `~/.gemini/settings.json` 中 `security.auth.selectedType="oauth-personal"`，并将该写盘步骤视为成功闭环的一部分。
+
+#### Scenario: callback 路线成功后补齐 settings
+- **WHEN** Gemini `oauth_proxy + callback` 完成 token exchange
+- **THEN** 系统写入或更新 `~/.gemini/settings.json`
+- **AND** `security.auth.selectedType` 等于 `oauth-personal`
+
+#### Scenario: auth_code_or_url 路线成功后补齐 settings
+- **WHEN** Gemini `oauth_proxy + auth_code_or_url` 完成 token exchange
+- **THEN** 系统写入或更新 `~/.gemini/settings.json`
+- **AND** `security.auth.selectedType` 等于 `oauth-personal`
+
 ### Requirement: Gemini 委托编排 MUST 具备 URL 可观测能力
 系统 MUST 在解析到 Gemini OAuth URL 后将其暴露在会话快照中，支持 UI 可点击展示。
 
@@ -121,17 +133,19 @@
 - **THEN** 若解析到 challenge，响应包含 `auth_url` 与 `user_code`
 - **AND** 未解析到 challenge 时返回 `null` 并提供错误摘要字段
 
-### Requirement: 鉴权完成后 auth-status MUST 一致联动
-系统 MUST 保证会话终态与 `GET /v1/engines/auth-status` 的 `auth_ready` 语义一致。
+### Requirement: 静态凭据观测 MUST 与 runtime auth completion 解耦
+系统 MUST 将 engine 静态凭据观测与 runtime auth session completion 解耦。
 
-#### Scenario: 鉴权成功联动
-- **WHEN** Codex `auth_code_or_url`（OpenAI device-code）会话状态为 `succeeded`
-- **THEN** `GET /v1/engines/auth-status` 中 `engines.codex.auth_ready` 为 `true`
+#### Scenario: 凭据状态仅表达静态观测
+- **WHEN** 客户端查询 `GET /v1/engines/auth-status`
+- **THEN** 响应中的引擎凭据字段 MUST 使用非 completion 语义
+- **AND** MUST NOT 暴露 `auth_ready`
 
-#### Scenario: 鉴权失败或取消不误报
-- **WHEN** 会话状态为 `failed|canceled|expired`
-- **THEN** 系统不应将该会话直接视为鉴权成功
-- **AND** `auth_ready` 仅由真实凭据状态决定
+#### Scenario: 静态凭据状态不驱动会话完成
+- **WHEN** 会话状态为 `waiting_user` 或 `challenge_active`
+- **AND** engine 静态凭据状态已变为可用
+- **THEN** 系统 MUST NOT 将该会话直接视为鉴权成功
+- **AND** runtime `auth.completed` 仍须来自 canonical completion
 
 ### Requirement: 会话快照 MUST 暴露 auth_method 可观测字段
 系统 MUST 在 auth session snapshot 中返回 `auth_method`。
@@ -379,3 +393,21 @@ The runtime option hard-cut MUST NOT change auth session state-machine or observ
 - **WHEN** 用户在管理 UI 发起任意鉴权会话（oauth_proxy 或 cli_delegate）
 - **THEN** 鉴权状态推进与事件可见性保持既有语义
 - **AND** runtime options 键名调整不会影响 auth session observability
+
+### Requirement: Engine auth observability MUST retire legacy auth_ready semantics
+系统 MUST 从 engine auth observability 中移除 `auth_ready`，并改用非 completion 语义的字段表达静态凭据状态。
+
+#### Scenario: static engine auth observability returns credential_state
+- **WHEN** 客户端查询 engine auth observability
+- **THEN** 响应使用 `credential_state`
+- **AND** MUST NOT 暴露 `auth_ready`
+
+### Requirement: Static credential observability MUST be decoupled from runtime auth completion
+系统 MUST 保证 engine 静态凭据状态不会被当成 runtime auth session completion 使用。
+
+#### Scenario: credential present does not complete waiting-auth
+- **WHEN** engine static `credential_state=present`
+- **AND** waiting-auth session 尚未 terminal success
+- **THEN** runtime MUST NOT 推进 `auth.completed`
+- **AND** MUST NOT 离开 `waiting_auth`
+

@@ -15,11 +15,33 @@
 - **THEN** Adapter 返回仅基于透传参数与必要上下文的命令数组
 
 ### Requirement: Adapter MUST 提供统一 runtime 流解析接口
-系统 MUST 要求所有引擎 Adapter 提供 runtime 流解析接口，输出统一结构字段（parser、confidence、session_id、assistant_messages、raw_rows、diagnostics、structured_types）。
+系统 MUST 要求所有引擎 Adapter 提供 runtime 流解析接口，输出统一结构字段（parser、confidence、session_id、assistant_messages、raw_rows、diagnostics、structured_types），并暴露可供 auth detection 使用的原始材料。
 
-#### Scenario: 引擎流解析返回标准字段
-- **WHEN** 任何引擎 Adapter 解析 stdout/stderr/pty 原始字节流
-- **THEN** 返回值包含统一结构字段并可直接被协议层消费
+#### Scenario: Adapter 暴露 auth-detection-ready evidence
+- **WHEN** 任一引擎 Adapter 完成 stdout/stderr/pty 原始字节流解析
+- **THEN** 返回值必须保留可供 auth detection 使用的证据
+- **AND** 这些证据包括：
+  - `stdout`
+  - `stderr`
+  - `pty`（如果有）
+  - parser diagnostics
+  - structured rows / extracted structured payloads（如适用）
+
+### Requirement: Adapter MUST 暴露 chunk 级运行时输出
+系统 MUST 允许 adapter 在子进程执行过程中逐 chunk 暴露 stdout/stderr，以支撑 live protocol publish。
+
+#### Scenario: chunk output is forwarded to the live emitter
+- **WHEN** adapter 从运行中的引擎进程读到 stdout 或 stderr chunk
+- **THEN** MUST 先交给 live runtime emitter
+- **AND** 不能等到事后 audit 重建才对外可见
+
+### Requirement: Stream parser MUST 支持 live session
+系统 MUST 提供 parser live session 合同，使引擎 parser 可以在执行期间增量吐出语义事件。
+
+#### Scenario: parser session emits semantic output before audit materialization
+- **WHEN** parser 已识别出完整 assistant / diagnostic 语义
+- **THEN** 它 MUST 能通过 live session 立即产出 emission
+- **AND** batch parse 仅作为 backfill / parity / cold replay 路径保留
 
 ### Requirement: Engine-specific adapter 实现 MUST 按引擎聚合
 系统 MUST 将 engine-specific adapter 代码放置在 `server/engines/<engine>/adapter/*`，并通过 execution adapter class 装配到执行注册表。
@@ -56,19 +78,21 @@
 - **AND** 不存在 `workspace_provisioner.py`
 
 ### Requirement: Runtime common 组件 MUST 承载引擎无关高重复逻辑
+
 跨引擎高重复逻辑 MUST 位于 `server/runtime/adapter/common/*`，引擎目录仅保留差异实现。
 
-#### Scenario: Prompt/session/workspace 逻辑复用
-- **WHEN** 四引擎装配 PromptBuilder/SessionCodec/WorkspaceProvisioner
+#### Scenario: Prompt/session/validation 逻辑复用
+- **WHEN** 四引擎装配 PromptBuilder、SessionCodec 与 per-attempt run-folder validation
 - **THEN** 共性步骤来自 runtime common
 - **AND** 引擎仅通过 profile 与少量差异参数定制
 
 ### Requirement: Prompt/Session/Workspace MUST 由 Adapter Profile 驱动
-`PromptBuilder`、`SessionHandleCodec`、`WorkspaceProvisioner` MUST 由 profile 驱动的 runtime/common 组件实现。
+
+`PromptBuilder`、`SessionHandleCodec`、`AttemptRunFolderValidator` MUST 由 profile 驱动的 runtime/common 组件实现。
 
 #### Scenario: 执行适配器初始化
 - **WHEN** 任一引擎 execution adapter 初始化
-- **THEN** 使用 `ProfiledPromptBuilder`、`ProfiledSessionCodec`、`ProfiledWorkspaceProvisioner`
+- **THEN** 使用 `ProfiledPromptBuilder`、`ProfiledSessionCodec`、`ProfiledAttemptRunFolderValidator`
 - **AND** profile 来源为 `server/engines/<engine>/adapter/adapter_profile.json`
 
 ### Requirement: Adapter Profile 校验 MUST fail-fast
@@ -80,17 +104,18 @@ adapter profile 校验失败 MUST 在 registry 初始化阶段直接报错并阻
 - **AND** 服务不得进入可运行状态
 
 ### Requirement: Adapter Profile MUST 声明引擎执行资产路径
-每个引擎 adapter profile MUST 承载配置资产与模型目录元信息，作为执行期单一来源。
+
+每个引擎 adapter profile MUST 承载配置资产、attempt workspace 布局与模型目录元信息，作为执行期单一来源。
 
 #### Scenario: config composer 读取资产
 - **WHEN** adapter 构建运行时配置
 - **THEN** `bootstrap/default/enforced/schema/skill-defaults` 路径来自 profile 字段
 - **AND** composer 不再硬编码 `assets/configs/<engine>/*` 路径
 
-#### Scenario: model registry 读取目录声明
-- **WHEN** 系统装配模型目录或 manifest
-- **THEN** 静态 manifest 引擎从 profile 的 `model_catalog` 字段读取路径
-- **AND** 动态 catalog 引擎从 profile 声明其 seed/cache 与模式元信息
+#### Scenario: validator 读取 attempt workspace 布局
+- **WHEN** adapter 校验当前 attempt 的 run folder
+- **THEN** attempt workspace 根目录与 skills 根目录来自 profile 的 `attempt_workspace` 字段
+- **AND** `attempt_workspace` 仅描述布局，不描述 skill 安装策略
 
 ### Requirement: Services MUST be domain-organized in phase1
 系统 MUST 将 `server/services` 按域分包（orchestration/skill/ui/platform），并停止继续新增扁平 services 模块。
@@ -157,4 +182,108 @@ phase2 收口后，orchestration 目录中的兼容壳文件 MUST 被删除。
   - `server/services/orchestration/codex_config_manager.py`
   - `server/services/orchestration/config_generator.py`
   - `server/services/orchestration/opencode_model_catalog.py`
+
+### Requirement: Adapter MUST separate per-attempt validation from run-scope skill materialization
+
+系统 MUST 将 per-attempt run-folder validation 与 create-run skill materialization 分离。
+
+#### Scenario: Non-reply attempt validates existing run folder
+- **WHEN** start 或 non-reply resumed attempt 准备启动引擎进程
+- **THEN** adapter MUST 先生成或确认本次 attempt 的 config
+- **AND** MUST 校验已解析的 run folder 满足最小执行合同
+- **AND** MUST NOT 在该路径执行 skill reinstall、recopy、unpack 或 patch
+
+#### Scenario: auth-completed resume re-runs config and validation only
+- **GIVEN** 一个 run 已进入 `waiting_auth` 并完成鉴权
+- **WHEN** auth-completed resumed attempt 开始
+- **THEN** adapter MAY 重新执行 config compose 与 run-folder validation
+- **AND** MUST 直接复用已有 run-local skill snapshot
+
+#### Scenario: validator detects snapshot drift and hard-fails
+- **GIVEN** 当前 attempt 的 run-local skill snapshot 缺失 `SKILL.md`、`assets/runner.json`、schema 文件或 config 文件
+- **WHEN** `AttemptRunFolderValidator` 校验 run folder
+- **THEN** 该 attempt MUST 失败
+- **AND** 系统 MUST NOT 进行隐式修复或 fallback source selection
+
+### Requirement: Adapter MUST consume orchestration-resolved manifests only
+
+adapter/runtime common MUST 将传入的 `SkillManifest` 视为 orchestration 已解析的 canonical source。
+
+#### Scenario: Adapter does not reopen source selection
+- **GIVEN** orchestration 已为当前 attempt 解析 canonical `SkillManifest`
+- **WHEN** adapter/runtime common 准备执行
+- **THEN** adapter MUST 直接消费该 manifest
+- **AND** MUST NOT 重新在 registry、temp staging 或 `skill_override` 之间进行选择
+
+### Requirement: Adapters MUST expose chunk-level runtime output during execution
+The system MUST require runtime adapters to expose stdout/stderr chunks while the subprocess is still running, so the protocol layer can publish live events without waiting for post-hoc audit reconstruction.
+
+#### Scenario: chunk output is forwarded to the live emitter
+- **WHEN** the adapter reads a stdout or stderr chunk from a running engine process
+- **THEN** it MUST forward that chunk to the live runtime emitter before process completion
+
+### Requirement: Stream parsers MUST support incremental live parsing
+The system MUST provide a live parser session contract so engine-specific parsers can emit semantic events incrementally during execution.
+
+#### Scenario: parser session emits semantic output before audit mirror
+- **WHEN** a parser can identify a complete semantic runtime event from incoming chunks
+- **THEN** it MUST be able to emit that event through the live parser session
+- **AND** the resulting FCMP / RASP publication MUST NOT wait for audit materialization
+
+### Requirement: Batch parse MUST remain secondary and backfill-only
+The system MAY retain batch parse utilities for backfill, cold replay, and parity testing, but MUST NOT use batch materialization as the live-authoritative source for SSE.
+
+#### Scenario: active SSE does not require batch materialization
+- **WHEN** an active run has published live events
+- **THEN** the SSE path MUST serve those events directly
+- **AND** MUST NOT invoke batch FCMP/RASP materialization as a prerequisite
+
+### Requirement: Live parser emission order MUST define canonical RASP order
+系统 MUST 将 live parser session 的 emission 顺序定义为 canonical RASP 顺序；audit mirror、batch backfill 和 replay 路径 MUST NOT 改写该顺序。
+
+#### Scenario: parser emission order becomes rasp_seq order
+- **WHEN** `LiveStreamParserSession.feed()` 或 `finish()` 产出多条 emission
+- **THEN** 这些 emission 派生的 RASP MUST 按产出顺序获得 `rasp_seq`
+- **AND** 后续 mirror/replay MUST 保持这一顺序
+
+### Requirement: Parser-originated FCMP MUST be produced as candidates before publication
+系统 MUST 先把 parser-originated FCMP 构造成 candidate，再交给顺序 gate 决定是否发布。
+
+#### Scenario: parser does not publish FCMP directly
+- **WHEN** parser 识别出 assistant 或 diagnostic 语义
+- **THEN** 它 MUST 先产出可被 gate 消费的 candidate
+- **AND** MUST NOT 直接绕过 gate 发布 FCMP
+
+### Requirement: Parser-originated FCMP MUST derive from incremental emissions without retroactive reordering
+系统 MUST 从 parser 的增量 emission 派生 parser-originated FCMP，且 MUST NOT 允许事后 batch rebuild 重新定义它们在 active run 中的相对顺序。
+
+#### Scenario: live parser FCMP is not overwritten by batch backfill
+- **WHEN** parser live session 已发布某条 assistant 或 diagnostic FCMP
+- **THEN** batch parse/backfill MAY 作为 parity 或 fallback 使用
+- **AND** MUST NOT 覆盖该 FCMP 在 active timeline 中的相对顺序
+
+### Requirement: Live parser emissions MUST expose stable correlation anchors
+系统 MUST 要求 live parser emission 为派生的 FCMP/RASP 提供稳定的关联锚点，以支撑跨流因果回溯。
+
+#### Scenario: FCMP and RASP share publish correlation
+- **WHEN** 同一 parser emission 同时派生出 FCMP 和 RASP
+- **THEN** 两者 MUST 共享稳定的 `publish_id`
+- **AND** 后续依赖事件 MAY 通过 `caused_by.publish_id` 建立因果关系
+
+### Requirement: Runtime auth session snapshots MUST distinguish credential observability from completion
+runtime auth session snapshot MUST 将静态凭据观测与 auth session completion 彻底解耦。
+
+#### Scenario: credential presence does not imply completed session
+- **WHEN** engine 本地凭据已经存在
+- **AND** auth session 仍在 challenge-active
+- **THEN** runtime auth snapshot MUST NOT 被视为 completed
+- **AND** MUST NOT 触发 `auth.completed`
+
+### Requirement: Runtime auth handlers MUST not expose readiness as completion semantics
+adapter/runtime auth handlers MUST NOT 再以 readiness-like 字段表达 session completion。
+
+#### Scenario: terminal success is explicit
+- **WHEN** auth session 被标记为 `succeeded` 或 `completed`
+- **THEN** 该状态 MUST 来自显式 completion path
+- **AND** MUST NOT 来自凭据存在性推断
 

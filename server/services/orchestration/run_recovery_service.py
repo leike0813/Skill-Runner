@@ -1,16 +1,132 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from server.models import InteractiveErrorCode, RunStatus
 from server.runtime.session.statechart import SessionEvent, waiting_recovery_event
+from server.services.orchestration.workspace_manager import workspace_manager
 
 logger = logging.getLogger(__name__)
 
 
+def _parse_utc(raw: Any) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().replace("Z", "+00:00")
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 class RunRecoveryService:
+    async def _reconcile_missing_run_dir_before_resume_redrive(
+        self,
+        *,
+        request_id: str,
+        run_id: str,
+        run_store_backend: Any,
+    ) -> None:
+        reason = "missing_run_dir_before_resume_redrive"
+        await run_store_backend.update_run_status(run_id, RunStatus.FAILED)
+        await run_store_backend.set_recovery_info(
+            run_id,
+            recovery_state="failed_reconciled",
+            recovery_reason=reason,
+        )
+        await run_store_backend.clear_pending_interaction(request_id)
+        await run_store_backend.clear_pending_auth_method_selection(request_id)
+        await run_store_backend.clear_pending_auth(request_id)
+        await run_store_backend.clear_engine_session_handle(request_id)
+        await run_store_backend.clear_auth_resume_context(request_id)
+
+    async def redrive_resume_ticket_if_needed(
+        self,
+        *,
+        request_id: str,
+        run_id: str,
+        engine_name: str,
+        run_store_backend: Any,
+        resume_run_job: Callable[..., Any] | None,
+        workspace_backend: Any | None = None,
+        recovery_reason: str | None = None,
+    ) -> bool:
+        if not request_id or not run_id or resume_run_job is None:
+            return False
+        resume_ticket = await run_store_backend.get_resume_ticket(request_id)
+        if not isinstance(resume_ticket, dict) or resume_ticket.get("state") not in {"issued", "dispatched"}:
+            return False
+        request_record = await run_store_backend.get_request(request_id)
+        if not isinstance(request_record, dict):
+            return False
+        resolved_workspace = workspace_backend or workspace_manager
+        run_dir = resolved_workspace.get_run_dir(run_id)
+        if run_dir is None or not run_dir.exists():
+            logger.warning(
+                "Skip queued resume redrive because run_dir is missing: request_id=%s run_id=%s ticket_id=%s",
+                request_id,
+                run_id,
+                resume_ticket.get("ticket_id"),
+            )
+            await self._reconcile_missing_run_dir_before_resume_redrive(
+                request_id=request_id,
+                run_id=run_id,
+                run_store_backend=run_store_backend,
+            )
+            return True
+        effective_runtime_options = request_record.get(
+            "effective_runtime_options",
+            request_record.get("runtime_options", {}),
+        )
+        options = {
+            **request_record.get("engine_options", {}),
+            **(effective_runtime_options if isinstance(effective_runtime_options, dict) else {}),
+            "__attempt_number_override": int(resume_ticket.get("target_attempt") or 1),
+            "__resume_ticket_id": str(resume_ticket.get("ticket_id") or ""),
+            "__resume_cause": str(resume_ticket.get("cause") or ""),
+        }
+        payload = resume_ticket.get("payload")
+        if isinstance(payload, dict):
+            if isinstance(payload.get("interaction_id"), int):
+                options["__interactive_reply_interaction_id"] = payload.get("interaction_id")
+            if "response" in payload:
+                options["__interactive_reply_payload"] = payload.get("response")
+            if isinstance(payload.get("resolution_mode"), str):
+                options["__interactive_resolution_mode"] = payload.get("resolution_mode")
+        temp_request_id: str | None = None
+        with contextlib.suppress(Exception):
+            from server.services.skill.temp_skill_run_store import temp_skill_run_store
+
+            temp_record = await temp_skill_run_store.get_request(request_id)
+            if isinstance(temp_record, dict):
+                temp_request_id = request_id
+        task = resume_run_job(
+            run_id=run_id,
+            skill_id=str(request_record.get("skill_id") or ""),
+            engine_name=engine_name,
+            options=options,
+            cache_key=None,
+            temp_request_id=temp_request_id,
+        )
+        if asyncio.iscoroutine(task):
+            asyncio.create_task(task)
+        if recovery_reason:
+            await run_store_backend.set_recovery_info(
+                run_id,
+                recovery_state="recovered_waiting",
+                recovery_reason=recovery_reason,
+            )
+        return True
+
     async def recover_incomplete_runs_on_startup(
         self,
         *,
@@ -48,6 +164,7 @@ class RunRecoveryService:
         run_store_backend: Any,
         is_valid_session_handle: Callable[[Any], bool],
         mark_restart_reconciled_failed: Callable[..., Awaitable[None]],
+        resume_run_job: Callable[..., Any] | None = None,
     ) -> None:
         request_id = str(record.get("request_id") or "")
         run_id = str(record.get("run_id") or "")
@@ -84,6 +201,56 @@ class RunRecoveryService:
             )
             return
 
+        if run_status == RunStatus.WAITING_AUTH:
+            pending_auth_method_selection = await run_store_backend.get_pending_auth_method_selection(request_id)
+            pending_auth = await run_store_backend.get_pending_auth(request_id)
+            expires_at = _parse_utc((pending_auth or {}).get("expires_at"))
+            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+                await mark_restart_reconciled_failed(
+                    request_id=request_id,
+                    run_id=run_id,
+                    engine_name=engine_name,
+                    error_code=InteractiveErrorCode.SESSION_RESUME_FAILED.value,
+                    reason="pending auth session expired before restart recovery",
+                )
+                return
+            if isinstance(pending_auth_method_selection, dict):
+                await run_store_backend.update_run_status(run_id, RunStatus.WAITING_AUTH)
+                await run_store_backend.set_recovery_info(
+                    run_id,
+                    recovery_state="recovered_waiting",
+                    recovery_reason="resumable_auth_waiting_preserved",
+                )
+                return
+            if isinstance(pending_auth, dict):
+                await mark_restart_reconciled_failed(
+                    request_id=request_id,
+                    run_id=run_id,
+                    engine_name=engine_name,
+                    error_code=InteractiveErrorCode.SESSION_RESUME_FAILED.value,
+                    reason="pending auth session cannot resume after restart",
+                )
+                return
+            await mark_restart_reconciled_failed(
+                request_id=request_id,
+                run_id=run_id,
+                engine_name=engine_name,
+                error_code=InteractiveErrorCode.SESSION_RESUME_FAILED.value,
+                reason="missing pending auth session after restart",
+            )
+            return
+
+        if run_status == RunStatus.QUEUED:
+            redriven = await self.redrive_resume_ticket_if_needed(
+                request_id=request_id,
+                run_id=run_id,
+                engine_name=engine_name,
+                run_store_backend=run_store_backend,
+                resume_run_job=resume_run_job,
+                recovery_reason="resume_ticket_redriven",
+            )
+            if redriven:
+                return
         if run_status in {RunStatus.QUEUED, RunStatus.RUNNING}:
             await mark_restart_reconciled_failed(
                 request_id=request_id,
@@ -122,7 +289,10 @@ class RunRecoveryService:
             recovery_reason=reason,
         )
         await run_store_backend.clear_pending_interaction(request_id)
+        await run_store_backend.clear_pending_auth_method_selection(request_id)
+        await run_store_backend.clear_pending_auth(request_id)
         await run_store_backend.clear_engine_session_handle(request_id)
+        await run_store_backend.clear_auth_resume_context(request_id)
         adapter = adapters.get(engine_name)
         if adapter is not None:
             with contextlib.suppress(Exception):
@@ -130,3 +300,6 @@ class RunRecoveryService:
 
     async def cleanup_orphan_runtime_bindings(self, records: list[dict[str, Any]]) -> None:
         _ = records
+
+
+run_recovery_service = RunRecoveryService()

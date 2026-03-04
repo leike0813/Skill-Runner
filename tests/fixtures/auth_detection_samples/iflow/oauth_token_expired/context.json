@@ -1,0 +1,22 @@
+{
+  "sample_id": "oauth_token_expired",
+  "source_run_id": "20260302T125912-iflow-d5c11e1c",
+  "engine": "iflow",
+  "provider_id": null,
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "iFlow reports oauth2 token expired and requires reauthentication",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "oauth_reauth",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "SERVER_OAUTH2_REQUIRED is the strongest engine-level auth-required marker."
+  ]
+}

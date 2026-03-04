@@ -1,0 +1,22 @@
+{
+  "sample_id": "minimax_login_fail_401",
+  "source_run_id": "20260302T123814-opencode-83b5ff21",
+  "engine": "opencode",
+  "provider_id": "minimax",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "fake API key causes provider 401 with authentication_error payload",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "api_key_missing",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Structured OpenCode APIError with statusCode=401 and provider responseBody.auth error."
+  ]
+}

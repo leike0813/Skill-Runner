@@ -16,6 +16,50 @@ async def _request(method: str, path: str, **kwargs):
         return await client.request(method, path, **kwargs)
 
 
+def _write_state_file(
+    run_dir,
+    *,
+    request_id: str,
+    status: str,
+    current_attempt: int = 1,
+    error=None,
+    pending_owner=None,
+    pending_payload=None,
+    pending_interaction_id=None,
+    pending_auth_session_id=None,
+):
+    state_dir = run_dir / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "request_id": request_id,
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-01-01T00:00:00",
+                "current_attempt": current_attempt,
+                "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
+                "pending": {
+                    "owner": pending_owner,
+                    "interaction_id": pending_interaction_id,
+                    "auth_session_id": pending_auth_session_id,
+                    "payload": pending_payload,
+                },
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {},
+                "error": error,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path",
@@ -77,7 +121,7 @@ async def test_v1_oauth_proxy_grouped_routes(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -92,7 +136,7 @@ async def test_v1_oauth_proxy_grouped_routes(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -107,7 +151,7 @@ async def test_v1_oauth_proxy_grouped_routes(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:05Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": True,
         },
     )
@@ -122,7 +166,7 @@ async def test_v1_oauth_proxy_grouped_routes(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:03Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -174,7 +218,7 @@ async def test_v1_cli_delegate_grouped_routes(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -203,7 +247,7 @@ async def test_v1_engine_auth_session_start_route(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -246,7 +290,7 @@ async def test_v1_engine_auth_session_start_route_passes_auth_method(monkeypatch
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -283,7 +327,7 @@ async def test_v1_engine_auth_session_start_route_iflow(monkeypatch):
             "created_at": "2026-02-26T00:00:00Z",
             "updated_at": "2026-02-26T00:00:01Z",
             "expires_at": "2026-02-26T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -318,7 +362,7 @@ async def test_v1_engine_auth_session_start_route_opencode(monkeypatch):
             "created_at": "2026-02-26T00:00:00Z",
             "updated_at": "2026-02-26T00:00:01Z",
             "expires_at": "2026-02-26T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -384,7 +428,7 @@ async def test_v1_engine_auth_session_status_and_cancel(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -402,7 +446,7 @@ async def test_v1_engine_auth_session_status_and_cancel(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:03Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": "Canceled by user",
             "exit_code": None,
             "terminal": True,
@@ -435,7 +479,7 @@ async def test_v1_engine_auth_session_input(monkeypatch):
             "created_at": "2026-02-26T00:00:00Z",
             "updated_at": "2026-02-26T00:00:02Z",
             "expires_at": "2026-02-26T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -467,7 +511,7 @@ async def test_v1_engine_auth_session_input_iflow(monkeypatch):
             "created_at": "2026-02-26T00:00:00Z",
             "updated_at": "2026-02-26T00:00:02Z",
             "expires_at": "2026-02-26T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -670,6 +714,8 @@ async def test_v1_runs_route_available():
 async def test_v1_jobs_interaction_routes_available():
     pending = await _request("GET", "/v1/jobs/does-not-exist/interaction/pending")
     assert pending.status_code == 404
+    auth_session = await _request("GET", "/v1/jobs/does-not-exist/auth/session")
+    assert auth_session.status_code == 404
     reply = await _request(
         "POST",
         "/v1/jobs/does-not-exist/interaction/reply",
@@ -694,6 +740,8 @@ async def test_v1_temp_skill_runs_cancel_route_available():
 async def test_v1_temp_skill_runs_interaction_and_history_routes_available():
     pending = await _request("GET", "/v1/temp-skill-runs/does-not-exist/interaction/pending")
     assert pending.status_code == 404
+    auth_session = await _request("GET", "/v1/temp-skill-runs/does-not-exist/auth/session")
+    assert auth_session.status_code == 404
 
     reply = await _request(
         "POST",
@@ -704,6 +752,8 @@ async def test_v1_temp_skill_runs_interaction_and_history_routes_available():
 
     history = await _request("GET", "/v1/temp-skill-runs/does-not-exist/events/history")
     assert history.status_code == 404
+    chat = await _request("GET", "/v1/temp-skill-runs/does-not-exist/chat/history")
+    assert chat.status_code == 404
 
     logs_range = await _request(
         "GET",
@@ -731,10 +781,7 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("hello", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("err", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, request_id="req-1", status="succeeded")
 
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
@@ -774,9 +821,13 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
+    _write_state_file(
+        run_dir,
+        request_id="temp-1",
+        status="waiting_user",
+        pending_owner="waiting_user",
+        pending_payload={"interaction_id": 1, "kind": "open_text", "prompt": "continue"},
+        pending_interaction_id=1,
     )
 
     monkeypatch.setattr(
@@ -810,6 +861,37 @@ async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_v1_jobs_result_requires_terminal_projection(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run-terminal-gate"
+    _write_state_file(
+        run_dir,
+        request_id="req-terminal-gate",
+        status="waiting_user",
+        current_attempt=2,
+        pending_owner="waiting_user",
+        pending_payload=None,
+    )
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_source_adapter.run_store.get_request",
+        AsyncMock(
+            return_value={
+                "request_id": "req-terminal-gate",
+                "run_id": "run-terminal-gate",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_source_adapter.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+
+    response = await _request("GET", "/v1/jobs/req-terminal-gate/result")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "terminal result not ready"
+
+
+@pytest.mark.asyncio
 async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-2"
     audit_dir = run_dir / ".audit"
@@ -817,9 +899,13 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
     stdout_path = audit_dir / "stdout.1.log"
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     stdout_path.write_text("part-1\n", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
+    _write_state_file(
+        run_dir,
+        request_id="req-2",
+        status="waiting_user",
+        pending_owner="waiting_user",
+        pending_interaction_id=1,
+        pending_payload={"interaction_id": 1},
     )
 
     monkeypatch.setattr(
@@ -853,10 +939,7 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
     assert "\"user.input.required\"" in first.text
 
     stdout_path.write_text("part-1\npart-2\n", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:01"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, request_id="req-2", status="succeeded")
 
     second = await _request(
         "GET",
@@ -873,15 +956,11 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("before-cancel\n", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps(
-            {
-                "status": "canceled",
-                "updated_at": "2026-01-01T00:00:00",
-                "error": {"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
-            }
-        ),
-        encoding="utf-8",
+    _write_state_file(
+        run_dir,
+        request_id="req-canceled",
+        status="canceled",
+        error={"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
@@ -906,7 +985,8 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
 
     response = await _request("GET", "/v1/jobs/req-canceled/events")
     assert response.status_code == 200
-    assert "\"conversation.failed\"" in response.text
+    assert "\"conversation.state.changed\"" in response.text
+    assert "\"to\": \"canceled\"" in response.text
     assert "\"CANCELED\"" in response.text
 
 
@@ -923,11 +1003,16 @@ async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
         lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
-        "server.routers.jobs.run_observability_service.list_event_history",
-        AsyncMock(return_value=[
-            {"seq": 2, "event": {"type": "agent.message.final"}},
-            {"seq": 3, "event": {"type": "lifecycle.run.terminal"}},
-        ]),
+        "server.runtime.observability.run_read_facade.run_observability_service.get_event_history_payload",
+        AsyncMock(return_value={
+            "events": [
+                {"seq": 2, "type": "assistant.message.final"},
+                {"seq": 3, "type": "conversation.state.changed", "data": {"to": "succeeded"}},
+            ],
+            "source": "live",
+            "cursor_floor": 2,
+            "cursor_ceiling": 3,
+        }),
     )
 
     response = await _request(
@@ -939,6 +1024,42 @@ async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
     assert payload["request_id"] == "req-history"
     assert payload["count"] == 2
     assert payload["events"][0]["seq"] == 2
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_chat_history_route(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run-chat-history"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-chat-history"}),
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_read_facade.run_observability_service.get_chat_history_payload",
+        AsyncMock(return_value={
+            "events": [
+                {"seq": 2, "role": "user", "text": "hello"},
+                {"seq": 3, "role": "assistant", "text": "world"},
+            ],
+            "source": "live",
+            "cursor_floor": 2,
+            "cursor_ceiling": 3,
+        }),
+    )
+
+    response = await _request(
+        "GET",
+        "/v1/jobs/req-chat-history/chat/history?from_seq=2&to_seq=3",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request_id"] == "req-chat-history"
+    assert payload["count"] == 2
+    assert payload["events"][0]["role"] == "user"
 
 
 @pytest.mark.asyncio

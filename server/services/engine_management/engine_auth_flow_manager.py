@@ -80,7 +80,6 @@ class _AuthSession:
     auth_url: Optional[str] = None
     user_code: Optional[str] = None
     error: Optional[str] = None
-    auth_ready: bool = False
     exit_code: Optional[int] = None
     driver: str = "codex"
     driver_state: Any = None
@@ -147,6 +146,7 @@ class EngineAuthFlowManager:
             handlers=cast(Any, self._engine_auth_handlers),
             state_store=self._callback_state_store,
         )
+        self._completion_listeners: list[Any] = []
         self._session_start_planner = AuthSessionStartPlanner(
             self,
             planners=cast(Any, self._engine_auth_handlers),
@@ -278,6 +278,18 @@ class EngineAuthFlowManager:
     def stop_callback_listener(self, *, channel: str) -> None:
         self._callback_listener_registry.stop(channel=channel)
 
+    def register_completion_listener(self, listener: Any) -> None:
+        if listener in self._completion_listeners:
+            return
+        self._completion_listeners.append(listener)
+
+    def _notify_completion_listeners(self, snapshot: Dict[str, Any]) -> None:
+        for listener in tuple(self._completion_listeners):
+            try:
+                listener(snapshot)
+            except Exception:
+                logger.warning("engine auth completion listener failed", exc_info=True)
+
     def _engine_handler_for(self, engine: str) -> Any:
         return self._engine_auth_handlers.get(engine.strip().lower())
 
@@ -311,7 +323,6 @@ class EngineAuthFlowManager:
             {
                 "status": session.status,
                 "error": session.error,
-                "auth_ready": bool(session.auth_ready),
             },
         )
         handler = self._engine_handler_for(session.engine)
@@ -373,10 +384,6 @@ class EngineAuthFlowManager:
             return fallback
         tail = rows[-3:]
         return " | ".join(tail)
-
-    def _collect_auth_ready(self, engine: str) -> bool:
-        snapshot = self.agent_manager.collect_auth_status().get(engine, {})
-        return bool(snapshot.get("auth_ready"))
 
     def _build_openai_device_start_error(self, exc: Exception) -> ValueError:
         if isinstance(exc, OpenAIOAuthError) and exc.status_code is not None:
@@ -483,7 +490,6 @@ class EngineAuthFlowManager:
             "created_at": _utc_iso(session.created_at),
             "updated_at": _utc_iso(session.updated_at),
             "expires_at": _utc_iso(session.expires_at),
-            "auth_ready": bool(session.auth_ready),
             "error": session.error,
             "exit_code": session.exit_code,
             "execution_mode": session.execution_mode,
@@ -563,12 +569,14 @@ class EngineAuthFlowManager:
         code: str | None = None,
         error: str | None = None,
         ) -> Dict[str, Any]:
-        return self._session_callback_completer.complete_callback(
+        snapshot = self._session_callback_completer.complete_callback(
             channel=channel,
             state=state,
             code=code,
             error=error,
         )
+        self._notify_completion_listeners(snapshot)
+        return snapshot
 
     def get_session(self, session_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -601,11 +609,6 @@ class EngineAuthFlowManager:
                     termination_error = str(exc)
                 session.status = "canceled"
                 session.updated_at = _utc_now()
-                session.auth_ready = (
-                    self._collect_auth_ready(session.engine)
-                    if session.engine in {"codex", "opencode"}
-                    else False
-                )
                 session.error = session.error or "Canceled by user"
                 if termination_error:
                     session.error = f"{session.error} (terminate error: {termination_error})"

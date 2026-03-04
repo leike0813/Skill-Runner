@@ -1,0 +1,22 @@
+{
+  "sample_id": "google_api_key_missing",
+  "source_run_id": "20260302T125146-opencode-318a9085",
+  "engine": "opencode",
+  "provider_id": "google",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "provider auth missing after removing AntiGravity accounts",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "api_key_missing",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "ProviderAuthError emitted directly by OpenCode with providerID=google."
+  ]
+}

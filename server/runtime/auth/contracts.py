@@ -18,7 +18,7 @@ class AuthDriverContext:
 @dataclass(frozen=True)
 class AuthDriverResult:
     status: str
-    auth_ready: bool
+    credential_state: str = "unknown"
     auth_url: Optional[str] = None
     user_code: Optional[str] = None
     error: Optional[str] = None

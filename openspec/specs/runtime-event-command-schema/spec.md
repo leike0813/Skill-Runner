@@ -2,9 +2,7 @@
 
 ## Purpose
 定义运行时核心事件/命令的 JSON Schema 合同与校验策略。
-
 ## Requirements
-
 ### Requirement: 系统 MUST 维护单一协议 Schema SSOT
 系统 MUST 维护覆盖 FCMP/RASP/orchestrator/pending/history/resume-command 的统一 schema 文档。
 
@@ -13,11 +11,22 @@
 - **THEN** 存在单一 schema 文件作为 SSOT
 
 ### Requirement: 写入路径 MUST 严格校验
-系统 MUST 在协议对象落盘/输出前执行 schema 校验。
+系统 MUST 在协议对象落盘/输出前执行 schema 校验，并确保 auth orchestrator event 的 canonical 写入路径被 schema 完整覆盖。
 
 #### Scenario: 不合法事件写入
 - **WHEN** 协议对象不满足 schema
 - **THEN** 写入被拒绝并返回 `PROTOCOL_SCHEMA_VIOLATION`
+
+#### Scenario: auth orchestrator event canonical payload 通过校验
+- **WHEN** orchestration 写入 `auth.session.created`、`auth.method.selected`、`auth.session.busy`、`auth.input.accepted`、`auth.session.completed`、`auth.session.failed` 或 `auth.session.timed_out`
+- **THEN** schema MUST 接受这些 canonical payload
+- **AND** 系统 MUST NOT 因 schema 漂移把合法 auth submit/complete/fail 路径升级成 `500`
+
+#### Scenario: auth.input.accepted 接受 canonical timestamp 字段
+- **WHEN** orchestration 为 callback/code 提交写入 `auth.input.accepted`
+- **THEN** 其 `data` MAY 包含 canonical `accepted_at`
+- **AND** schema MUST 明确允许该字段
+- **AND** 仍 MUST 拒绝未声明的额外字段
 
 ### Requirement: 读取路径 MUST 兼容历史脏数据
 系统 MUST 在读取历史对象时过滤不合规行，不中断整体读取。
@@ -41,3 +50,56 @@
 - **WHEN** 事件 payload 满足 schema
 - **AND** FCMP 状态映射不满足不变量合同
 - **THEN** 属性/模型测试失败
+
+### Requirement: runtime protocol payloads MUST expose resume ownership metadata
+The runtime protocol schema MUST support resume ownership metadata without breaking backward compatibility.
+
+#### Scenario: resume-related FCMP or orchestrator payload is emitted
+- **GIVEN** the system emits resume-related FCMP or orchestrator payloads
+- **WHEN** the payload is validated against the runtime schema
+- **THEN** it MUST support `resume_cause`, `pending_owner`, `source_attempt`, `target_attempt`, `resume_ticket_id`, and `ticket_consumed`
+- **AND** these fields MUST remain optional for backward compatibility
+
+### Requirement: pending and history payloads MUST preserve attempt attribution
+Pending and history payloads MUST carry attempt attribution in schema-supported fields.
+
+#### Scenario: pending interaction or interaction history row is written
+- **GIVEN** the system writes pending interaction or interaction history payloads
+- **WHEN** the payload is validated
+- **THEN** the schema MUST support `source_attempt`
+- **AND** read paths MUST continue to tolerate legacy rows that predate this field
+
+### Requirement: protocol and read-model schemas MUST not encode conversation capability by state name
+Schema contracts MUST let clients read effective runtime behavior without inferring it from `waiting_auth`.
+
+#### Scenario: client inspects waiting-state payloads
+- **GIVEN** the backend emits waiting-state protocol payloads or status/read-model responses
+- **WHEN** the client needs to decide whether a run is session-capable
+- **THEN** the contract MUST expose explicit conversation capability fields on read-model/status surfaces
+- **AND** `waiting_auth` MUST NOT imply `interactive`
+
+### Requirement: auth payload MUST expose phase and timeout metadata
+Auth-related FCMP payloads MUST expose phase metadata and timeout metadata.
+
+#### Scenario: backend emits auth-related FCMP payload
+- **GIVEN** the system emits auth-related FCMP payload
+- **WHEN** payload is consumed by UI or API clients
+- **THEN** payload MUST include `phase`
+- **AND** payload SHOULD include `available_methods`, `selected_method`, `timeout_sec`, and `expires_at`
+
+### Requirement: pending auth payload MUST support callback URL input kind
+Pending auth challenge payload MUST support callback URL input kind.
+
+#### Scenario: backend emits pending auth challenge
+- **GIVEN** the system emits pending auth challenge payload
+- **WHEN** challenge kind or input kind is validated
+- **THEN** it MUST support `callback_url`
+
+### Requirement: orchestrator schema MUST 识别 interaction.reply.accepted
+runtime protocol schema MUST 将 `interaction.reply.accepted` 视为一等 orchestrator event，并校验其稳定的 reply-acceptance 元数据。
+
+#### Scenario: reply-accepted orchestrator event 校验成功
+- **WHEN** 后端输出一条类型为 `interaction.reply.accepted` 的 orchestrator event
+- **THEN** schema 校验 MUST 接受包含 `interaction_id`、`accepted_at` 和 `response_preview` 的 payload
+- **AND** 下游协议翻译 MAY 依赖这些字段，而无需绕过 schema 校验
+

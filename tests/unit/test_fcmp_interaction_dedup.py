@@ -50,21 +50,25 @@ def test_build_fcmp_events_deduplicates_waiting_prompt_and_keeps_reply_preview()
         {
             "event_type": "reply",
             "interaction_id": 1,
+            "source_attempt": 1,
             "created_at": "2026-02-24T00:00:01",
             "payload": {
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:02",
                 "response": {"text": "我的回复"},
+                "source_attempt": 1,
             },
         },
         {
             "event_type": "reply",
             "interaction_id": 7,
+            "source_attempt": 1,
             "created_at": "2026-02-24T00:00:03",
             "payload": {
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:04",
                 "response": {"text": "旧回复"},
+                "source_attempt": 1,
             },
         },
     ]

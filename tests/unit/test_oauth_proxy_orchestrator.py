@@ -16,7 +16,7 @@ class _ManagerStub:
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         }
 
@@ -30,7 +30,7 @@ class _ManagerStub:
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         }
 

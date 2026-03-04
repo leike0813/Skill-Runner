@@ -19,12 +19,38 @@ from server.services.engine_management.engine_interaction_gate import EngineInte
 from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 
 
+@pytest.fixture(autouse=True)
+def _stub_openai_callback_listener(monkeypatch):
+    monkeypatch.setattr(
+        "server.engines.common.callbacks.openai_local_callback_server.set_callback_handler",
+        lambda _handler: None,
+    )
+    monkeypatch.setattr(
+        "server.engines.common.callbacks.openai_local_callback_server.start",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "server.engines.common.callbacks.openai_local_callback_server.stop",
+        lambda: None,
+    )
+
+
 def _set_engine_auth_log_persistence(enabled: bool) -> bool:
     previous = bool(config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED)
     config.defrost()
     config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED = enabled
     config.freeze()
     return previous
+
+
+def _require_pty() -> None:
+    try:
+        master_fd, slave_fd = os.openpty()
+    except OSError as exc:
+        pytest.skip(f"PTYs are unavailable in this environment: {exc}")
+    else:
+        os.close(master_fd)
+        os.close(slave_fd)
 
 
 class _FakeProfile:
@@ -56,10 +82,10 @@ class _FakeCliManager:
         auth_file = self.profile.agent_home / ".codex" / "auth.json"
         opencode_auth = self.profile.agent_home / ".local" / "share" / "opencode" / "auth.json"
         return {
-            "codex": {"auth_ready": auth_file.exists()},
-            "gemini": {"auth_ready": False},
-            "iflow": {"auth_ready": False},
-            "opencode": {"auth_ready": opencode_auth.exists()},
+            "codex": {"credential_state": "present" if auth_file.exists() else "missing"},
+            "gemini": {"credential_state": "missing"},
+            "iflow": {"credential_state": "missing"},
+            "opencode": {"credential_state": "present" if opencode_auth.exists() else "missing"},
         }
 
 
@@ -168,7 +194,6 @@ def test_engine_auth_flow_manager_codex_oauth_proxy_uses_protocol_flow(tmp_path:
 
         final = manager.input_session(started["session_id"], "text", "http://localhost/callback?code=test-code")
         assert final["status"] == "succeeded"
-        assert final["auth_ready"] is True
         assert final["manual_fallback_used"] is True
         assert submit_calls == ["http://localhost/callback?code=test-code"]
         assert final["auth_url"].startswith("https://auth.openai.com/oauth/authorize?")
@@ -501,7 +526,12 @@ exit 0
         trust_manager=_TrustSpy(),
     )
 
-    started = manager.start_session("codex", "auth", auth_method="auth_code_or_url")
+    started = manager.start_session(
+        "codex",
+        "auth",
+        transport="cli_delegate",
+        auth_method="auth_code_or_url",
+    )
     canceled = manager.cancel_session(started["session_id"])
     assert canceled["status"] == "canceled"
     assert canceled["terminal"] is True
@@ -525,7 +555,12 @@ exit 0
     )
     monkeypatch.setattr(manager, "_ttl_seconds", lambda: 1)
 
-    started = manager.start_session("codex", "auth", auth_method="auth_code_or_url")
+    started = manager.start_session(
+        "codex",
+        "auth",
+        transport="cli_delegate",
+        auth_method="auth_code_or_url",
+    )
     time.sleep(1.2)
     payload = manager.get_session(started["session_id"])
     assert payload["status"] == "expired"
@@ -595,11 +630,6 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_uses_protocol_flow(tmp_path
         "submit_input",
         lambda *_args, **_kwargs: {"google_account_email": "test@example.com"},
     )
-    monkeypatch.setattr(
-        manager,
-        "_collect_auth_ready",
-        lambda engine: engine == "gemini",
-    )
     final = manager.input_session(
         started["session_id"],
         "text",
@@ -630,11 +660,6 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_callback_state_once(tmp_pat
         manager._gemini_oauth_proxy_flow,
         "complete_with_code",
         lambda **_kwargs: {"google_account_email": "test@example.com"},
-    )
-    monkeypatch.setattr(
-        manager,
-        "_collect_auth_ready",
-        lambda engine: engine == "gemini",
     )
     started = manager.start_session(
         "gemini",
@@ -685,8 +710,6 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_manual_success(tmp_path: Pat
         "submit_input",
         lambda *_args, **_kwargs: {"iflow_api_key_present": True, "iflow_user_name": "iflow-user"},
     )
-    monkeypatch.setattr(manager, "_collect_auth_ready", lambda engine: engine == "iflow")
-
     started = manager.start_session(
         "iflow",
         "auth",
@@ -736,8 +759,6 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_state_once(tmp_path
         "complete_with_code",
         lambda **_kwargs: {"iflow_api_key_present": True, "iflow_user_name": "iflow-user"},
     )
-    monkeypatch.setattr(manager, "_collect_auth_ready", lambda engine: engine == "iflow")
-
     started = manager.start_session(
         "iflow",
         "auth",
@@ -870,6 +891,7 @@ def _wait_until_status(
 
 
 def test_engine_auth_flow_manager_gemini_submit_success(tmp_path: Path):
+    _require_pty()
     command_path = _write_script(
         tmp_path / "fake-gemini",
         """
@@ -910,10 +932,10 @@ sleep 0.2
 
     final = _wait_until_status(manager, started["session_id"], {"succeeded"})
     assert final["status"] == "succeeded"
-    assert final["auth_ready"] is True
 
 
 def test_engine_auth_flow_manager_gemini_already_authenticated_triggers_reauth(tmp_path: Path):
+    _require_pty()
     command_path = _write_script(
         tmp_path / "fake-gemini-authenticated",
         """
@@ -948,6 +970,7 @@ sleep 0.2
 
 
 def test_engine_auth_flow_manager_iflow_submit_success(tmp_path: Path):
+    _require_pty()
     command_path = _write_script(
         tmp_path / "fake-iflow",
         """
@@ -988,7 +1011,6 @@ sleep 0.2
 
     final = _wait_until_status(manager, started["session_id"], {"succeeded"})
     assert final["status"] == "succeeded"
-    assert final["auth_ready"] is True
 
 
 def test_engine_auth_flow_manager_iflow_rejects_wrong_method(tmp_path: Path):
@@ -1030,7 +1052,6 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
 
     submitted = manager.input_session(started["session_id"], "api_key", "sk-test-123")
     assert submitted["status"] == "succeeded"
-    assert submitted["auth_ready"] is True
 
     auth_path = profile.agent_home / ".local" / "share" / "opencode" / "auth.json"
     assert auth_path.exists()
@@ -1217,6 +1238,7 @@ def test_engine_auth_flow_manager_opencode_google_oauth_proxy_rejects_device_aut
 
 
 def test_engine_auth_flow_manager_opencode_google_cancel_restores_accounts(tmp_path: Path):
+    _require_pty()
     command_path = _write_script(tmp_path / "fake-opencode", "sleep 10")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(

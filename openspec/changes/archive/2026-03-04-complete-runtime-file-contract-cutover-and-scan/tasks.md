@@ -1,0 +1,8 @@
+- [x] 1. Add the new change specs for file contract, dispatch state, audit contract, and data reset.
+- [x] 2. Update SSOT docs and machine-readable contracts to remove legacy file semantics.
+- [x] 3. Stop production code from creating or writing legacy run files and directories.
+- [x] 4. Remove legacy fallback reads for new runs in observability, routers, and UI-facing reads.
+- [x] 5. Update data reset service and reset script to enforce the new canonical directory skeleton.
+- [x] 6. Migrate integration/unit tests from legacy files to `.state/.audit/result`.
+- [x] 7. Add runtime file contract scan tests and run targeted plus full pytest validation.
+- [x] 8. Switch temp skill upload from staging-plus-copy to direct run-local materialization and remove runtime staging dependencies.

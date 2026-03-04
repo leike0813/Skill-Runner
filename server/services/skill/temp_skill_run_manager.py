@@ -1,6 +1,7 @@
 import json
 import logging
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class TempSkillRunManager:
-    """Validates, stages, and cleans up temporary skill packages."""
+    """Validates uploads and maintains import-only temp request metadata."""
 
     def __init__(self) -> None:
         self.validator = SkillPackageValidator()
@@ -28,7 +29,7 @@ class TempSkillRunManager:
     def request_root(self, request_id: str) -> Path:
         return Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / request_id
 
-    async def stage_skill_package(self, request_id: str, package_bytes: bytes) -> SkillManifest:
+    async def inspect_skill_package(self, request_id: str, package_bytes: bytes) -> SkillManifest:
         max_bytes = int(config.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES)
         if max_bytes > 0 and len(package_bytes) > max_bytes:
             raise ValueError(f"Skill package exceeds size limit ({max_bytes} bytes)")
@@ -36,31 +37,31 @@ class TempSkillRunManager:
             raise ValueError("Uploaded skill package is empty")
 
         request_root = self.create_request_dirs(request_id)
-        package_path = request_root / "skill_package.zip"
-        package_path.write_bytes(package_bytes)
+        with tempfile.TemporaryDirectory(dir=request_root) as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            package_path = tmp_dir / "skill_package.zip"
+            package_path.write_bytes(package_bytes)
 
-        top_level = self.validator.inspect_zip_top_level_from_path(package_path)
-        staged_root = request_root / "staged"
-        self.validator.extract_zip_safe(package_path, staged_root)
-        staged_skill_dir = staged_root / top_level
-        if not staged_skill_dir.exists() or not staged_skill_dir.is_dir():
-            raise ValueError("Skill package extraction failed")
+            top_level = self.validator.inspect_zip_top_level_from_path(package_path)
+            extract_root = tmp_dir / "extract"
+            self.validator.extract_zip_safe(package_path, extract_root)
+            skill_dir = extract_root / top_level
+            if not skill_dir.exists() or not skill_dir.is_dir():
+                raise ValueError("Skill package extraction failed")
 
-        skill_id, _version = self.validator.validate_skill_dir(
-            staged_skill_dir, top_level, require_version=False
-        )
+            skill_id, _version = self.validator.validate_skill_dir(
+                skill_dir, top_level, require_version=False
+            )
 
-        manifest = self._load_manifest(staged_skill_dir)
-        if not manifest.path:
-            raise ValueError("Temporary skill path unavailable after staging")
-        if manifest.id != skill_id:
-            raise ValueError("Skill identity mismatch after manifest load")
+            manifest = self._load_manifest(skill_dir)
+            if not manifest.path:
+                raise ValueError("Temporary skill path unavailable after inspection")
+            if manifest.id != skill_id:
+                raise ValueError("Skill identity mismatch after manifest load")
 
-        await temp_skill_run_store.update_staged_skill(
+        await temp_skill_run_store.update_skill_identity(
             request_id,
             skill_id=skill_id,
-            skill_package_path=str(package_path),
-            staged_skill_dir=str(staged_skill_dir),
         )
         return manifest
 
@@ -89,16 +90,7 @@ class TempSkillRunManager:
         debug_keep_temp: bool = False,
     ) -> None:
         await temp_skill_run_store.update_status(request_id, status=status, error=error)
-        if debug_keep_temp:
-            return
-        try:
-            await self.cleanup_temp_assets(request_id)
-        except (OSError, RuntimeError, ValueError):
-            logger.warning(
-                "Temporary skill cleanup failed for request %s; deferred to scheduled cleanup",
-                request_id,
-                exc_info=True,
-            )
+        _ = debug_keep_temp
 
     async def cleanup_orphans(self) -> Dict[str, int]:
         retention_hours = int(config.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS)

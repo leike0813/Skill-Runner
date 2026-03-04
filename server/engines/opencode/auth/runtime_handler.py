@@ -346,7 +346,6 @@ class OpencodeAuthRuntimeHandler:
                         }
                     },
                     error=f"Failed to clear Google AntiGravity accounts: {exc}",
-                    auth_ready=self._manager._collect_auth_ready("opencode"),  # noqa: SLF001
                     execution_mode="cli_delegate",
                     trust_engine=context.trust_engine,
                     trust_path=context.trust_path,
@@ -432,7 +431,6 @@ class OpencodeAuthRuntimeHandler:
             auth_store.upsert_api_key(session.provider_id, value)
             session.status = "succeeded"
             session.updated_at = _utc_now()
-            session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
             session.error = None
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return
@@ -447,12 +445,10 @@ class OpencodeAuthRuntimeHandler:
                 self._manager._opencode_openai_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return
         if isinstance(runtime, OpencodeGoogleAntigravityOAuthProxySession):
@@ -463,7 +459,6 @@ class OpencodeAuthRuntimeHandler:
                 flow_result = self._manager._opencode_google_antigravity_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
                 audit.update(flow_result)
                 audit["callback_mode"] = "manual"
@@ -471,7 +466,6 @@ class OpencodeAuthRuntimeHandler:
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return
         if isinstance(runtime, OpenAIDeviceProxySession):
@@ -489,22 +483,18 @@ class OpencodeAuthRuntimeHandler:
             now = _utc_now()
             session.updated_at = now
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if now > session.expires_at:
                 self._manager._terminate_process(session)  # noqa: SLF001
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if runtime is None:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if not isinstance(runtime, OpencodeAuthCliSession):
                 session.status = "failed"
                 session.error = "OpenCode auth session driver is missing"
-                session.auth_ready = False
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             self._manager._opencode_flow.refresh(runtime)  # noqa: SLF001
@@ -514,10 +504,6 @@ class OpencodeAuthRuntimeHandler:
             session.user_code = runtime.user_code
             session.error = runtime.error
             session.exit_code = runtime.exit_code
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
-            if session.status == "failed" and session.exit_code == 0 and session.auth_ready:
-                session.status = "succeeded"
-                session.error = None
             if session.status in _TERMINAL_STATUSES:
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
@@ -525,57 +511,47 @@ class OpencodeAuthRuntimeHandler:
             if runtime is None or not isinstance(runtime, OpencodeOpenAIOAuthProxySession):
                 session.status = "failed"
                 session.error = "OpenCode OpenAI OAuth proxy session driver is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             now = _utc_now()
             session.updated_at = now
             runtime.updated_at = now
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if now > session.expires_at:
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status == "starting":
                 session.status = "waiting_user"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         if session.driver == "opencode_google_antigravity_oauth_proxy":
             if runtime is None or not isinstance(runtime, OpencodeGoogleAntigravityOAuthProxySession):
                 session.status = "failed"
                 session.error = "OpenCode Google OAuth proxy session driver is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             now = _utc_now()
             session.updated_at = now
             runtime.updated_at = now
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if now > session.expires_at:
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status == "starting":
                 session.status = "waiting_user"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         if session.driver == "opencode_openai_device_oauth_proxy":
             if runtime is None or not isinstance(runtime, OpenAIDeviceProxySession):
                 session.status = "failed"
                 session.error = "OpenCode OpenAI device auth session driver is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             now = _utc_now()
             session.updated_at = now
@@ -583,7 +559,6 @@ class OpencodeAuthRuntimeHandler:
             if now > session.expires_at:
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status == "starting":
@@ -591,18 +566,15 @@ class OpencodeAuthRuntimeHandler:
             try:
                 tokens = self._manager._openai_device_proxy_flow.poll_once(runtime, now=now)  # noqa: SLF001
                 if tokens is None:
-                    session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                     return True
                 self._manager._opencode_openai_oauth_proxy_flow.complete_with_tokens(tokens)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = self._manager._build_openai_device_error_message(exc)  # noqa: SLF001
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         return False
@@ -623,26 +595,22 @@ class OpencodeAuthRuntimeHandler:
             if error and error.strip():
                 session.status = "failed"
                 session.error = f"OAuth callback error: {error.strip()}"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             normalized_code = (code or "").strip()
             if not normalized_code:
                 session.status = "failed"
                 session.error = "OAuth callback code is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             try:
                 self._manager._opencode_openai_oauth_proxy_flow.complete_with_code(runtime, normalized_code)  # noqa: SLF001
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = f"OAuth callback token exchange failed: {exc}"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if channel == "antigravity" and session.engine == "opencode":
@@ -652,14 +620,12 @@ class OpencodeAuthRuntimeHandler:
             if error and error.strip():
                 session.status = "failed"
                 session.error = f"OAuth callback error: {error.strip()}"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             normalized_code = (code or "").strip()
             if not normalized_code:
                 session.status = "failed"
                 session.error = "OAuth callback code is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             try:
@@ -670,7 +636,6 @@ class OpencodeAuthRuntimeHandler:
                 )
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("opencode")  # noqa: SLF001
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
                 audit.update(flow_result)
@@ -678,7 +643,6 @@ class OpencodeAuthRuntimeHandler:
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = f"OAuth callback token exchange failed: {exc}"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         return False

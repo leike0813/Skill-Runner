@@ -63,7 +63,7 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "json_lines_finder": None,
                     "regex_pattern": None
                 },
-                "workspace_provisioner": {
+                "attempt_workspace": {
                     "workspace_subdir": ".gemini",
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": True,
@@ -104,7 +104,7 @@ def test_validate_adapter_profiles_fail_fast(tmp_path: Path) -> None:
                     "strategy": "first_json_line",
                     "error_message": "x"
                 },
-                "workspace_provisioner": {
+                "attempt_workspace": {
                     "workspace_subdir": ".codex",
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": False,
@@ -157,7 +157,7 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                     "json_lines_finder": None,
                     "regex_pattern": None
                 },
-                "workspace_provisioner": {
+                "attempt_workspace": {
                     "workspace_subdir": ".codex",
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": False,

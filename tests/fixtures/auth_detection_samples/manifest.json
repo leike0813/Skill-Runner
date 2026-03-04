@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "capture_batch": "2026-03-02",
+  "scope": "non_interactive_backend_auth_detection",
+  "samples": [
+    {
+      "sample_id": "iflowcn_unknown_step_finish_loop",
+      "engine": "opencode",
+      "provider_id": "iflowcn",
+      "source_run_id": "20260302T124637-opencode-af75ddb5",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "unknown_auth"
+    },
+    {
+      "sample_id": "minimax_login_fail_401",
+      "engine": "opencode",
+      "provider_id": "minimax",
+      "source_run_id": "20260302T123814-opencode-83b5ff21",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "api_key_missing"
+    },
+    {
+      "sample_id": "moonshot_invalid_authentication",
+      "engine": "opencode",
+      "provider_id": "moonshotai",
+      "source_run_id": "20260302T123922-opencode-cd01b352",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "invalid_api_key"
+    },
+    {
+      "sample_id": "openrouter_missing_auth_header",
+      "engine": "opencode",
+      "provider_id": "openrouter",
+      "source_run_id": "20260302T124207-opencode-92cb26a3",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "api_key_missing"
+    },
+    {
+      "sample_id": "zai_token_expired_or_incorrect",
+      "engine": "opencode",
+      "provider_id": "zai-coding-plan",
+      "source_run_id": "20260302T124311-opencode-f20f3d85",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "auth_expired"
+    },
+    {
+      "sample_id": "deepseek_invalid_api_key",
+      "engine": "opencode",
+      "provider_id": "deepseek",
+      "source_run_id": "20260302T124608-opencode-d6802254",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "invalid_api_key"
+    },
+    {
+      "sample_id": "opencode_invalid_api_key",
+      "engine": "opencode",
+      "provider_id": "opencode",
+      "source_run_id": "20260302T124901-opencode-3cfec290",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "invalid_api_key"
+    },
+    {
+      "sample_id": "google_api_key_missing",
+      "engine": "opencode",
+      "provider_id": "google",
+      "source_run_id": "20260302T125146-opencode-318a9085",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "api_key_missing"
+    },
+    {
+      "sample_id": "openai_missing_bearer_401",
+      "engine": "codex",
+      "provider_id": "openai",
+      "source_run_id": "20260302T125727-codex-1bec66bb",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "api_key_missing"
+    },
+    {
+      "sample_id": "auth_method_not_configured",
+      "engine": "gemini",
+      "provider_id": null,
+      "source_run_id": "20260302T125827-gemini-18a2015e",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "api_key_missing"
+    },
+    {
+      "sample_id": "oauth_token_expired",
+      "engine": "iflow",
+      "provider_id": null,
+      "source_run_id": "20260302T125912-iflow-d5c11e1c",
+      "expected_classification": "auth_required",
+      "expected_subcategory": "oauth_reauth"
+    }
+  ]
+}

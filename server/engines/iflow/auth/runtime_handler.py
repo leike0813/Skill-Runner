@@ -198,7 +198,6 @@ class IFlowAuthRuntimeHandler:
                 flow_result = self._manager._iflow_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("iflow")  # noqa: SLF001
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
                 audit["callback_mode"] = "manual"
                 audit.update(flow_result)
@@ -206,7 +205,6 @@ class IFlowAuthRuntimeHandler:
             except (OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
-                session.auth_ready = self._manager._collect_auth_ready("iflow")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return
         if runtime is None or not isinstance(runtime, IFlowAuthCliSession):
@@ -222,30 +220,25 @@ class IFlowAuthRuntimeHandler:
             if runtime is None or not isinstance(runtime, IFlowOAuthProxySession):
                 session.status = "failed"
                 session.error = "iFlow OAuth proxy session driver is missing"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             now = _utc_now()
             session.updated_at = now
             runtime.updated_at = now
             if session.status in _TERMINAL_STATUSES:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             if now > session.expires_at:
                 session.status = "expired"
                 session.error = "Auth session expired"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             if session.status == "starting":
                 session.status = "waiting_user"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         if session.driver == "iflow":
             if runtime is None or not isinstance(runtime, IFlowAuthCliSession):
                 session.status = "failed"
                 session.error = "iFlow auth session driver is missing"
-                session.auth_ready = False
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             self._manager._iflow_flow.refresh(runtime)  # noqa: SLF001
@@ -255,7 +248,6 @@ class IFlowAuthRuntimeHandler:
             session.user_code = getattr(runtime, "user_code", None)
             session.error = runtime.error
             session.exit_code = runtime.exit_code
-            session.auth_ready = runtime.status == "succeeded"
             if runtime.status in _TERMINAL_STATUSES:
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
@@ -276,20 +268,17 @@ class IFlowAuthRuntimeHandler:
         if runtime is None or not isinstance(runtime, IFlowOAuthProxySession):
             session.status = "failed"
             session.error = "OAuth callback session does not support iFlow callback"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if error and error.strip():
             session.status = "failed"
             session.error = f"OAuth callback error: {error.strip()}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         normalized_code = (code or "").strip()
         if not normalized_code:
             session.status = "failed"
             session.error = "OAuth callback code is missing"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         try:
@@ -300,7 +289,6 @@ class IFlowAuthRuntimeHandler:
             )
             session.status = "succeeded"
             session.error = None
-            session.auth_ready = self._manager._collect_auth_ready("iflow")  # noqa: SLF001
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
             audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
             audit["callback_mode"] = "auto"
@@ -308,7 +296,6 @@ class IFlowAuthRuntimeHandler:
         except (OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = f"OAuth callback token exchange failed: {exc}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
         self._manager._finalize_active_session(session)  # noqa: SLF001
         return True
 

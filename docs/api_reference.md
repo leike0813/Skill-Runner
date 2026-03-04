@@ -360,6 +360,12 @@
 }
 ```
 
+**语义约束**:
+- 该接口现在是 terminal-only。
+- 仅当 run 已进入 `succeeded` / `failed` / `canceled` 时返回 `200`。
+- 若当前仍处于 `queued` / `running` / `waiting_user` / `waiting_auth`，返回 `409`，`detail="terminal result not ready"`。
+- 当前态请改读 `GET /v1/jobs/{request_id}` 与 `GET /v1/jobs/{request_id}/interaction/pending` / `GET /v1/jobs/{request_id}/auth/session`。
+
 ### 获取产物清单 (Get Artifacts)
 `GET /v1/jobs/{request_id}/artifacts`
 
@@ -458,7 +464,7 @@
 - 取消成功后：
   - `status = canceled`
   - `error.code = CANCELED_BY_USER`
-  - SSE 会推送 `conversation.state.changed(to=canceled)` 与 `conversation.failed(error.code=CANCELED)`
+  - SSE 会推送 terminal `conversation.state.changed(to=canceled, data.terminal.error.code=CANCELED)`
 
 ### 清理运行记录 (Cleanup Runs)
 `POST /v1/jobs/cleanup`
@@ -857,7 +863,8 @@ Gemini OAuth 代理说明：
 - 会话启动时服务按需拉起本地 listener（`127.0.0.1:51122`），会话终止时释放。
 - `callback` 模式要求本地 listener 可用，并支持 `/input` 兜底。
 - `auth_code_or_url` 模式使用手工码流，通过 `/input(kind=text|code)` 完成鉴权。
-- 本期仅写入 `~/.gemini/oauth_creds.json`（以及可选 `google_accounts.json`）；不读写 `mcp-oauth-tokens-v2.json`。
+- 鉴权成功后会写入 `~/.gemini/oauth_creds.json`（以及可选 `google_accounts.json`），并确保 `~/.gemini/settings.json` 中 `security.auth.selectedType="oauth-personal"`。
+- 不读写 `mcp-oauth-tokens-v2.json`。
 - 需通过环境变量提供 Google OAuth 凭据：
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`

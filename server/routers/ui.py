@@ -43,6 +43,7 @@ from ..services.engine_management.engine_interaction_gate import EngineInteracti
 from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
+from ..engines.opencode.models.catalog_service import opencode_model_catalog
 from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
 from ..services.engine_management.agent_cli_manager import AgentCliManager
 from ..services.skill.skill_browser import (
@@ -88,6 +89,32 @@ LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
     "SKILL_RUNNER_UI_LEGACY_API_REPLACEMENT_DOC",
     "/docs/api_reference.md#management-api-recommended",
 )
+
+
+def _get_engine_models_context(engine: str, *, error: str | None = None, message: str | None = None) -> dict[str, object]:
+    view = model_registry.get_manifest_view(engine)
+    snapshots_supported = engine != "opencode"
+    return {
+        "engine": engine,
+        "view": view,
+        "error": error,
+        "message": message,
+        "snapshots_supported": snapshots_supported,
+    }
+
+
+def _render_engine_models_panel(
+    request: Request,
+    *,
+    engine: str,
+    error: str | None = None,
+    message: str | None = None,
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="ui/partials/engine_models_panel.html",
+        context=_get_engine_models_context(engine, error=error, message=message),
+    )
 
 
 def _raise_ui_internal_server_error(*, action: str, exc: Exception) -> NoReturn:
@@ -790,21 +817,33 @@ async def ui_engine_upgrade_status(request: Request, request_id: str):
 @router.get("/engines/{engine}/models", response_class=HTMLResponse)
 async def ui_engine_models(request: Request, engine: str, error: str | None = None, message: str | None = None):
     try:
-        view = model_registry.get_manifest_view(engine)
+        context = _get_engine_models_context(engine, error=error, message=message)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    snapshots_supported = engine != "opencode"
     return templates.TemplateResponse(
         request=request,
         name="ui/engine_models.html",
-        context={
-            "engine": engine,
-            "view": view,
-            "error": error,
-            "message": message,
-            "snapshots_supported": snapshots_supported,
-        },
+        context=context,
     )
+
+
+@router.post("/engines/opencode/models/refresh", response_class=HTMLResponse)
+async def ui_engine_models_refresh_opencode(request: Request):
+    try:
+        await opencode_model_catalog.refresh(reason="ui_manual_refresh")
+        return _render_engine_models_panel(
+            request,
+            engine="opencode",
+            message="Model list refreshed",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (OSError, RuntimeError, TypeError) as exc:
+        return _render_engine_models_panel(
+            request,
+            engine="opencode",
+            error=str(exc),
+        )
 
 
 @router.post("/engines/{engine}/models/snapshots")
@@ -812,7 +851,7 @@ async def ui_engine_models_add_snapshot(
     request: Request,
     engine: str,
     id: list[str] = Form(...),
-    display_name: list[str] | None = Form(None),
+    model: list[str] | None = Form(None),
     deprecated: list[str] | None = Form(None),
     notes: list[str] | None = Form(None),
     supported_effort: list[str] | None = Form(None),
@@ -823,7 +862,7 @@ async def ui_engine_models_add_snapshot(
             status_code=303,
         )
 
-    display_name = display_name or []
+    model = model or []
     deprecated = deprecated or []
     notes = notes or []
     supported_effort = supported_effort or []
@@ -832,7 +871,7 @@ async def ui_engine_models_add_snapshot(
         model_id_clean = model_id.strip()
         if not model_id_clean:
             continue
-        display_value = display_name[index].strip() if index < len(display_name) else ""
+        model_value = model[index].strip() if index < len(model) else ""
         notes_value = notes[index].strip() if index < len(notes) else ""
         deprecated_raw = deprecated[index].strip().lower() if index < len(deprecated) else "false"
         effort_raw = supported_effort[index].strip() if index < len(supported_effort) else ""
@@ -840,7 +879,7 @@ async def ui_engine_models_add_snapshot(
         models.append(
             {
                 "id": model_id_clean,
-                "display_name": display_value or None,
+                "display_name": model_value or None,
                 "deprecated": deprecated_raw in {"1", "true", "yes", "on"},
                 "notes": notes_value or None,
                 "supported_effort": efforts,

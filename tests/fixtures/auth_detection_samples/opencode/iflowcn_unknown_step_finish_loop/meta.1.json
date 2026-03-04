@@ -1,0 +1,27 @@
+{
+  "run_id": "20260302T124637-opencode-af75ddb5",
+  "engine": "opencode",
+  "status": "failed",
+  "exit_code": 130,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:47:03.266560",
+  "finished_at": "2026-03-02T12:47:03.266567",
+  "completion": {
+    "state": "interrupted",
+    "reason_code": "NON_ZERO_EXIT",
+    "exit_code": 130,
+    "diagnostics": []
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/opencode",
+      "run",
+      "--format",
+      "json",
+      "--model=iflowcn/glm-4.6",
+      "Hello."
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

@@ -4,10 +4,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import aiosqlite
-
 from server.config import config
 from server.models import EngineUpgradeTaskStatus
+from server.services.platform import aiosqlite_compat as aiosqlite
 
 
 class EngineUpgradeStore:

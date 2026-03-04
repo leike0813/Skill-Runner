@@ -1,0 +1,24 @@
+{
+  "sample_id": "iflowcn_unknown_step_finish_loop",
+  "source_run_id": "20260302T124637-opencode-af75ddb5",
+  "engine": "opencode",
+  "provider_id": "iflowcn",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "user-confirmed auth failure surfaced as a repeated step_finish(reason=unknown) loop and required manual termination",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "unknown_auth",
+    "confidence": "medium"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "The visible output is dominated by repeated step_start/step_finish(reason=unknown) pairs.",
+    "The process did not stop on its own and was terminated manually with ^C.",
+    "This sample is auth-related but is not a clean first-pass rule template."
+  ]
+}

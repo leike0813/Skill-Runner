@@ -97,7 +97,9 @@ class IFlowAuthCliFlow:
         output_path: Path,
         expires_at: datetime,
     ) -> IFlowAuthCliSession:
-        master_fd, slave_fd = pty.openpty()
+        master_fd, slave_fd = (
+            os.openpty() if hasattr(os, "openpty") else pty.openpty()
+        )
         try:
             process = subprocess.Popen(
                 [str(command_path)],

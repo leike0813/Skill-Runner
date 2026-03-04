@@ -201,6 +201,7 @@ async def test_interaction_history_and_consume_reply(tmp_path):
         request_id="req-1",
         interaction_id=2,
         event_type="ask_user",
+        source_attempt=1,
         payload={
             "interaction_id": 2,
             "kind": "choose_one",
@@ -229,6 +230,7 @@ async def test_auto_decision_stats(tmp_path):
         request_id="req-1",
         interaction_id=1,
         event_type="reply",
+        source_attempt=1,
         payload={
             "response": {"answer": "a"},
             "resolution_mode": "auto_decide_timeout",
@@ -239,6 +241,7 @@ async def test_auto_decision_stats(tmp_path):
         request_id="req-1",
         interaction_id=2,
         event_type="reply",
+        source_attempt=1,
         payload={
             "response": {"answer": "b"},
             "resolution_mode": "user_reply",
@@ -249,6 +252,7 @@ async def test_auto_decision_stats(tmp_path):
         request_id="req-1",
         interaction_id=3,
         event_type="reply",
+        source_attempt=1,
         payload={
             "response": {"answer": "c"},
             "resolution_mode": "auto_decide_timeout",
@@ -258,6 +262,36 @@ async def test_auto_decision_stats(tmp_path):
     stats = await store.get_auto_decision_stats("req-1")
     assert stats["auto_decision_count"] == 2
     assert stats["last_auto_decision_at"] == "2026-02-16T00:00:03"
+
+
+@pytest.mark.asyncio
+async def test_resume_ticket_roundtrip_is_idempotent(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    first = await store.issue_resume_ticket(
+        "req-1",
+        cause="auth_completed",
+        source_attempt=1,
+        target_attempt=2,
+        payload={"auth_session_id": "auth-1"},
+    )
+    second = await store.issue_resume_ticket(
+        "req-1",
+        cause="auth_completed",
+        source_attempt=1,
+        target_attempt=2,
+        payload={"auth_session_id": "auth-1"},
+    )
+
+    assert second["ticket_id"] == first["ticket_id"]
+    assert await store.mark_resume_ticket_dispatched("req-1", first["ticket_id"]) is True
+    assert await store.mark_resume_ticket_dispatched("req-1", first["ticket_id"]) is False
+    assert await store.mark_resume_ticket_started("req-1", first["ticket_id"], target_attempt=2) is True
+    assert await store.mark_resume_ticket_started("req-1", first["ticket_id"], target_attempt=2) is False
+
+    ticket = await store.get_resume_ticket("req-1")
+    assert ticket is not None
+    assert ticket["state"] == "started"
+    assert ticket["target_attempt"] == 2
 
 
 @pytest.mark.asyncio

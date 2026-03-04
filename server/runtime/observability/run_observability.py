@@ -7,6 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
+from server.config import config
+from server.runtime.chat_replay.factories import derive_chat_replay_rows_from_fcmp
+from server.runtime.chat_replay.live_journal import chat_replay_live_journal
 from server.runtime.protocol.event_protocol import (
     build_fcmp_events,
     build_rasp_events,
@@ -17,11 +20,19 @@ from server.runtime.protocol.event_protocol import (
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
+    validate_chat_replay_event,
     validate_fcmp_event,
     validate_orchestrator_event,
     validate_rasp_event,
 )
-from server.runtime.observability.contracts import RunStorePort, WorkspacePort
+from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
+from server.runtime.observability.rasp_live_journal import rasp_live_journal
+from server.runtime.observability.contracts import (
+    QueuedResumeRedriver,
+    RunStorePort,
+    WaitingAuthReconciler,
+    WorkspacePort,
+)
 from server.services.platform.async_compat import maybe_await
 from server.services.skill.skill_browser import (
     build_preview_payload,
@@ -65,6 +76,14 @@ class _UnconfiguredRunStore:
         _ = request_id
         raise RuntimeError("Run observability run_store port is not configured")
 
+    def get_pending_auth(self, request_id: str):
+        _ = request_id
+        raise RuntimeError("Run observability run_store port is not configured")
+
+    def get_pending_auth_method_selection(self, request_id: str):
+        _ = request_id
+        raise RuntimeError("Run observability run_store port is not configured")
+
     def get_interaction_count(self, request_id: str):
         _ = request_id
         raise RuntimeError("Run observability run_store port is not configured")
@@ -87,6 +106,8 @@ class _UnconfiguredWorkspace:
 run_store: RunStorePort | Any = _UnconfiguredRunStore()
 workspace_manager: WorkspacePort | Any = _UnconfiguredWorkspace()
 parser_resolver: RuntimeParserResolverPort | None = None
+waiting_auth_reconciler: WaitingAuthReconciler | None = None
+queued_resume_redriver: QueuedResumeRedriver | None = None
 
 
 def configure_run_observability_ports(
@@ -94,11 +115,27 @@ def configure_run_observability_ports(
     run_store_backend: RunStorePort | Any,
     workspace_backend: WorkspacePort | Any,
     parser_resolver_backend: RuntimeParserResolverPort | None = None,
+    waiting_auth_reconciler_backend: WaitingAuthReconciler | None = None,
+    queued_resume_redriver_backend: QueuedResumeRedriver | None = None,
 ) -> None:
-    global run_store, workspace_manager, parser_resolver
+    global run_store, workspace_manager, parser_resolver, waiting_auth_reconciler, queued_resume_redriver
     run_store = run_store_backend
     workspace_manager = workspace_backend
     parser_resolver = parser_resolver_backend
+    waiting_auth_reconciler = waiting_auth_reconciler_backend
+    queued_resume_redriver = queued_resume_redriver_backend
+
+
+def _resolve_conversation_mode(client_metadata: dict[str, Any] | None) -> str:
+    if not isinstance(client_metadata, dict):
+        return "session"
+    raw = client_metadata.get("conversation_mode")
+    if not isinstance(raw, str):
+        return "session"
+    normalized = raw.strip().lower()
+    if normalized in {"session", "non_session"}:
+        return normalized
+    return "session"
 
 
 class RunObservabilityService:
@@ -107,6 +144,30 @@ class RunObservabilityService:
 
     def _workspace(self):
         return workspace_manager
+
+    async def _reconcile_waiting_auth_if_needed(self, request_id: str, run_status: str) -> None:
+        if run_status != "waiting_auth" or not request_id or waiting_auth_reconciler is None:
+            return
+        await waiting_auth_reconciler(request_id=request_id)
+
+    async def _redrive_queued_resume_if_needed(self, request_id: str, run_status: str) -> None:
+        if run_status != "queued" or not request_id or queued_resume_redriver is None:
+            return
+        request_record = await maybe_await(self._run_store().get_request(request_id))
+        if not isinstance(request_record, dict):
+            return
+        run_id_obj = request_record.get("run_id")
+        engine_name_obj = request_record.get("engine")
+        if not isinstance(run_id_obj, str) or not run_id_obj:
+            return
+        if not isinstance(engine_name_obj, str) or not engine_name_obj:
+            return
+        await queued_resume_redriver(
+            request_id=request_id,
+            run_id=run_id_obj,
+            engine_name=engine_name_obj,
+            run_store_backend=self._run_store(),
+        )
 
     def format_sse_frame(self, event: str, payload: Dict[str, Any]) -> str:
         encoded = json.dumps(payload, ensure_ascii=False)
@@ -195,25 +256,32 @@ class RunObservabilityService:
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
             status = "queued"
-        snapshot = {
-            "status": status,
-            "cursor": max(0, int(cursor)),
-        }
-        pending_id = await self._read_pending_interaction_id(request_id)
-        if pending_id is not None:
-            snapshot["pending_interaction_id"] = pending_id
-        yield {"event": "snapshot", "data": snapshot}
-
-        last_heartbeat_at = time.monotonic()
-        last_chat_event_seq = max(0, int(cursor))
-        bootstrap_events = await self.list_event_history(
+        history_payload = await self.get_event_history_payload(
             run_dir=run_dir,
             request_id=request_id,
-            from_seq=last_chat_event_seq + 1,
+            from_seq=max(0, int(cursor)) + 1,
             to_seq=None,
             from_ts=None,
             to_ts=None,
         )
+        snapshot = {
+            "status": status,
+            "cursor": max(0, int(cursor)),
+            "cursor_floor": history_payload.get("cursor_floor", 0),
+            "cursor_ceiling": history_payload.get("cursor_ceiling", 0),
+            "replay_source": history_payload.get("source", "audit"),
+        }
+        pending_id = await self._read_pending_interaction_id(request_id)
+        if pending_id is not None:
+            snapshot["pending_interaction_id"] = pending_id
+        pending_auth_session_id = await self._read_pending_auth_session_id(request_id)
+        if pending_auth_session_id is not None:
+            snapshot["pending_auth_session_id"] = pending_auth_session_id
+        yield {"event": "snapshot", "data": snapshot}
+
+        last_heartbeat_at = time.monotonic()
+        last_chat_event_seq = max(0, int(cursor))
+        bootstrap_events = history_payload.get("events", [])
         for event in bootstrap_events:
             seq_obj = event.get("seq")
             if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
@@ -221,16 +289,186 @@ class RunObservabilityService:
             yield {"event": "chat_event", "data": event}
             last_chat_event_seq = seq_obj
 
-        while True:
-            if is_disconnected is not None and await is_disconnected():
-                return
+        queue, unsubscribe = fcmp_live_journal.subscribe(run_id=run_dir.name)
+        terminal_idle_cycles = 0
+        try:
+            while True:
+                if is_disconnected is not None and await is_disconnected():
+                    return
 
-            emitted = False
+                emitted = False
+                try:
+                    queued_event = await asyncio.wait_for(queue.get(), timeout=poll_interval_sec)
+                except asyncio.TimeoutError:
+                    queued_event = None
 
-            status_payload = self._read_status_payload(run_dir)
-            status_obj = status_payload.get("status")
-            current_status = status_obj if isinstance(status_obj, str) and status_obj else status
+                if isinstance(queued_event, dict):
+                    seq_obj = queued_event.get("seq")
+                    if isinstance(seq_obj, int) and seq_obj > last_chat_event_seq:
+                        yield {"event": "chat_event", "data": queued_event}
+                        last_chat_event_seq = seq_obj
+                        emitted = True
 
+                catchup_payload = await self.get_event_history_payload(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    from_seq=last_chat_event_seq + 1,
+                    to_seq=None,
+                    from_ts=None,
+                    to_ts=None,
+                )
+                for event in catchup_payload.get("events", []):
+                    seq_obj = event.get("seq")
+                    if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
+                        continue
+                    yield {"event": "chat_event", "data": event}
+                    emitted = True
+                    last_chat_event_seq = seq_obj
+
+                status_payload = self._read_status_payload(run_dir)
+                status_obj = status_payload.get("status")
+                current_status = status_obj if isinstance(status_obj, str) and status_obj else status
+
+                if current_status in {"waiting_user", "waiting_auth", *TERMINAL_STATUSES}:
+                    if emitted:
+                        terminal_idle_cycles = 0
+                    else:
+                        terminal_idle_cycles += 1
+                    if terminal_idle_cycles >= 2:
+                        return
+                else:
+                    terminal_idle_cycles = 0
+
+                now = time.monotonic()
+                if not emitted and now - last_heartbeat_at >= heartbeat_interval_sec:
+                    yield {"event": "heartbeat", "data": {"ts": datetime.utcnow().isoformat()}}
+                    last_heartbeat_at = now
+                elif emitted:
+                    last_heartbeat_at = now
+        finally:
+            unsubscribe()
+
+    async def iter_chat_events(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        cursor: int = 0,
+        heartbeat_interval_sec: float = 5.0,
+        poll_interval_sec: float = 0.2,
+        is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        status_payload = self._read_status_payload(run_dir)
+        status = status_payload.get("status")
+        if not isinstance(status, str) or not status:
+            status = "queued"
+        history_payload = await self.get_chat_history_payload(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=max(0, int(cursor)) + 1,
+            to_seq=None,
+            from_ts=None,
+            to_ts=None,
+        )
+        snapshot = {
+            "status": status,
+            "cursor": max(0, int(cursor)),
+            "cursor_floor": history_payload.get("cursor_floor", 0),
+            "cursor_ceiling": history_payload.get("cursor_ceiling", 0),
+            "replay_source": history_payload.get("source", "audit"),
+        }
+        pending_id = await self._read_pending_interaction_id(request_id)
+        if pending_id is not None:
+            snapshot["pending_interaction_id"] = pending_id
+        pending_auth_session_id = await self._read_pending_auth_session_id(request_id)
+        if pending_auth_session_id is not None:
+            snapshot["pending_auth_session_id"] = pending_auth_session_id
+        yield {"event": "snapshot", "data": snapshot}
+
+        last_chat_seq = max(0, int(cursor))
+        bootstrap_events = history_payload.get("events", [])
+        for event in bootstrap_events:
+            seq_obj = event.get("seq")
+            if not isinstance(seq_obj, int) or seq_obj <= last_chat_seq:
+                continue
+            yield {"event": "chat_event", "data": event}
+            last_chat_seq = seq_obj
+
+        queue, unsubscribe = chat_replay_live_journal.subscribe(run_id=run_dir.name)
+        terminal_idle_cycles = 0
+        last_heartbeat_at = time.monotonic()
+        try:
+            while True:
+                if is_disconnected is not None and await is_disconnected():
+                    return
+
+                emitted = False
+                try:
+                    queued_event = await asyncio.wait_for(queue.get(), timeout=poll_interval_sec)
+                except asyncio.TimeoutError:
+                    queued_event = None
+
+                if isinstance(queued_event, dict):
+                    seq_obj = queued_event.get("seq")
+                    if isinstance(seq_obj, int) and seq_obj > last_chat_seq:
+                        yield {"event": "chat_event", "data": queued_event}
+                        last_chat_seq = seq_obj
+                        emitted = True
+
+                catchup_payload = await self.get_chat_history_payload(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    from_seq=last_chat_seq + 1,
+                    to_seq=None,
+                    from_ts=None,
+                    to_ts=None,
+                )
+                for event in catchup_payload.get("events", []):
+                    seq_obj = event.get("seq")
+                    if not isinstance(seq_obj, int) or seq_obj <= last_chat_seq:
+                        continue
+                    yield {"event": "chat_event", "data": event}
+                    emitted = True
+                    last_chat_seq = seq_obj
+
+                status_payload = self._read_status_payload(run_dir)
+                status_obj = status_payload.get("status")
+                current_status = status_obj if isinstance(status_obj, str) and status_obj else status
+
+                if current_status in {"waiting_user", "waiting_auth", *TERMINAL_STATUSES}:
+                    if emitted:
+                        terminal_idle_cycles = 0
+                    else:
+                        terminal_idle_cycles += 1
+                    if terminal_idle_cycles >= 2:
+                        return
+                else:
+                    terminal_idle_cycles = 0
+
+                now = time.monotonic()
+                if not emitted and now - last_heartbeat_at >= heartbeat_interval_sec:
+                    yield {"event": "heartbeat", "data": {"ts": datetime.utcnow().isoformat()}}
+                    last_heartbeat_at = now
+                elif emitted:
+                    last_heartbeat_at = now
+        finally:
+            unsubscribe()
+
+    async def _drain_trailing_chat_events(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        last_chat_event_seq: int,
+        poll_interval_sec: float,
+        expected_attempt: int | None = None,
+        drain_window_sec: float = 5.0,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        drained: List[Dict[str, Any]] = []
+        deadline = time.monotonic() + max(0.1, float(drain_window_sec))
+        idle_cycles = 0
+        latest_attempt_seen = self._latest_attempt_number(run_dir)
+        while time.monotonic() < deadline:
             protocol_payload = await self.list_event_history(
                 run_dir=run_dir,
                 request_id=request_id,
@@ -239,26 +477,46 @@ class RunObservabilityService:
                 from_ts=None,
                 to_ts=None,
             )
+            emitted = False
             for event in protocol_payload:
                 seq_obj = event.get("seq")
                 if not isinstance(seq_obj, int) or seq_obj <= last_chat_event_seq:
                     continue
-                yield {"event": "chat_event", "data": event}
-                emitted = True
+                drained.append(event)
                 last_chat_event_seq = seq_obj
+                emitted = True
 
-            if current_status == "waiting_user":
-                return
-            if current_status in TERMINAL_STATUSES:
-                return
+            current_latest_attempt = self._latest_attempt_number(run_dir)
+            attempt_advanced = current_latest_attempt > latest_attempt_seen
+            latest_attempt_seen = current_latest_attempt
+            waiting_for_expected_attempt = (
+                isinstance(expected_attempt, int)
+                and expected_attempt > 0
+                and latest_attempt_seen < expected_attempt
+            )
+            if emitted:
+                idle_cycles = 0
+            else:
+                idle_cycles += 1
+            if drained and idle_cycles >= 1 and not attempt_advanced and not waiting_for_expected_attempt:
+                break
+            if idle_cycles >= 3 and not attempt_advanced and not waiting_for_expected_attempt:
+                break
+            await asyncio.sleep(min(max(poll_interval_sec, 0.01), 0.1))
+        return drained, last_chat_event_seq
 
-            now = time.monotonic()
-            if not emitted and now - last_heartbeat_at >= heartbeat_interval_sec:
-                yield {"event": "heartbeat", "data": {"ts": datetime.utcnow().isoformat()}}
-                last_heartbeat_at = now
-            elif emitted:
-                last_heartbeat_at = now
-            await asyncio.sleep(poll_interval_sec)
+    def _read_expected_attempt_number(self, status_payload: Dict[str, Any]) -> int | None:
+        current_attempt_obj = status_payload.get("current_attempt")
+        if isinstance(current_attempt_obj, int) and current_attempt_obj > 0:
+            return current_attempt_obj
+        if isinstance(current_attempt_obj, str):
+            try:
+                current_attempt = int(current_attempt_obj)
+            except ValueError:
+                return None
+            if current_attempt > 0:
+                return current_attempt
+        return None
 
     async def list_event_history(
         self,
@@ -269,6 +527,185 @@ class RunObservabilityService:
         to_seq: Optional[int] = None,
         from_ts: Optional[str] = None,
         to_ts: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        payload = await self.get_event_history_payload(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        events_obj = payload.get("events")
+        return events_obj if isinstance(events_obj, list) else []
+
+    async def list_chat_history(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int] = None,
+        to_seq: Optional[int] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        payload = await self.get_chat_history_payload(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        events_obj = payload.get("events")
+        return events_obj if isinstance(events_obj, list) else []
+
+    async def get_chat_history_payload(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int] = None,
+        to_seq: Optional[int] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        run_id = run_dir.name
+        requested_from = int(from_seq) if from_seq is not None else None
+        live_payload = chat_replay_live_journal.replay(
+            run_id=run_id,
+            after_seq=max(0, (requested_from or 1) - 1),
+        )
+        live_rows = self._filter_events(
+            rows=live_payload.get("events", []),
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        live_floor = int(live_payload.get("cursor_floor") or 0)
+        live_ceiling = int(live_payload.get("cursor_ceiling") or 0)
+        needs_audit = not live_payload.get("has_live")
+        if requested_from is None:
+            needs_audit = True
+        elif live_floor > 0 and requested_from < live_floor:
+            needs_audit = True
+        audit_rows: List[Dict[str, Any]] = []
+        if needs_audit:
+            audit_rows = await self._list_chat_history_from_audit(
+                run_dir=run_dir,
+                request_id=request_id,
+                from_seq=from_seq,
+                to_seq=to_seq,
+                from_ts=from_ts,
+                to_ts=to_ts,
+            )
+        merged = self._merge_chat_rows(audit_rows, live_rows)
+        source = "live" if live_rows and not audit_rows else "audit"
+        if live_rows and audit_rows:
+            source = "mixed"
+        if not live_rows and not audit_rows:
+            source = "audit"
+        return {
+            "events": merged,
+            "source": source,
+            "cursor_floor": live_floor,
+            "cursor_ceiling": live_ceiling,
+        }
+
+    async def get_event_history_payload(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int] = None,
+        to_seq: Optional[int] = None,
+        from_ts: Optional[str] = None,
+        to_ts: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        run_id = run_dir.name
+        requested_from = int(from_seq) if from_seq is not None else None
+        live_payload = fcmp_live_journal.replay(
+            run_id=run_id,
+            after_seq=max(0, (requested_from or 1) - 1),
+        )
+        live_rows = self._filter_events(
+            rows=live_payload.get("events", []),
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        live_floor = int(live_payload.get("cursor_floor") or 0)
+        live_ceiling = int(live_payload.get("cursor_ceiling") or 0)
+        needs_audit = not live_payload.get("has_live")
+        if requested_from is None:
+            needs_audit = True
+        elif live_floor > 0 and requested_from < live_floor:
+            needs_audit = True
+        audit_rows: List[Dict[str, Any]] = []
+        if needs_audit:
+            audit_rows = await self._list_event_history_from_audit(
+                run_dir=run_dir,
+                request_id=request_id,
+                from_seq=from_seq,
+                to_seq=to_seq,
+                from_ts=from_ts,
+                to_ts=to_ts,
+            )
+        merged = self._merge_fcmp_rows(audit_rows, live_rows)
+        source = "live" if live_rows and not audit_rows else "audit"
+        if live_rows and audit_rows:
+            source = "mixed"
+        if not live_rows and not audit_rows:
+            source = "audit"
+        return {
+            "events": merged,
+            "source": source,
+            "cursor_floor": live_floor,
+            "cursor_ceiling": live_ceiling,
+        }
+
+    async def _list_chat_history_from_audit(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+        from_ts: Optional[str],
+        to_ts: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        audit_path = run_dir / AUDIT_DIR_NAME / "chat_replay.jsonl"
+        rows: List[Dict[str, Any]]
+        if audit_path.exists() and audit_path.is_file():
+            rows = self._filter_valid_chat_rows(
+                rows=read_jsonl(audit_path),
+                context=f"chat-audit:{request_id or run_dir.name}",
+            )
+        else:
+            rows = await self._derive_chat_history_from_fcmp_audit(
+                run_dir=run_dir,
+                request_id=request_id,
+            )
+        rows.sort(key=lambda row: (int(row.get("seq") or 0), str(row.get("created_at") or "")))
+        return self._filter_events(
+            rows=rows,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+
+    async def _list_event_history_from_audit(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+        from_ts: Optional[str],
+        to_ts: Optional[str],
     ) -> List[Dict[str, Any]]:
         attempts = self._list_available_attempts(run_dir)
         if not attempts:
@@ -301,6 +738,71 @@ class RunObservabilityService:
             to_ts=to_ts,
         )
 
+    async def _derive_chat_history_from_fcmp_audit(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        fcmp_rows = await self._list_event_history_from_audit(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=None,
+            to_seq=None,
+            from_ts=None,
+            to_ts=None,
+        )
+        derived: List[Dict[str, Any]] = []
+        next_seq = 1
+        for row in fcmp_rows:
+            for chat_row in derive_chat_replay_rows_from_fcmp(row):
+                row_copy = dict(chat_row)
+                row_copy["seq"] = next_seq
+                next_seq += 1
+                try:
+                    validate_chat_replay_event(row_copy)
+                except ProtocolSchemaViolation as exc:
+                    logger.warning(
+                        "Skip invalid chat replay row during FCMP fallback (%s): %s",
+                        request_id or run_dir.name,
+                        str(exc),
+                    )
+                    continue
+                derived.append(row_copy)
+        return derived
+
+    def _merge_fcmp_rows(
+        self,
+        audit_rows: List[Dict[str, Any]],
+        live_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        merged: Dict[int, Dict[str, Any]] = {}
+        for row in audit_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        for row in live_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        return [merged[key] for key in sorted(merged)]
+
+    def _merge_chat_rows(
+        self,
+        audit_rows: List[Dict[str, Any]],
+        live_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        merged: Dict[int, Dict[str, Any]] = {}
+        for row in audit_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        for row in live_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        return [merged[key] for key in sorted(merged)]
+
     async def list_protocol_history(
         self,
         *,
@@ -332,7 +834,27 @@ class RunObservabilityService:
             run_dir=run_dir,
             requested_attempt=attempt,
         )
+        live_payload = self._get_live_protocol_payload(
+            run_dir=run_dir,
+            stream=normalized_stream,
+            attempt_number=selected_attempt,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        live_rows = live_payload.get("events", [])
+        live_floor = int(live_payload.get("cursor_floor") or 0)
+        requested_from = int(from_seq) if from_seq is not None else None
         paths = self._protocol_paths(run_dir, selected_attempt)
+        needs_audit = normalized_stream == "orchestrator"
+        if normalized_stream in {"fcmp", "rasp"}:
+            if requested_from is None:
+                needs_audit = True
+            elif live_floor > 0 and requested_from < live_floor:
+                needs_audit = True
+            elif not live_rows:
+                needs_audit = True
         should_materialize = normalized_stream in {"fcmp", "rasp"}
         if not should_materialize:
             should_materialize = selected_attempt == runtime_attempt
@@ -342,7 +864,7 @@ class RunObservabilityService:
                 and paths["fcmp"].exists()
                 and paths["orchestrator"].exists()
             )
-        if should_materialize:
+        if should_materialize and needs_audit:
             await self._materialize_protocol_stream(
                 run_dir=run_dir,
                 request_id=request_id,
@@ -375,11 +897,76 @@ class RunObservabilityService:
             from_ts=from_ts,
             to_ts=to_ts,
         )
+        if normalized_stream in {"fcmp", "rasp"}:
+            filtered = self._merge_protocol_rows(filtered, live_rows)
         return {
             "attempt": selected_attempt,
             "available_attempts": self._list_available_attempts(run_dir),
             "events": filtered,
+            "source": (
+                "mixed"
+                if filtered and live_rows and needs_audit
+                else ("live" if live_rows and not needs_audit else "audit")
+            ),
+            "cursor_floor": int(live_payload.get("cursor_floor") or 0),
+            "cursor_ceiling": int(live_payload.get("cursor_ceiling") or 0),
         }
+
+    def _get_live_protocol_payload(
+        self,
+        *,
+        run_dir: Path,
+        stream: str,
+        attempt_number: int,
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+        from_ts: Optional[str],
+        to_ts: Optional[str],
+    ) -> Dict[str, Any]:
+        run_id = run_dir.name
+        after_seq = max(0, int(from_seq or 1) - 1)
+        if stream == "fcmp":
+            payload = fcmp_live_journal.replay(
+                run_id=run_id,
+                after_seq=after_seq,
+                event_filter=lambda row: int(((row.get("meta") or {}).get("attempt") or 0)) == attempt_number,
+            )
+        elif stream == "rasp":
+            payload = rasp_live_journal.replay(
+                run_id=run_id,
+                after_seq=after_seq,
+                event_filter=lambda row: int(row.get("attempt_number") or 0) == attempt_number,
+            )
+        else:
+            return {"events": [], "cursor_floor": 0, "cursor_ceiling": 0}
+        rows = self._filter_events(
+            rows=payload.get("events", []),
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        return {
+            "events": rows,
+            "cursor_floor": payload.get("cursor_floor", 0),
+            "cursor_ceiling": payload.get("cursor_ceiling", 0),
+        }
+
+    def _merge_protocol_rows(
+        self,
+        audit_rows: List[Dict[str, Any]],
+        live_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        merged: Dict[int, Dict[str, Any]] = {}
+        for row in audit_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        for row in live_rows:
+            seq_obj = row.get("seq")
+            if isinstance(seq_obj, int):
+                merged[seq_obj] = row
+        return [merged[key] for key in sorted(merged)]
 
     def reindex_fcmp_global_seq(self, run_dir: Path) -> None:
         attempts = self._list_available_attempts(run_dir)
@@ -540,7 +1127,10 @@ class RunObservabilityService:
         request_record = await maybe_await(self._run_store().get_request(request_id))
         if not request_record:
             return available_attempts[-1] if available_attempts else 1
-        runtime_options = request_record.get("runtime_options")
+        runtime_options = request_record.get(
+            "effective_runtime_options",
+            request_record.get("runtime_options"),
+        )
         execution_mode = ""
         if isinstance(runtime_options, dict):
             execution_mode_obj = runtime_options.get("execution_mode")
@@ -642,9 +1232,21 @@ class RunObservabilityService:
             attempt_status=attempt_status,
             interaction_history=interaction_history,
         )
+        pending_auth = await self._resolve_attempt_pending_auth(
+            request_id=request_id,
+            attempt_status=attempt_status,
+        )
+        pending_auth_method_selection = await self._resolve_attempt_pending_auth_method_selection(
+            request_id=request_id,
+            attempt_status=attempt_status,
+        )
         orchestrator_events = self._filter_valid_orchestrator_rows(
             rows=read_jsonl(self._protocol_paths(run_dir, attempt_number)["orchestrator"]),
             context=f"materialize:{request_id or run_id}",
+        )
+        existing_fcmp_rows = self._filter_valid_fcmp_rows(
+            rows=read_jsonl(self._protocol_paths(run_dir, attempt_number)["fcmp"]),
+            context=f"materialize-existing:{request_id or run_id}",
         )
         status_updated_at_obj = (
             attempt_meta.get("finished_at")
@@ -677,19 +1279,24 @@ class RunObservabilityService:
         rasp_rows = [model.model_dump(mode="json") for model in rasp_models]
         for row in rasp_rows:
             validate_rasp_event(row)
-        fcmp_models = build_fcmp_events(
-            rasp_models,
-            status=attempt_status,
-            status_updated_at=status_updated_at,
-            pending_interaction=pending_interaction,
-            interaction_history=interaction_history,
-            orchestrator_events=orchestrator_events,
-            effective_session_timeout_sec=effective_session_timeout_sec,
-            completion=completion_payload,
-        )
-        fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
-        for row in fcmp_rows:
-            validate_fcmp_event(row)
+        if existing_fcmp_rows:
+            fcmp_rows = existing_fcmp_rows
+        else:
+            fcmp_models = build_fcmp_events(
+                rasp_models,
+                status=attempt_status,
+                status_updated_at=status_updated_at,
+                pending_interaction=pending_interaction,
+                pending_auth_method_selection=pending_auth_method_selection,
+                pending_auth=pending_auth,
+                interaction_history=interaction_history,
+                orchestrator_events=orchestrator_events,
+                effective_session_timeout_sec=effective_session_timeout_sec,
+                completion=completion_payload,
+            )
+            fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
+            for row in fcmp_rows:
+                validate_fcmp_event(row)
         metrics_payload = compute_protocol_metrics(rasp_models)
 
         paths = self._protocol_paths(run_dir, attempt_number)
@@ -703,7 +1310,8 @@ class RunObservabilityService:
                 and row["event"].get("category") == "diagnostic"
             ],
         )
-        write_jsonl(paths["fcmp"], fcmp_rows)
+        if not existing_fcmp_rows:
+            write_jsonl(paths["fcmp"], fcmp_rows)
         self.reindex_fcmp_global_seq(run_dir)
         paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
         paths["metrics"].write_text(
@@ -735,8 +1343,14 @@ class RunObservabilityService:
                 continue
             if item.get("event_type") != "ask_user":
                 continue
-            interaction_id_obj = item.get("interaction_id")
-            if not isinstance(interaction_id_obj, int) or interaction_id_obj != attempt_number:
+            source_attempt_obj = item.get("source_attempt")
+            source_attempt: Optional[int]
+            if isinstance(source_attempt_obj, int):
+                source_attempt = source_attempt_obj
+            else:
+                interaction_id_obj = item.get("interaction_id")
+                source_attempt = interaction_id_obj if isinstance(interaction_id_obj, int) else None
+            if source_attempt != attempt_number:
                 continue
             payload_obj = item.get("payload")
             if isinstance(payload_obj, dict):
@@ -744,9 +1358,33 @@ class RunObservabilityService:
         if request_id and attempt_status == "waiting_user":
             pending_obj = await maybe_await(self._run_store().get_pending_interaction(request_id))
             if isinstance(pending_obj, dict):
-                interaction_id_obj = pending_obj.get("interaction_id")
-                if isinstance(interaction_id_obj, int) and interaction_id_obj == attempt_number:
+                source_attempt_obj = pending_obj.get("source_attempt")
+                if isinstance(source_attempt_obj, int) and source_attempt_obj == attempt_number:
                     return pending_obj
+        return None
+
+    async def _resolve_attempt_pending_auth(
+        self,
+        *,
+        request_id: Optional[str],
+        attempt_status: str,
+    ) -> Optional[Dict[str, Any]]:
+        if request_id and attempt_status == "waiting_auth":
+            pending_obj = await maybe_await(self._run_store().get_pending_auth(request_id))
+            if isinstance(pending_obj, dict):
+                return pending_obj
+        return None
+
+    async def _resolve_attempt_pending_auth_method_selection(
+        self,
+        *,
+        request_id: Optional[str],
+        attempt_status: str,
+    ) -> Optional[Dict[str, Any]]:
+        if request_id and attempt_status == "waiting_auth":
+            pending_obj = await maybe_await(self._run_store().get_pending_auth_method_selection(request_id))
+            if isinstance(pending_obj, dict):
+                return pending_obj
         return None
 
     def _filter_events(
@@ -802,6 +1440,17 @@ class RunObservabilityService:
             filtered.append(row)
         return filtered
 
+    def _filter_valid_chat_rows(self, *, rows: List[Dict[str, Any]], context: str) -> List[Dict[str, Any]]:
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                validate_chat_replay_event(row)
+            except ProtocolSchemaViolation as exc:
+                logger.warning("Skip invalid chat replay row (%s): %s", context, str(exc))
+                continue
+            filtered.append(row)
+        return filtered
+
     def _filter_valid_orchestrator_rows(
         self,
         *,
@@ -842,6 +1491,16 @@ class RunObservabilityService:
             file_state = self._build_file_state(run_dir)
             request_id_obj = row.get("request_id")
             request_id = request_id_obj if isinstance(request_id_obj, str) else ""
+            await self._reconcile_waiting_auth_if_needed(request_id, run_status)
+            await self._redrive_queued_resume_if_needed(request_id, run_status)
+            if request_id:
+                refreshed_row = await maybe_await(self._run_store().get_request_with_run(request_id))
+                if isinstance(refreshed_row, dict):
+                    row = refreshed_row
+                run_dir = self._workspace().get_run_dir(run_id)
+                status_payload = self._read_status_payload(run_dir) if run_dir else {}
+                run_status = self._normalize_run_status(row, status_payload)
+                file_state = self._build_file_state(run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id))
             updated_at = status_payload.get("updated_at")
             if not isinstance(updated_at, str):
                 updated_at = self._derive_updated_at(run_dir, row)
@@ -874,32 +1533,46 @@ class RunObservabilityService:
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise ValueError("Run not found")
         run_dir = self._workspace().get_run_dir(run_id_obj)
-        if not run_dir or not run_dir.exists():
-            raise FileNotFoundError("Run directory not found")
-
-        status_payload = self._read_status_payload(run_dir)
+        run_dir_path = run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+        status_payload = self._read_status_payload(run_dir_path) if run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
-        file_state = self._build_file_state(run_dir)
-        entries = list_skill_entries(run_dir)
+        await self._reconcile_waiting_auth_if_needed(request_id, run_status)
+        await self._redrive_queued_resume_if_needed(request_id, run_status)
+        refreshed_record = await maybe_await(self._run_store().get_request_with_run(request_id))
+        if isinstance(refreshed_record, dict):
+            record = refreshed_record
+        run_dir = self._workspace().get_run_dir(run_id_obj)
+        run_dir_path = run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+        status_payload = self._read_status_payload(run_dir_path) if run_dir_path.exists() else {}
+        run_status = self._normalize_run_status(record, status_payload)
+        file_state = self._build_file_state(run_dir_path)
+        entries = list_skill_entries(run_dir_path) if run_dir_path.exists() else []
         runtime_options = record.get("runtime_options", {})
+        effective_runtime_options = record.get("effective_runtime_options", runtime_options)
+        requested_execution_mode = None
+        effective_execution_mode = None
+        conversation_mode = _resolve_conversation_mode(record.get("client_metadata"))
         interactive_auto_reply: bool | None = None
         interactive_reply_timeout_sec: int | None = None
         if isinstance(runtime_options, dict):
-            auto_reply_obj = runtime_options.get("interactive_auto_reply")
+            requested_execution_mode = runtime_options.get("execution_mode")
+        if isinstance(effective_runtime_options, dict):
+            effective_execution_mode = effective_runtime_options.get("execution_mode")
+            auto_reply_obj = effective_runtime_options.get("interactive_auto_reply")
             if isinstance(auto_reply_obj, bool):
                 interactive_auto_reply = auto_reply_obj
-            timeout_obj = runtime_options.get("interactive_reply_timeout_sec")
-            if isinstance(timeout_obj, int) and timeout_obj > 0:
+            timeout_obj = effective_runtime_options.get("interactive_reply_timeout_sec")
+            if isinstance(timeout_obj, int) and timeout_obj >= 0:
                 interactive_reply_timeout_sec = timeout_obj
 
         return {
             "request_id": request_id,
             "run_id": run_id_obj,
-            "run_dir": str(run_dir),
+            "run_dir": str(run_dir_path),
             "skill_id": record.get("skill_id"),
             "engine": record.get("engine"),
             "status": run_status,
-            "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir, record),
+            "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir_path, record),
             "effective_session_timeout_sec": await maybe_await(self._run_store().get_effective_session_timeout(request_id)),
             "recovery_state": record.get("recovery_state") or "none",
             "recovered_at": record.get("recovered_at"),
@@ -907,8 +1580,21 @@ class RunObservabilityService:
             "entries": entries,
             "file_state": file_state,
             "poll_logs": run_status in RUNNING_STATUSES,
+            "requested_execution_mode": requested_execution_mode,
+            "effective_execution_mode": effective_execution_mode,
+            "conversation_mode": conversation_mode,
             "interactive_auto_reply": interactive_auto_reply,
             "interactive_reply_timeout_sec": interactive_reply_timeout_sec,
+            "effective_interactive_require_user_reply": bool(
+                effective_execution_mode == "interactive" and conversation_mode == "session"
+            ),
+            "effective_interactive_reply_timeout_sec": interactive_reply_timeout_sec,
+            "current_attempt": status_payload.get("current_attempt"),
+            "pending_owner": status_payload.get("pending_owner"),
+            "resume_ticket_id": status_payload.get("resume_ticket_id"),
+            "resume_cause": status_payload.get("resume_cause"),
+            "source_attempt": status_payload.get("source_attempt"),
+            "target_attempt": status_payload.get("target_attempt"),
         }
 
     async def resolve_run_file_path(self, request_id: str, relative_path: str) -> Path:
@@ -939,17 +1625,16 @@ class RunObservabilityService:
         }
 
     def _read_status_payload(self, run_dir: Path) -> Dict[str, Any]:
-        status_file = run_dir / "status.json"
-        if not status_file.exists():
-            return {}
-        try:
-            with open(status_file, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict):
-                return payload
-            return {}
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return {}
+        state_file = run_dir / ".state" / "state.json"
+        if state_file.exists():
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict):
+                    return payload
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+        return {}
 
     def _normalize_run_status(self, record: Dict[str, Any], status_payload: Dict[str, Any]) -> str:
         status_obj = status_payload.get("status")
@@ -966,8 +1651,9 @@ class RunObservabilityService:
         latest_attempt = max(1, self._latest_attempt_number(run_dir))
         audit_dir = run_dir / AUDIT_DIR_NAME
         targets = {
-            "status": run_dir / "status.json",
-            "input": run_dir / "input.json",
+            "state": run_dir / ".state" / "state.json",
+            "dispatch": run_dir / ".state" / "dispatch.json",
+            "request_input": run_dir / ".audit" / "request_input.json",
             "stdout": audit_dir / f"stdout.{latest_attempt}.log",
             "stderr": audit_dir / f"stderr.{latest_attempt}.log",
             "result": run_dir / "result" / "result.json",
@@ -1024,6 +1710,18 @@ class RunObservabilityService:
         if interaction_id <= 0:
             return None
         return interaction_id
+
+    async def _read_pending_auth_session_id(self, request_id: Optional[str]) -> Optional[str]:
+        if not request_id:
+            return None
+        pending = await maybe_await(self._run_store().get_pending_auth(request_id))
+        if not isinstance(pending, dict):
+            return None
+        value = pending.get("auth_session_id")
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 run_observability_service = RunObservabilityService()

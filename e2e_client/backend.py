@@ -130,6 +130,27 @@ class BackendClient:
         to_seq: int | None = None,
         from_ts: str | None = None,
         to_ts: str | None = None,
+        ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    async def stream_run_chat(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+        cursor: int = 0,
+    ) -> AsyncIterator[bytes]:
+        raise NotImplementedError
+
+    async def get_run_chat_history(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+        from_seq: int | None = None,
+        to_seq: int | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -239,6 +260,17 @@ class HttpBackendClient(BackendClient):
             json_payload=payload,
         )
 
+    async def get_run_auth_session(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            "GET",
+            f"{self._run_base_path(request_id, run_source=run_source)}/auth/session",
+        )
+
     async def get_run_result(
         self,
         request_id: str,
@@ -324,6 +356,50 @@ class HttpBackendClient(BackendClient):
         return await self._request_json(
             "GET",
             f"{self._run_base_path(request_id, run_source=run_source)}/events/history",
+            params=params if params else None,
+        )
+
+    async def stream_run_chat(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+        cursor: int = 0,
+    ) -> AsyncIterator[bytes]:
+        params = {"cursor": cursor}
+        path = f"{self._run_base_path(request_id, run_source=run_source)}/chat"
+        url = f"{self._base_url}{path}"
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", url, params=params) as response:
+                if response.status_code >= 400:
+                    detail = await _extract_error_detail(response)
+                    raise BackendApiError(response.status_code, detail)
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+
+    async def get_run_chat_history(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+        from_seq: int | None = None,
+        to_seq: int | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if from_seq is not None:
+            params["from_seq"] = from_seq
+        if to_seq is not None:
+            params["to_seq"] = to_seq
+        if from_ts:
+            params["from_ts"] = from_ts
+        if to_ts:
+            params["to_ts"] = to_ts
+        return await self._request_json(
+            "GET",
+            f"{self._run_base_path(request_id, run_source=run_source)}/chat/history",
             params=params if params else None,
         )
 

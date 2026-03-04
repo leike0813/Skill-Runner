@@ -1,0 +1,42 @@
+version: 1
+roles:
+  - user
+  - assistant
+  - system
+kinds:
+  - interaction_reply
+  - auth_submission
+  - assistant_final
+  - orchestration_notice
+order_source:
+  canonical: chat_publish_order
+  scope: run
+  sequence_field: seq
+derivation_rules:
+  - source: interaction.reply.accepted
+    role: user
+    kind: interaction_reply
+  - source: auth.input.accepted
+    role: user
+    kind: auth_submission
+  - source: assistant.message.final
+    role: assistant
+    kind: assistant_final
+  - source: auth.completed
+    role: system
+    kind: orchestration_notice
+  - source: auth.failed
+    role: system
+    kind: orchestration_notice
+  - source: interaction.auto_decide.timeout
+    role: system
+    kind: orchestration_notice
+  - source: conversation.state.changed
+    role: system
+    kind: orchestration_notice
+    when:
+      terminal_only: true
+invariants:
+  - no_local_render
+  - live_history_consistent
+  - persisted_truth_is_chat_replay_jsonl

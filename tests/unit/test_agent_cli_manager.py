@@ -162,7 +162,7 @@ def test_collect_auth_status_opencode_ready_requires_auth_json_only(tmp_path, mo
 
     payload = manager.collect_auth_status()
     assert payload["opencode"]["credential_files"]["auth.json"] is True
-    assert payload["opencode"]["auth_ready"] is True
+    assert payload["opencode"]["credential_state"] == "present"
 
 
 def test_probe_resume_capability_success_and_profile_mapping(tmp_path, monkeypatch):

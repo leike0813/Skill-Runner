@@ -32,10 +32,10 @@ class _FakeCliManager:
 
     def collect_auth_status(self):
         return {
-            "codex": {"auth_ready": False},
-            "gemini": {"auth_ready": False},
-            "iflow": {"auth_ready": False},
-            "opencode": {"auth_ready": False},
+            "codex": {"credential_state": "missing"},
+            "gemini": {"credential_state": "missing"},
+            "iflow": {"credential_state": "missing"},
+            "opencode": {"credential_state": "missing"},
         }
 
 

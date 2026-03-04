@@ -1,0 +1,6 @@
+- [x] Draft proposal for preventing queued resume stalls caused by concurrency slot leakage and orphan redrive.
+- [x] Update runtime invariants, runtime sequence docs, and relevant OpenSpec specs for queued redrive and orphan reconciliation semantics.
+- [x] Refactor `run_job()` to guarantee slot release on every post-acquire exit path.
+- [x] Add canonical missing-run-dir handling to queued resume recovery and reconcile orphan queued runs to failed.
+- [x] Keep observability queued redrive as a thin trigger and remove repeated orphan redrive behavior.
+- [x] Add regression coverage for slot safety, orphan queued reconciliation, and healthy resume survival under orphan noise.

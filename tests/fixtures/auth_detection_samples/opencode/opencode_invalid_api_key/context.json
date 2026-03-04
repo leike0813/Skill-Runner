@@ -1,0 +1,22 @@
+{
+  "sample_id": "opencode_invalid_api_key",
+  "source_run_id": "20260302T124901-opencode-3cfec290",
+  "engine": "opencode",
+  "provider_id": "opencode",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "OpenCode provider returns Invalid API key AuthError",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "invalid_api_key",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "OpenCode wrapper returns AuthError inside responseBody."
+  ]
+}

@@ -16,25 +16,25 @@ def resolve_interactive_reply_timeout(
     options: Mapping[str, Any],
     default: int = DEFAULT_SESSION_TIMEOUT_SEC,
 ) -> SessionTimeoutResolution:
-    preferred = _parse_positive_int(options.get(INTERACTIVE_REPLY_TIMEOUT_KEY))
+    preferred = _parse_non_negative_int(options.get(INTERACTIVE_REPLY_TIMEOUT_KEY))
     if preferred is not None:
         return SessionTimeoutResolution(
             value=preferred,
             source=INTERACTIVE_REPLY_TIMEOUT_KEY,
         )
     return SessionTimeoutResolution(
-        value=max(1, int(default)),
+        value=max(0, int(default)),
         source="default",
     )
 
 
-def _parse_positive_int(raw: Any) -> int | None:
+def _parse_non_negative_int(raw: Any) -> int | None:
     if raw is None:
         return None
     try:
         parsed = int(raw)
     except (TypeError, ValueError, OverflowError):
         return None
-    if parsed <= 0:
+    if parsed < 0:
         return None
     return parsed

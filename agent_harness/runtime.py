@@ -15,7 +15,10 @@ import logging
 from server.models import EngineSessionHandle, EngineSessionHandleType
 from server.models import SkillManifest
 from server.services.engine_management.engine_adapter_registry import engine_adapter_registry
-from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
+from server.services.orchestration.run_folder_trust_manager import (
+    RunFolderTrustManager,
+    run_folder_trust_manager,
+)
 from server.runtime.protocol.event_protocol import (
     build_fcmp_events,
     build_rasp_events,
@@ -63,6 +66,17 @@ class HarnessResumeRequest:
 class HarnessRuntime:
     def __init__(self, config: HarnessConfig) -> None:
         self.config = config
+
+    def _resolve_trust_manager(self):
+        manager = run_folder_trust_manager
+        if isinstance(manager, RunFolderTrustManager):
+            profile = self.config.runtime_profile
+            return RunFolderTrustManager(
+                codex_config_path=profile.agent_home / ".codex" / "config.toml",
+                gemini_trusted_path=profile.agent_home / ".gemini" / "trustedFolders.json",
+                runs_root=self.config.run_root,
+            )
+        return manager
 
     def _normalize_execution_mode(self, value: Any) -> Literal["auto", "interactive"]:
         if isinstance(value, str):
@@ -470,9 +484,10 @@ class HarnessRuntime:
         try:
             before_snapshot = snapshot_filesystem(run_dir)
             trust_registered = False
+            trust_manager = self._resolve_trust_manager()
             try:
                 if engine in TRUST_ENGINES:
-                    run_folder_trust_manager.register_run_folder(engine, run_dir)
+                    trust_manager.register_run_folder(engine, run_dir)
                     trust_registered = True
                 exit_code, stdout_text, stderr_text, stdin_captured = self._run_command(
                     engine=engine,
@@ -485,7 +500,7 @@ class HarnessRuntime:
             finally:
                 if trust_registered:
                     try:
-                        run_folder_trust_manager.remove_run_folder(engine, run_dir)
+                        trust_manager.remove_run_folder(engine, run_dir)
                     except Exception:
                         logger.warning(
                             "Failed to cleanup harness run folder trust for engine=%s run_id=%s",

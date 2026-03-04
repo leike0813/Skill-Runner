@@ -1,0 +1,22 @@
+{
+  "sample_id": "zai_token_expired_or_incorrect",
+  "source_run_id": "20260302T124311-opencode-f20f3d85",
+  "engine": "opencode",
+  "provider_id": "zai-coding-plan",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "provider returns token expired or incorrect",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "auth_expired",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Structured provider payload indicates token expiry or incorrect token."
+  ]
+}

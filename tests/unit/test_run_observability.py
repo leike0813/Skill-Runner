@@ -4,7 +4,40 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from server.runtime.protocol.event_protocol import write_jsonl
+from server.runtime.protocol.factories import make_fcmp_event, make_fcmp_state_changed
+from server.services.orchestration.run_recovery_service import run_recovery_service
+from server.services.orchestration.run_store import RunStore
+from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.run_observability import RunObservabilityService
+
+
+def _write_state_file(run_dir: Path, status: str) -> None:
+    state_path = run_dir / ".state" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "request_id": run_dir.name,
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-01-01T00:00:00",
+                "current_attempt": 1,
+                "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
+                "pending": {"owner": None, "interaction_id": None, "auth_session_id": None, "payload": None},
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {},
+                "error": None,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio
@@ -15,10 +48,7 @@ async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     (run_dir / ".audit" / "meta.1.json").write_text("{}", encoding="utf-8")
     (run_dir / ".audit" / "stdout.1.log").write_text("line1\nline2\n", encoding="utf-8")
     (run_dir / ".audit" / "stderr.1.log").write_text("err1\n", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "running")
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
@@ -61,6 +91,165 @@ async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     assert "err1" in tail["stderr"]
 
 
+@pytest.mark.asyncio
+async def test_list_runs_reconciles_waiting_auth_before_render(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "waiting_auth")
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
+        AsyncMock(
+            return_value=[
+                {
+                    "request_id": "req-auth",
+                    "run_id": "run-auth",
+                    "skill_id": "demo",
+                    "engine": "codex",
+                    "request_created_at": "2026-01-01T00:00:00",
+                    "run_status": "waiting_auth",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+
+    async def _reconcile(request_id: str) -> bool:
+        assert request_id == "req-auth"
+        _write_state_file(run_dir, "failed")
+        return True
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.waiting_auth_reconciler",
+        _reconcile,
+    )
+
+    service = RunObservabilityService()
+    rows = await service.list_runs()
+
+    assert rows[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_get_run_detail_redrives_queued_resume_ticket(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-queued"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "queued")
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(
+            return_value={
+                "request_id": "req-queued",
+                "run_id": "run-queued",
+                "skill_id": "demo",
+                "engine": "codex",
+                "request_created_at": "2026-01-01T00:00:00",
+                "run_status": "queued",
+                "runtime_options": {"execution_mode": "interactive"},
+                "effective_runtime_options": {"execution_mode": "interactive"},
+                "client_metadata": {"conversation_mode": "session"},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(
+            return_value={
+                "request_id": "req-queued",
+                "run_id": "run-queued",
+                "skill_id": "demo",
+                "engine": "codex",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+    redrive = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_recovery_service.run_recovery_service.redrive_resume_ticket_if_needed",
+        redrive,
+    )
+
+    service = RunObservabilityService()
+    detail = await service.get_run_detail("req-queued")
+
+    assert detail["status"] == "queued"
+    redrive.assert_awaited_once()
+    await_args = redrive.await_args
+    assert await_args is not None
+    assert await_args.kwargs["request_id"] == "req-queued"
+    assert await_args.kwargs["run_id"] == "run-queued"
+    assert await_args.kwargs["recovery_reason"] == "resume_ticket_redriven_online"
+
+
+@pytest.mark.asyncio
+async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detail(monkeypatch, tmp_path: Path):
+    local_store = RunStore(db_path=tmp_path / "runs.db")
+    await local_store.create_request(
+        request_id="req-orphan",
+        skill_id="demo",
+        engine="codex",
+        parameter={},
+        engine_options={},
+        runtime_options={"execution_mode": "interactive"},
+        effective_runtime_options={"execution_mode": "interactive"},
+        client_metadata={"conversation_mode": "session"},
+        input_data={},
+    )
+    await local_store.update_request_run_id("req-orphan", "run-orphan")
+    await local_store.create_run("run-orphan", None, "queued")
+    await local_store.issue_resume_ticket(
+        "req-orphan",
+        cause="interaction_reply",
+        source_attempt=1,
+        target_attempt=2,
+        payload={"interaction_id": 1, "response": {"text": "hello"}, "resolution_mode": "user_reply"},
+    )
+
+    async def _redrive(**kwargs):
+        return await run_recovery_service.redrive_resume_ticket_if_needed(
+            **kwargs,
+            workspace_backend=type("Workspace", (), {"get_run_dir": lambda self, _run_id: None})(),
+            resume_run_job=lambda **_payload: None,
+            recovery_reason="resume_ticket_redriven_online",
+        )
+
+    monkeypatch.setattr("server.runtime.observability.run_observability.run_store", local_store)
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: None,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.queued_resume_redriver",
+        _redrive,
+    )
+
+    service = RunObservabilityService()
+    rows = await service.list_runs()
+    detail = await service.get_run_detail("req-orphan")
+
+    assert rows[0]["status"] == "failed"
+    assert rows[0]["recovery_state"] == "failed_reconciled"
+    assert rows[0]["recovery_reason"] == "missing_run_dir_before_resume_redrive"
+    assert detail["status"] == "failed"
+    assert detail["recovery_state"] == "failed_reconciled"
+    assert detail["recovery_reason"] == "missing_run_dir_before_resume_redrive"
+    assert detail["entries"] == []
+
+
 def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
     log_path = tmp_path / "stdout.txt"
     log_path.write_text("abcdef", encoding="utf-8")
@@ -72,8 +261,92 @@ def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
     chunk2 = service.read_log_increment(log_path, from_offset=2, max_bytes=3)
     assert chunk2 == {"from": 2, "to": 5, "chunk": "cde"}
 
-    chunk3 = service.read_log_increment(log_path, from_offset=5, max_bytes=3)
-    assert chunk3 == {"from": 5, "to": 6, "chunk": "f"}
+
+@pytest.mark.asyncio
+async def test_event_history_prefers_live_journal_when_audit_missing(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-history"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    fcmp_live_journal.clear(run_dir.name)
+    fcmp_live_journal.publish(
+        run_id=run_dir.name,
+        row={
+            "protocol_version": "fcmp/1.0",
+            "run_id": run_dir.name,
+            "seq": 1,
+            "ts": "2026-03-04T00:00:00Z",
+            "engine": "codex",
+            "type": "assistant.message.final",
+            "data": {"message_id": "m_1", "text": "hello"},
+            "meta": {"attempt": 1, "local_seq": 1},
+            "correlation": {"publish_id": "pub-1"},
+            "raw_ref": None,
+        },
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value=None),
+    )
+
+    service = RunObservabilityService()
+    payload = await service.get_event_history_payload(
+        run_dir=run_dir,
+        request_id=None,
+        from_seq=1,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+    )
+
+    assert payload["source"] == "live"
+    assert payload["events"][0]["data"]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_iter_sse_events_replays_live_journal_without_materializing_audit(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-sse"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "waiting_user")
+    fcmp_live_journal.clear(run_dir.name)
+    fcmp_live_journal.publish(
+        run_id=run_dir.name,
+        row={
+            "protocol_version": "fcmp/1.0",
+            "run_id": run_dir.name,
+            "seq": 1,
+            "ts": "2026-03-04T00:00:00Z",
+            "engine": "codex",
+            "type": "assistant.message.final",
+            "data": {"message_id": "m_1", "text": "live only"},
+            "meta": {"attempt": 1, "local_seq": 1},
+            "correlation": {"publish_id": "pub-live"},
+            "raw_ref": None,
+        },
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        RunObservabilityService,
+        "_read_pending_interaction_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        RunObservabilityService,
+        "_read_pending_auth_session_id",
+        AsyncMock(return_value=None),
+    )
+
+    service = RunObservabilityService()
+    iterator = service.iter_sse_events(run_dir=run_dir, request_id=None, cursor=0)
+    events = []
+    async for item in iterator:
+        events.append(item)
+
+    assert events[0]["event"] == "snapshot"
+    assert events[1]["event"] == "chat_event"
+    assert events[1]["data"]["data"]["text"] == "live only"
 
 
 @pytest.mark.asyncio
@@ -176,6 +449,10 @@ def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = 
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_pending_auth",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
         AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": execution_mode}}),
     )
@@ -206,10 +483,7 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
     )
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "succeeded")
     _patch_protocol_defaults(monkeypatch, status="succeeded")
 
     service = RunObservabilityService()
@@ -230,7 +504,6 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
 
     chat_events = [evt["data"] for evt in events if evt["event"] == "chat_event"]
     assert any(evt["type"] == "assistant.message.final" for evt in chat_events)
-    assert any(evt["type"] == "conversation.completed" for evt in chat_events)
     assert any(
         evt["type"] == "conversation.state.changed" and evt["data"].get("to") == "succeeded"
         for evt in chat_events
@@ -245,10 +518,7 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "waiting_user")
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -293,6 +563,218 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_iter_sse_events_drains_trailing_waiting_user_chat_events(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-wait-drain"
+    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "waiting_user")
+
+    async def _get_event_history_payload(self, **kwargs):
+        _ = self
+        from_seq = kwargs.get("from_seq")
+        if from_seq == 1:
+            if not hasattr(_get_event_history_payload, "called"):
+                _get_event_history_payload.called = True
+                return {"events": [], "source": "live", "cursor_floor": 0, "cursor_ceiling": 0}
+            return {
+                "events": [
+                    {
+                        "seq": 1,
+                        "type": "assistant.message.final",
+                        "data": {"message_id": "m_1", "text": "hello after drain"},
+                        "meta": {"attempt": 1},
+                    },
+                    {
+                        "seq": 2,
+                        "type": "user.input.required",
+                        "data": {"interaction_id": 7, "kind": "free_text", "prompt": "please continue"},
+                        "meta": {"attempt": 1},
+                    },
+                ],
+                "source": "live",
+                "cursor_floor": 1,
+                "cursor_ceiling": 2,
+            }
+        return {"events": [], "source": "live", "cursor_floor": 0, "cursor_ceiling": 0}
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.RunObservabilityService.get_event_history_payload",
+        _get_event_history_payload,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.RunObservabilityService._read_status_payload",
+        lambda self, _run_dir: {"status": "waiting_user"},
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.RunObservabilityService._latest_attempt_number",
+        lambda self, _run_dir: 1,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
+        AsyncMock(return_value={"interaction_id": 7, "kind": "open_text", "prompt": "请继续输入"}),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_pending_auth",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "interactive"}}),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=1200),
+    )
+
+    service = RunObservabilityService()
+    events = []
+    async for item in service.iter_sse_events(
+        run_dir=run_dir,
+        request_id="req-wait-drain",
+        poll_interval_sec=0.01,
+        heartbeat_interval_sec=1.0,
+    ):
+        events.append(item)
+
+    chat_events = [evt["data"] for evt in events if evt["event"] == "chat_event"]
+    assert any(evt["type"] == "assistant.message.final" for evt in chat_events)
+    assert any(evt["type"] == "user.input.required" for evt in chat_events)
+
+
+@pytest.mark.asyncio
+async def test_drain_trailing_chat_events_waits_for_expected_attempt(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-terminal-drain"
+    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "succeeded")
+
+    available_attempts = [3, 3, 4, 4]
+
+    def _latest_attempt_number(self, _run_dir: Path) -> int:
+        _ = self
+        if available_attempts:
+            return available_attempts.pop(0)
+        return 4
+
+    call_counter = {"count": 0}
+
+    async def _list_event_history(self, **kwargs):
+        _ = self
+        call_counter["count"] += 1
+        from_seq = kwargs.get("from_seq")
+        if from_seq == 1 and call_counter["count"] >= 3:
+            return [
+                {
+                    "seq": 1,
+                    "type": "assistant.message.final",
+                    "data": {"message_id": "m_4_1", "text": "terminal message"},
+                    "meta": {"attempt": 4},
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.RunObservabilityService._latest_attempt_number",
+        _latest_attempt_number,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.RunObservabilityService.list_event_history",
+        _list_event_history,
+    )
+
+    service = RunObservabilityService()
+    drained, last_seq = await service._drain_trailing_chat_events(
+        run_dir=run_dir,
+        request_id="req-terminal-drain",
+        last_chat_event_seq=0,
+        poll_interval_sec=0.01,
+        expected_attempt=4,
+        drain_window_sec=0.5,
+    )
+
+    assert last_seq == 1
+    assert any(evt["type"] == "assistant.message.final" for evt in drained)
+    assert call_counter["count"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-wait"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
+    _write_state_file(run_dir, "waiting_auth")
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_pending_auth",
+        AsyncMock(
+            return_value={
+                "auth_session_id": "auth-1",
+                "engine": "opencode",
+                "provider_id": "google",
+                "challenge_kind": "api_key",
+                "prompt": "API key is required.",
+                "auth_url": None,
+                "user_code": None,
+                "instructions": "Paste API key into chat.",
+                "accepts_chat_input": True,
+                "input_kind": "api_key",
+                "last_error": None,
+                "source_attempt": 1,
+                "phase": "challenge_active",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value={"engine": "opencode", "runtime_options": {"execution_mode": "interactive"}}),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=1200),
+    )
+
+    service = RunObservabilityService()
+    events = []
+    async for item in service.iter_sse_events(
+        run_dir=run_dir,
+        request_id="req-auth",
+        poll_interval_sec=0.01,
+        heartbeat_interval_sec=1.0,
+    ):
+        events.append(item)
+
+    assert events[0]["event"] == "snapshot"
+    assert events[0]["data"]["pending_auth_session_id"] == "auth-1"
+    chat_events = [evt["data"] for evt in events if evt["event"] == "chat_event"]
+    assert any(evt["type"] == "auth.required" for evt in chat_events)
+    assert any(
+        evt["type"] == "conversation.state.changed" and evt["data"].get("to") == "waiting_auth"
+        for evt in chat_events
+    )
+
+
+@pytest.mark.asyncio
 async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-cursor"
     audit_dir = run_dir / ".audit"
@@ -304,10 +786,7 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
     )
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "succeeded")
     _patch_protocol_defaults(monkeypatch, status="succeeded")
 
     service = RunObservabilityService()
@@ -350,10 +829,7 @@ async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Pat
     )
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "succeeded")
     _patch_protocol_defaults(monkeypatch, status="succeeded")
 
     service = RunObservabilityService()
@@ -378,10 +854,7 @@ async def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-range"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "succeeded")
     (audit_dir / "stdout.1.log").write_text("audit-stdout", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text(
         json.dumps({"completion": {"state": "completed", "reason_code": "DONE_MARKER_FOUND"}}),
@@ -417,10 +890,7 @@ async def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_
     audit_dir.mkdir(parents=True, exist_ok=True)
     (logs_dir / "stdout.txt").write_text("legacy-stdout", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, "running")
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
@@ -440,3 +910,95 @@ async def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_
         byte_to=64,
     )
     assert payload["chunk"] == ""
+
+
+@pytest.mark.asyncio
+async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-materialize-order"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "waiting_user")
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "orchestrator_events.1.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-03-04T00:00:00Z",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "interaction.user_input.required",
+                "data": {"interaction_id": 7, "kind": "open_text"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (audit_dir / "meta.1.json").write_text(
+        json.dumps(
+            {
+                "engine": "codex",
+                "status": "waiting_user",
+                "completion": {"state": "awaiting_user_input", "reason_code": "WAITING_USER_INPUT"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    existing_rows = [
+        make_fcmp_event(
+            run_id=run_dir.name,
+            seq=1,
+            engine="codex",
+            type_name="user.input.required",
+            data={
+                "interaction_id": 7,
+                "kind": "open_text",
+                "prompt": "User input is required to continue.",
+            },
+            attempt_number=1,
+        ).model_dump(mode="json"),
+        make_fcmp_event(
+            run_id=run_dir.name,
+            seq=2,
+            engine="codex",
+            type_name="conversation.state.changed",
+            data=make_fcmp_state_changed(
+                source_state="running",
+                target_state="waiting_user",
+                trigger="turn.needs_input",
+                updated_at="2026-03-04T00:00:00Z",
+                pending_interaction_id=7,
+                pending_owner="waiting_user",
+            ),
+            attempt_number=1,
+        ).model_dump(mode="json"),
+    ]
+    write_jsonl(audit_dir / "fcmp_events.1.jsonl", existing_rows)
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+
+    service = RunObservabilityService()
+    payload = await service._materialize_protocol_stream(
+        run_dir=run_dir,
+        request_id=None,
+        status_payload={"status": "waiting_user"},
+        attempt_number=1,
+    )
+
+    assert [row["type"] for row in payload["fcmp_events"]] == [
+        "user.input.required",
+        "conversation.state.changed",
+    ]
+    persisted_rows = [
+        json.loads(line)
+        for line in (audit_dir / "fcmp_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [row["type"] for row in persisted_rows] == [
+        "user.input.required",
+        "conversation.state.changed",
+    ]

@@ -9,7 +9,11 @@ def _read_template() -> str:
 def test_run_observe_template_has_prompt_card_and_shortcut_hint():
     content = _read_template()
     assert "Pending Input Request" in content
+    assert "Authentication Required" in content
     assert 'id="prompt-card"' in content
+    assert 'id="auth-card"' in content
+    assert 'id="prompt-card-actions"' in content
+    assert 'id="auth-card-actions"' in content
     assert 'id="final-summary-card"' in content
     assert "Ctrl+Enter / Cmd+Enter to send" in content
     assert "replyTextEl.addEventListener(\"keydown\"" in content
@@ -31,23 +35,57 @@ def test_run_observe_template_removes_technical_panels():
     assert "stderr-panel" not in content
 
 
-def test_run_observe_template_extracts_ask_user_yaml_into_prompt_card():
+def test_run_observe_template_consumes_backend_ask_user_hints():
     content = _read_template()
-    assert "extractAskUserBlocks" in content
-    assert "parseAskUserYaml" in content
+    assert "deriveAskUserView" in content
+    assert "safeText(askUser.hint).trim()" in content
     assert "renderPromptCard" in content
-    assert "parsed.stripped" in content
-    assert "applyPendingPrompt(askPayload)" in content
+    assert "extractAskUserBlocks" not in content
+    assert "parseAskUserYaml" not in content
+    assert "applyPendingPrompt({" in content
+    assert 'id="prompt-card-hint"' in content
     assert "ui_hints" in content
-    assert "hint" in content
+    assert "replyTextEl.placeholder = hint || \"Reply to agent...\";" in content
 
 
 def test_run_observe_template_maps_user_input_required_to_agent_semantics():
     content = _read_template()
-    assert "if (type === \"user.input.required\")" in content
     assert "applyPendingPrompt(payload)" in content
-    assert "appendChatBubble(\"user\", text || \"(empty reply)\"" in content
-    assert "response_preview" in content
+    assert "renderActionButtons(" in content
+    assert "mode: \"interaction\"" in content
+    assert "response: option.value" in content
+    assert "successText" not in content
+    assert "successKey" not in content
+
+
+def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
+    content = _read_template()
+    assert "renderAuthCard(payload)" in content
+    assert "pending_auth_method_selection" in content
+    assert "/api/runs/${requestId}/auth/session" in content
+    assert "executeWaitingAuthWatchdogTick" in content
+    assert "maybeStartWaitingAuthWatchdog" in content
+    assert "clearWaitingAuthWatchdog" in content
+    assert 'selection: {' in content
+    assert 'kind: "auth_method"' in content
+    assert "const askUser = payload && typeof payload.ask_user === \"object\" ? payload.ask_user : null;" in content
+    assert 'id="auth-card-hint"' in content
+    assert "setReplyComposerVisible(false)" in content
+    assert "setReplyComposerVisible(true)" in content
+    assert "lastAuthRenderSignature" in content
+    assert "lastPromptRenderSignature" in content
+    assert 'if (currentStatus !== "waiting_auth") {' in content
+    assert 'mode: "auth"' in content
+    assert "submitPayload(" in content
+    assert "API key submitted" not in content
+    assert "Authorization code submitted" not in content
+
+
+def test_run_observe_template_hides_technical_auth_details():
+    content = _read_template()
+    assert 'id="auth-card-kind"' not in content
+    assert 'id="auth-card-methods"' not in content
+    assert 'id="auth-card-instructions"' not in content
 
 
 def test_run_observe_template_hides_prompt_card_body_when_hint_missing():
@@ -74,9 +112,31 @@ def test_run_observe_template_appends_final_artifact_summary():
 
 def test_run_observe_template_renders_all_assistant_messages_as_bubbles():
     content = _read_template()
-    assert "if (cleaned) {" in content
+    assert "handleChatEvent(event)" in content
     assert "appendChatBubble(" in content
     assert "isStructuredDoneMessage" not in content
+
+
+def test_run_observe_template_keeps_stream_open_until_terminal_chat_event():
+    content = _read_template()
+    assert 'if (isTerminal(currentStatus)) {' in content
+    terminal_refresh_block = """if (isTerminal(currentStatus)) {
+            clearWaitingUserWatchdog();
+            setReplyEnabled(false);
+            clearPromptCard();
+            await catchUpHistory();
+            await maybeAppendFinalSummary();
+            await maybeLoadFileTreeOnTerminal();
+        }"""
+    assert terminal_refresh_block in content
+
+
+def test_run_observe_template_catches_up_history_for_waiting_and_terminal_states():
+    content = _read_template()
+    assert "async function catchUpHistory()" in content
+    assert "await catchUpHistory();" in content
+    assert "catchUpHistory().catch(() => {});" in content
+    assert "catchUpHistory()\n                .catch(() => {})" in content
 
 
 def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():
@@ -84,3 +144,18 @@ def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():
     assert "/runs/{{ request_id }}/result" not in content
     assert "file-tree-layout" in content
     assert "preview-panel" in content
+
+
+def test_run_observe_template_uses_canonical_chat_replay_routes() -> None:
+    content = _read_template()
+    assert "/api/runs/${requestId}/chat/history" in content
+    assert "/api/runs/${requestId}/chat?cursor=${cursor}" in content
+    assert "/api/runs/${requestId}/events" not in content
+    assert "stream.addEventListener(\"chat_event\"" in content
+
+
+def test_run_observe_template_does_not_optimistically_append_chat_bubbles() -> None:
+    content = _read_template()
+    assert "appendChatBubble(\"user\"" not in content
+    assert "response_preview" not in content
+    assert "interaction.reply.accepted" not in content

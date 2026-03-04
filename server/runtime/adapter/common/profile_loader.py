@@ -48,7 +48,7 @@ class SessionCodecProfile:
 
 
 @dataclass(frozen=True)
-class WorkspaceProvisionerProfile:
+class AttemptWorkspaceProfile:
     workspace_subdir: str
     skills_subdir: str
     use_config_parent_as_workspace: bool
@@ -78,7 +78,7 @@ class AdapterProfile:
     profile_path: Path
     prompt_builder: PromptBuilderProfile
     session_codec: SessionCodecProfile
-    workspace_provisioner: WorkspaceProvisionerProfile
+    attempt_workspace: AttemptWorkspaceProfile
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
 
@@ -141,10 +141,10 @@ class AdapterProfile:
     def skills_root_from(self, run_dir: Path, config_path: Path) -> Path:
         workspace = (
             config_path.parent
-            if self.workspace_provisioner.use_config_parent_as_workspace
-            else run_dir / self.workspace_provisioner.workspace_subdir
+            if self.attempt_workspace.use_config_parent_as_workspace
+            else run_dir / self.attempt_workspace.workspace_subdir
         )
-        return workspace / self.workspace_provisioner.skills_subdir
+        return workspace / self.attempt_workspace.skills_subdir
 
 
 def _load_schema() -> dict[str, Any]:
@@ -194,7 +194,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
 
     prompt_raw = payload["prompt_builder"]
     session_raw = payload["session_codec"]
-    workspace_raw = payload["workspace_provisioner"]
+    workspace_raw = payload["attempt_workspace"]
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
 
@@ -266,7 +266,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             json_lines_finder=session_raw.get("json_lines_finder"),
             regex_pattern=session_raw.get("regex_pattern"),
         ),
-        workspace_provisioner=WorkspaceProvisionerProfile(
+        attempt_workspace=AttemptWorkspaceProfile(
             workspace_subdir=str(workspace_raw["workspace_subdir"]),
             skills_subdir=str(workspace_raw["skills_subdir"]),
             use_config_parent_as_workspace=bool(workspace_raw["use_config_parent_as_workspace"]),

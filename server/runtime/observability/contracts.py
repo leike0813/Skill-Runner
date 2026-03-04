@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 
 class RunStorePort(Protocol):
@@ -17,6 +17,12 @@ class RunStorePort(Protocol):
     async def get_pending_interaction(self, request_id: str) -> dict[str, Any] | None:
         ...
 
+    async def get_pending_auth(self, request_id: str) -> dict[str, Any] | None:
+        ...
+
+    async def get_pending_auth_method_selection(self, request_id: str) -> dict[str, Any] | None:
+        ...
+
     async def get_interaction_count(self, request_id: str) -> int:
         ...
 
@@ -30,6 +36,10 @@ class RunStorePort(Protocol):
 class WorkspacePort(Protocol):
     def get_run_dir(self, run_id: str) -> Path | None:
         ...
+
+
+WaitingAuthReconciler = Callable[..., Awaitable[bool]]
+QueuedResumeRedriver = Callable[..., Awaitable[bool]]
 
 
 class JobBundlePort(Protocol):

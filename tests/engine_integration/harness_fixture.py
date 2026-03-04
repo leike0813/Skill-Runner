@@ -30,6 +30,49 @@ from tests.common.skill_fixture_loader import (
 logger = logging.getLogger(__name__)
 
 
+def _write_state_file(run_dir: Path, status: str, *, warnings: list[str] | None = None) -> None:
+    state_dir = run_dir / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "request_id": f"req-{run_dir.name}",
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-02-16T00:00:00",
+                "current_attempt": 1,
+                "state_phase": {
+                    "waiting_auth_phase": None,
+                    "dispatch_phase": None,
+                },
+                "pending": {
+                    "owner": None,
+                    "interaction_id": None,
+                    "auth_session_id": None,
+                    "payload": None,
+                },
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {
+                    "conversation_mode": "session",
+                    "requested_execution_mode": None,
+                    "effective_execution_mode": None,
+                    "effective_interactive_require_user_reply": None,
+                    "effective_interactive_reply_timeout_sec": None,
+                    "effective_session_timeout_sec": None,
+                },
+                "error": None,
+                "warnings": warnings or [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class EngineIntegrationHarnessFixture:
     def __init__(self, project_root: Path, fixtures_dir: Path) -> None:
         self.project_root = project_root
@@ -216,7 +259,7 @@ class EngineIntegrationHarnessFixture:
         if not run_dir:
             logger.error("Run dir not found for %s", run_id)
             return False
-        status_file = run_dir / "status.json"
+        status_file = run_dir / ".state" / "state.json"
 
         final_status = None
         start_time = time.time()

@@ -46,6 +46,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "source_attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
         "kind": {
           "type": "string",
           "enum": [
@@ -104,8 +108,272 @@
       },
       "required": [
         "interaction_id",
+        "source_attempt",
         "kind",
         "prompt"
+      ]
+    },
+    "ask_user_hint_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "open_text",
+            "choose_one",
+            "confirm"
+          ]
+        },
+        "prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": true
+            },
+            "required": [
+              "label",
+              "value"
+            ]
+          },
+          "default": []
+        },
+        "ui_hints": {
+          "type": "object",
+          "default": {}
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "pending_auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auth_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auth_method": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "callback",
+            "device_auth",
+            "authorization_code",
+            "api_key",
+            null
+          ]
+        },
+        "challenge_kind": {
+          "type": "string",
+          "enum": [
+            "oauth_link",
+            "callback_url",
+            "authorization_code",
+            "api_key",
+            "browser_callback_only"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "instructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accepts_chat_input": {
+          "type": "boolean"
+        },
+        "input_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "callback_url",
+            "authorization_code",
+            "api_key",
+            null
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "challenge_active"
+          ]
+        },
+        "timeout_sec": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "auth_session_id",
+        "engine",
+        "challenge_kind",
+        "prompt",
+        "accepts_chat_input",
+        "source_attempt",
+        "phase"
+      ]
+    },
+    "pending_auth_method_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "available_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "callback",
+              "device_auth",
+              "authorization_code",
+              "api_key"
+            ]
+          }
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "method_selection"
+          ]
+        },
+        "ui_hints": {
+          "type": "object",
+          "default": {}
+        },
+        "ask_user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ask_user_hint_payload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "engine",
+        "available_methods",
+        "prompt",
+        "source_attempt",
+        "phase"
+      ]
+    },
+    "auth_waiting_payload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pending_auth_method_selection"
+        },
+        {
+          "$ref": "#/$defs/pending_auth"
+        }
       ]
     },
     "interactive_resume_command": {
@@ -151,6 +419,10 @@
           "type": "integer",
           "minimum": 1
         },
+        "source_attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
         "event_type": {
           "type": "string",
           "enum": [
@@ -168,6 +440,7 @@
       },
       "required": [
         "interaction_id",
+        "source_attempt",
         "event_type",
         "payload",
         "created_at"
@@ -204,6 +477,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "response": true,
+                  "source_attempt": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
                   "resolution_mode": {
                     "type": "string",
                     "enum": [
@@ -233,12 +510,539 @@
                 },
                 "required": [
                   "response",
+                  "source_attempt",
                   "resolution_mode"
                 ]
               }
             }
           }
         }
+      ]
+    },
+    "current_run_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_user",
+            "waiting_auth",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "current_attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pending_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "waiting_user",
+            "waiting_auth.method_selection",
+            "waiting_auth.challenge_active",
+            null
+          ]
+        },
+        "pending_interaction_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "pending_auth_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resume_ticket_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resume_cause": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "auth_completed",
+            "interaction_reply",
+            "interaction_auto_decide_timeout",
+            "restart_recovery",
+            null
+          ]
+        },
+        "source_attempt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "target_attempt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "conversation_mode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "session",
+            "non_session",
+            null
+          ]
+        },
+        "requested_execution_mode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "auto",
+            "interactive",
+            null
+          ]
+        },
+        "effective_execution_mode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "auto",
+            "interactive",
+            null
+          ]
+        },
+        "effective_interactive_require_user_reply": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "effective_interactive_reply_timeout_sec": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "effective_session_timeout_sec": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "error": {},
+        "warnings": {
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "request_id",
+        "run_id",
+        "status",
+        "updated_at",
+        "current_attempt",
+        "warnings"
+      ]
+    },
+    "terminal_run_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "data": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "repair_level": {
+          "type": "string"
+        },
+        "validation_warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "error": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "artifacts",
+        "repair_level",
+        "validation_warnings"
+      ]
+    },
+    "run_state_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_user",
+            "waiting_auth",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "current_attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_phase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "waiting_auth_phase": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "method_selection",
+                "challenge_active",
+                null
+              ]
+            },
+            "dispatch_phase": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "created",
+                "admitted",
+                "dispatch_scheduled",
+                "worker_claimed",
+                "attempt_materializing",
+                null
+              ]
+            }
+          },
+          "required": [
+            "waiting_auth_phase",
+            "dispatch_phase"
+          ]
+        },
+        "pending": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "waiting_user",
+                "waiting_auth.method_selection",
+                "waiting_auth.challenge_active",
+                null
+              ]
+            },
+            "interaction_id": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "auth_session_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "payload": {
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "owner",
+            "interaction_id",
+            "auth_session_id",
+            "payload"
+          ]
+        },
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "resume_ticket_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "resume_cause": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "auth_completed",
+                "interaction_reply",
+                "interaction_auto_decide_timeout",
+                "restart_recovery",
+                null
+              ]
+            },
+            "source_attempt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "target_attempt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          },
+          "required": [
+            "resume_ticket_id",
+            "resume_cause",
+            "source_attempt",
+            "target_attempt"
+          ]
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "conversation_mode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "session",
+                "non_session",
+                null
+              ]
+            },
+            "requested_execution_mode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "auto",
+                "interactive",
+                null
+              ]
+            },
+            "effective_execution_mode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "auto",
+                "interactive",
+                null
+              ]
+            },
+            "effective_interactive_require_user_reply": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "effective_interactive_reply_timeout_sec": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "effective_session_timeout_sec": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          },
+          "required": [
+            "conversation_mode",
+            "requested_execution_mode",
+            "effective_execution_mode",
+            "effective_interactive_require_user_reply",
+            "effective_interactive_reply_timeout_sec",
+            "effective_session_timeout_sec"
+          ]
+        },
+        "error": {},
+        "warnings": {
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "request_id",
+        "run_id",
+        "status",
+        "updated_at",
+        "current_attempt",
+        "state_phase",
+        "pending",
+        "resume",
+        "runtime",
+        "warnings"
+      ]
+    },
+    "run_dispatch_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dispatch_ticket_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "created",
+            "admitted",
+            "dispatch_scheduled",
+            "worker_claimed",
+            "attempt_materializing"
+          ]
+        },
+        "worker_claim_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "admitted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "scheduled_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "claimed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "request_id",
+        "run_id",
+        "dispatch_ticket_id",
+        "phase",
+        "worker_claim_id",
+        "admitted_at",
+        "scheduled_at",
+        "claimed_at",
+        "last_error",
+        "updated_at"
       ]
     },
     "orchestrator_event": {
@@ -273,6 +1077,16 @@
             "lifecycle.run.terminal",
             "lifecycle.run.canceled",
             "interaction.user_input.required",
+            "interaction.reply.accepted",
+            "auth.method.selection.required",
+            "auth.method.selected",
+            "auth.session.created",
+            "auth.challenge.updated",
+            "auth.input.accepted",
+            "auth.session.completed",
+            "auth.session.failed",
+            "auth.session.timed_out",
+            "auth.session.busy",
             "error.run.failed",
             "diagnostic.warning"
           ]
@@ -398,6 +1212,296 @@
                 "required": [
                   "interaction_id",
                   "kind"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "interaction.reply.accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "interaction_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "resolution_mode": {
+                    "type": "string",
+                    "const": "user_reply"
+                  },
+                  "accepted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "response_preview": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "interaction_id",
+                  "resolution_mode",
+                  "accepted_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.method.selection.required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/pending_auth_method_selection"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.method.selected"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/pending_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.session.created"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/pending_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.challenge.updated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/pending_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.session.timed_out"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/pending_auth"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.session.busy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/auth_waiting_payload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.input.accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "submission_kind": {
+                    "type": "string",
+                    "enum": [
+                      "callback_url",
+                      "authorization_code",
+                      "api_key"
+                    ]
+                  },
+                  "accepted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "auth_session_id",
+                  "submission_kind",
+                  "accepted_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.session.completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resume_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "source_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "target_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "resume_ticket_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ticket_consumed": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "completed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "auth_session_id",
+                  "completed_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.session.failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "failed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "auth_session_id"
                 ]
               }
             }
@@ -604,6 +1708,7 @@
                       "queued",
                       "running",
                       "waiting_user",
+                      "waiting_auth",
                       "succeeded",
                       "failed",
                       "canceled"
@@ -641,6 +1746,7 @@
                       "completed",
                       "interrupted",
                       "awaiting_user_input",
+                      "awaiting_auth",
                       "unknown"
                     ]
                   },
@@ -859,6 +1965,100 @@
         }
       ]
     },
+    "chat_replay_event_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "string",
+          "const": "chat-replay/1.0"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "interaction_reply",
+            "auth_submission",
+            "assistant_final",
+            "orchestration_notice"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "correlation": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "run_id",
+        "seq",
+        "created_at",
+        "attempt",
+        "role",
+        "kind",
+        "text"
+      ]
+    },
+    "chat_replay_history_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/chat_replay_event_envelope"
+          }
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "live",
+            "audit",
+            "mixed"
+          ]
+        },
+        "cursor_floor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cursor_ceiling": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "events",
+        "source",
+        "cursor_floor",
+        "cursor_ceiling"
+      ]
+    },
     "fcmp_event_envelope": {
       "type": "object",
       "additionalProperties": false,
@@ -886,14 +2086,16 @@
         "type": {
           "type": "string",
           "enum": [
-            "conversation.started",
             "conversation.state.changed",
             "assistant.message.final",
             "user.input.required",
+            "auth.required",
+            "auth.challenge.updated",
+            "auth.input.accepted",
+            "auth.completed",
+            "auth.failed",
             "interaction.reply.accepted",
             "interaction.auto_decide.timeout",
-            "conversation.completed",
-            "conversation.failed",
             "diagnostic.warning",
             "raw.stdout",
             "raw.stderr"
@@ -918,6 +2120,9 @@
           "required": [
             "attempt"
           ]
+        },
+        "correlation": {
+          "type": "object"
         },
         "raw_ref": {
           "anyOf": [
@@ -945,32 +2150,6 @@
           "if": {
             "properties": {
               "type": {
-                "const": "conversation.started"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "data": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "session_id": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "session_id"
-                ]
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
                 "const": "conversation.state.changed"
               }
             }
@@ -987,6 +2166,7 @@
                       "queued",
                       "running",
                       "waiting_user",
+                      "waiting_auth",
                       "succeeded",
                       "failed",
                       "canceled"
@@ -998,6 +2178,7 @@
                       "queued",
                       "running",
                       "waiting_user",
+                      "waiting_auth",
                       "succeeded",
                       "failed",
                       "canceled"
@@ -1020,6 +2201,101 @@
                       "null"
                     ],
                     "minimum": 1
+                  },
+                  "pending_auth_session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "resume_cause": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "auth_completed",
+                      "interaction_reply",
+                      "interaction_auto_decide_timeout",
+                      "restart_recovery",
+                      null
+                    ]
+                  },
+                  "pending_owner": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "waiting_user",
+                      "waiting_auth.method_selection",
+                      "waiting_auth.challenge_active",
+                      null
+                    ]
+                  },
+                  "resume_ticket_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ticket_consumed": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "terminal": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "succeeded",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "reason_code": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "category": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "code": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "category",
+                          "code"
+                        ]
+                      },
+                      "diagnostics": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
                   }
                 },
                 "required": [
@@ -1096,6 +2372,186 @@
                 "required": [
                   "kind",
                   "prompt"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/auth_waiting_payload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.challenge.updated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/auth_waiting_payload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.input.accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "submission_kind": {
+                    "type": "string",
+                    "enum": [
+                      "callback_url",
+                      "authorization_code",
+                      "api_key"
+                    ]
+                  },
+                  "accepted_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "auth_session_id",
+                  "submission_kind",
+                  "accepted_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resume_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "source_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "target_attempt": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "resume_ticket_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ticket_consumed": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "completed_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "auth_session_id",
+                  "completed_at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "auth.failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "auth_session_id"
                 ]
               }
             }
@@ -1195,77 +2651,6 @@
                   "resolution_mode",
                   "accepted_at",
                   "policy"
-                ]
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "conversation.completed"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "data": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "state": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "reason_code": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "state",
-                  "reason_code"
-                ]
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "conversation.failed"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "data": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "error": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "category": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "code": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "category",
-                      "code"
-                    ]
-                  }
-                },
-                "required": [
-                  "error"
                 ]
               }
             }

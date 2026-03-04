@@ -1,0 +1,25 @@
+{
+  "run_id": "20260302T125827-gemini-18a2015e",
+  "engine": "gemini",
+  "status": "failed",
+  "exit_code": 41,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:58:30.866022",
+  "finished_at": "2026-03-02T12:58:30.866027",
+  "completion": {
+    "state": "interrupted",
+    "reason_code": "NON_ZERO_EXIT",
+    "exit_code": 41
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/gemini",
+      "--yolo",
+      "--model=gemini-3.5-flash",
+      "-p",
+      "Hello"
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

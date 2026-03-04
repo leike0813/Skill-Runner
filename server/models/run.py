@@ -3,9 +3,18 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .common import RecoveryState, RunStatus, SkillInstallStatus
+from .common import (
+    ClientConversationMode,
+    ClientMetadata,
+    DispatchPhase,
+    ExecutionMode,
+    RecoveryState,
+    RunStatus,
+    SkillInstallStatus,
+)
+from .interaction import PendingOwner, ResumeCause
 
 
 class RunCreateRequest(BaseModel):
@@ -17,6 +26,7 @@ class RunCreateRequest(BaseModel):
     parameter: Dict[str, Any] = {}
     model: Optional[str] = None
     runtime_options: Dict[str, Any] = {}
+    client_metadata: ClientMetadata = Field(default_factory=ClientMetadata)
 
 
 class RunCreateResponse(BaseModel):
@@ -42,6 +52,7 @@ class TempSkillRunCreateRequest(BaseModel):
     parameter: Dict[str, Any] = {}
     model: Optional[str] = None
     runtime_options: Dict[str, Any] = {}
+    client_metadata: ClientMetadata = Field(default_factory=ClientMetadata)
 
 
 class TempSkillRunCreateResponse(BaseModel):
@@ -74,12 +85,28 @@ class RequestStatusResponse(BaseModel):
     auto_decision_count: int = 0
     last_auto_decision_at: Optional[datetime] = None
     pending_interaction_id: Optional[int] = None
+    pending_auth_session_id: Optional[str] = None
+    pending_payload: Optional[Dict[str, Any]] = None
     interaction_count: int = 0
     recovery_state: RecoveryState = RecoveryState.NONE
     recovered_at: Optional[datetime] = None
     recovery_reason: Optional[str] = None
+    requested_execution_mode: Optional[ExecutionMode] = None
+    effective_execution_mode: Optional[ExecutionMode] = None
+    conversation_mode: Optional[ClientConversationMode] = None
     interactive_auto_reply: Optional[bool] = None
     interactive_reply_timeout_sec: Optional[int] = None
+    effective_interactive_require_user_reply: Optional[bool] = None
+    effective_interactive_reply_timeout_sec: Optional[int] = None
+    current_attempt: Optional[int] = None
+    pending_owner: Optional[PendingOwner] = None
+    dispatch_phase: Optional[DispatchPhase] = None
+    dispatch_ticket_id: Optional[str] = None
+    worker_claim_id: Optional[str] = None
+    resume_ticket_id: Optional[str] = None
+    resume_cause: Optional[ResumeCause] = None
+    source_attempt: Optional[int] = None
+    target_attempt: Optional[int] = None
 
 
 class RunResponse(BaseModel):

@@ -1,0 +1,22 @@
+{
+  "sample_id": "openai_missing_bearer_401",
+  "source_run_id": "20260302T125727-codex-1bec66bb",
+  "engine": "codex",
+  "provider_id": "openai",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "Codex repeated 401 unauthorized missing bearer failures",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "api_key_missing",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Repeated reconnect loop still ends in the same missing bearer auth error."
+  ]
+}

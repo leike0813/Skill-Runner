@@ -42,7 +42,10 @@ def _build_skill_zip(
 
 
 @pytest.mark.asyncio
-async def test_stage_and_cleanup_temp_skill(monkeypatch, temp_config_dirs):
+async def test_inspect_skill_package_records_identity_without_persisting_temp_paths(
+    monkeypatch,
+    temp_config_dirs,
+):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
     monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
@@ -56,12 +59,13 @@ async def test_stage_and_cleanup_temp_skill(monkeypatch, temp_config_dirs):
         engine_options={},
         runtime_options={},
     )
-    manifest = await manager.stage_skill_package(request_id, _build_skill_zip())
+    manifest = await manager.inspect_skill_package(request_id, _build_skill_zip())
     assert manifest.id == "demo-temp-skill"
     record = await store.get_request(request_id)
     assert record is not None
-    assert record["skill_package_path"] is not None
-    assert record["staged_skill_dir"] is not None
+    assert record["skill_id"] == "demo-temp-skill"
+    assert record["skill_package_path"] is None
+    assert record["staged_skill_dir"] is None
 
     await manager.cleanup_temp_assets(request_id)
     record = await store.get_request(request_id)
@@ -89,11 +93,11 @@ async def test_reject_oversized_skill_package(monkeypatch, temp_config_dirs):
         runtime_options={},
     )
     with pytest.raises(ValueError, match="exceeds size limit"):
-        await manager.stage_skill_package(request_id, b"x" * 128)
+        await manager.inspect_skill_package(request_id, b"x" * 128)
 
 
 @pytest.mark.asyncio
-async def test_debug_keep_temp_skips_immediate_cleanup(monkeypatch, temp_config_dirs):
+async def test_on_terminal_updates_status_without_runtime_temp_assets(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
     monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
@@ -107,16 +111,17 @@ async def test_debug_keep_temp_skips_immediate_cleanup(monkeypatch, temp_config_
         engine_options={},
         runtime_options={"debug_keep_temp": True},
     )
-    await manager.stage_skill_package(request_id, _build_skill_zip())
+    await manager.inspect_skill_package(request_id, _build_skill_zip())
     await manager.on_terminal(request_id, RunStatus.SUCCEEDED, debug_keep_temp=True)
     record = await store.get_request(request_id)
     assert record is not None
     assert record["status"] == "succeeded"
-    assert record["skill_package_path"] is not None
+    assert record["skill_package_path"] is None
+    assert record["staged_skill_dir"] is None
 
 
 @pytest.mark.asyncio
-async def test_stage_missing_engines_defaults_to_all_supported(monkeypatch, temp_config_dirs):
+async def test_inspect_missing_engines_defaults_to_all_supported(monkeypatch, temp_config_dirs):
     store = TempSkillRunStore(db_path=Path(config.SYSTEM.TEMP_SKILL_RUNS_DB))
     monkeypatch.setattr("server.services.skill.temp_skill_run_manager.temp_skill_run_store", store)
     manager = TempSkillRunManager()
@@ -130,7 +135,7 @@ async def test_stage_missing_engines_defaults_to_all_supported(monkeypatch, temp
         engine_options={},
         runtime_options={},
     )
-    manifest = await manager.stage_skill_package(
+    manifest = await manager.inspect_skill_package(
         request_id,
         _build_skill_zip(include_engines=False),
     )

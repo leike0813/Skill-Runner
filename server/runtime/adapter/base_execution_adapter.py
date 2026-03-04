@@ -21,15 +21,16 @@ from ...models import (
     InteractionOption,
     SkillManifest,
 )
+from ..protocol.contracts import LiveRuntimeEmitter
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
+    AttemptRunFolderValidator,
     CommandBuilder,
     ConfigComposer,
     PromptBuilder,
     SessionHandleCodec,
     StreamParser,
-    WorkspaceProvisioner,
 )
 from .types import EngineRunResult, ProcessExecutionResult, RuntimeStreamParseResult
 
@@ -53,7 +54,7 @@ class EngineExecutionAdapter:
     """
 
     config_composer: ConfigComposer | None = None
-    workspace_provisioner: WorkspaceProvisioner | None = None
+    run_folder_validator: AttemptRunFolderValidator | None = None
     prompt_builder: PromptBuilder | None = None
     command_builder: CommandBuilder | None = None
     stream_parser: StreamParser | None = None
@@ -66,11 +67,12 @@ class EngineExecutionAdapter:
         input_data: dict[str, Any],
         run_dir: Path,
         options: dict[str, Any],
+        live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> EngineRunResult:
         is_interactive_reply_turn = "__interactive_reply_payload" in options
         if (
             self.config_composer is None
-            or self.workspace_provisioner is None
+            or self.run_folder_validator is None
             or self.prompt_builder is None
             or self.command_builder is None
             or self.stream_parser is None
@@ -85,7 +87,7 @@ class EngineExecutionAdapter:
                 options=options,
             )
             config_path = self.config_composer.compose(bootstrap_ctx)
-            self.workspace_provisioner.prepare(bootstrap_ctx, config_path)
+            self.run_folder_validator.validate(bootstrap_ctx, config_path)
 
         render_ctx = AdapterExecutionContext(
             skill=skill,
@@ -98,7 +100,13 @@ class EngineExecutionAdapter:
         if isinstance(prompt_override, str) and prompt_override.strip():
             prompt = prompt_override
 
-        process_result = await self._execute_process(prompt, run_dir, skill, options)
+        process_result = await self._execute_process(
+            prompt,
+            run_dir,
+            skill,
+            options,
+            live_runtime_emitter=live_runtime_emitter,
+        )
         exit_code = process_result.exit_code
         stdout = process_result.raw_stdout
         stderr = process_result.raw_stderr
@@ -112,23 +120,15 @@ class EngineExecutionAdapter:
         if turn_result.stderr is None and stderr:
             turn_result = turn_result.model_copy(update={"stderr": stderr})
 
-        result_payload = self._materialize_output_payload(turn_result)
         repair_level = turn_result.repair_level
 
         artifacts_dir = run_dir / "artifacts"
         artifacts = list(artifacts_dir.glob("**/*")) if artifacts_dir.exists() else []
 
-        result_path = run_dir / "result" / "result.json"
-        if result_payload is not None:
-            result_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(result_path, "w", encoding="utf-8") as f:
-                json.dump(result_payload, f, indent=2, ensure_ascii=False)
-
         return EngineRunResult(
             exit_code=exit_code,
             raw_stdout=stdout,
             raw_stderr=stderr,
-            output_file_path=result_path if result_path.exists() else None,
             artifacts_created=artifacts,
             failure_reason=process_result.failure_reason,
             repair_level=repair_level,
@@ -264,6 +264,7 @@ class EngineExecutionAdapter:
         run_dir: Path,
         skill: SkillManifest,
         options: dict[str, Any],
+        live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
         _ = skill
         resume_handle = options.get("__resume_session_handle")
@@ -278,7 +279,13 @@ class EngineExecutionAdapter:
 
         env = self.build_subprocess_env(os.environ.copy())
         proc = await self._create_subprocess(*command, cwd=run_dir, env=env)
-        return await self._capture_process_output(proc, run_dir, options, self.process_prefix)
+        return await self._capture_process_output(
+            proc,
+            run_dir,
+            options,
+            self.process_prefix,
+            live_runtime_emitter=live_runtime_emitter,
+        )
 
     # Backward-compatible component wrappers used by existing tests and thin callers.
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: dict[str, Any]) -> Path:
@@ -300,9 +307,9 @@ class EngineExecutionAdapter:
         config_path: Path,
         options: dict[str, Any],
     ) -> Path:
-        if self.workspace_provisioner is None:
-            raise RuntimeError("execution adapter workspace provisioner is not initialized")
-        return self.workspace_provisioner.prepare(
+        if self.run_folder_validator is None:
+            raise RuntimeError("execution adapter run-folder validator is not initialized")
+        return self.run_folder_validator.validate(
             AdapterExecutionContext(
                 skill=skill,
                 run_dir=run_dir,
@@ -353,13 +360,16 @@ class EngineExecutionAdapter:
         run_dir: Path,
         options: dict[str, Any],
         prefix: str,
+        live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
-        logs_dir = run_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        stdout_log_path = logs_dir / "stdout.txt"
-        stderr_log_path = logs_dir / "stderr.txt"
+        attempt_number_obj = options.get("__attempt_number")
+        attempt_number = attempt_number_obj if isinstance(attempt_number_obj, int) and attempt_number_obj > 0 else 1
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log_path = audit_dir / f"stdout.{attempt_number}.log"
+        stderr_log_path = audit_dir / f"stderr.{attempt_number}.log"
         stdout_log = stdout_log_path.open("w", encoding="utf-8")
         stderr_log = stderr_log_path.open("w", encoding="utf-8")
 
@@ -369,9 +379,11 @@ class EngineExecutionAdapter:
             tag: str,
             should_print: bool,
             log_file: Any,
+            stream_name: str,
         ) -> None:
             if stream is None:
                 return
+            offset = 0
             while True:
                 chunk = await stream.read(1024)
                 if not chunk:
@@ -380,14 +392,22 @@ class EngineExecutionAdapter:
                 chunks.append(decoded_chunk)
                 log_file.write(decoded_chunk)
                 log_file.flush()
+                if live_runtime_emitter is not None:
+                    await live_runtime_emitter.on_stream_chunk(
+                        stream=stream_name,
+                        text=decoded_chunk,
+                        byte_from=offset,
+                        byte_to=offset + len(chunk),
+                    )
+                offset += len(chunk)
                 if should_print:
                     logger.info("[%s]%s", tag, decoded_chunk.rstrip())
 
         stdout_task = asyncio.create_task(
-            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False, stdout_log)
+            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False, stdout_log, "stdout")
         )
         stderr_task = asyncio.create_task(
-            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False, stderr_log)
+            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False, stderr_log, "stderr")
         )
 
         run_id_obj = options.get("__run_id")
@@ -423,10 +443,18 @@ class EngineExecutionAdapter:
         raw_stderr = "".join(stderr_chunks)
         returncode = proc.returncode if proc.returncode is not None else 1
         failure_reason: str | None = None
+        # Legacy fallback only: the canonical auth classification path now lives in
+        # runtime auth_detection and orchestration. Keep this to avoid regressing
+        # existing adapters while rules migrate to the detector/rule-pack stack.
         if self._looks_like_auth_required(raw_stdout, raw_stderr) and (timed_out or returncode != 0):
             failure_reason = "AUTH_REQUIRED"
         elif timed_out:
             failure_reason = "TIMEOUT"
+        if live_runtime_emitter is not None:
+            await live_runtime_emitter.on_process_exit(
+                exit_code=returncode,
+                failure_reason=failure_reason,
+            )
         return ProcessExecutionResult(
             exit_code=returncode,
             raw_stdout=raw_stdout,

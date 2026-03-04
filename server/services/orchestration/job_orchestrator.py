@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 from pydantic import ValidationError
 from server.models import (
+    AdapterTurnOutcome,
     EngineSessionHandle,
     EngineInteractiveProfile,
     ExecutionMode,
@@ -37,12 +38,26 @@ from server.services.orchestration.run_job_lifecycle_service import (
     RunJobLifecycleService,
     RunJobRequest,
 )
+from server.services.orchestration.run_auth_orchestration_service import (
+    RunAuthOrchestrationService,
+    run_auth_orchestration_service,
+)
+from server.services.orchestration.run_projection_service import run_projection_service
+from server.runtime.auth_detection.service import (
+    AuthDetectionService,
+    auth_detection_service,
+)
 from server.runtime.session.timeout import resolve_interactive_reply_timeout
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
 )
+from server.runtime.protocol.parse_utils import extract_fenced_or_plain_json
+from server.runtime.protocol.event_protocol import translate_orchestrator_event_to_fcmp_specs
+from server.runtime.protocol.factories import make_fcmp_event
+from server.runtime.protocol.live_publish import fcmp_event_publisher
+from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.config import config
 
 
@@ -60,6 +75,8 @@ class OrchestratorDeps:
     interaction_service: RunInteractionLifecycleService | None = None
     recovery_service: RunRecoveryService | None = None
     run_job_lifecycle_service: RunJobLifecycleService | None = None
+    auth_detection_service: AuthDetectionService | None = None
+    auth_orchestration_service: RunAuthOrchestrationService | None = None
 
 
 class JobOrchestrator:
@@ -86,6 +103,12 @@ class JobOrchestrator:
         )
         self.interaction_service = self.deps.interaction_service or RunInteractionLifecycleService()
         self.recovery_service = self.deps.recovery_service or RunRecoveryService()
+        self.auth_detection_service = (
+            self.deps.auth_detection_service or auth_detection_service
+        )
+        self.auth_orchestration_service = (
+            self.deps.auth_orchestration_service or run_auth_orchestration_service
+        )
         self.run_job_lifecycle_service = (
             self.deps.run_job_lifecycle_service or RunJobLifecycleService()
         )
@@ -145,15 +168,37 @@ class JobOrchestrator:
                     await adapter.cancel_run_process(run_id)
 
         canceled_error = self._build_canceled_error()
-        self._write_canceled_result(run_dir, canceled_error)
-        self._update_status(
-            run_dir,
-            RunStatus.CANCELED,
-            error=canceled_error,
-            effective_session_timeout_sec=(
-                (await run_store.get_effective_session_timeout(request_id)) if request_id else None
-            ),
+        request_record = (
+            await run_store.get_request(request_id) if request_id else None
         )
+        effective_session_timeout_sec = (
+            (await run_store.get_effective_session_timeout(request_id)) if request_id else None
+        )
+        if request_id:
+            await run_projection_service.write_terminal_projection(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_id,
+                status=RunStatus.CANCELED,
+                terminal_result={
+                    "data": None,
+                    "artifacts": [],
+                    "repair_level": "none",
+                    "validation_warnings": [],
+                    "error": canceled_error,
+                },
+                request_record=request_record,
+                effective_session_timeout_sec=effective_session_timeout_sec,
+                error=canceled_error,
+            )
+        else:
+            self._write_canceled_result(run_dir, canceled_error)
+            self._update_status(
+                run_dir,
+                RunStatus.CANCELED,
+                error=canceled_error,
+                effective_session_timeout_sec=effective_session_timeout_sec,
+            )
         await run_store.update_run_status(run_id, RunStatus.CANCELED)
 
         if temp_request_id:
@@ -192,6 +237,28 @@ class JobOrchestrator:
         )
         return result_path
 
+    def _write_failed_result(self, run_dir: Optional[Path], error: Dict[str, Any]) -> Optional[Path]:
+        if run_dir is None:
+            return None
+        result_payload: Dict[str, Any] = {
+            "status": RunStatus.FAILED.value,
+            "data": None,
+            "artifacts": [],
+            "repair_level": "none",
+            "validation_warnings": [],
+            "error": error,
+            "pending_interaction": None,
+            "pending_auth_method_selection": None,
+            "pending_auth": None,
+        }
+        result_path = run_dir / "result" / "result.json"
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(
+            json.dumps(result_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return result_path
+
     def _update_status(
         self,
         run_dir: Path,
@@ -200,21 +267,30 @@ class JobOrchestrator:
         warnings: Optional[List[str]] = None,
         effective_session_timeout_sec: Optional[int] = None,
     ):
-        # In v0, we might just rely on checking result/ but let's write a status file
-        # This mirrors what WorkspaceManager does but updates it
-        # Ideally WorkspaceManager should own this writing logic
-        # For simplicity, I'll write a simple status.json sidecar
-        
+        state_file = run_dir / ".state" / "state.json"
         warnings_list = warnings or []
-        status_data = {
-            "status": status,
-            "updated_at": str(datetime.now()),
-            "error": error,
-            "warnings": warnings_list,
-            "effective_session_timeout_sec": effective_session_timeout_sec,
-        }
-        with open(run_dir / "status.json", "w") as f:
-            json.dump(status_data, f)
+        status_data = {}
+        if state_file.exists():
+            try:
+                status_data = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                status_data = {}
+        if not isinstance(status_data, dict):
+            status_data = {}
+        runtime_obj = status_data.get("runtime")
+        runtime_payload: Dict[str, Any] = dict(runtime_obj) if isinstance(runtime_obj, dict) else {}
+        runtime_payload["effective_session_timeout_sec"] = effective_session_timeout_sec
+        status_data.update(
+            {
+                "status": status.value if isinstance(status, RunStatus) else str(status),
+                "updated_at": str(datetime.now()),
+                "error": error,
+                "warnings": warnings_list,
+                "runtime": runtime_payload,
+            }
+        )
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(status_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _update_latest_run_id(self, run_id: str):
         """Updates the latest_run_id file in the runs directory."""
@@ -284,6 +360,38 @@ class JobOrchestrator:
         except (TypeError, ValueError):
             pass
         return default_timeout
+
+    def _parse_runtime_stream_for_auth_detection(
+        self,
+        *,
+        adapter: Any | None,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> Dict[str, Any] | None:
+        if adapter is None or not hasattr(adapter, "parse_runtime_stream"):
+            return None
+        try:
+            parsed = adapter.parse_runtime_stream(
+                stdout_raw=raw_stdout.encode("utf-8", errors="replace"),
+                stderr_raw=raw_stderr.encode("utf-8", errors="replace"),
+                pty_raw=b"",
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, LookupError) as exc:
+            logger.warning(
+                "Failed to parse runtime stream for auth detection: adapter=%s",
+                getattr(adapter, "__class__", type(adapter)).__name__,
+                exc_info=True,
+            )
+            return {
+                "parser": "auth_detection_fallback",
+                "confidence": 0.0,
+                "session_id": None,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [f"AUTH_DETECTION_PARSE_FAILED:{type(exc).__name__}"],
+                "structured_types": [],
+            }
+        return parsed if isinstance(parsed, dict) else None
 
     async def _resolve_attempt_number(self, *, request_id: Optional[str], is_interactive: bool) -> int:
         if not request_id or not is_interactive:
@@ -369,6 +477,8 @@ class JobOrchestrator:
         validation_warnings: List[str],
         terminal_error_code: Optional[str],
         options: Dict[str, Any],
+        auth_detection: Dict[str, Any] | None = None,
+        auth_session: Dict[str, Any] | None = None,
     ) -> None:
         self.audit_service.write_attempt_audit_artifacts(
             run_dir=run_dir,
@@ -390,6 +500,8 @@ class JobOrchestrator:
             validation_warnings=validation_warnings,
             terminal_error_code=terminal_error_code,
             options=options,
+            auth_detection=auth_detection,
+            auth_session=auth_session,
         )
 
     def _append_orchestrator_event(
@@ -400,6 +512,7 @@ class JobOrchestrator:
         category: str,
         type_name: str,
         data: Dict[str, Any],
+        engine_name: Optional[str] = None,
     ) -> None:
         self.audit_service.append_orchestrator_event(
             run_dir=run_dir,
@@ -408,6 +521,51 @@ class JobOrchestrator:
             type_name=type_name,
             data=data,
         )
+        resolved_engine = self._resolve_orchestrator_event_engine(
+            run_dir=run_dir,
+            data=data,
+            engine_name=engine_name,
+        )
+        for spec in translate_orchestrator_event_to_fcmp_specs(
+            engine=resolved_engine,
+            type_name=type_name,
+            data=data,
+            updated_at=datetime.utcnow().isoformat(),
+            default_attempt_number=attempt_number,
+        ):
+            event = make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine=resolved_engine,
+                type_name=str(spec["type_name"]),
+                data=dict(spec["data"]),
+                attempt_number=attempt_number,
+                ts=datetime.utcnow(),
+            )
+            fcmp_event_publisher.publish(run_dir=run_dir, event=event)
+
+    def _resolve_orchestrator_event_engine(
+        self,
+        *,
+        run_dir: Path,
+        data: Dict[str, Any],
+        engine_name: Optional[str],
+    ) -> str:
+        if isinstance(engine_name, str) and engine_name.strip():
+            return engine_name.strip()
+        engine_obj = data.get("engine")
+        if isinstance(engine_obj, str) and engine_obj.strip():
+            return engine_obj.strip()
+        live_payload = fcmp_live_journal.replay(run_id=run_dir.name, after_seq=0)
+        live_events = live_payload.get("events")
+        if isinstance(live_events, list):
+            for row in reversed(live_events):
+                if not isinstance(row, dict):
+                    continue
+                row_engine = row.get("engine")
+                if isinstance(row_engine, str) and row_engine.strip():
+                    return row_engine.strip()
+        return "unknown"
 
     def _next_orchestrator_event_seq(self, event_path: Path) -> int:
         return self.audit_service.next_orchestrator_event_seq(event_path)
@@ -443,7 +601,10 @@ class JobOrchestrator:
             value = options.get("interactive_auto_reply")
             if isinstance(value, bool):
                 return value
-        runtime_options = request_record.get("runtime_options", {})
+        runtime_options = request_record.get(
+            "effective_runtime_options",
+            request_record.get("runtime_options", {}),
+        )
         value = runtime_options.get("interactive_auto_reply", False)
         return bool(value)
 
@@ -558,6 +719,52 @@ class JobOrchestrator:
     ) -> tuple[Dict[str, Any], bool]:
         return self.interaction_service.strip_done_marker_for_output_validation(payload)
 
+    def _materialize_turn_result_payload(self, turn_result: Any | None) -> Dict[str, Any] | None:
+        if turn_result is None:
+            return None
+        outcome = getattr(turn_result, "outcome", None)
+        if outcome == AdapterTurnOutcome.FINAL:
+            final_data = getattr(turn_result, "final_data", None)
+            return dict(final_data) if isinstance(final_data, dict) else None
+        if outcome == AdapterTurnOutcome.ASK_USER:
+            interaction = getattr(turn_result, "interaction", None)
+            if interaction is None:
+                return None
+            interaction_payload = interaction.model_dump(mode="json")
+            return {
+                "outcome": AdapterTurnOutcome.ASK_USER.value,
+                "action": AdapterTurnOutcome.ASK_USER.value,
+                "ask_user": interaction_payload,
+                "interaction": interaction_payload,
+            }
+        return None
+
+    def _resolve_structured_output_payload(
+        self,
+        *,
+        result: Any,
+        runtime_parse_result: Dict[str, Any] | None,
+    ) -> Dict[str, Any] | None:
+        payload = self._materialize_turn_result_payload(getattr(result, "turn_result", None))
+        if isinstance(payload, dict):
+            return payload
+
+        if not isinstance(runtime_parse_result, dict):
+            return None
+        assistant_messages = runtime_parse_result.get("assistant_messages")
+        if not isinstance(assistant_messages, list):
+            return None
+        for item in reversed(assistant_messages):
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            parsed = extract_fenced_or_plain_json(text)
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
     async def _persist_waiting_interaction(
         self,
         *,
@@ -565,6 +772,7 @@ class JobOrchestrator:
         run_id: str,
         run_dir: Path,
         request_id: str,
+        attempt_number: int,
         profile: EngineInteractiveProfile,
         interactive_auto_reply: bool,
         pending_interaction: Dict[str, Any],
@@ -576,6 +784,7 @@ class JobOrchestrator:
             run_id=run_id,
             run_dir=run_dir,
             request_id=request_id,
+            attempt_number=attempt_number,
             profile=profile,
             interactive_auto_reply=interactive_auto_reply,
             pending_interaction=pending_interaction,
@@ -583,7 +792,6 @@ class JobOrchestrator:
             run_store_backend=run_store,
             append_internal_schema_warning=self._append_internal_schema_warning,
             append_orchestrator_event=self._append_orchestrator_event,
-            resolve_attempt_number=self._resolve_attempt_number,
         )
 
     async def _write_interaction_mirror_files(
@@ -661,6 +869,7 @@ class JobOrchestrator:
             run_store_backend=self._run_store_backend(),
             is_valid_session_handle=self._is_valid_session_handle,
             mark_restart_reconciled_failed=self._mark_restart_reconciled_failed,
+            resume_run_job=self.run_job,
         )
 
     async def _mark_restart_reconciled_failed(

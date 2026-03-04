@@ -236,12 +236,10 @@ class CodexAuthRuntimeHandler:
                 self._manager._codex_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
                 session.status = "succeeded"
                 session.error = None
-                session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
                 session.status = "failed"
                 session.error = str(exc)
-                session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
         elif isinstance(runtime, OpenAIDeviceProxySession):
             raise ValueError("Codex auth_code_or_url device session does not accept manual input")
@@ -281,24 +279,20 @@ class CodexAuthRuntimeHandler:
         if runtime is None or not isinstance(runtime, CodexOAuthProxySession):
             session.status = "failed"
             session.error = "Codex OAuth proxy session driver is missing"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         now = _utc_now()
         session.updated_at = now
         runtime.updated_at = now
         if session.status in _TERMINAL_STATUSES:
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         if now > session.expires_at:
             session.status = "expired"
             session.error = "Auth session expired"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if session.status == "starting":
             session.status = "waiting_user"
-        session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
         return True
 
     def _refresh_codex_device_oauth_proxy_session_locked(self, session: Any) -> bool:
@@ -306,11 +300,9 @@ class CodexAuthRuntimeHandler:
         if runtime is None or not isinstance(runtime, OpenAIDeviceProxySession):
             session.status = "failed"
             session.error = "Codex OpenAI device auth session driver is missing"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if session.status in _TERMINAL_STATUSES:
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             return True
         now = _utc_now()
         session.updated_at = now
@@ -318,7 +310,6 @@ class CodexAuthRuntimeHandler:
         if now > session.expires_at:
             session.status = "expired"
             session.error = "Auth session expired"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         if session.status == "starting":
@@ -326,18 +317,15 @@ class CodexAuthRuntimeHandler:
         try:
             tokens = self._manager._openai_device_proxy_flow.poll_once(runtime, now=now)  # noqa: SLF001
             if tokens is None:
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 return True
             self._manager._codex_oauth_proxy_flow.complete_with_tokens(tokens)  # noqa: SLF001
             session.status = "succeeded"
             session.error = None
-            session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
         except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = self._manager._build_openai_device_error_message(exc)  # noqa: SLF001
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
         return True
 
@@ -355,33 +343,28 @@ class CodexAuthRuntimeHandler:
         if error and error.strip():
             session.status = "failed"
             session.error = f"OAuth callback error: {error.strip()}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         normalized_code = (code or "").strip()
         if not normalized_code:
             session.status = "failed"
             session.error = "OAuth callback code is missing"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         runtime = session.driver_state
         if runtime is None or not isinstance(runtime, CodexOAuthProxySession):
             session.status = "failed"
             session.error = "OAuth callback session does not support OpenAI callback"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             return True
         try:
             self._manager._codex_oauth_proxy_flow.complete_with_code(runtime, normalized_code)  # noqa: SLF001
-            session.auth_ready = self._manager._collect_auth_ready("codex")  # noqa: SLF001
             session.status = "succeeded"
             session.error = None
             self._manager._mark_auto_callback_success(session)  # noqa: SLF001
         except (OpenAIOAuthError, OSError, RuntimeError, ValueError) as exc:
             session.status = "failed"
             session.error = f"OAuth callback token exchange failed: {exc}"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
         self._manager._finalize_active_session(session)  # noqa: SLF001
         return True
 

@@ -535,6 +535,63 @@ async def get_run_events_history_api(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
+@router.get("/api/runs/{request_id}/chat")
+async def stream_run_chat_api(
+    request_id: str,
+    source: str | None = None,
+    cursor: int = 0,
+    backend: BackendClient = Depends(get_backend_client),
+):
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+
+    async def _stream():
+        try:
+            async for chunk in backend.stream_run_chat(
+                request_id,
+                run_source=run_source,
+                cursor=cursor,
+            ):
+                yield chunk
+        except BackendApiError as exc:
+            payload = {"error": exc.detail, "status_code": exc.status_code}
+            frame = f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            yield frame.encode("utf-8")
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/api/runs/{request_id}/chat/history")
+async def get_run_chat_history_api(
+    request_id: str,
+    source: str | None = None,
+    from_seq: int | None = None,
+    to_seq: int | None = None,
+    from_ts: str | None = None,
+    to_ts: str | None = None,
+    backend: BackendClient = Depends(get_backend_client),
+):
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+    try:
+        return await backend.get_run_chat_history(
+            request_id,
+            run_source=run_source,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+    except BackendApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
 @router.get("/api/runs/{request_id}/logs/range")
 async def get_run_logs_range_api(
     request_id: str,
@@ -1176,15 +1233,15 @@ def _build_runtime_options(
         raw_value = submitted.get("interactive_reply_timeout_sec")
         if interactive_auto_reply:
             if not isinstance(raw_value, str) or not raw_value.strip():
-                errors.append("interactive_reply_timeout_sec must be a positive integer")
+                errors.append("interactive_reply_timeout_sec must be a non-negative integer")
             else:
                 try:
                     parsed = int(raw_value.strip())
                 except ValueError:
-                    errors.append("interactive_reply_timeout_sec must be a positive integer")
+                    errors.append("interactive_reply_timeout_sec must be a non-negative integer")
                 else:
-                    if parsed <= 0:
-                        errors.append("interactive_reply_timeout_sec must be a positive integer")
+                    if parsed < 0:
+                        errors.append("interactive_reply_timeout_sec must be a non-negative integer")
                     else:
                         options["interactive_reply_timeout_sec"] = parsed
     return options, errors

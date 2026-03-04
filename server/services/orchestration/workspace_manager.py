@@ -15,7 +15,7 @@ class WorkspaceManager:
     
     Responsibilities:
     - Creates unique run directories (`runs/{uuid}`).
-    - Provisions subdirectories (`artifacts`, `result`, `interactions`).
+    - Provisions canonical subdirectories (`artifacts`, `result`, `.state`, `.audit`).
     - Handles file uploads to the workspace.
     - Provides accessors for run paths.
     """
@@ -43,15 +43,12 @@ class WorkspaceManager:
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create subdirectories
+        # Create canonical subdirectories
         (run_dir / "artifacts").mkdir()
         (run_dir / "result").mkdir()
-        (run_dir / "interactions").mkdir()
+        (run_dir / ".state").mkdir()
+        (run_dir / ".audit").mkdir()
         # uploads directory is created only when inputs are promoted
-
-        # Save input
-        with open(run_dir / "input.json", 'w', encoding='utf-8') as f:
-            json.dump(request.model_dump(), f, indent=2)
 
         # Initial status
         now = datetime.now()

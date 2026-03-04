@@ -1,13 +1,14 @@
+import asyncio
 import io
 import json
-import time
 import zipfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient
+httpx = pytest.importorskip("httpx")
 
 from server.config import config
 from server.main import app
@@ -82,15 +83,21 @@ def _build_invalid_zip_missing_output_schema(skill_id: str, version: str) -> byt
     return buff.getvalue()
 
 
-def _wait_install_status(client: TestClient, request_id: str, timeout_sec: float = 5.0) -> dict:
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        res = client.get(f"/v1/skill-packages/{request_id}")
+async def _request(method: str, path: str, **kwargs):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.request(method, path, **kwargs)
+
+
+async def _wait_install_status(request_id: str, timeout_sec: float = 5.0) -> dict:
+    deadline = asyncio.get_running_loop().time() + timeout_sec
+    while asyncio.get_running_loop().time() < deadline:
+        res = await _request("GET", f"/v1/skill-packages/{request_id}")
         assert res.status_code == 200
         payload = res.json()
         if payload["status"] in ("succeeded", "failed"):
             return payload
-        time.sleep(0.05)
+        await asyncio.sleep(0.05)
     raise AssertionError(f"Timed out waiting for install status: {request_id}")
 
 
@@ -131,75 +138,109 @@ def disable_lifespan_schedulers(monkeypatch):
     monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", lambda: None)
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
     monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_status_cache_service.engine_status_cache_service.refresh_all",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_status_cache_service.engine_status_cache_service.start",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_status_cache_service.engine_status_cache_service.stop",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "server.engines.opencode.models.catalog_service.opencode_model_catalog.start",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "server.engines.opencode.models.catalog_service.opencode_model_catalog.refresh",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.engines.opencode.models.catalog_service.opencode_model_catalog.stop",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "server.runtime.auth_detection.service.auth_detection_service.preload",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "server.services.orchestration.job_orchestrator.job_orchestrator.recover_incomplete_runs_on_startup",
+        AsyncMock(return_value=None),
+    )
 
 
-def test_install_new_skill_and_discoverable(isolated_skill_install_env):
+@pytest.mark.asyncio
+async def test_install_new_skill_and_discoverable(isolated_skill_install_env):
     skill_id = "demo-upload-int"
-    with TestClient(app) as client:
-        upload = _build_skill_zip(skill_id, "1.0.0")
-        res = client.post(
-            "/v1/skill-packages/install",
-            files={"file": ("skill.zip", upload, "application/zip")}
-        )
-        assert res.status_code == 200
-        request_id = res.json()["request_id"]
+    upload = _build_skill_zip(skill_id, "1.0.0")
+    res = await _request(
+        "POST",
+        "/v1/skill-packages/install",
+        files={"file": ("skill.zip", upload, "application/zip")}
+    )
+    assert res.status_code == 200
+    request_id = res.json()["request_id"]
 
-        status = _wait_install_status(client, request_id)
-        assert status["status"] == "succeeded"
-        assert status["skill_id"] == skill_id
-        assert status["version"] == "1.0.0"
-        assert status["action"] == "install"
+    status = await _wait_install_status(request_id)
+    assert status["status"] == "succeeded"
+    assert status["skill_id"] == skill_id
+    assert status["version"] == "1.0.0"
+    assert status["action"] == "install"
 
-        skill_res = client.get(f"/v1/skills/{skill_id}")
-        assert skill_res.status_code == 200
-        assert skill_res.json()["id"] == skill_id
+    skill_res = await _request("GET", f"/v1/skills/{skill_id}")
+    assert skill_res.status_code == 200
+    assert skill_res.json()["id"] == skill_id
 
 
-def test_update_archives_previous_version(isolated_skill_install_env):
+@pytest.mark.asyncio
+async def test_update_archives_previous_version(isolated_skill_install_env):
     skill_id = "demo-upload-int"
-    with TestClient(app) as client:
-        v1 = _build_skill_zip(skill_id, "1.0.0")
-        r1 = client.post("/v1/skill-packages/install", files={"file": ("v1.zip", v1, "application/zip")})
-        assert r1.status_code == 200
-        s1 = _wait_install_status(client, r1.json()["request_id"])
-        assert s1["status"] == "succeeded"
+    v1 = _build_skill_zip(skill_id, "1.0.0")
+    r1 = await _request("POST", "/v1/skill-packages/install", files={"file": ("v1.zip", v1, "application/zip")})
+    assert r1.status_code == 200
+    s1 = await _wait_install_status(r1.json()["request_id"])
+    assert s1["status"] == "succeeded"
 
-        v2 = _build_skill_zip(skill_id, "1.1.0")
-        r2 = client.post("/v1/skill-packages/install", files={"file": ("v2.zip", v2, "application/zip")})
-        assert r2.status_code == 200
-        s2 = _wait_install_status(client, r2.json()["request_id"])
-        assert s2["status"] == "succeeded"
-        assert s2["action"] == "update"
+    v2 = _build_skill_zip(skill_id, "1.1.0")
+    r2 = await _request("POST", "/v1/skill-packages/install", files={"file": ("v2.zip", v2, "application/zip")})
+    assert r2.status_code == 200
+    s2 = await _wait_install_status(r2.json()["request_id"])
+    assert s2["status"] == "succeeded"
+    assert s2["action"] == "update"
 
-        archived_runner = Path(config.SYSTEM.SKILLS_ARCHIVE_DIR) / skill_id / "1.0.0" / "assets" / "runner.json"
-        assert archived_runner.exists()
+    archived_runner = Path(config.SYSTEM.SKILLS_ARCHIVE_DIR) / skill_id / "1.0.0" / "assets" / "runner.json"
+    assert archived_runner.exists()
 
 
-def test_reject_downgrade_update(isolated_skill_install_env):
+@pytest.mark.asyncio
+async def test_reject_downgrade_update(isolated_skill_install_env):
     skill_id = "demo-upload-int"
-    with TestClient(app) as client:
-        v2 = _build_skill_zip(skill_id, "2.0.0")
-        r1 = client.post("/v1/skill-packages/install", files={"file": ("v2.zip", v2, "application/zip")})
-        assert r1.status_code == 200
-        s1 = _wait_install_status(client, r1.json()["request_id"])
-        assert s1["status"] == "succeeded"
+    v2 = _build_skill_zip(skill_id, "2.0.0")
+    r1 = await _request("POST", "/v1/skill-packages/install", files={"file": ("v2.zip", v2, "application/zip")})
+    assert r1.status_code == 200
+    s1 = await _wait_install_status(r1.json()["request_id"])
+    assert s1["status"] == "succeeded"
 
-        v1 = _build_skill_zip(skill_id, "1.0.0")
-        r2 = client.post("/v1/skill-packages/install", files={"file": ("v1.zip", v1, "application/zip")})
-        assert r2.status_code == 200
-        s2 = _wait_install_status(client, r2.json()["request_id"])
-        assert s2["status"] == "failed"
-        assert "strictly higher version" in (s2.get("error") or "")
+    v1 = _build_skill_zip(skill_id, "1.0.0")
+    r2 = await _request("POST", "/v1/skill-packages/install", files={"file": ("v1.zip", v1, "application/zip")})
+    assert r2.status_code == 200
+    s2 = await _wait_install_status(r2.json()["request_id"])
+    assert s2["status"] == "failed"
+    assert "strictly higher version" in (s2.get("error") or "")
 
 
-def test_reject_invalid_package_missing_required_files(isolated_skill_install_env):
-    with TestClient(app) as client:
-        payload = _build_invalid_zip_missing_output_schema("demo-bad-upload", "1.0.0")
-        res = client.post(
-            "/v1/skill-packages/install",
-            files={"file": ("bad.zip", payload, "application/zip")}
-        )
-        assert res.status_code == 200
-        status = _wait_install_status(client, res.json()["request_id"])
-        assert status["status"] == "failed"
-        assert "missing required files" in (status.get("error") or "")
+@pytest.mark.asyncio
+async def test_reject_invalid_package_missing_required_files(isolated_skill_install_env):
+    payload = _build_invalid_zip_missing_output_schema("demo-bad-upload", "1.0.0")
+    res = await _request(
+        "POST",
+        "/v1/skill-packages/install",
+        files={"file": ("bad.zip", payload, "application/zip")}
+    )
+    assert res.status_code == 200
+    status = await _wait_install_status(res.json()["request_id"])
+    assert status["status"] == "failed"
+    assert "missing required files" in (status.get("error") or "")

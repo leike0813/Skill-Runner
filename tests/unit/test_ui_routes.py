@@ -40,6 +40,10 @@ def _build_skill_dir(base: Path) -> Path:
     return skill_dir
 
 
+def _read_run_detail_template() -> str:
+    return Path("server/assets/templates/ui/run_detail.html").read_text(encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_ui_index_available_when_auth_disabled(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
@@ -166,7 +170,7 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -219,6 +223,22 @@ async def test_ui_auth_protects_ui_and_skill_package_routes(monkeypatch):
         json={"engine": "codex", "method": "auth"},
     )
     assert response.status_code == 200
+
+
+def test_run_detail_template_keeps_stream_open_until_terminal_chat_event():
+    content = _read_run_detail_template()
+    assert "function updateStatus(payload) {" in content
+    assert 'if (terminal) {\n                clearWaitingUserWatchdog();\n                clearWaitingAuthWatchdog();\n            }' in content
+    assert 'closeStream();' in content
+    assert '/v1/management/runs/${requestId}/chat?cursor=${cursor}' in content
+
+
+def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states():
+    content = _read_run_detail_template()
+    assert "async function catchUpConversationHistory()" in content
+    assert "await catchUpConversationHistory();" in content
+    assert "catchUpConversationHistory().catch(() => {});" in content
+    assert "catchUpConversationHistory()\n                .catch(() => {})" in content
 
 
 @pytest.mark.asyncio
@@ -528,7 +548,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -546,7 +566,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:02Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -564,7 +584,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:03Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": "Canceled by user",
             "exit_code": None,
             "terminal": True,
@@ -583,7 +603,7 @@ async def test_ui_engine_auth_session_endpoints(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:02Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -634,7 +654,7 @@ async def test_ui_engine_auth_grouped_endpoints(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:01Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -649,7 +669,7 @@ async def test_ui_engine_auth_grouped_endpoints(monkeypatch):
             "created_at": "2026-02-27T00:00:00Z",
             "updated_at": "2026-02-27T00:00:02Z",
             "expires_at": "2026-02-27T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "terminal": False,
         },
     )
@@ -694,7 +714,7 @@ async def test_ui_engine_auth_start_passes_auth_method(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -734,7 +754,7 @@ async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:01Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -753,7 +773,7 @@ async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
             "created_at": "2026-02-25T00:00:00Z",
             "updated_at": "2026-02-25T00:00:02Z",
             "expires_at": "2026-02-25T00:15:00Z",
-            "auth_ready": False,
+            "credential_state": "missing",
             "error": None,
             "exit_code": None,
             "terminal": False,
@@ -853,15 +873,46 @@ async def test_ui_engine_models_page(monkeypatch):
     assert response.status_code == 200
     assert "模型管理：codex" in response.text
     assert "gpt-5.2-codex" in response.text
+    assert "GPT-5.2 Codex" in response.text
+    assert "<th>display_name</th>" not in response.text
+    assert "<th>model</th>" in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_models_page_opencode_shows_refresh_button(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.model_registry.get_manifest_view",
+        lambda _engine: {
+            "engine": "opencode",
+            "cli_version_detected": "0.1.0",
+            "manifest": {"engine": "opencode", "snapshots": []},
+            "resolved_snapshot_version": "2026-02-25T00:00:00Z",
+            "resolved_snapshot_file": "opencode_models_cache.json",
+            "fallback_reason": None,
+            "models": [{"id": "openai/gpt-5", "provider": "openai", "model": "gpt-5", "display_name": None, "deprecated": False}],
+        },
+    )
+
+    response = await _request("GET", "/ui/engines/opencode/models")
+    assert response.status_code == 200
+    assert "手动刷新模型列表" in response.text
+    assert 'hx-post="/ui/engines/opencode/models/refresh"' in response.text
+    assert 'hx-target="#engine-models-panel"' in response.text
+    assert 'hx-swap="outerHTML"' in response.text
+    assert "openai/gpt-5" in response.text
+    assert "gpt-5" in response.text
 
 
 @pytest.mark.asyncio
 async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
+    captured = {}
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     monkeypatch.setattr(
         "server.routers.ui.model_registry.add_snapshot_for_detected_version",
-        lambda _engine, _models: None,
+        lambda _engine, _models: captured.update({"engine": _engine, "models": _models}),
     )
 
     response = await _request(
@@ -869,7 +920,7 @@ async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
         "/ui/engines/codex/models/snapshots",
         data={
             "id": ["gpt-5.2-codex"],
-            "display_name": ["GPT-5.2 Codex"],
+            "model": ["GPT-5.2 Codex"],
             "deprecated": ["false"],
             "notes": ["snapshot"],
             "supported_effort": ["low,high"],
@@ -877,6 +928,9 @@ async def test_ui_engine_models_add_snapshot_redirect(monkeypatch):
     )
     assert response.status_code == 303
     assert "/ui/engines/codex/models?message=Snapshot+created" in response.headers["location"]
+    assert captured["engine"] == "codex"
+    assert captured["models"][0]["id"] == "gpt-5.2-codex"
+    assert captured["models"][0]["display_name"] == "GPT-5.2 Codex"
 
 
 @pytest.mark.asyncio
@@ -889,7 +943,7 @@ async def test_ui_engine_models_add_snapshot_rejects_opencode(monkeypatch):
         "/ui/engines/opencode/models/snapshots",
         data={
             "id": ["openai/gpt-5"],
-            "display_name": ["OpenAI GPT-5"],
+            "model": ["OpenAI GPT-5"],
             "deprecated": ["false"],
             "notes": ["runtime_probe_cache"],
             "supported_effort": [""],
@@ -897,6 +951,33 @@ async def test_ui_engine_models_add_snapshot_rejects_opencode(monkeypatch):
     )
     assert response.status_code == 303
     assert "does+not+support+model+snapshots" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_models_refresh_opencode_returns_partial(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    refresh_mock = AsyncMock()
+    monkeypatch.setattr("server.routers.ui.opencode_model_catalog.refresh", refresh_mock)
+    monkeypatch.setattr(
+        "server.routers.ui.model_registry.get_manifest_view",
+        lambda _engine: {
+            "engine": "opencode",
+            "cli_version_detected": "0.1.1",
+            "manifest": {"engine": "opencode", "snapshots": []},
+            "resolved_snapshot_version": "2026-02-26T00:00:00Z",
+            "resolved_snapshot_file": "opencode_models_cache.json",
+            "fallback_reason": None,
+            "models": [{"id": "openai/gpt-5", "provider": "openai", "model": "gpt-5", "display_name": None, "deprecated": False}],
+        },
+    )
+
+    response = await _request("POST", "/ui/engines/opencode/models/refresh")
+    assert response.status_code == 200
+    assert 'id="engine-models-panel"' in response.text
+    assert "Model list refreshed" in response.text
+    assert "openai/gpt-5" in response.text
+    refresh_mock.assert_awaited_once_with(reason="ui_manual_refresh")
 
 
 @pytest.mark.asyncio
@@ -953,13 +1034,13 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     monkeypatch.setattr(
         "server.routers.ui.management_router.get_management_run_files",
         lambda _request_id: SimpleNamespace(
-            entries=[{"rel_path": "logs/stdout.txt", "name": "stdout.txt", "is_dir": False, "depth": 1}],
+            entries=[{"rel_path": ".audit/stdout.1.log", "name": "stdout.1.log", "is_dir": False, "depth": 1}],
         ),
     )
     monkeypatch.setattr(
         "server.routers.ui.management_router.get_management_run_file",
         lambda _request_id, _path: SimpleNamespace(
-            path="logs/stdout.txt",
+            path=".audit/stdout.1.log",
             preview={"mode": "text", "content": "ok", "size": 2, "meta": "2 bytes"},
         ),
     )
@@ -979,7 +1060,7 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert detail_res.status_code == 200
     assert "Request: req-1" in detail_res.text
     assert "Run File Tree (Read-only)" in detail_res.text
-    assert "对话区（FCMP）" in detail_res.text
+    assert "对话区（Canonical Chat）" in detail_res.text
     assert "Raw stderr" in detail_res.text
     assert "raw_ref 回跳预览" in detail_res.text
     assert "FCMP Audit Stream" in detail_res.text
@@ -991,12 +1072,16 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert 'id="rasp-audit-log"' in detail_res.text
     assert 'id="orchestrator-audit-log"' in detail_res.text
     assert 'id="raw-ref-preview"' in detail_res.text
-    assert "/v1/management/runs/${requestId}/events" in detail_res.text
+    assert "/v1/management/runs/${requestId}/chat" in detail_res.text
+    assert "/v1/management/runs/${requestId}/chat/history" in detail_res.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "connectEvents()" in detail_res.text
+    assert "executeWaitingAuthWatchdogTick" in detail_res.text
+    assert "maybeStartWaitingAuthWatchdog" in detail_res.text
+    assert "clearWaitingAuthWatchdog" in detail_res.text
     assert detail_res.text.index("raw_ref 回跳预览") < detail_res.text.index("Attempt:")
-    assert detail_res.text.index("对话区（FCMP）") < detail_res.text.index("Attempt:")
+    assert detail_res.text.index("对话区（Canonical Chat）") < detail_res.text.index("Attempt:")
     assert detail_res.text.index("Attempt:") < detail_res.text.index("FCMP Audit Stream")
     assert detail_res.text.rindex("Raw stderr") > detail_res.text.index("FCMP Audit Stream")
 
@@ -1039,7 +1124,8 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
     response = await _request("GET", "/ui/runs/req-x")
     assert response.status_code == 200
     assert f">{status}<" in response.text
-    assert "/v1/management/runs/${requestId}/events" in response.text
+    assert "/v1/management/runs/${requestId}/chat" in response.text
+    assert "/v1/management/runs/${requestId}/chat/history" in response.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in response.text
     assert "/v1/management/runs/${requestId}/cancel" in response.text
     assert "/v1/management/runs/${requestId}/logs/range" in response.text

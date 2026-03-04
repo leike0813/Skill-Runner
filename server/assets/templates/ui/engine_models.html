@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Engine Models - {{ engine }}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <style>
         body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
         .layout { max-width: 1200px; margin: 0 auto; padding: 24px; display: grid; gap: 18px; }
@@ -33,7 +34,7 @@
             row.className = "grid";
             row.innerHTML = `
                 <input class="inline-input" name="id" placeholder="id" required />
-                <input class="inline-input" name="display_name" placeholder="display_name" />
+                <input class="inline-input" name="model" placeholder="model" />
                 <select class="inline-input" name="deprecated">
                     <option value="false">false</option>
                     <option value="true">true</option>
@@ -48,92 +49,7 @@
 </head>
 <body>
 <div class="layout">
-    <div class="card">
-        <a href="/ui/engines">← Back to Engines</a>
-        <h1>模型管理：{{ engine }}</h1>
-        <div class="muted">Detected Version: {{ view.cli_version_detected or "-" }}</div>
-        <div class="muted">Resolved Snapshot: {{ view.resolved_snapshot_version }} ({{ view.resolved_snapshot_file }})</div>
-        {% if view.fallback_reason %}
-        <div class="muted">Fallback: {{ view.fallback_reason }}</div>
-        {% endif %}
-        {% if not snapshots_supported %}
-        <div class="muted">Snapshots: not supported for {{ engine }} (runtime probe cache only).</div>
-        {% endif %}
-        {% if error %}
-        <div class="error" style="margin-top:8px;">{{ error }}</div>
-        {% endif %}
-        {% if message %}
-        <div class="ok" style="margin-top:8px;">{{ message }}</div>
-        {% endif %}
-    </div>
-
-    <div class="card">
-        <h2>当前 Model Manifest（原始）</h2>
-        <pre>{{ view.manifest | tojson(indent=2) }}</pre>
-    </div>
-
-    <div class="card">
-        <h2>当前模型列表</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>id</th>
-                    <th>provider</th>
-                    <th>model</th>
-                    <th>display_name</th>
-                    <th>deprecated</th>
-                    <th>notes</th>
-                    <th>supported_effort</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for model in view.models %}
-                <tr>
-                    <td>{{ model.id }}</td>
-                    <td>{{ model.provider or "-" }}</td>
-                    <td>{{ model.model or "-" }}</td>
-                    <td>{{ model.display_name or "-" }}</td>
-                    <td>{{ model.deprecated }}</td>
-                    <td>{{ model.notes or "-" }}</td>
-                    <td>{{ ", ".join(model.supported_effort or []) }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    {% if snapshots_supported %}
-    <div class="card">
-        <h2>新增当前版本快照（add-only）</h2>
-        <form method="post" action="/ui/engines/{{ engine }}/models/snapshots">
-            <div class="grid grid-head">
-                <div>id *</div>
-                <div>display_name</div>
-                <div>deprecated</div>
-                <div>notes</div>
-                <div>supported_effort</div>
-                <div></div>
-            </div>
-            <div id="models-form-rows">
-                <div class="grid">
-                    <input class="inline-input" name="id" placeholder="id" required />
-                    <input class="inline-input" name="display_name" placeholder="display_name" />
-                    <select class="inline-input" name="deprecated">
-                        <option value="false">false</option>
-                        <option value="true">true</option>
-                    </select>
-                    <input class="inline-input" name="notes" placeholder="notes" />
-                    <input class="inline-input" name="supported_effort" placeholder="low,medium,high" />
-                    <button type="button" onclick="this.parentElement.remove()">删除</button>
-                </div>
-            </div>
-            <div class="row" style="margin-top: 10px;">
-                <button type="button" onclick="addModelRow()">新增一行</button>
-                <button type="submit">提交新增快照</button>
-            </div>
-        </form>
-    </div>
-    {% endif %}
+    {% include "ui/partials/engine_models_panel.html" %}
 </div>
 </body>
 </html>

@@ -1,0 +1,6 @@
+- [x] Draft proposal for making FCMP live-published and demoting audit materialization to a secondary mirror.
+- [x] Update runtime invariants, protocol docs, schema docs, and OpenSpec specs for live FCMP/RASP publication and audit-secondary semantics.
+- [x] Introduce FCMP/RASP live journals, shared publishers, and asynchronous audit mirror writers.
+- [x] Extend adapter execution and parser contracts to support incremental live parsing and chunk-level runtime emission.
+- [x] Refactor SSE and events/history to use memory-first replay with audit fallback.
+- [x] Add regression coverage for delayed audit writes, reconnect replay, final-message visibility, and FCMP/RASP publish ordering.

@@ -222,56 +222,6 @@ class AgentCliManager:
             _default_opencode_config(),
         )
 
-    def ensure_ui_terminal_assets(self) -> Path:
-        """
-        Ensure xterm static assets are available under data/ui_static/xterm.
-        Returns the mounted static root directory.
-        """
-        static_root = self.profile.data_dir / "ui_static"
-        target_dir = static_root / "xterm"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target_js = target_dir / "xterm.js"
-        target_css = target_dir / "xterm.css"
-        target_fit = target_dir / "addon-fit.js"
-        if target_js.exists() and target_css.exists():
-            return static_root
-
-        source_js, source_css = self._resolve_xterm_asset_sources()
-        if source_js is None or source_css is None:
-            install_result = self.install_package(UI_XTERM_PACKAGE)
-            if install_result.returncode != 0:
-                logger.warning(
-                    "Failed to install xterm package for UI terminal: exit=%s stderr=%s",
-                    install_result.returncode,
-                    install_result.stderr.strip(),
-                )
-                return static_root
-            source_js, source_css = self._resolve_xterm_asset_sources()
-
-        if source_js and source_css:
-            shutil.copy2(source_js, target_js)
-            shutil.copy2(source_css, target_css)
-        else:
-            logger.warning("xterm static assets are missing after install attempt")
-
-        # Optional addon: keep UI usable even when fit addon is unavailable.
-        source_fit = self._resolve_xterm_fit_asset_source()
-        if source_fit is None:
-            fit_install = self.install_package(UI_XTERM_FIT_PACKAGE)
-            if fit_install.returncode == 0:
-                source_fit = self._resolve_xterm_fit_asset_source()
-            else:
-                logger.warning(
-                    "Failed to install xterm fit addon: exit=%s stderr=%s",
-                    fit_install.returncode,
-                    fit_install.stderr.strip(),
-                )
-        if source_fit is not None:
-            shutil.copy2(source_fit, target_fit)
-        else:
-            logger.info("xterm fit addon not available; UI terminal will run without auto-fit addon")
-        return static_root
-
     def collect_status(self) -> Dict[str, EngineStatus]:
         result: Dict[str, EngineStatus] = {}
         for engine in ENGINE_PACKAGES:
@@ -491,13 +441,16 @@ class AgentCliManager:
                 effective_source = "global"
 
             credential_files = self._credential_status_paths(engine)
-            auth_ready = bool(effective_cmd) and all(credential_files.values())
+            credential_state = "unknown"
+            credentials_present = bool(effective_cmd) and all(credential_files.values())
             if engine == "iflow":
-                auth_ready = auth_ready and self._is_iflow_settings_valid(
+                credentials_present = credentials_present and self._is_iflow_settings_valid(
                     self.profile.agent_home / ".iflow" / "settings.json"
                 )
             if engine == "opencode":
-                auth_ready = bool(effective_cmd) and self._is_opencode_auth_ready(credential_files)
+                credentials_present = bool(effective_cmd) and self._has_opencode_credentials(credential_files)
+            if effective_cmd:
+                credential_state = "present" if credentials_present else "missing"
 
             status[engine] = {
                 "managed_present": managed_cmd is not None,
@@ -507,7 +460,7 @@ class AgentCliManager:
                 "effective_cli_path": str(effective_cmd) if effective_cmd else None,
                 "effective_path_source": effective_source,
                 "credential_files": credential_files,
-                "auth_ready": auth_ready,
+                "credential_state": credential_state,
             }
         return status
 
@@ -517,7 +470,7 @@ class AgentCliManager:
             for src_name, dst_relpath in CREDENTIAL_IMPORT_RULES.get(engine, ())
         }
 
-    def _is_opencode_auth_ready(self, credential_files: Dict[str, bool]) -> bool:
+    def _has_opencode_credentials(self, credential_files: Dict[str, bool]) -> bool:
         return bool(credential_files.get("auth.json"))
 
     def _ensure_json_file(self, path: Path, payload: Mapping[str, object]) -> None:

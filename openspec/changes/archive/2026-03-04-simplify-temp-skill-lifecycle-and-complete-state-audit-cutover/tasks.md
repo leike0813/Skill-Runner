@@ -1,0 +1,7 @@
+- [x] 1. Add run-local skill materialization service and model.
+- [x] 2. Materialize installed and temp skills into run-local snapshots during create-run.
+- [x] 3. Remove temp runtime cleanup dependency on staging paths.
+- [x] 4. Move request input snapshot to `.audit/request_input.json`.
+- [x] 5. Stop writing legacy state/output files for new runs.
+- [x] 6. Make resumed attempts load from run-local skill snapshots.
+- [x] 7. Update docs, schema, invariants, and regression tests.

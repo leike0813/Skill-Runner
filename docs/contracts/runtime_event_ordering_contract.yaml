@@ -1,0 +1,140 @@
+version: 1
+
+streams:
+  - fcmp
+  - rasp
+
+ordering_domains:
+  fcmp: run
+  rasp: attempt
+
+event_kinds:
+  - conversation.state.changed
+  - interaction.prompted
+  - assistant.message.final
+  - user.input.required
+  - auth.required
+  - auth.session.busy
+  - interaction.reply.accepted
+  - interaction.auto_decide.timeout
+  - auth.method.selection.required
+  - auth.challenge.updated
+  - auth.input.accepted
+  - auth.completed
+  - auth.failed
+  - projection.terminal.result
+
+precedence_rules:
+  - id: PR-01
+    before: auth.method.selection.required
+    after: auth.challenge.updated
+    when:
+      auth_route: multi_method
+  - id: PR-02
+    before: interaction.prompted
+    after: conversation.state.changed.waiting_user
+  - id: PR-03
+    before: interaction.reply.accepted
+    after: conversation.state.changed.running.resumed
+  - id: PR-04
+    before: assistant.message.final
+    after: conversation.state.changed.succeeded
+  - id: PR-05
+    before: conversation.state.changed.failed
+    after: projection.terminal.result
+  - id: PR-06
+    before: conversation.state.changed.succeeded
+    after: projection.terminal.result
+  - id: PR-07
+    before: conversation.state.changed.canceled
+    after: projection.terminal.result
+
+gating_rules:
+  - id: GR-01
+    event_kind: auth.challenge.updated
+    requires:
+      - auth.method.selection.required
+    when:
+      auth_route: multi_method
+  - id: GR-01B
+    event_kind: auth.challenge.updated
+    bypasses:
+      - auth.method.selection.required
+    when:
+      auth_route: single_method
+  - id: GR-02
+    event_kind: conversation.state.changed.succeeded
+    requires:
+      - assistant.message.final
+  - id: GR-03
+    event_kind: projection.terminal.result
+    requires_one_of:
+      - conversation.state.changed.succeeded
+      - conversation.state.changed.failed
+      - conversation.state.changed.canceled
+
+projection_rules:
+  - id: PJ-01
+    projection: terminal.result
+    source_event: conversation.state.changed
+    terminal_only: true
+  - id: PJ-02
+    projection: final.summary
+    source_event: conversation.state.changed
+    terminal_only: true
+  - id: PJ-03
+    projection: waiting_auth.challenge
+    source_event: auth.challenge.updated
+    terminal_only: false
+    preserve_busy_recovery: single_method
+
+replay_rules:
+  canonical_source: publish_order
+  live_delivery: memory_first
+  history_replay: memory_first_audit_fallback
+  audit_must_not_redefine_active_order: true
+  batch_backfill_must_not_override_live_order: true
+
+completion_rules:
+  auth_completed_sources:
+    - auth_session.status=succeeded
+    - auth_session.status=completed
+    - callback_completion
+    - submission_completion
+  forbidden_sources:
+    - auth_ready
+    - credential_state
+    - credential_files_present
+    - cli_static_check
+  waiting_auth_exit_requires: auth.completed
+
+legacy_semantics_removed:
+  - auth_ready
+
+buffer_policies:
+  fcmp:
+    strategy: gate_buffered
+    candidate_required: true
+    direct_publish_forbidden: true
+  rasp:
+    strategy: emission_order_buffered
+    candidate_required: true
+    direct_publish_forbidden: true
+
+lifecycle_normalization_rules:
+  remove:
+    - conversation.started
+    - conversation.completed
+    - conversation.failed
+  normalize_to: conversation.state.changed
+  terminal_payload_field: terminal
+  auth_routes:
+    multi_method:
+      requires_method_selection: true
+    single_method:
+      requires_method_selection: false
+  busy_recovery:
+    single_method:
+      preserve_phase: challenge_active
+      reproject_existing_challenge: true
+      forbid_method_selection_demotion: true

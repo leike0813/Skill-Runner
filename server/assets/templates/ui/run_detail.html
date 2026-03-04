@@ -99,7 +99,7 @@
 
     <div class="row">
         <div class="card">
-            <h3 style="margin:0 0 8px;">对话区（FCMP）</h3>
+            <h3 style="margin:0 0 8px;">对话区（Canonical Chat）</h3>
             <div id="stdout-log" class="conversation-window"></div>
         </div>
         <div class="card">
@@ -169,6 +169,7 @@
     const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
     const WATCHDOG_RETRY_INTERVAL_MS = 2000;
     const WATCHDOG_RETRY_WINDOW_MS = 30000;
+    const AUTH_WATCHDOG_INTERVAL_MS = 1500;
 
     let cursor = 0;
     let source = null;
@@ -180,6 +181,15 @@
     let waitingUserWatchdogTimer = null;
     let waitingUserWatchdogStartAt = 0;
     let waitingUserWatchdogInFlight = false;
+    let waitingAuthWatchdogTimer = null;
+    let waitingAuthWatchdogInFlight = false;
+    let lastTerminalErrorMessage = {{ (
+        detail.result.error.message
+        if detail.result and detail.result.error and detail.result.error.message
+        else detail.error.message
+        if detail.error and detail.error.message
+        else ""
+    ) | tojson }};
 
     function appendLog(target, chunk) {
         if (!chunk) return;
@@ -276,6 +286,33 @@
         stdoutEl.scrollTop = stdoutEl.scrollHeight;
     }
 
+    function buildTerminalSystemMessage(status, eventData) {
+        const terminalPayload = eventData && typeof eventData === "object" && eventData.terminal && typeof eventData.terminal === "object"
+            ? eventData.terminal
+            : eventData;
+        if (status === "succeeded") {
+            return "任务已成功。";
+        }
+        if (status === "canceled") {
+            return "任务已取消。";
+        }
+        if (status === "failed") {
+            const error = terminalPayload && typeof terminalPayload === "object" ? terminalPayload.error : null;
+            const message = error && typeof error.message === "string"
+                ? error.message.trim()
+                : lastTerminalErrorMessage.trim();
+            const code = error && typeof error.code === "string" ? error.code.trim() : "";
+            if (message) {
+                return `任务失败：${message}`;
+            }
+            if (code) {
+                return `任务失败（${code}）。`;
+            }
+            return "任务失败。";
+        }
+        return "任务状态已更新。";
+    }
+
     function closeStream() {
         if (source) {
             source.close();
@@ -290,6 +327,14 @@
         }
         waitingUserWatchdogStartAt = 0;
         waitingUserWatchdogInFlight = false;
+    }
+
+    function clearWaitingAuthWatchdog() {
+        if (waitingAuthWatchdogTimer) {
+            clearTimeout(waitingAuthWatchdogTimer);
+            waitingAuthWatchdogTimer = null;
+        }
+        waitingAuthWatchdogInFlight = false;
     }
 
     async function executeWaitingUserWatchdogTick() {
@@ -335,6 +380,38 @@
         waitingUserWatchdogTimer = setTimeout(executeWaitingUserWatchdogTick, initialDelayMs);
     }
 
+    async function executeWaitingAuthWatchdogTick() {
+        if (waitingAuthWatchdogInFlight) return;
+        if (terminal || (statusEl.textContent || "") !== "waiting_auth") {
+            clearWaitingAuthWatchdog();
+            return;
+        }
+        waitingAuthWatchdogInFlight = true;
+        try {
+            await refreshState();
+            if (terminal || (statusEl.textContent || "") !== "waiting_auth") {
+                clearWaitingAuthWatchdog();
+                if (!source && !terminal) {
+                    connectEvents();
+                }
+                await loadConversationHistory();
+                return;
+            }
+        } finally {
+            waitingAuthWatchdogInFlight = false;
+        }
+        waitingAuthWatchdogTimer = setTimeout(executeWaitingAuthWatchdogTick, AUTH_WATCHDOG_INTERVAL_MS);
+    }
+
+    function maybeStartWaitingAuthWatchdog() {
+        if (terminal || (statusEl.textContent || "") !== "waiting_auth") {
+            clearWaitingAuthWatchdog();
+            return;
+        }
+        if (waitingAuthWatchdogTimer || waitingAuthWatchdogInFlight) return;
+        waitingAuthWatchdogTimer = setTimeout(executeWaitingAuthWatchdogTick, AUTH_WATCHDOG_INTERVAL_MS);
+    }
+
     function stripAskUserBlocks(text) {
         if (typeof text !== "string" || !text.trim()) return "";
         let normalized = text;
@@ -368,12 +445,25 @@
             statusEl.textContent = payload.status;
             terminal = terminalStatuses.has(payload.status);
             if (terminal) {
-                closeStream();
                 clearWaitingUserWatchdog();
+                clearWaitingAuthWatchdog();
             }
         }
         if (typeof payload.updated_at === "string" && payload.updated_at) {
             updatedAtEl.textContent = payload.updated_at;
+        }
+        const resultObj = payload.result && typeof payload.result === "object" ? payload.result : null;
+        const resultError = resultObj && resultObj.error && typeof resultObj.error === "object"
+            ? resultObj.error
+            : null;
+        const topError = payload.error && typeof payload.error === "object" ? payload.error : null;
+        const errorMessage = resultError && typeof resultError.message === "string"
+            ? resultError.message.trim()
+            : topError && typeof topError.message === "string"
+                ? topError.message.trim()
+                : "";
+        if (errorMessage) {
+            lastTerminalErrorMessage = errorMessage;
         }
         if (payload.pending_interaction_id !== undefined) {
             pendingIdEl.textContent = payload.pending_interaction_id === null ? "-" : String(payload.pending_interaction_id);
@@ -386,6 +476,11 @@
         } else {
             clearWaitingUserWatchdog();
         }
+        if ((statusEl.textContent || "") === "waiting_auth") {
+            maybeStartWaitingAuthWatchdog();
+        } else {
+            clearWaitingAuthWatchdog();
+        }
     }
 
     async function refreshState() {
@@ -393,6 +488,9 @@
         if (!res.ok) return;
         const data = await res.json();
         updateStatus(data);
+        if (terminal || (statusEl.textContent || "") === "waiting_user" || (statusEl.textContent || "") === "waiting_auth") {
+            await catchUpConversationHistory();
+        }
     }
 
     function updateAttemptPager() {
@@ -495,52 +593,42 @@
     async function loadConversationHistory() {
         stdoutEl.textContent = "";
         renderedChatSeq.clear();
-        for (const attempt of availableAttempts) {
-            const payload = await fetchProtocolHistory("fcmp", attempt);
-            if (!payload) continue;
-            const events = Array.isArray(payload.events) ? payload.events : [];
-            for (const event of events) {
-                const type = typeof event.type === "string" ? event.type : "";
-                const rawRef = extractRawRef(event);
-                if (type === "assistant.message.final") {
-                    const text = stripAskUserBlocks(event.data ? event.data.text : "");
-                    if (text) {
-                        appendChatEvent("assistant", text, event, rawRef);
-                    }
-                } else if (type === "user.input.required") {
-                    // Control event only; avoid duplicate chat content.
-                } else if (type === "interaction.reply.accepted") {
-                    const preview = event.data && typeof event.data.response_preview === "string"
-                        ? event.data.response_preview.trim()
-                        : "";
-                    if (preview) {
-                        appendChatEvent("user", preview, event, rawRef);
-                    } else {
-                        appendChatEvent("system", "Reply accepted, run resumed.", event, rawRef);
-                    }
-                } else if (type === "interaction.auto_decide.timeout") {
-                    appendChatEvent("system", "Timeout auto decision applied.", event, rawRef);
-                } else if (type === "conversation.completed") {
-                    appendChatEvent("system", "任务已完成。", event, rawRef);
-                } else if (type === "conversation.failed") {
-                    appendChatEvent("system", "任务执行失败。", event, rawRef);
-                } else if (type === "conversation.state.changed") {
-                    updateStatus({
-                        status: event.data && event.data.to ? event.data.to : undefined,
-                        updated_at: event.data && event.data.updated_at ? event.data.updated_at : undefined,
-                        pending_interaction_id: event.data && event.data.pending_interaction_id !== undefined
-                            ? event.data.pending_interaction_id
-                            : undefined,
-                    });
-                }
+        const res = await fetch(`/v1/management/runs/${requestId}/chat/history`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        for (const event of events) {
+            const seqObj = event && event.seq;
+            if (typeof seqObj === "number") {
+                cursor = Math.max(cursor, seqObj);
             }
-            if (attempt === currentAttempt) {
-                for (const event of events) {
-                    const seqObj = event && event.seq;
-                    if (typeof seqObj === "number") {
-                        cursor = Math.max(cursor, seqObj);
-                    }
-                }
+            const role = typeof event.role === "string" ? event.role : "";
+            const text = typeof event.text === "string" ? event.text : "";
+            if (role && text.trim()) {
+                appendChatEvent(role, text, event, null);
+            }
+        }
+    }
+
+    async function catchUpConversationHistory() {
+        const query = new URLSearchParams();
+        if (cursor > 0) {
+            query.set("from_seq", String(cursor + 1));
+        }
+        const suffix = query.toString() ? `?${query.toString()}` : "";
+        const res = await fetch(`/v1/management/runs/${requestId}/chat/history${suffix}`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        for (const event of events) {
+            const seq = Number(event && event.seq);
+            if (Number.isFinite(seq)) {
+                cursor = Math.max(cursor, Math.floor(seq));
+            }
+            const role = typeof event.role === "string" ? event.role : "";
+            const text = typeof event.text === "string" ? event.text : "";
+            if (role && text.trim()) {
+                appendChatEvent(role, text, event, null);
             }
         }
     }
@@ -581,7 +669,7 @@
     function connectEvents() {
         if (terminal) return;
         closeStream();
-        source = new EventSource(`/v1/management/runs/${requestId}/events?cursor=${cursor}`);
+        source = new EventSource(`/v1/management/runs/${requestId}/chat?cursor=${cursor}`);
 
         source.addEventListener("snapshot", (evt) => {
             const data = JSON.parse(evt.data || "{}");
@@ -589,79 +677,39 @@
                 cursor = Math.max(cursor, data.cursor);
             }
             updateStatus(data);
+            if (terminal || (statusEl.textContent || "") === "waiting_user" || (statusEl.textContent || "") === "waiting_auth") {
+                catchUpConversationHistory().catch(() => {});
+            }
         });
 
         source.addEventListener("chat_event", (evt) => {
             const data = JSON.parse(evt.data || "{}");
-            const type = typeof data.type === "string" ? data.type : "";
             const seq = typeof data.seq === "number" ? data.seq : 0;
-            const rawRef = extractRawRef(data);
             if (seq > 0) {
                 cursor = Math.max(cursor, seq);
             }
-            if (type === "conversation.state.changed") {
-                updateStatus({
-                    status: data.data && data.data.to ? data.data.to : undefined,
-                    updated_at: data.data && data.data.updated_at ? data.data.updated_at : undefined,
-                    pending_interaction_id: data.data && data.data.pending_interaction_id !== undefined
-                        ? data.data.pending_interaction_id
-                        : undefined,
-                });
-                return;
-            }
-            if (type === "assistant.message.final") {
-                const text = stripAskUserBlocks(data.data ? data.data.text : "");
-                if (text) {
-                    appendChatEvent("assistant", text, data, rawRef);
-                }
-                return;
-            }
-            if (type === "user.input.required") {
-                // Control event only; avoid duplicate chat content.
-                return;
-            }
-            if (type === "interaction.reply.accepted") {
-                clearWaitingUserWatchdog();
-                const preview = data.data && typeof data.data.response_preview === "string"
-                    ? data.data.response_preview.trim()
-                    : "";
-                if (preview) {
-                    appendChatEvent("user", preview, data, rawRef);
-                } else {
-                    appendChatEvent("system", "Reply accepted, run resumed.", data, rawRef);
-                }
-                return;
-            }
-            if (type === "interaction.auto_decide.timeout") {
-                clearWaitingUserWatchdog();
-                appendChatEvent("system", "Timeout auto decision applied.", data, rawRef);
-                return;
-            }
-            if (type === "conversation.completed") {
-                appendChatEvent("system", "任务已完成。", data, rawRef);
-                updateStatus({ status: "succeeded" });
-                return;
-            }
-            if (type === "conversation.failed") {
-                appendChatEvent("system", "任务执行失败。", data, rawRef);
-                updateStatus({ status: "failed" });
-                return;
-            }
-            if (type === "raw.stderr") {
-                appendLog(stderrEl, `${data.data && data.data.line ? data.data.line : ""}\n`);
+            const role = typeof data.role === "string" ? data.role : "";
+            const text = typeof data.text === "string" ? data.text : "";
+            if (role && text.trim()) {
+                appendChatEvent(role, text, data, null);
             }
         });
 
         source.onerror = () => {
             closeStream();
-            if (!terminal && statusEl.textContent !== "waiting_user") {
-                scheduleReconnect();
-            }
+            catchUpConversationHistory()
+                .catch(() => {})
+                .finally(() => {
+                    if (!terminal && statusEl.textContent !== "waiting_user" && statusEl.textContent !== "waiting_auth") {
+                        scheduleReconnect();
+                    }
+                });
         };
     }
 
     cancelBtn.addEventListener("click", async () => {
         clearWaitingUserWatchdog();
+        clearWaitingAuthWatchdog();
         cancelBtn.disabled = true;
         await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
         await refreshState();
@@ -705,6 +753,7 @@
 
     window.addEventListener("beforeunload", () => {
         clearWaitingUserWatchdog();
+        clearWaitingAuthWatchdog();
     });
 })();
 </script>

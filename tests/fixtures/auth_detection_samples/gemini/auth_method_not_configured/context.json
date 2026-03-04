@@ -1,0 +1,22 @@
+{
+  "sample_id": "auth_method_not_configured",
+  "source_run_id": "20260302T125827-gemini-18a2015e",
+  "engine": "gemini",
+  "provider_id": null,
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "Gemini CLI reports no auth method configured",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "api_key_missing",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Local CLI configuration failure visible in non-interactive execution output."
+  ]
+}

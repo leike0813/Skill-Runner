@@ -76,7 +76,6 @@ class EngineAuthSessionSnapshot(BaseModel):
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
-    auth_ready: bool = False
     error: Optional[str] = None
     exit_code: Optional[int] = None
     execution_mode: Optional[str] = None
@@ -137,7 +136,6 @@ class AuthSessionSnapshotV2(BaseModel):
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
-    auth_ready: bool = False
     error: Optional[str] = None
     exit_code: Optional[int] = None
     execution_mode: Optional[str] = None

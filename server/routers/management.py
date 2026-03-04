@@ -372,6 +372,36 @@ async def list_management_run_event_history(
     )
 
 
+@router.get("/runs/{request_id}/chat")
+async def stream_management_run_chat(
+    request_id: str,
+    request: Request,
+    cursor: int = Query(default=0, ge=0),
+):
+    return await jobs_router.stream_run_chat(
+        request_id=request_id,
+        request=request,
+        cursor=cursor,
+    )
+
+
+@router.get("/runs/{request_id}/chat/history")
+async def list_management_run_chat_history(
+    request_id: str,
+    from_seq: int | None = Query(default=None, ge=0),
+    to_seq: int | None = Query(default=None, ge=0),
+    from_ts: str | None = Query(default=None),
+    to_ts: str | None = Query(default=None),
+):
+    return await jobs_router.list_run_chat_history(
+        request_id=request_id,
+        from_seq=from_seq,
+        to_seq=to_seq,
+        from_ts=from_ts,
+        to_ts=to_ts,
+    )
+
+
 @router.get("/runs/{request_id}/protocol/history")
 async def list_management_run_protocol_history(
     request_id: str,
@@ -584,7 +614,7 @@ async def _build_run_state_from_detail(
     auto_stats = await run_store.get_auto_decision_stats(request_id)
     status = _parse_run_status(detail.get("status"))
     timeout_obj = detail.get("interactive_reply_timeout_sec")
-    timeout_sec = timeout_obj if isinstance(timeout_obj, int) and timeout_obj > 0 else None
+    timeout_sec = timeout_obj if isinstance(timeout_obj, int) and timeout_obj >= 0 else None
     return ManagementRunConversationState(
         request_id=request_id,
         run_id=str(detail.get("run_id", "")),
@@ -633,11 +663,11 @@ async def _read_pending_interaction_id(request_id: str) -> int | None:
 def _read_run_error(run_dir: Path | None) -> Any:
     if not run_dir:
         return None
-    status_file = run_dir / "status.json"
-    if not status_file.exists():
+    state_file = run_dir / ".state" / "state.json"
+    if not state_file.exists():
         return None
     try:
-        payload = json.loads(status_file.read_text(encoding="utf-8"))
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):

@@ -181,6 +181,13 @@ class RunAuditService:
                 "reason_code": "WAITING_USER_INPUT",
                 "diagnostics": diagnostics,
             }
+        if status == RunStatus.WAITING_AUTH:
+            diagnostics.append("DONE_MARKER_MISSING")
+            return {
+                "state": "awaiting_auth",
+                "reason_code": "WAITING_AUTH_REQUIRED",
+                "diagnostics": diagnostics,
+            }
         if status in {RunStatus.FAILED, RunStatus.CANCELED}:
             return {
                 "state": "interrupted",
@@ -215,6 +222,8 @@ class RunAuditService:
         validation_warnings: list[str],
         terminal_error_code: str | None,
         options: dict[str, Any],
+        auth_detection: dict[str, Any] | None = None,
+        auth_session: dict[str, Any] | None = None,
     ) -> None:
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -227,6 +236,7 @@ class RunAuditService:
         fs_before_path = audit_dir / f"fs-before{suffix}.json"
         fs_after_path = audit_dir / f"fs-after{suffix}.json"
         fs_diff_path = audit_dir / f"fs-diff{suffix}.json"
+        parser_diagnostics_path = audit_dir / f"parser_diagnostics{suffix}.jsonl"
         stdout_text = process_raw_stdout
         stderr_text = process_raw_stderr
         pty_text = f"{stdout_text}{stderr_text}"
@@ -301,11 +311,100 @@ class RunAuditService:
             "stderr_chunks": stderr_chunks,
             "reconstruction_error": reconstruction_error,
             "filesystem_diff": fs_diff,
+            "auth_detection": auth_detection
+            or {
+                "classification": "unknown",
+                "subcategory": None,
+                "confidence": "low",
+                "engine": engine_name,
+                "provider_id": None,
+                "matched_rule_ids": [],
+                "evidence_sources": [],
+                "evidence_excerpt": None,
+                "details": {},
+            },
+            "auth_session": auth_session
+            or {
+                "session_id": None,
+                "engine": engine_name,
+                "provider_id": None,
+                "challenge_kind": None,
+                "status": "none",
+                "source_attempt": attempt_number,
+                "resume_attempt": None,
+                "last_error": None,
+                "redacted_submission": {"kind": None, "present": False},
+            },
         }
         meta_path.write_text(
             json.dumps(meta_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        self._write_auth_detection_diagnostic(
+            path=parser_diagnostics_path,
+            run_id=run_id,
+            attempt_number=attempt_number,
+            engine_name=engine_name,
+            auth_detection=auth_detection,
+        )
+
+    def _write_auth_detection_diagnostic(
+        self,
+        *,
+        path: Path,
+        run_id: str,
+        attempt_number: int,
+        engine_name: str,
+        auth_detection: dict[str, Any] | None,
+    ) -> None:
+        if not isinstance(auth_detection, dict):
+            return
+        confidence = auth_detection.get("confidence")
+        classification = auth_detection.get("classification")
+        if classification != "auth_required" or confidence not in {"medium", "high"}:
+            return
+        seq = self._next_jsonl_seq(path)
+        confidence_score = 1.0 if confidence == "high" else 0.6
+        payload = {
+            "protocol_version": "rasp/1.0",
+            "run_id": run_id,
+            "seq": seq,
+            "ts": datetime.utcnow().isoformat(),
+            "source": {
+                "engine": engine_name,
+                "parser": "auth_detection",
+                "confidence": confidence_score,
+            },
+            "event": {
+                "category": "diagnostic",
+                "type": "diagnostic.warning",
+            },
+            "data": {
+                "code": "AUTH_DETECTION_MATCHED",
+                "classification": classification,
+                "subcategory": auth_detection.get("subcategory"),
+                "confidence": confidence,
+                "matched_rule_ids": auth_detection.get("matched_rule_ids", []),
+            },
+            "correlation": {},
+            "attempt_number": attempt_number,
+            "raw_ref": None,
+        }
+        with path.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False))
+            fp.write("\n")
+
+    def _next_jsonl_seq(self, path: Path) -> int:
+        if not path.exists() or not path.is_file():
+            return 1
+        seq = 0
+        try:
+            with path.open("r", encoding="utf-8") as fp:
+                for seq, _line in enumerate(fp, start=1):
+                    continue
+        except OSError:
+            return 1
+        return seq + 1
 
     def append_orchestrator_event(
         self,
@@ -332,7 +431,7 @@ class RunAuditService:
             validate_orchestrator_event(payload)
         except ProtocolSchemaViolation as exc:
             raise RuntimeError(
-                f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value}: {exc}"
+                f"{InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value} [{type_name}]: {exc}"
             ) from exc
         with event_path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False))

@@ -1,0 +1,30 @@
+{
+  "model": {
+    "name": "gemini-2.5-flash"
+  },
+  "general": {
+    "enableAutoUpdate": false
+  },
+  "ui": {
+    "quiet": true,
+    "hideBanner": true
+  },
+  "ide": {
+    "enabled": false
+  },
+  "output": {
+    "format": "json"
+  },
+  "security": {
+    "disableYoloMode": false
+  },
+  "tools": {
+    "autoAccept": true,
+    "allowed": [
+      "run_shell_command"
+    ]
+  },
+  "experimental": {
+    "skills": true
+  }
+}

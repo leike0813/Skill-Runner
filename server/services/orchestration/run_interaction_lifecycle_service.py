@@ -16,7 +16,14 @@ from server.models import (
     InteractiveErrorCode,
     InteractiveResolutionMode,
     OrchestratorEventType,
+    PendingOwner,
+    ResumeCause,
     RunStatus,
+)
+from server.runtime.common.ask_user_text import (
+    DEFAULT_INTERACTION_PROMPT,
+    normalize_interaction_text,
+    strip_ask_user_yaml_blocks,
 )
 from server.runtime.protocol.factories import make_resume_command
 from server.runtime.protocol.schema_registry import (
@@ -29,6 +36,7 @@ from server.runtime.session.statechart import (
     waiting_reply_target_status,
 )
 from server.services.platform.async_compat import maybe_await
+from server.services.orchestration.run_projection_service import run_projection_service
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +106,13 @@ class RunInteractionLifecycleService:
                 event_type="reply",
                 payload={
                     "response": resume_command["response"],
+                    "source_attempt": int(options.get("__interactive_source_attempt") or 1),
                     "resolution_mode": resume_command["resolution_mode"],
                     "resolved_at": datetime.utcnow().isoformat(),
                     "auto_decide_reason": resume_command.get("auto_decide_reason"),
                     "auto_decide_policy": resume_command.get("auto_decide_policy"),
                 },
+                source_attempt=int(options.get("__interactive_source_attempt") or 1),
             ))
             await maybe_await(run_store_backend.consume_interaction_reply(request_id, interaction_id))
         options["__prompt_override"] = build_reply_prompt(resume_command.get("response"))
@@ -149,22 +159,24 @@ class RunInteractionLifecycleService:
 
         ui_hints_raw = interaction_payload.get("ui_hints")
         ui_hints = ui_hints_raw if isinstance(ui_hints_raw, dict) else {}
-        hint_obj = ui_hints.get("hint")
+        hint_obj = interaction_payload.get("hint")
+        if not (isinstance(hint_obj, str) and hint_obj.strip()):
+            hint_obj = ui_hints.get("hint")
         hint_text = (
             self.normalize_interaction_prompt(hint_obj)
             if isinstance(hint_obj, str) and hint_obj.strip()
             else ""
         )
+        if hint_text:
+            ui_hints = {**ui_hints, "hint": hint_text}
         prompt_obj = interaction_payload.get("prompt") or interaction_payload.get("question")
         prompt = (
             self.normalize_interaction_prompt(prompt_obj)
             if isinstance(prompt_obj, str) and prompt_obj.strip()
             else ""
         )
-        if not prompt and hint_text:
-            prompt = hint_text
         if not prompt:
-            return None
+            prompt = DEFAULT_INTERACTION_PROMPT
         interaction_id = 0
         interaction_id_source = "payload"
         interaction_id_raw = interaction_payload.get("interaction_id")
@@ -242,23 +254,10 @@ class RunInteractionLifecycleService:
             return extracted
         if fallback_interaction_id <= 0:
             return None
-        prompt_obj = payload.get("prompt") or payload.get("question")
-        ui_hints_obj = payload.get("ui_hints")
-        hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
-        hint = (
-            self.normalize_interaction_prompt(hint_obj)
-            if isinstance(hint_obj, str) and hint_obj.strip()
-            else ""
-        )
-        prompt = (
-            self.normalize_interaction_prompt(prompt_obj)
-            if isinstance(prompt_obj, str) and prompt_obj.strip()
-            else hint or "Please provide your reply to continue."
-        )
         return {
             "interaction_id": int(fallback_interaction_id),
             "kind": "open_text",
-            "prompt": prompt,
+            "prompt": DEFAULT_INTERACTION_PROMPT,
             "options": [],
             "ui_hints": {},
             "default_decision_policy": "engine_judgement",
@@ -298,20 +297,20 @@ class RunInteractionLifecycleService:
         messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
         if not isinstance(messages, list) or not messages:
             return None
-        latest_text = ""
+        has_message = False
         for item in reversed(messages):
             if not isinstance(item, dict):
                 continue
             text_obj = item.get("text")
             if isinstance(text_obj, str) and text_obj.strip():
-                latest_text = self.normalize_interaction_prompt(text_obj)
+                has_message = True
                 break
-        if not latest_text:
+        if not has_message:
             return None
         return {
             "interaction_id": int(fallback_interaction_id),
             "kind": "open_text",
-            "prompt": latest_text,
+            "prompt": DEFAULT_INTERACTION_PROMPT,
             "options": [],
             "ui_hints": {},
             "default_decision_policy": "engine_judgement",
@@ -320,25 +319,10 @@ class RunInteractionLifecycleService:
         }
 
     def strip_prompt_yaml_blocks(self, text: str) -> str:
-        normalized = text
-        tag_pattern = re.compile(
-            r"<ASK_USER_YAML>\s*[\s\S]*?\s*</ASK_USER_YAML>",
-            re.IGNORECASE,
-        )
-        fence_pattern = re.compile(
-            r"```(?:ask_user_yaml|ask-user-yaml)\s*[\s\S]*?```",
-            re.IGNORECASE,
-        )
-        normalized = tag_pattern.sub("\n", normalized)
-        normalized = fence_pattern.sub("\n", normalized)
-        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
-        return normalized
+        return strip_ask_user_yaml_blocks(text)
 
     def normalize_interaction_prompt(self, raw_prompt: Any) -> str:
-        if not isinstance(raw_prompt, str):
-            return ""
-        normalized = self.strip_prompt_yaml_blocks(raw_prompt).strip()
-        return normalized
+        return normalize_interaction_text(raw_prompt)
 
     def normalize_interaction_kind_name(self, raw_kind: Any) -> str:
         kind_name = str(raw_kind or "").strip().lower()
@@ -346,6 +330,7 @@ class RunInteractionLifecycleService:
             "decision": "choose_one",
             "confirmation": "confirm",
             "clarification": "open_text",
+            "single_select": "choose_one",
         }
         kind_name = alias_map.get(kind_name, kind_name)
         allowed = {"choose_one", "confirm", "fill_fields", "open_text", "risk_ack"}
@@ -356,9 +341,20 @@ class RunInteractionLifecycleService:
     def looks_like_direct_interaction_payload(self, payload: dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
+        if (
+            "interaction_id" in payload
+            and (
+                "kind" in payload
+                or isinstance(payload.get("options"), list)
+                or isinstance(payload.get("ui_hints"), dict)
+            )
+        ):
+            return True
         prompt_obj = payload.get("prompt") or payload.get("question")
         ui_hints_obj = payload.get("ui_hints")
-        hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
+        hint_obj = payload.get("hint")
+        if not (isinstance(hint_obj, str) and hint_obj.strip()):
+            hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
         has_prompt = isinstance(prompt_obj, str) and bool(prompt_obj.strip())
         has_hint = isinstance(hint_obj, str) and bool(hint_obj.strip())
         if not has_prompt and not has_hint:
@@ -466,6 +462,7 @@ class RunInteractionLifecycleService:
         run_id: str,
         run_dir: Path,
         request_id: str,
+        attempt_number: int,
         profile: EngineInteractiveProfile,
         interactive_auto_reply: bool,
         pending_interaction: dict[str, Any],
@@ -473,12 +470,8 @@ class RunInteractionLifecycleService:
         run_store_backend: Any,
         append_internal_schema_warning: Callable[..., None],
         append_orchestrator_event: Callable[..., None],
-        resolve_attempt_number: Callable[..., Awaitable[int]],
     ) -> str | None:
-        attempt_number = await resolve_attempt_number(
-            request_id=request_id,
-            is_interactive=True,
-        )
+        pending_interaction.setdefault("source_attempt", attempt_number)
         try:
             validate_pending_interaction(pending_interaction)
         except ProtocolSchemaViolation as exc:
@@ -490,6 +483,7 @@ class RunInteractionLifecycleService:
             )
             pending_interaction = {
                 "interaction_id": int(pending_interaction.get("interaction_id", attempt_number)),
+                "source_attempt": attempt_number,
                 "kind": "open_text",
                 "prompt": (
                     self.normalize_interaction_prompt(pending_interaction.get("prompt"))
@@ -502,7 +496,7 @@ class RunInteractionLifecycleService:
                     and isinstance(pending_interaction.get("ui_hints", {}).get("hint"), str)
                     else ""
                 )
-                or "Please provide your reply to continue.",
+                or DEFAULT_INTERACTION_PROMPT,
                 "options": [],
                 "ui_hints": {},
                 "default_decision_policy": "engine_judgement",
@@ -515,6 +509,7 @@ class RunInteractionLifecycleService:
             interaction_id=int(pending_interaction["interaction_id"]),
             event_type="ask_user",
             payload=pending_interaction,
+            source_attempt=attempt_number,
         ))
         append_orchestrator_event(
             run_dir=run_dir,
@@ -556,6 +551,18 @@ class RunInteractionLifecycleService:
             pending_interaction=pending_interaction,
             run_store_backend=run_store_backend,
         )
+        await run_projection_service.write_non_terminal_projection(
+            run_dir=run_dir,
+            request_id=request_id,
+            run_id=run_id,
+            status=RunStatus.WAITING_USER,
+            current_attempt=attempt_number,
+            pending_owner=PendingOwner.WAITING_USER,
+            pending_interaction=pending_interaction,
+            source_attempt=attempt_number,
+            effective_session_timeout_sec=profile.session_timeout_sec,
+            run_store_backend=run_store_backend,
+        )
         return None
 
     async def write_interaction_mirror_files(
@@ -566,26 +573,10 @@ class RunInteractionLifecycleService:
         pending_interaction: dict[str, Any],
         run_store_backend: Any,
     ) -> None:
-        interactions_dir = run_dir / "interactions"
-        interactions_dir.mkdir(parents=True, exist_ok=True)
-        (interactions_dir / "pending.json").write_text(
-            json.dumps(pending_interaction, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        history = await maybe_await(run_store_backend.list_interaction_history(request_id))
-        history_path = interactions_dir / "history.jsonl"
-        with history_path.open("w", encoding="utf-8") as f:
-            for item in history:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        runtime_state = {
-            "interactive_profile": await maybe_await(run_store_backend.get_interactive_profile(request_id)),
-            "effective_session_timeout_sec": await maybe_await(run_store_backend.get_effective_session_timeout(request_id)),
-            "session_handle": await maybe_await(run_store_backend.get_engine_session_handle(request_id)),
-        }
-        (interactions_dir / "runtime_state.json").write_text(
-            json.dumps(runtime_state, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _ = run_dir
+        _ = request_id
+        _ = pending_interaction
+        _ = run_store_backend
 
     async def auto_decide_after_timeout(
         self,
@@ -600,14 +591,14 @@ class RunInteractionLifecycleService:
         append_internal_schema_warning: Callable[..., None],
         resolve_attempt_number: Callable[..., Awaitable[int]],
     ) -> None:
-        await asyncio.sleep(max(1, int(delay_sec)))
+        await asyncio.sleep(max(0, int(delay_sec)))
         request_record = await maybe_await(run_store_backend.get_request(request_id))
         if not request_record or request_record.get("run_id") != run_id:
             return
         run_dir = workspace_backend.get_run_dir(run_id)
         if run_dir is None:
             return
-        status_file = run_dir / "status.json"
+        status_file = run_dir / ".state" / "state.json"
         if not status_file.exists():
             return
         payload = json.loads(status_file.read_text(encoding="utf-8"))
@@ -617,7 +608,10 @@ class RunInteractionLifecycleService:
         pending_interaction = await maybe_await(run_store_backend.get_pending_interaction(request_id))
         if pending_interaction is None:
             return
-        runtime_options = request_record.get("runtime_options", {})
+        runtime_options = request_record.get(
+            "effective_runtime_options",
+            request_record.get("runtime_options", {}),
+        )
         interactive_auto_reply = bool(
             runtime_options.get("interactive_auto_reply", False)
         )
@@ -669,6 +663,8 @@ class RunInteractionLifecycleService:
             if isinstance(default_policy_obj, str) and default_policy_obj.strip()
             else "engine_judgement"
         )
+        source_attempt_obj = pending_interaction.get("source_attempt")
+        source_attempt = source_attempt_obj if isinstance(source_attempt_obj, int) else 1
         auto_reply_payload = {
             "source": "auto_decide_timeout",
             "interaction_id": interaction_id,
@@ -713,26 +709,64 @@ class RunInteractionLifecycleService:
         run_dir = workspace_backend.get_run_dir(run_id)
         if run_dir is None:
             return
-        update_status(
-            run_dir,
-            next_status,
-            effective_session_timeout_sec=await maybe_await(run_store_backend.get_effective_session_timeout(request_id)),
-        )
         await maybe_await(run_store_backend.update_run_status(run_id, next_status))
 
         options = {
             **request_record.get("engine_options", {}),
-            **request_record.get("runtime_options", {}),
+            **request_record.get(
+                "effective_runtime_options",
+                request_record.get("runtime_options", {}),
+            ),
             "__interactive_reply_payload": resume_command["response"],
             "__interactive_reply_interaction_id": resume_command["interaction_id"],
             "__interactive_resolution_mode": resume_command["resolution_mode"],
             "__interactive_auto_reason": resume_command.get("auto_decide_reason"),
             "__interactive_auto_policy": resume_command.get("auto_decide_policy"),
+            "__interactive_source_attempt": source_attempt,
+            "__attempt_number_override": source_attempt + 1,
         }
-        await run_job_callback(
-            run_id=run_id,
-            skill_id=str(request_record["skill_id"]),
-            engine_name=str(request_record["engine"]),
-            options=options,
-            cache_key=None,
+        resume_ticket = await maybe_await(
+            run_store_backend.issue_resume_ticket(
+                request_id,
+                cause=ResumeCause.INTERACTION_AUTO_DECIDE_TIMEOUT.value,
+                source_attempt=source_attempt,
+                target_attempt=source_attempt + 1,
+                payload={
+                    "interaction_id": interaction_id,
+                    "resolution_mode": resume_command["resolution_mode"],
+                    "response": resume_command["response"],
+                },
+            )
         )
+        await run_projection_service.write_non_terminal_projection(
+            run_dir=run_dir,
+            request_id=request_id,
+            run_id=run_id,
+            status=next_status,
+            current_attempt=source_attempt,
+            pending_owner=None,
+            resume_ticket_id=str(resume_ticket["ticket_id"]),
+            resume_cause=ResumeCause.INTERACTION_AUTO_DECIDE_TIMEOUT,
+            source_attempt=source_attempt,
+            target_attempt=source_attempt + 1,
+            effective_session_timeout_sec=await maybe_await(
+                run_store_backend.get_effective_session_timeout(request_id)
+            ),
+            run_store_backend=run_store_backend,
+        )
+        options["__resume_ticket_id"] = str(resume_ticket["ticket_id"])
+        options["__resume_cause"] = ResumeCause.INTERACTION_AUTO_DECIDE_TIMEOUT.value
+        ticket_dispatched = await maybe_await(
+            run_store_backend.mark_resume_ticket_dispatched(
+                request_id,
+                str(resume_ticket["ticket_id"]),
+            )
+        )
+        if ticket_dispatched:
+            await run_job_callback(
+                run_id=run_id,
+                skill_id=str(request_record["skill_id"]),
+                engine_name=str(request_record["engine"]),
+                options=options,
+                cache_key=None,
+            )

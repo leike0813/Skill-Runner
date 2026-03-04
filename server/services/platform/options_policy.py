@@ -63,17 +63,17 @@ class OptionsPolicy:
         value = runtime_options.get(INTERACTIVE_REPLY_TIMEOUT_KEY)
         if value is None:
             raise ValueError(
-                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a positive integer"
+                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a non-negative integer"
             )
         try:
             parsed = int(value)
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
-                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a positive integer"
+                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a non-negative integer"
             ) from exc
-        if parsed <= 0:
+        if parsed < 0:
             raise ValueError(
-                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a positive integer"
+                f"runtime_options.{INTERACTIVE_REPLY_TIMEOUT_KEY} must be a non-negative integer"
             )
 
     def _validate_interactive_auto_reply(self, runtime_options: Dict[str, Any]) -> None:

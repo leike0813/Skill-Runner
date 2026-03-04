@@ -87,7 +87,7 @@ Runner 将是一个 Python 脚本，负责读取 YAML 并在本地**黑盒调用
     *   调用 `WorkspaceManager.create_run(...)` 后再触发 `JobOrchestrator.run_job(...)`。
     *   若 `engine` 不在 `skill.engines` 内，应在 `create_run` 阶段抛错并视为预期失败。
 5.  **Poll/Wait**:
-    *   轮询检查 `status.json` 直到 `status` 为 `SUCCEEDED` 或 `FAILED`。
+    *   轮询检查 `.state/state.json` 直到 `status` 为 `SUCCEEDED` 或 `FAILED`。
 6.  **Verify**:
     *   **Status Check**: 实际状态 == expect.status?
     *   **Artifacts Check**: `data/runs/<id>/artifacts/` 下是否存在指定文件?

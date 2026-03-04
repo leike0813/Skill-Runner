@@ -105,22 +105,26 @@ def test_paired_reply_and_auto_decide_events_require_state_change_pair(tmp_path:
     interaction_history = [
         {
             "interaction_id": 3,
+            "source_attempt": 4,
             "event_type": "reply",
             "payload": {
                 "response": {"answer": "ok"},
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:02",
+                "source_attempt": 4,
             },
             "created_at": "2026-02-24T00:00:02",
         },
         {
             "interaction_id": 4,
+            "source_attempt": 5,
             "event_type": "reply",
             "payload": {
                 "response": {"answer": "auto"},
                 "resolution_mode": "auto_decide_timeout",
                 "resolved_at": "2026-02-24T00:00:03",
                 "auto_decide_policy": "engine_judgement",
+                "source_attempt": 5,
             },
             "created_at": "2026-02-24T00:00:03",
         },
@@ -129,7 +133,7 @@ def test_paired_reply_and_auto_decide_events_require_state_change_pair(tmp_path:
         tmp_path=tmp_path,
         run_id="run-reply-history-user",
         status="running",
-        attempt_number=4,
+        attempt_number=5,
         interaction_history=interaction_history,
         effective_session_timeout_sec=1200,
     )
@@ -137,7 +141,7 @@ def test_paired_reply_and_auto_decide_events_require_state_change_pair(tmp_path:
         tmp_path=tmp_path,
         run_id="run-reply-history-auto",
         status="running",
-        attempt_number=5,
+        attempt_number=6,
         interaction_history=interaction_history,
         effective_session_timeout_sec=1200,
     )
@@ -165,25 +169,24 @@ def test_paired_reply_and_auto_decide_events_require_state_change_pair(tmp_path:
 
 
 def test_terminal_state_change_has_consistent_terminal_event(tmp_path: Path) -> None:
-    scenarios = {
-        "succeeded": "conversation.completed",
-        "failed": "conversation.failed",
-        "canceled": "conversation.failed",
-    }
-    for status, terminal_event_type in scenarios.items():
+    for status in {"succeeded", "failed", "canceled"}:
         events = _build_fcmp(tmp_path=tmp_path, run_id=f"run-terminal-{status}", status=status)
-        for idx, event in enumerate(events):
-            if event["type"] != "conversation.state.changed":
-                continue
-            if event["data"].get("to") != status:
-                continue
-            assert any(
-                candidate["type"] == terminal_event_type
-                for candidate in events[idx + 1 :]
-            )
-            break
-        else:
-            raise AssertionError(f"missing terminal state change for status={status}")
+        terminal_event = next(
+            (
+                event
+                for event in events
+                if event["type"] == "conversation.state.changed" and event["data"].get("to") == status
+            ),
+            None,
+        )
+        assert terminal_event is not None, f"missing terminal state change for status={status}"
+        terminal_payload = terminal_event["data"].get("terminal")
+        assert isinstance(terminal_payload, dict)
+        assert terminal_payload.get("status") == status
+        assert not any(
+            event["type"] in {"conversation.completed", "conversation.failed"}
+            for event in events
+        )
 
 
 def test_waiting_user_state_requires_user_input_required_event(tmp_path: Path) -> None:
@@ -240,11 +243,13 @@ def test_reply_accepted_precedes_resumed_assistant_message() -> None:
     interaction_history = [
         {
             "interaction_id": 1,
+            "source_attempt": 1,
             "event_type": "reply",
             "payload": {
                 "response": {"text": "用户已回复"},
                 "resolution_mode": "user_reply",
                 "resolved_at": "2026-02-24T00:00:02",
+                "source_attempt": 1,
             },
             "created_at": "2026-02-24T00:00:02",
         }

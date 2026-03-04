@@ -12,8 +12,8 @@ class _ConfigComposer:
         return ctx.run_dir / "engine.json"
 
 
-class _WorkspaceProvisioner:
-    def prepare(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:
+class _RunFolderValidator:
+    def validate(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:
         return config_path.parent / ".workspace"
 
 
@@ -53,7 +53,7 @@ class _SessionCodec:
 def test_engine_execution_adapter_component_contracts() -> None:
     adapter = EngineExecutionAdapter(
         config_composer=_ConfigComposer(),
-        workspace_provisioner=_WorkspaceProvisioner(),
+        run_folder_validator=_RunFolderValidator(),
         prompt_builder=_PromptBuilder(),
         command_builder=_CommandBuilder(),
         stream_parser=_StreamParser(),
@@ -93,4 +93,3 @@ def test_engine_execution_adapter_component_contracts() -> None:
     )
     assert artifacts.exit_code == 0
     assert artifacts.session_handle is not None
-

@@ -80,6 +80,22 @@ def validate_fcmp_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _validate_payload(payload, def_name="fcmp_event_envelope", schema_name="fcmp_event_envelope")
 
 
+def validate_chat_replay_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="chat_replay_event_envelope",
+        schema_name="chat_replay_event_envelope",
+    )
+
+
+def validate_chat_replay_history_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="chat_replay_history_response",
+        schema_name="chat_replay_history_response",
+    )
+
+
 def validate_rasp_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _validate_payload(payload, def_name="rasp_event_envelope", schema_name="rasp_event_envelope")
 
@@ -90,6 +106,18 @@ def validate_orchestrator_event(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def validate_pending_interaction(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _validate_payload(payload, def_name="pending_interaction", schema_name="pending_interaction")
+
+
+def validate_pending_auth(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(payload, def_name="pending_auth", schema_name="pending_auth")
+
+
+def validate_pending_auth_method_selection(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="pending_auth_method_selection",
+        schema_name="pending_auth_method_selection",
+    )
 
 
 def validate_interaction_history_entry(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -105,4 +133,36 @@ def validate_resume_command(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload,
         def_name="interactive_resume_command",
         schema_name="interactive_resume_command",
+    )
+
+
+def validate_current_run_projection(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="current_run_projection",
+        schema_name="current_run_projection",
+    )
+
+
+def validate_terminal_run_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="terminal_run_result",
+        schema_name="terminal_run_result",
+    )
+
+
+def validate_run_state_envelope(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="run_state_envelope",
+        schema_name="run_state_envelope",
+    )
+
+
+def validate_run_dispatch_envelope(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="run_dispatch_envelope",
+        schema_name="run_dispatch_envelope",
     )

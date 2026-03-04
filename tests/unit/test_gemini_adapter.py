@@ -91,7 +91,6 @@ def test_construct_config_includes_engine_default_layer(tmp_path):
 async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    (run_dir / "input.json").write_text("{}")
     
     # Mock uploads
     uploads_dir = run_dir / "uploads"
@@ -155,7 +154,6 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
 async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    (run_dir / "input.json").write_text("{}")
     
     # Mock uploads - but DO NOT create "input_file"
     uploads_dir = run_dir / "uploads"

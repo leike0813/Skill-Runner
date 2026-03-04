@@ -12,16 +12,14 @@ def test_template_uses_history_then_stream_and_no_replay():
     assert "recordings" not in content
 
 
-def test_template_renders_reply_accepted_as_user_when_preview_available():
+def test_template_uses_canonical_chat_history_and_stream():
     content = _template()
-    assert "if (type === \"interaction.reply.accepted\")" in content
-    assert "response_preview" in content
-    assert "appendChatBubble(\"user\", preview" in content
+    assert "/api/runs/${requestId}/chat/history" in content
+    assert "/api/runs/${requestId}/chat?cursor=${cursor}" in content
+    assert "handleChatEvent(event)" in content
 
 
-def test_template_user_input_required_only_updates_prompt_card():
+def test_template_pending_cards_are_separate_from_chat_replay():
     content = _template()
-    assert "if (type === \"user.input.required\")" in content
-    assert "handleUserInputRequired(event);" in content
-    assert "applyPendingPrompt(payload);" in content
-    assert "user.input.required.prompt:" not in content
+    assert "applyPendingPrompt({" in content
+    assert "appendChatBubble(\"user\"" not in content

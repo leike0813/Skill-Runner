@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ...models import EngineSessionHandle, SkillManifest
+from ...runtime.protocol.contracts import LiveRuntimeEmitter, LiveStreamParserSession
 
 
 @dataclass(frozen=True)
@@ -31,8 +32,8 @@ class ConfigComposer(Protocol):
         ...
 
 
-class WorkspaceProvisioner(Protocol):
-    def prepare(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:
+class AttemptRunFolderValidator(Protocol):
+    def validate(self, ctx: AdapterExecutionContext, config_path: Path) -> Path:
         ...
 
 
@@ -56,6 +57,9 @@ class CommandBuilder(Protocol):
 
 class StreamParser(Protocol):
     def parse(self, raw_stdout: str) -> dict[str, Any]:
+        ...
+
+    def start_live_session(self) -> LiveStreamParserSession:
         ...
 
 

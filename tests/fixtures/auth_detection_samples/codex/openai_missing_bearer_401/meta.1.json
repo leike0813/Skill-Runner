@@ -1,0 +1,26 @@
+{
+  "run_id": "20260302T125727-codex-1bec66bb",
+  "engine": "codex",
+  "status": "failed",
+  "exit_code": 1,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:57:39.857753",
+  "finished_at": "2026-03-02T12:57:39.857759",
+  "completion": {
+    "state": "interrupted",
+    "reason_code": "NON_ZERO_EXIT",
+    "exit_code": 1
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/codex",
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "--full-auto",
+      "Hello."
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

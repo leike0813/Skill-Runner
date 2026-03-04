@@ -1,0 +1,16 @@
+{
+  "modelName": "glm-5",
+  "sandbox": "false",
+  "autoAccept": true,
+  "approvalMode": "yolo",
+  "hideTips": true,
+  "hideBanner": true,
+  "disableAutoUpdate": true,
+  "telemetry": {
+    "enabled": false
+  },
+  "disableTelemetry": true,
+  "accessibility": {
+    "disableLoadingPhrases": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "run_id": "20260302T124901-opencode-3cfec290",
+  "engine": "opencode",
+  "status": "waiting_user",
+  "exit_code": 0,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:49:07.123966",
+  "finished_at": "2026-03-02T12:49:07.123982",
+  "completion": {
+    "state": "awaiting_user_input",
+    "reason_code": "WAITING_USER_INPUT",
+    "exit_code": 0
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/opencode",
+      "run",
+      "--format",
+      "json",
+      "--model=opencode/minimax-m2.5-free",
+      "Hello."
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

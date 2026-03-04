@@ -1,0 +1,98 @@
+version: 1
+engine: opencode
+rules:
+  - id: opencode_google_api_key_missing
+    enabled: true
+    priority: 1000
+    match:
+      all:
+        - field: extracted.error_name
+          op: eq
+          value: ProviderAuthError
+        - field: extracted.provider_id
+          op: eq
+          value: google
+        - field: extracted.message
+          op: regex
+          value: "API key is missing"
+    classify:
+      classification: auth_required
+      subcategory: api_key_missing
+      confidence: high
+  - id: opencode_missing_auth_header
+    enabled: true
+    priority: 950
+    match:
+      all:
+        - field: extracted.status_code
+          op: eq
+          value: 401
+        - field: extracted.message
+          op: regex
+          value: "Missing Authentication header|Authorization.+request header|API secret key"
+    classify:
+      classification: auth_required
+      subcategory: api_key_missing
+      confidence: high
+  - id: opencode_invalid_api_key
+    enabled: true
+    priority: 940
+    match:
+      all:
+        - field: extracted.status_code
+          op: eq
+          value: 401
+        - field: extracted.message
+          op: regex
+          value: "Invalid API key|Invalid Authentication"
+    classify:
+      classification: auth_required
+      subcategory: invalid_api_key
+      confidence: high
+  - id: opencode_response_error_invalid_auth
+    enabled: true
+    priority: 930
+    match:
+      all:
+        - field: extracted.response_error_type
+          op: in
+          value:
+            - invalid_authentication_error
+            - authentication_error
+    classify:
+      classification: auth_required
+      subcategory: invalid_api_key
+      confidence: high
+  - id: opencode_token_expired
+    enabled: true
+    priority: 920
+    match:
+      all:
+        - field: extracted.status_code
+          op: eq
+          value: 401
+        - field: extracted.message
+          op: regex
+          value: "token expired or incorrect"
+    classify:
+      classification: auth_required
+      subcategory: auth_expired
+      confidence: high
+  - id: opencode_iflowcn_unknown_loop
+    enabled: true
+    priority: 400
+    match:
+      all:
+        - field: extracted.provider_id
+          op: eq
+          value: iflowcn
+        - field: extracted.step_finish_unknown_count
+          op: gte
+          value: 10
+        - field: extracted.saw_manual_interrupt
+          op: eq
+          value: true
+    classify:
+      classification: auth_required
+      subcategory: unknown_auth
+      confidence: medium

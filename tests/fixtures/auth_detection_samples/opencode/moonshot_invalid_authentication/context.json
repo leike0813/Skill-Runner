@@ -1,0 +1,22 @@
+{
+  "sample_id": "moonshot_invalid_authentication",
+  "source_run_id": "20260302T123922-opencode-cd01b352",
+  "engine": "opencode",
+  "provider_id": "moonshotai",
+  "execution_mode": "non_interactive_backend",
+  "capture_date": "2026-03-02",
+  "scenario": "fake API key returns Invalid Authentication",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": "invalid_api_key",
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "structured_json",
+    "stdout_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Structured OpenCode APIError with invalid_authentication_error."
+  ]
+}

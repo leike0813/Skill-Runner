@@ -1,0 +1,26 @@
+{
+  "run_id": "20260302T125146-opencode-318a9085",
+  "engine": "opencode",
+  "status": "waiting_user",
+  "exit_code": 0,
+  "attempt_number": 1,
+  "started_at": "2026-03-02T12:51:50.983310",
+  "finished_at": "2026-03-02T12:51:50.983316",
+  "completion": {
+    "state": "awaiting_user_input",
+    "reason_code": "WAITING_USER_INPUT",
+    "exit_code": 0
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/opencode",
+      "run",
+      "--format",
+      "json",
+      "--model=google/gemini-2.5-flash",
+      "Hello."
+    ],
+    "execution_mode": "interactive"
+  },
+  "source_capture_type": "harness_run"
+}

@@ -22,7 +22,7 @@
     "json_lines_finder": null,
     "regex_pattern": "\"session-id\"\\s*:\\s*\"([^\"]+)\""
   },
-  "workspace_provisioner": {
+  "attempt_workspace": {
     "workspace_subdir": ".iflow",
     "skills_subdir": "skills",
     "use_config_parent_as_workspace": false,

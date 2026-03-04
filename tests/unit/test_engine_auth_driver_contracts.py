@@ -27,20 +27,20 @@ def test_auth_driver_context_is_frozen_and_carries_transport_fields() -> None:
 
 
 def test_auth_driver_result_defaults_and_optional_fields() -> None:
-    result = AuthDriverResult(status="waiting_user", auth_ready=False)
+    result = AuthDriverResult(status="waiting_user")
     assert result.status == "waiting_user"
-    assert result.auth_ready is False
+    assert result.credential_state == "unknown"
     assert result.auth_url is None
     assert result.input_kind is None
 
     with_details = AuthDriverResult(
         status="succeeded",
-        auth_ready=True,
+        credential_state="present",
         auth_url="https://example.com/oauth",
         user_code="ABCD-EFGH",
         input_kind="text",
         audit={"callback_mode": "auto"},
     )
+    assert with_details.credential_state == "present"
     assert with_details.user_code == "ABCD-EFGH"
     assert with_details.audit == {"callback_mode": "auto"}
-

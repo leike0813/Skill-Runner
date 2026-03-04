@@ -8,7 +8,7 @@
     "engine",
     "prompt_builder",
     "session_codec",
-    "workspace_provisioner",
+    "attempt_workspace",
     "config_assets",
     "model_catalog"
   ],
@@ -91,7 +91,7 @@
         }
       ]
     },
-    "workspace_provisioner": {
+    "attempt_workspace": {
       "type": "object",
       "additionalProperties": false,
       "required": [

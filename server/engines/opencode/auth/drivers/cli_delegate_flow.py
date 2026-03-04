@@ -92,7 +92,9 @@ class OpencodeAuthCliFlow:
         provider_label: str,
         openai_auth_method: str = "callback",
     ) -> OpencodeAuthCliSession:
-        master_fd, slave_fd = pty.openpty()
+        master_fd, slave_fd = (
+            os.openpty() if hasattr(os, "openpty") else pty.openpty()
+        )
         try:
             process = subprocess.Popen(
                 [str(command_path), "auth", "login"],

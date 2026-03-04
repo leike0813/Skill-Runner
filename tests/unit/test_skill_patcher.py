@@ -45,6 +45,11 @@ def test_generate_patch_content_interactive_mode_keeps_ask_user_optional():
     assert "{{ run_dir }}/artifacts/final.md" in content
     assert "Execution Mode: INTERACTIVE" in content
     assert "<ASK_USER_YAML>" in content
+    assert "Canonical minimal ASK_USER schema" in content
+    assert "Example:" in content
+    assert "hint: \"<optional UI hint>\"" in content
+    assert "{ask_user_schema_block}" not in content
+    assert "Please reply to continue." in content
     assert "MUST NOT ask the user" not in content
 
 

@@ -3,10 +3,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiosqlite
-
 from server.config import config
 from server.models import SkillInstallStatus
+from server.services.platform import aiosqlite_compat as aiosqlite
 
 
 class SkillInstallStore:
@@ -49,20 +48,39 @@ class SkillInstallStore:
             )
             await conn.commit()
 
+    async def _execute(self, sql: str, params: tuple[Any, ...]) -> None:
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(sql, params)
+            await conn.commit()
+
+    async def _fetchone(self, sql: str, params: tuple[Any, ...]) -> Optional[Dict[str, Any]]:
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(sql, params)
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    async def _fetchall(self, sql: str, params: tuple[Any, ...]) -> List[Dict[str, Any]]:
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(sql, params)
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
     async def create_install(self, request_id: str) -> None:
         await self._ensure_initialized()
         now = datetime.utcnow().isoformat()
-        async with self._connect() as conn:
-            conn.row_factory = aiosqlite.Row
-            await conn.execute(
-                """
-                INSERT INTO skill_installs (
-                    request_id, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?)
-                """,
-                (request_id, SkillInstallStatus.QUEUED.value, now, now)
-            )
-            await conn.commit()
+        await self._execute(
+            """
+            INSERT INTO skill_installs (
+                request_id, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (request_id, SkillInstallStatus.QUEUED.value, now, now),
+        )
 
     async def update_running(self, request_id: str) -> None:
         await self._update(
@@ -100,42 +118,29 @@ class SkillInstallStore:
             return
         fields["updated_at"] = datetime.utcnow().isoformat()
         columns = ", ".join(f"{key} = ?" for key in fields.keys())
-        values = list(fields.values()) + [request_id]
-        async with self._connect() as conn:
-            conn.row_factory = aiosqlite.Row
-            await conn.execute(
-                f"UPDATE skill_installs SET {columns} WHERE request_id = ?",
-                values
-            )
-            await conn.commit()
+        values = tuple(list(fields.values()) + [request_id])
+        await self._execute(
+            f"UPDATE skill_installs SET {columns} WHERE request_id = ?",
+            values,
+        )
 
     async def get_install(self, request_id: str) -> Optional[Dict[str, Any]]:
         await self._ensure_initialized()
-        async with self._connect() as conn:
-            conn.row_factory = aiosqlite.Row
-            cursor = await conn.execute(
-                "SELECT * FROM skill_installs WHERE request_id = ?",
-                (request_id,)
-            )
-            row = await cursor.fetchone()
-        if not row:
-            return None
-        return dict(row)
+        return await self._fetchone(
+            "SELECT * FROM skill_installs WHERE request_id = ?",
+            (request_id,),
+        )
 
     async def list_installs(self, limit: int = 50) -> List[Dict[str, Any]]:
         await self._ensure_initialized()
-        async with self._connect() as conn:
-            conn.row_factory = aiosqlite.Row
-            cursor = await conn.execute(
-                """
-                SELECT * FROM skill_installs
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,)
-            )
-            rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        return await self._fetchall(
+            """
+            SELECT * FROM skill_installs
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
 
 
 skill_install_store = SkillInstallStore()

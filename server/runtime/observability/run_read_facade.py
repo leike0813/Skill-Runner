@@ -13,7 +13,7 @@ from .run_observability import run_observability_service
 from .run_source_adapter import RunSourceAdapter, get_request_and_run_dir, require_capability
 
 TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
-ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER}
+ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_AUTH}
 
 class _UnconfiguredJobControl:
     def build_run_bundle(self, run_dir: Path, debug: bool = False):
@@ -50,6 +50,9 @@ class RunReadFacade:
         request_id: str,
     ) -> RunResultResponse:
         _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        current_status = _read_status(run_dir).value
+        if current_status not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
+            raise HTTPException(status_code=409, detail="terminal result not ready")
         result_path = run_dir / "result" / "result.json"
         if not result_path.exists():
             raise HTTPException(status_code=404, detail="Run result not found")
@@ -168,6 +171,38 @@ class RunReadFacade:
             },
         )
 
+    async def stream_chat(
+        self,
+        *,
+        source_adapter: RunSourceAdapter,
+        request_id: str,
+        request: Request,
+        cursor: int = 0,
+    ) -> StreamingResponse:
+        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+
+        async def _event_stream():
+            async for item in run_observability_service.iter_chat_events(
+                run_dir=run_dir,
+                request_id=request_id,
+                cursor=cursor,
+                is_disconnected=request.is_disconnected,
+            ):
+                yield run_observability_service.format_sse_frame(
+                    item["event"],
+                    item["data"],
+                )
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     async def list_event_history(
         self,
         *,
@@ -180,7 +215,7 @@ class RunReadFacade:
     ) -> dict[str, Any]:
         require_capability(source_adapter, capability="supports_event_history")
         _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
-        events = await run_observability_service.list_event_history(
+        payload = await run_observability_service.get_event_history_payload(
             run_dir=run_dir,
             request_id=request_id,
             from_seq=from_seq,
@@ -188,7 +223,47 @@ class RunReadFacade:
             from_ts=from_ts,
             to_ts=to_ts,
         )
-        return {"request_id": request_id, "count": len(events), "events": events}
+        events_obj = payload.get("events")
+        events = events_obj if isinstance(events_obj, list) else []
+        return {
+            "request_id": request_id,
+            "count": len(events),
+            "events": events,
+            "source": payload.get("source", "audit"),
+            "cursor_floor": payload.get("cursor_floor", 0),
+            "cursor_ceiling": payload.get("cursor_ceiling", 0),
+        }
+
+    async def list_chat_history(
+        self,
+        *,
+        source_adapter: RunSourceAdapter,
+        request_id: str,
+        from_seq: int | None,
+        to_seq: int | None,
+        from_ts: str | None,
+        to_ts: str | None,
+    ) -> dict[str, Any]:
+        require_capability(source_adapter, capability="supports_event_history")
+        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        payload = await run_observability_service.get_chat_history_payload(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=from_seq,
+            to_seq=to_seq,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+        events_obj = payload.get("events")
+        events = events_obj if isinstance(events_obj, list) else []
+        return {
+            "request_id": request_id,
+            "count": len(events),
+            "events": events,
+            "source": payload.get("source", "audit"),
+            "cursor_floor": payload.get("cursor_floor", 0),
+            "cursor_ceiling": payload.get("cursor_ceiling", 0),
+        }
 
     async def read_log_range(
         self,
@@ -263,11 +338,11 @@ class RunReadFacade:
 
 
 def _read_status(run_dir: Path) -> RunStatus:
-    status_file = run_dir / "status.json"
-    if not status_file.exists():
-        return RunStatus.QUEUED
-    payload = json.loads(status_file.read_text(encoding="utf-8"))
-    return RunStatus(payload.get("status", RunStatus.QUEUED.value))
+    state_file = run_dir / ".state" / "state.json"
+    if state_file.exists():
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        return RunStatus(payload.get("status", RunStatus.QUEUED.value))
+    return RunStatus.QUEUED
 
 
 def _read_log(path: Path) -> str | None:

@@ -250,7 +250,6 @@ class AuthSessionRefresher:
         session.updated_at = now
 
         if session.status in _TERMINAL_STATUSES:
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._append_state_changed_if_needed(session, previous_status)
             return
 
@@ -258,7 +257,6 @@ class AuthSessionRefresher:
             self._manager._terminate_process(session)  # noqa: SLF001
             session.status = "expired"
             session.error = "Auth session expired"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             self._append_state_changed_if_needed(session, previous_status)
             return
@@ -266,7 +264,6 @@ class AuthSessionRefresher:
         if session.output_path is None or session.process is None:
             session.status = "failed"
             session.error = f"{session.engine} auth session is missing process context"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._manager._finalize_active_session(session)  # noqa: SLF001
             self._append_state_changed_if_needed(session, previous_status)
             return
@@ -283,18 +280,12 @@ class AuthSessionRefresher:
         if rc is None:
             if session.status == "starting":
                 session.status = "waiting_user"
-            session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
             self._append_state_changed_if_needed(session, previous_status)
             return
 
         session.exit_code = rc
-        session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
         if session.status == "canceled":
             pass
-        elif session.auth_ready:
-            session.status = "succeeded"
-            session.error = None
-            self._manager._mark_auto_callback_success(session)  # noqa: SLF001
         else:
             session.status = "failed"
             session.error = self._manager._build_error_summary(  # noqa: SLF001
@@ -398,6 +389,5 @@ class AuthSessionCallbackCompleter:
             if not handled:
                 session.status = "failed"
                 session.error = "OAuth callback session does not support this callback channel"
-                session.auth_ready = self._manager._collect_auth_ready(session.engine)  # noqa: SLF001
                 self._manager._finalize_active_session(session)  # noqa: SLF001
             return self._manager._to_snapshot(session)  # noqa: SLF001

@@ -9,7 +9,7 @@ from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 
 def _assert_components(adapter: EngineExecutionAdapter) -> None:
     assert adapter.config_composer is not None
-    assert adapter.workspace_provisioner is not None
+    assert adapter.run_folder_validator is not None
     assert adapter.prompt_builder is not None
     assert adapter.command_builder is not None
     assert adapter.stream_parser is not None

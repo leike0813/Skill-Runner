@@ -63,6 +63,61 @@ async def _run_background_tasks(background_tasks: BackgroundTasks) -> None:
             await outcome
 
 
+def _write_state_file(
+    run_dir: Path,
+    *,
+    status: str,
+    current_attempt: int = 1,
+    pending_owner: str | None = None,
+    pending_payload: dict | None = None,
+) -> None:
+    state_path = run_dir / ".state" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "request_id": "req-test",
+                "run_id": run_dir.name,
+                "status": status,
+                "updated_at": "2026-01-01T00:00:00",
+                "current_attempt": current_attempt,
+                "state_phase": {
+                    "waiting_auth_phase": None,
+                    "dispatch_phase": None,
+                },
+                "pending": {
+                    "owner": pending_owner,
+                    "interaction_id": pending_payload.get("interaction_id")
+                    if isinstance(pending_payload, dict)
+                    else None,
+                    "auth_session_id": pending_payload.get("auth_session_id")
+                    if isinstance(pending_payload, dict)
+                    else None,
+                    "payload": pending_payload,
+                },
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {
+                    "conversation_mode": "session",
+                    "requested_execution_mode": "interactive",
+                    "effective_execution_mode": "interactive",
+                    "effective_interactive_require_user_reply": True,
+                    "effective_interactive_reply_timeout_sec": 1200,
+                    "effective_session_timeout_sec": 1200,
+                },
+                "error": None,
+                "warnings": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.fixture(autouse=True)
 def disable_schedulers(monkeypatch):
     monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", lambda: None)
@@ -146,6 +201,73 @@ async def test_temp_status_exposes_interactive_auto_reply_fields(temp_config_dir
     status = await temp_skill_runs_router.get_temp_skill_run_status(create.request_id)
     assert status.interactive_auto_reply is True
     assert status.interactive_reply_timeout_sec == 8
+    assert status.requested_execution_mode.value == "interactive"
+    assert status.effective_execution_mode.value == "interactive"
+    assert status.conversation_mode.value == "session"
+    assert status.effective_interactive_require_user_reply is True
+    assert status.effective_interactive_reply_timeout_sec == 8
+
+
+@pytest.mark.asyncio
+async def test_temp_create_preserves_non_session_client_metadata(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={"execution_mode": "interactive"},
+            client_metadata={"conversation_mode": "non_session"},
+        )
+    )
+    record = await temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    assert record is not None
+    assert record["client_metadata"]["conversation_mode"] == "non_session"
+
+
+@pytest.mark.asyncio
+async def test_temp_upload_normalizes_non_session_interactive_only_skill(temp_config_dirs, monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.temp_skill_runs.model_registry.validate_model",
+        lambda _e, m: {"model": m},
+    )
+    create = await temp_skill_runs_router.create_temp_skill_run(
+        TempSkillRunCreateRequest(
+            engine="gemini",
+            parameter={},
+            model="gemini-test",
+            runtime_options={},
+            client_metadata={"conversation_mode": "non_session"},
+        )
+    )
+    monkeypatch.setattr(
+        temp_skill_runs_router.concurrency_manager,
+        "admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        temp_skill_runs_router.job_orchestrator,
+        "run_job",
+        AsyncMock(return_value=None),
+    )
+    background = BackgroundTasks()
+    await temp_skill_runs_router.upload_temp_skill_and_start(
+        create.request_id,
+        background,
+        skill_package=_build_upload_file(
+            "skill.zip",
+            _build_skill_zip(execution_modes=["interactive"]),
+        ),
+        file=None,
+    )
+    record = await temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    assert record is not None
+    assert record["effective_runtime_options"]["execution_mode"] == "interactive"
+    assert record["effective_runtime_options"]["interactive_auto_reply"] is True
+    assert record["effective_runtime_options"]["interactive_reply_timeout_sec"] == 0
 
 
 @pytest.mark.asyncio
@@ -399,17 +521,7 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
             "error": None,
         }
         (run_dir / "result" / "result.json").write_text(json.dumps(payload), encoding="utf-8")
-        (run_dir / "status.json").write_text(
-            json.dumps(
-                {
-                    "status": "succeeded",
-                    "warnings": [],
-                    "error": None,
-                    "updated_at": "2026-01-01T00:00:00",
-                }
-            ),
-            encoding="utf-8",
-        )
+        _write_state_file(run_dir, status="succeeded")
         if temp_request_id:
             await temp_skill_run_manager.on_terminal(
                 temp_request_id,
@@ -440,6 +552,10 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
 
     status = await temp_skill_runs_router.get_temp_skill_run_status(create.request_id)
     assert status.status == RunStatus.SUCCEEDED
+    record = await temp_skill_runs_router.temp_skill_run_store.get_request(create.request_id)
+    assert record is not None
+    run_dir = Path(temp_config_dirs / "runs" / str(record["run_id"]))
+    assert (run_dir / ".gemini" / "skills" / "temp-router-skill" / "SKILL.md").exists()
 
     result = await temp_skill_runs_router.get_temp_skill_run_result(create.request_id)
     assert result.result["data"]["message"] == "ok"
@@ -468,10 +584,7 @@ async def test_cancel_temp_skill_run_active_accepts(temp_config_dirs, monkeypatc
     await temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-1")
     run_dir = Path(temp_config_dirs / "runs" / "run-temp-1")
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "running", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, status="running")
     monkeypatch.setattr(
         temp_skill_runs_router.workspace_manager,
         "get_run_dir",
@@ -504,10 +617,7 @@ async def test_cancel_temp_skill_run_terminal_idempotent(temp_config_dirs, monke
     await temp_skill_runs_router.temp_skill_run_store.update_run_started(create.request_id, "run-temp-2")
     run_dir = Path(temp_config_dirs / "runs" / "run-temp-2")
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "succeeded", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
-    )
+    _write_state_file(run_dir, status="succeeded")
     monkeypatch.setattr(
         temp_skill_runs_router.workspace_manager,
         "get_run_dir",
@@ -594,9 +704,20 @@ async def test_temp_interaction_pending_and_reply_parity(temp_config_dirs, monke
 
     run_dir = Path(temp_config_dirs / "runs" / run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "status.json").write_text(
-        json.dumps({"status": "waiting_user", "updated_at": "2026-01-01T00:00:00"}),
-        encoding="utf-8",
+    pending_payload = {
+        "interaction_id": 3,
+        "kind": "open_text",
+        "prompt": "Need input",
+        "options": [],
+        "ui_hints": {},
+        "default_decision_policy": "engine_judgement",
+        "required_fields": [],
+    }
+    _write_state_file(
+        run_dir,
+        status="waiting_user",
+        pending_owner="waiting_user",
+        pending_payload=pending_payload,
     )
     monkeypatch.setattr(
         temp_skill_runs_router.workspace_manager,
@@ -606,15 +727,7 @@ async def test_temp_interaction_pending_and_reply_parity(temp_config_dirs, monke
 
     await temp_skill_runs_router.run_store.set_pending_interaction(
         create.request_id,
-        {
-            "interaction_id": 3,
-            "kind": "open_text",
-            "prompt": "Need input",
-            "options": [],
-            "ui_hints": {},
-            "default_decision_policy": "engine_judgement",
-            "required_fields": [],
-        },
+        pending_payload,
     )
 
     pending = await temp_skill_runs_router.get_temp_skill_interaction_pending(create.request_id)

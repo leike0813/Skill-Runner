@@ -203,37 +203,44 @@ def test_parse_output_invalid_ask_user_payload_returns_error():
     assert result.outcome == AdapterTurnOutcome.ERROR
 
 
-def test_setup_environment_passes_output_schema_to_skill_patcher(tmp_path):
+def test_setup_environment_validates_run_folder_contract(tmp_path):
     adapter = IFlowExecutionAdapter()
     skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# skill\n", encoding="utf-8")
-    (skill_dir / "output.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "test-skill",
+                "version": "1.0.0",
+                "execution_modes": ["interactive"],
+                "schemas": {
+                    "input": "assets/input.schema.json",
+                    "parameter": "assets/parameter.schema.json",
+                    "output": "assets/output.schema.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (assets_dir / "input.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    (assets_dir / "parameter.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    (assets_dir / "output.schema.json").write_text('{"type":"object"}', encoding="utf-8")
     skill = SkillManifest(
         id="test-skill",
         path=skill_dir,
-        schemas={"output": "output.schema.json"},
+        schemas={"output": "assets/output.schema.json"},
     )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     config_path = run_dir / ".iflow" / "settings.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
 
-    with patch(
-        "server.runtime.adapter.common.workspace_provisioner_common.skill_patcher.load_output_schema",
-        return_value={"type": "object"},
-    ) as mock_load, patch(
-        "server.runtime.adapter.common.workspace_provisioner_common.skill_patcher.patch_skill_md"
-    ) as mock_patch:
-        target = adapter._setup_environment(skill, run_dir, config_path, options={})
+    target = adapter._setup_environment(skill, run_dir, config_path, options={})
 
-    assert target == run_dir / ".iflow" / "skills" / "test-skill"
-    mock_load.assert_called_once_with(
-        skill_path=skill.path,
-        output_schema_relpath="output.schema.json",
-    )
-    _, kwargs = mock_patch.call_args
-    assert kwargs["execution_mode"] == "auto"
-    assert kwargs["output_schema"] == {"type": "object"}
+    assert target == skill_dir.resolve()
 
 
 @pytest.mark.asyncio
