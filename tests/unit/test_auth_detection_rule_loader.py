@@ -24,10 +24,9 @@ def test_auth_detection_rule_registry_rejects_duplicate_rule_ids(tmp_path: Path)
     schema_src = (
         PROJECT_ROOT
         / "server"
-        / "assets"
+        / "contracts"
         / "schemas"
-        / "auth_detection"
-        / "rule_pack.schema.json"
+        / "auth_detection_rule_pack.schema.json"
     )
     schema_dir.joinpath("rule_pack.schema.json").write_text(
         schema_src.read_text(encoding="utf-8"),
@@ -71,10 +70,9 @@ def test_auth_detection_rule_registry_rejects_invalid_subcategory(tmp_path: Path
     schema_src = (
         PROJECT_ROOT
         / "server"
-        / "assets"
+        / "contracts"
         / "schemas"
-        / "auth_detection"
-        / "rule_pack.schema.json"
+        / "auth_detection_rule_pack.schema.json"
     )
     schema_dir.joinpath("rule_pack.schema.json").write_text(
         schema_src.read_text(encoding="utf-8"),
@@ -123,7 +121,7 @@ def test_auth_detection_rule_registry_rejects_invalid_subcategory(tmp_path: Path
 
 
 def test_backend_rule_packs_do_not_encode_interactive_url_or_code_prompts() -> None:
-    rule_dir = PROJECT_ROOT / "server" / "assets" / "auth_detection"
+    rule_dir = PROJECT_ROOT / "server" / "engines" / "auth_detection"
     combined = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(rule_dir.glob("*.yaml"))

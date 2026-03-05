@@ -184,7 +184,7 @@ stateDiagram-v2
 
 为避免状态机文档与测试漂移，当前 canonical 不变量已收敛为机器可读合同文件：
 
-- `docs/contracts/session_fcmp_invariants.yaml`
+- `server/contracts/invariants/session_fcmp_invariants.yaml`
 
 该合同覆盖：
 

@@ -86,6 +86,9 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
             created_at = None
     data_obj = row.get("data")
     data = data_obj if isinstance(data_obj, dict) else {}
+    raw_ref_obj = row.get("raw_ref")
+    if isinstance(raw_ref_obj, dict):
+        correlation = {**correlation, "raw_ref": raw_ref_obj}
     specs: List[tuple[str, str, str, Dict[str, Any]]] = []
 
     if type_name == "interaction.reply.accepted":

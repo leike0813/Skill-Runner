@@ -193,7 +193,7 @@ async def upload_temp_skill_and_start(
     try:
         skill_bytes = await skill_package.read()
         skill_package_hash = compute_bytes_hash(skill_bytes)
-        inspected_skill = await temp_skill_run_manager.inspect_skill_package(request_id, skill_bytes)
+        inspected_skill = await temp_skill_run_manager.inspect_skill_package(skill_bytes, request_id=request_id)
         engine_policy = resolve_skill_engine_policy(inspected_skill)
         ensure_skill_engine_supported(
             skill_id=inspected_skill.id,
@@ -227,7 +227,6 @@ async def upload_temp_skill_and_start(
             upload_res = workspace_manager.handle_upload(request_id, input_bytes)
             extracted_files = upload_res.get("extracted_files", [])
 
-        runtime_options = record.get("runtime_options", {})
         cache_enabled = is_cache_enabled(effective_runtime_options)
         await _ensure_temp_request_synced_in_run_store(
             request_id=request_id,
@@ -259,7 +258,6 @@ async def upload_temp_skill_and_start(
                 await temp_skill_run_manager.on_terminal(
                     request_id,
                     RunStatus.SUCCEEDED,
-                    debug_keep_temp=bool(runtime_options.get("debug_keep_temp")),
                 )
                 return TempSkillRunUploadResponse(
                     request_id=request_id,

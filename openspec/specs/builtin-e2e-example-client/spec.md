@@ -2,7 +2,6 @@
 
 ## Purpose
 定义内建 E2E 示例客户端的独立端口部署、低耦合边界和自测能力约束。
-
 ## Requirements
 ### Requirement: 系统 MUST 提供独立端口运行的内建 E2E 示例客户端服务
 系统 MUST 提供一套与主服务分离的示例客户端服务，用于 E2E 测试和演示，且该服务 MUST 以独立端口启动。
@@ -138,4 +137,22 @@ The example client MUST present a product-style chat experience while preserving
 - **WHEN** 开发者查阅示例客户端设计约束
 - **THEN** 可以在 `docs/e2e_example_client_ui_reference.md` 获取页面结构、关键组件和状态说明
 - **AND** 文档内容可用于实现与测试对齐
+
+### Requirement: 示例客户端文件树 MUST 默认目录折叠
+
+示例客户端 Observation 页文件树 MUST 与管理 UI 一致，默认目录折叠并支持点击展开/收起。
+
+#### Scenario: observation file tree starts collapsed
+- **WHEN** 用户打开 `/runs/{request_id}`
+- **THEN** 文件树目录默认折叠
+- **AND** 用户展开目录后才显示子节点
+
+### Requirement: 示例客户端 run explorer data MUST respect backend denylist filtering
+
+示例客户端显示的 run 文件树与预览 MUST 基于后端过滤后的结果，不得在前端重新放宽可见集合。
+
+#### Scenario: ignored paths never rendered in client tree
+- **WHEN** 后端返回的 run 文件树已应用 debug 黑名单过滤
+- **THEN** 客户端 MUST 仅渲染返回结果
+- **AND** 命中黑名单的目录（例如 `node_modules`）不得出现在页面
 

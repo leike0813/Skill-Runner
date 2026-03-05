@@ -29,15 +29,21 @@ class TempSkillRunManager:
     def request_root(self, request_id: str) -> Path:
         return Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / request_id
 
-    async def inspect_skill_package(self, request_id: str, package_bytes: bytes) -> SkillManifest:
+    async def inspect_skill_package(
+        self,
+        package_bytes: bytes,
+        request_id: str | None = None,
+    ) -> SkillManifest:
         max_bytes = int(config.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES)
         if max_bytes > 0 and len(package_bytes) > max_bytes:
             raise ValueError(f"Skill package exceeds size limit ({max_bytes} bytes)")
         if not package_bytes:
             raise ValueError("Uploaded skill package is empty")
 
-        request_root = self.create_request_dirs(request_id)
-        with tempfile.TemporaryDirectory(dir=request_root) as tmp_dir_str:
+        tmp_root: str | None = None
+        if request_id:
+            tmp_root = str(self.create_request_dirs(request_id))
+        with tempfile.TemporaryDirectory(dir=tmp_root) as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
             package_path = tmp_dir / "skill_package.zip"
             package_path.write_bytes(package_bytes)
@@ -59,10 +65,11 @@ class TempSkillRunManager:
             if manifest.id != skill_id:
                 raise ValueError("Skill identity mismatch after manifest load")
 
-        await temp_skill_run_store.update_skill_identity(
-            request_id,
-            skill_id=skill_id,
-        )
+        if request_id:
+            await temp_skill_run_store.update_skill_identity(
+                request_id,
+                skill_id=skill_id,
+            )
         return manifest
 
     async def cleanup_temp_assets(self, request_id: str) -> None:
@@ -87,10 +94,8 @@ class TempSkillRunManager:
         status: RunStatus,
         *,
         error: str | None = None,
-        debug_keep_temp: bool = False,
     ) -> None:
         await temp_skill_run_store.update_status(request_id, status=status, error=error)
-        _ = debug_keep_temp
 
     async def cleanup_orphans(self) -> Dict[str, int]:
         retention_hours = int(config.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS)

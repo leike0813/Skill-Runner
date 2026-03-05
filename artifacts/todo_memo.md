@@ -1,9 +1,14 @@
-- engine 支持的鉴权模式策略化抽出
-- 管理后端对话区无法随前端回复实时刷新
-- temp skill 残留语义（debug_keep_temp）
-- request 数据库化及数据库重组织
-- temp skill 与常规 skill 进一步合并
-- e2e前端在后端不可达时 hard-fail
-- 消除前端双轨制（实时 vs. run回放）
-- cocurrency_policy归入config
+- [x] UI hint缺少统一合同，注入的Prompt也应根据合同动态生成
+- [x] fcmp冗余event (state.changed vs conversation.complete|failed)
+- [x] bundle 打包和文件树共享的ignore规则
+- [x] engine 支持的鉴权模式策略化抽出
+- [x] 前端和后端 run 列表的显示状态与后端 run 观测页面显示状态不一致（可能存在多个状态解析策略甚至多个真相源）
+- [x] 管理后端对话区无法随前端回复实时刷新
+- [x] 引入独立 chat history 机制后，管理后端的 raw_ref 回跳功能失效
+- [x] temp skill 残留语义（debug_keep_temp）
+- [x] request 数据库化及数据库重组织
+- [x] temp skill 与常规 skill 进一步合并
+- [x] e2e前端在后端不可达时 hard-fail
+- [x] 消除前端双轨制（实时 vs. run回放）
+- [x] cocurrency_policy归入config
 

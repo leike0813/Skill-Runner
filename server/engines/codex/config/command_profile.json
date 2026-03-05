@@ -1,0 +1,14 @@
+{
+  "start": [
+    "--skip-git-repo-check",
+    "--json",
+    "--full-auto",
+    "-p",
+    "skill-runner"
+  ],
+  "resume": [
+    "--skip-git-repo-check",
+    "--json",
+    "--full-auto"
+  ]
+}

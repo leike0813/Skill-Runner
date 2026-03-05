@@ -270,10 +270,10 @@ _parse_output(raw_stdout) → AdapterTurnResult
 
 | 层级 | 来源 | 路径示例 |
 |------|------|----------|
-| 1. Engine Default | `server/assets/configs/<engine>/default.*` | `server/assets/configs/codex/default.toml` |
+| 1. Engine Default | `server/engines/<engine>/config/default.*` | `server/engines/codex/config/default.toml` |
 | 2. Skill Recommended | `assets/<engine>_config.*` 或 `assets/<engine>_settings.json` | skill 包内 |
 | 3. User Options | API 参数：`model` + `runtime_options` + `<engine>_config` | 请求体 |
-| 4. Enforced Config | `server/assets/configs/<engine>/enforced.*` | `server/assets/configs/codex/enforced.toml` |
+| 4. Enforced Config | `server/engines/<engine>/config/enforced.*` | `server/engines/codex/config/enforced.toml` |
 
 各引擎配置写入位置：
 - Codex：`run_dir/.codex/` 下的配置

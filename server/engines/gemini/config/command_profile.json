@@ -1,0 +1,8 @@
+{
+  "start": [
+    "--yolo"
+  ],
+  "resume": [
+    "--yolo"
+  ]
+}

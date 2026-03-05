@@ -22,15 +22,10 @@ ALLOWED_SUBCATEGORIES = {
 @dataclass
 class AuthDetectionRuleRegistry:
     rule_dir: Path = field(
-        default_factory=lambda: Path(config.SYSTEM.ROOT) / "server" / "assets" / "auth_detection"
+        default_factory=lambda: Path(config.SYSTEM.ROOT) / "server" / "engines" / "auth_detection"
     )
     schema_path: Path = field(
-        default_factory=lambda: Path(config.SYSTEM.ROOT)
-        / "server"
-        / "assets"
-        / "schemas"
-        / "auth_detection"
-        / "rule_pack.schema.json"
+        default_factory=lambda: Path(config.SYSTEM.ROOT) / "server" / "contracts" / "schemas" / "auth_detection_rule_pack.schema.json"
     )
     _loaded: bool = False
     _packs: dict[str, AuthDetectionRulePack] = field(default_factory=dict)

@@ -16,7 +16,20 @@ class ConfigGenerator:
     4. System enforced policies
     """
     def __init__(self):
-        self.schemas_dir = Path(__file__).resolve().parents[3] / "assets" / "schemas"
+        root = Path(__file__).resolve().parents[3]
+        self._contract_schemas_dir = root / "contracts" / "schemas"
+        self._engine_schemas_glob = root / "engines"
+
+    def _resolve_schema_path(self, schema_name: str) -> Path:
+        contract_candidate = self._contract_schemas_dir / schema_name
+        if contract_candidate.exists():
+            return contract_candidate
+
+        engine_candidates = sorted(self._engine_schemas_glob.glob(f"*/schemas/{schema_name}"))
+        if engine_candidates:
+            return engine_candidates[0]
+
+        raise FileNotFoundError(f"Schema {schema_name} not found")
 
     def deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -72,9 +85,7 @@ class ConfigGenerator:
         """
         
         # 1. Load Schema
-        schema_path = self.schemas_dir / schema_name
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Schema {schema_name} not found")
+        schema_path = self._resolve_schema_path(schema_name)
             
         with open(schema_path, "r") as f:
             schema = json.load(f)

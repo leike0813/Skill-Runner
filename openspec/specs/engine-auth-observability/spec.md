@@ -411,3 +411,27 @@ The runtime option hard-cut MUST NOT change auth session state-machine or observ
 - **THEN** runtime MUST NOT 推进 `auth.completed`
 - **AND** MUST NOT 离开 `waiting_auth`
 
+### Requirement: Engine auth 启动校验能力 MUST 与 UI 能力同源
+
+系统 MUST 使用同一策略文件驱动 driver registry 能力校验与 UI 菜单能力展示，避免出现“可见但不可启动”组合。
+
+#### Scenario: strategy-supported combination is startable
+- **WHEN** 某 transport+engine(+provider)+auth_method 组合在策略文件中声明支持
+- **THEN** driver registry MUST 支持该组合
+
+#### Scenario: strategy-unsupported combination is rejected
+- **WHEN** 某组合未在策略文件声明
+- **THEN** driver registry MUST 拒绝该组合
+- **AND** 返回错误应明确指出不支持的组合信息
+
+### Requirement: Engine Auth Strategy Must Be Engine-Scoped Configuration
+
+Engine auth strategy capabilities MUST be sourced from engine-scoped strategy files under `server/engines/<engine>/config/` and aggregated by a single strategy service.
+
+#### Scenario: strategy service resolves capabilities from engine files
+
+- **WHEN** UI and orchestration query auth capabilities
+- **THEN** both receive data from the same strategy service
+- **AND** engine-scoped strategy files are the preferred source
+- **AND** legacy global strategy file MAY be used only as migration fallback
+

@@ -44,7 +44,7 @@ class OpencodeModelCatalog:
         )
         seed_path = profile.resolve_seed_path()
         if seed_path is None:
-            return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / "opencode" / "models_seed.json"
+            return Path(config.SYSTEM.ROOT) / "server" / "engines" / "opencode" / "models" / "models_seed.json"
         return seed_path
 
     def _normalize_models(self, rows: Any) -> List[Dict[str, Any]]:

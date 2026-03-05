@@ -34,7 +34,7 @@ class CodexConfigManager:
     dedicated profile (`[profiles.skill-runner]`) into the user's config.
     
     The final profile is composed of:
-    1. Engine Defaults (from `server/assets/configs/codex/default.toml`)
+    1. Engine Defaults (from `server/engines/codex/config/default.toml`)
     2. Skill Defaults (from `assets/codex_config.toml`)
     3. Runtime Overrides (from API request)
     4. Enforced Policy (security strictures)
@@ -71,7 +71,7 @@ class CodexConfigManager:
     def generate_profile_settings(self, skill_defaults: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generates the final profile configuration by merging layers:
-        1. Engine Defaults (from assets/configs/codex/default.toml)
+        1. Engine Defaults (from engines/codex/config/default.toml)
         2. Skill Defaults (from assets/codex_config.toml)
         3. Runtime Config (User overrides from API)
         4. Enforced Config (Built-in mandatory defaults)

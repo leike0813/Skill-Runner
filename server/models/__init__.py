@@ -86,6 +86,7 @@ from .management import (
 )
 from .run import (
     CancelResponse,
+    RequestSkillSource,
     RequestStatusResponse,
     RunArtifactsResponse,
     RunCleanupResponse,
@@ -210,6 +211,7 @@ __all__ = [
     "ResumeTicket",
     "RecoveryState",
     "RequestStatusResponse",
+    "RequestSkillSource",
     "CurrentRunProjection",
     "DispatchPhase",
     "RunArtifactsResponse",
@@ -230,6 +232,9 @@ __all__ = [
     "RunStatePhase",
     "RunStatus",
     "RunUploadResponse",
+    "TempSkillRunCreateRequest",
+    "TempSkillRunCreateResponse",
+    "TempSkillRunUploadResponse",
     "RuntimeDefinition",
     "RuntimeEventCategory",
     "RuntimeEventEnvelope",
@@ -241,8 +246,5 @@ __all__ = [
     "SkillInstallStatusResponse",
     "SkillManifest",
     "AttemptAuditMeta",
-    "TempSkillRunCreateRequest",
-    "TempSkillRunCreateResponse",
-    "TempSkillRunUploadResponse",
     "TerminalRunResult",
 ]

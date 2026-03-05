@@ -2035,7 +2035,7 @@ def test_extract_pending_interaction_accepts_hint_without_prompt():
     extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=2)
     assert extracted is not None
     assert extracted["interaction_id"] == 2
-    assert extracted["prompt"] == "请先简要介绍你的情况。"
+    assert extracted["prompt"] == "Please reply to continue."
     assert extracted["ui_hints"]["hint"] == "请先简要介绍你的情况。"
 
 
@@ -2049,7 +2049,8 @@ def test_extract_pending_interaction_accepts_direct_payload_with_hint():
     extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=3)
     assert extracted is not None
     assert extracted["interaction_id"] == 3
-    assert extracted["prompt"] == "请补充你的核心诉求。"
+    assert extracted["prompt"] == "Please reply to continue."
+    assert extracted["ui_hints"]["hint"] == "请补充你的核心诉求。"
 
 
 class EscapedNdjsonAdapterForHint:
@@ -2090,7 +2091,7 @@ def test_extract_pending_interaction_from_stream_prefers_parser_text_for_hint():
     )
     assert extracted is not None
     assert extracted["interaction_id"] == 5
-    assert extracted["prompt"] == "例如：男，38，工程师"
+    assert extracted["prompt"] == "Please reply to continue."
     assert extracted["ui_hints"]["hint"] == "例如：男，38，工程师"
 
 

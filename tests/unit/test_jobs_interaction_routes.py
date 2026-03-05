@@ -104,6 +104,7 @@ async def _create_interactive_request(
 ) -> tuple[RunStore, str]:
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
     monkeypatch.setattr(
         jobs_router.concurrency_manager,
         "admit_or_reject",
@@ -457,6 +458,7 @@ async def test_reply_interaction_rejects_stale_interaction(monkeypatch, temp_con
 async def test_interaction_endpoints_require_interactive_mode(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
     monkeypatch.setattr(
         jobs_router.model_registry,
         "validate_model",

@@ -215,3 +215,130 @@ When orchestration accepts interaction replies, auth submissions, or emits user-
 - **AND** 下游 FCMP 发布 MUST 从该 orchestrator event 派生
 - **AND** 系统 MUST NOT 直接在 reply endpoint 中发布 FCMP 绕过 orchestrator event path
 
+### Requirement: run_job attempt lifecycle MUST manage run-scoped service log mirroring
+
+`run_job` 在 attempt 执行期间 MUST 绑定 run logging 上下文并启用双镜像会话（run-scope 全集 + attempt-scope 分片），确保并发 run 日志不互串且资源正确释放。
+
+#### Scenario: attempt execution opens and closes mirror session
+- **WHEN** `run_job` 解析出 `run_id` 与 `attempt_number` 后进入 attempt 执行
+- **THEN** 系统 MUST 开启 run-scope 与 attempt-scope 服务日志镜像会话
+- **AND** 在 attempt 任意退出路径（success/failure/cancel/exception）MUST 关闭会话并卸载 handler
+
+#### Scenario: mirror writes only records bound to the target run
+- **GIVEN** 多个 run 并发执行
+- **WHEN** 服务进程产生日志
+- **THEN** 每个 run 的 `service.run.log` MUST 只包含自身 `run_id` 的记录
+- **AND** 每个 attempt 的 `service.<attempt>.log` MUST 只包含自身 `run_id + attempt` 的记录
+- **AND** 缺少 `run_id` 的记录 MUST 被丢弃
+
+### Requirement: run lifecycle orchestration MUST mirror service logs outside attempt windows
+
+create-run、upload-run、reply/auth 提交与 auth 状态轮询等 attempt 外编排路径 MUST 进入 run-scope 镜像，确保 run 全生命周期日志完整。
+
+#### Scenario: create-run orchestration contributes to run-scope service log
+- **WHEN** run 在 router/orchestration 路径被创建并完成 bootstrap/dispatch 准备
+- **THEN** 这些服务日志 MUST 写入 `.audit/service.run.log`
+- **AND** 这些记录 MAY 不出现在任何 `service.<attempt>.log`
+
+### Requirement: Concurrency Policy Must Be YACS-Managed
+
+Runtime concurrency admission MUST read canonical policy values from system configuration (`config.SYSTEM.CONCURRENCY.*`) rather than a standalone JSON file.
+
+#### Scenario: concurrency manager boots with YACS policy
+
+- **WHEN** runtime starts concurrency manager
+- **THEN** it reads max queue and concurrency budget from YACS
+- **AND** environment overrides MAY refine those values
+
+### Requirement: Runtime Contract Resolution Must Prefer Canonical Contract Paths
+
+Runtime protocol/schema consumers MUST resolve schemas from canonical contract paths first and only use legacy paths as phase migration fallback.
+
+#### Scenario: schema file exists in canonical path
+
+- **WHEN** protocol schema registry loads runtime contract schema
+- **THEN** canonical `server/contracts/schemas/*` is used
+- **AND** legacy path is not required
+
+### Requirement: Request persistence MUST be DB-only
+
+Orchestration MUST persist request lifecycle in database storage and MUST NOT rely on request filesystem directories as canonical request state.
+
+#### Scenario: request data persisted without request dir
+- **WHEN** a request is created
+- **THEN** request metadata MUST be stored in unified request DB model
+- **AND** no request directory is required for canonical persistence
+
+### Requirement: Upload staging MUST be request-scoped temporary storage
+
+Orchestration MUST stage uploads in request-local temporary storage during upload handling, then decide cache hit/miss before writing to run directory.
+
+#### Scenario: cache hit discards temporary staging
+- **WHEN** upload is processed and cache hits
+- **THEN** system MUST bind cached run
+- **AND** system MUST discard temporary staging without creating run uploads directory
+
+#### Scenario: cache miss promotes staging to run directory
+- **WHEN** upload is processed and cache misses
+- **THEN** system MUST create run directory
+- **AND** system MUST promote staged uploads into run directory
+
+### Requirement: Runtime chain MUST not branch by temp request identity
+
+Orchestration MUST execute interaction/auth/resume lifecycle from unified request identity and MUST NOT require temp-request-specific branching.
+
+#### Scenario: resume scheduling without temp_request_id branch
+- **WHEN** system schedules resumed attempt
+- **THEN** orchestration MUST use unified request record only
+- **AND** MUST NOT depend on temp request store lookup
+
+### Requirement: Run bundle candidate filtering MUST be rule-file driven
+
+系统 MUST 使用独立规则文件管理 run bundle 的候选文件过滤，而不是在代码中硬编码散落规则。
+
+#### Scenario: non-debug bundle uses allowlist file
+- **WHEN** orchestration 构建 `debug=false` 的 run bundle
+- **THEN** 系统 MUST 使用非 debug 白名单规则文件筛选候选文件
+- **AND** 首版白名单行为 MUST 与当前语义等价（`result/result.json` 与 `artifacts/**`）
+
+#### Scenario: debug bundle uses denylist file
+- **WHEN** orchestration 构建 `debug=true` 的 run bundle
+- **THEN** 系统 MUST 使用 debug 黑名单规则文件排除候选文件
+- **AND** 命中任意层级 `node_modules` 的目录与文件 MUST 被排除
+
+### Requirement: Run explorer filtering MUST reuse debug denylist contract
+
+run 文件树和文件预览 MUST 复用 debug 黑名单规则文件，保持“打包可见集合”与“浏览可见集合”一致。
+
+#### Scenario: filtered paths are hidden from run explorer
+- **WHEN** 客户端读取 run 文件树
+- **THEN** 命中 debug 黑名单规则的目录与文件 MUST NOT 出现在 entries 中
+
+#### Scenario: filtered file preview is rejected
+- **WHEN** 客户端请求 run 文件预览且路径命中 debug 黑名单规则
+- **THEN** 系统 MUST 拒绝该预览请求
+- **AND** MUST NOT 通过手工路径输入绕过过滤
+
+### Requirement: Orchestration MUST emit request-scoped structured trace events
+
+Runtime orchestration MUST emit stable structured trace logs for upload, lifecycle, interaction/auth, and recovery critical transitions. Critical transitions MUST carry `request_id` and stable event code semantics.
+
+#### Scenario: upload failure can be traced by request_id
+- **WHEN** `POST /v1/jobs/{request_id}/upload` fails at any critical phase
+- **THEN** backend MUST emit `upload.failed`
+- **AND** the event MUST include `request_id`, `phase`, `outcome=error`, and normalized error metadata
+
+#### Scenario: run lifecycle slot handling remains traceable
+- **WHEN** orchestration acquires and later releases a runtime slot
+- **THEN** backend MUST emit `run.lifecycle.slot_acquired` and `run.lifecycle.slot_released`
+- **AND** both events MUST be attributable to the same `run_id`
+
+### Requirement: Recovery redrive decisions MUST be traceable
+
+Recovery service MUST emit structured trace events for resume redrive decisions and orphan reconciliation.
+
+#### Scenario: missing run_dir redrive is reconciled with trace
+- **WHEN** queued redrive finds missing run directory
+- **THEN** backend MUST emit a reconciliation trace event
+- **AND** the event MUST carry `request_id`, `run_id`, and a stable error code for missing runtime assets
+

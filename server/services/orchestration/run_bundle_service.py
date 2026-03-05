@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from .run_file_filter_service import run_file_filter_service
+from server.services.platform.run_file_filter_service import run_file_filter_service
 
 
 class RunBundleService:

@@ -12,7 +12,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `server/runtime/session/statechart.py` | **SSOT 实现**: 定义 `SessionEvent`、`Transition`、`TERMINAL_STATES`、`TRANSITIONS` 元组。所有状态/转移与 `docs/contracts/session_fcmp_invariants.yaml` 一一对应。 |
+| `server/runtime/session/statechart.py` | **SSOT 实现**: 定义 `SessionEvent`、`Transition`、`TERMINAL_STATES`、`TRANSITIONS` 元组。所有状态/转移与 `server/contracts/invariants/session_fcmp_invariants.yaml` 一一对应。 |
 | `server/runtime/session/timeout.py` | 会话超时策略（`interactive_reply_timeout_sec` 管理） |
 
 ### 1.2 Protocol — 协议层

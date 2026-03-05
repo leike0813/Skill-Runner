@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional
 import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
 from server.models import ManifestArtifact
 from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER, generate_output_schema_patch
 from .skill_patch_templates import (
@@ -84,7 +86,11 @@ class SkillPatcher:
         return content
 
     def _ask_user_schema_contract_path(self) -> Path:
-        return Path(__file__).resolve().parents[3] / "docs" / "contracts" / "ask_user_schema.yaml"
+        candidates = config_registry.ask_user_schema_paths()
+        matched = next((path for path in candidates if path.exists()), None)
+        if matched is None:
+            raise RuntimeError("ask_user schema contract not found in canonical path")
+        return matched
 
     def _render_ask_user_schema_block(self) -> str:
         default_prompt = "Please reply to continue."
@@ -109,7 +115,7 @@ class SkillPatcher:
                             ]
                             if parsed:
                                 kinds = parsed
-        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        except (OSError, UnicodeDecodeError, yaml.YAMLError, RuntimeError):
             logger.warning("Failed to load ask_user schema contract for template rendering", exc_info=True)
         kind_joined = " | ".join(kinds)
         return (

@@ -1,29 +1,30 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import jsonschema  # type: ignore[import-untyped]
 import pytest
 import yaml  # type: ignore[import-untyped]
 
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
+
 
 def _load_schema() -> dict[str, object]:
-    path = (
-        Path("server")
-        / "assets"
-        / "schemas"
-        / "engine_auth"
-        / "engine_auth_strategy.schema.json"
-    )
+    candidates = config_registry.engine_auth_strategy_schema_paths()
+    path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_strategy() -> dict[str, object]:
-    path = Path("server") / "assets" / "configs" / "engine_auth_strategy.yaml"
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert isinstance(payload, dict)
-    return payload
+    engines: dict[str, object] = {}
+    for engine in keys.ENGINE_KEYS:
+        path = config_registry.engine_config_path(engine=engine, filename=keys.ENGINE_AUTH_STRATEGY_NAME)
+        assert path.exists()
+        engine_payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(engine_payload, dict)
+        engines[engine] = engine_payload
+    return {"version": 1, "engines": engines}
 
 
 def test_engine_auth_strategy_yaml_matches_schema() -> None:

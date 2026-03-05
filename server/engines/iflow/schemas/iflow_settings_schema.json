@@ -1,0 +1,66 @@
+{
+    "selectedAuthType": "str",
+    "apiKey": "str",
+    "baseUrl": "str",
+    "modelName": "str",
+    "contextFileName": "str",
+    "bugCommand": {
+        "urlTemplate": "str"
+    },
+    "fileFiltering": {
+        "respectGitIgnore": "bool",
+        "enableRecursiveFileSearch": "bool"
+    },
+    "coreTools": "list",
+    "excludeTools": "list",
+    "allowMCPServers": "list",
+    "excludeMCPServers": "list",
+    "autoAccept": "bool",
+    "theme": "str",
+    "vimMode": "bool",
+    "sandbox": "str",
+    "mcpServers": "dict",
+    "checkpointing": {
+        "enabled": "bool"
+    },
+    "preferredEditor": "str",
+    "telemetry": {
+        "enabled": "bool",
+        "target": "str",
+        "otlpEndpoint": "str",
+        "logPrompts": "bool"
+    },
+    "hideTips": "bool",
+    "hideBanner": "bool",
+    "maxSessionTurns": "int",
+    "summarizeToolOutput": "dict",
+    "disableAutoUpdate": "bool",
+    "disableTelemetry": "bool",
+    "pasteFromClipboard": "bool",
+    "tokensLimit": "int",
+    "compressionTokenThreshold": "float",
+    "useRipgrep": "bool",
+    "skipNextSpeakerCheck": "bool",
+    "shellTimeout": "int",
+    "approvalMode": "str",
+    "language": "str",
+    "includeDirectories": "list",
+    "mcpServerCommand": "str",
+    "accessibility": {
+        "disableLoadingPhrases": "bool"
+    },
+    "hookManager": "bool",
+    "enableBuildInTask": "str",
+    "outputStyle": "str",
+    "hasIdeOnboardingBeenShown": "dict",
+    "customThemes": "dict",
+    "autoConfigureMaxOldSpaceSize": "bool",
+    "hideWindowTitle": "bool",
+    "lightWeightPlan": "bool",
+    "hooks": "dict",
+    "errorLog": {
+        "enabled": "bool",
+        "maxInMemoryErrors": "int",
+        "enableFileLogging": "bool"
+    }
+}

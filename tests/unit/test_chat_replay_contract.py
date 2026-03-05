@@ -2,9 +2,14 @@ from pathlib import Path
 
 import yaml
 
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
+
 
 def test_chat_replay_contract_defines_roles_kinds_and_invariants() -> None:
-    path = Path("docs/contracts/chat_replay_contract.yaml")
+    candidates = config_registry.invariant_contract_paths(keys.CHAT_REPLAY_CONTRACT_NAME)
+    path = candidates[0]
+    assert path.exists()
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     assert payload["order_source"]["canonical"] == "chat_publish_order"

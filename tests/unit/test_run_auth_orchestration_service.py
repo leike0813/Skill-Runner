@@ -442,10 +442,6 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
         "server.services.orchestration.run_auth_orchestration_service.concurrency_manager.admit_or_reject",
         AsyncMock(side_effect=AssertionError("internal auth resume must not re-enter queue admission")),
     )
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.temp_skill_run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-1"}),
-    )
 
     backend = SimpleNamespace(
         get_pending_auth=AsyncMock(return_value=pending_auth),
@@ -499,7 +495,6 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     backend.mark_resume_ticket_dispatched.assert_awaited_once_with("req-1", "ticket-1")
     backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.QUEUED)
     assert len(background_tasks.tasks) == 1
-    assert background_tasks.tasks[0].kwargs["temp_request_id"] == "req-1"
     assert background_tasks.tasks[0].kwargs["options"]["__resume_ticket_id"] == "ticket-1"
     assert background_tasks.tasks[0].kwargs["options"]["__attempt_number_override"] == 2
     state_payload = _read_state_payload(run_dir)
@@ -644,10 +639,6 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.concurrency_manager.admit_or_reject",
         AsyncMock(side_effect=AssertionError("callback reconcile must not re-enter queue admission")),
-    )
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.temp_skill_run_store.get_request",
-        AsyncMock(return_value=None),
     )
     backend = SimpleNamespace(
         get_auth_session_status=AsyncMock(
@@ -834,10 +825,6 @@ async def test_submit_auth_input_completed_session_returns_conflict_not_500(monk
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.concurrency_manager.admit_or_reject",
         AsyncMock(return_value=True),
-    )
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.temp_skill_run_store.get_request",
-        AsyncMock(return_value=None),
     )
 
     backend = SimpleNamespace(

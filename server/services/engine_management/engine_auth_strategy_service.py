@@ -9,11 +9,13 @@ from typing import Any, Dict, Iterable, Optional
 import jsonschema  # type: ignore[import-untyped]
 import yaml  # type: ignore[import-untyped]
 
-from server.config import config
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
 
 
 _VALID_TRANSPORTS = ("oauth_proxy", "cli_delegate")
 _NON_OPENCODE_ENGINES = ("codex", "gemini", "iflow")
+_ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode")
 
 
 class EngineAuthStrategyLoadError(RuntimeError):
@@ -37,44 +39,74 @@ class EngineAuthStrategyService:
         strategy_path: Path | None = None,
         schema_path: Path | None = None,
     ) -> None:
-        root = Path(config.SYSTEM.ROOT)
-        self._strategy_path = strategy_path or (
-            root / "server" / "assets" / "configs" / "engine_auth_strategy.yaml"
-        )
-        self._schema_path = schema_path or (
-            root / "server" / "assets" / "schemas" / "engine_auth" / "engine_auth_strategy.schema.json"
-        )
+        self._strategy_path = strategy_path
+        self._schema_path = schema_path
         self._lock = Lock()
         self._loaded = False
         self._payload: dict[str, Any] = {}
 
     def _load_schema(self) -> dict[str, Any]:
+        schema_paths: tuple[Path, ...]
+        if self._schema_path is not None:
+            schema_paths = (self._schema_path,)
+        else:
+            schema_paths = config_registry.engine_auth_strategy_schema_paths()
+        schema_path = next((path for path in schema_paths if path.exists()), None)
+        if schema_path is None:
+            joined = ", ".join(str(path) for path in schema_paths)
+            raise EngineAuthStrategyLoadError(
+                f"Failed to locate engine auth strategy schema. tried: {joined}"
+            )
         try:
-            payload = json.loads(self._schema_path.read_text(encoding="utf-8"))
+            payload = json.loads(schema_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise EngineAuthStrategyLoadError(
-                f"Failed to load engine auth strategy schema: {self._schema_path}"
+                f"Failed to load engine auth strategy schema: {schema_path}"
             ) from exc
         if not isinstance(payload, dict):
             raise EngineAuthStrategyLoadError(
-                f"Engine auth strategy schema must be an object: {self._schema_path}"
+                f"Engine auth strategy schema must be an object: {schema_path}"
             )
         return payload
 
     def _load_strategy(self) -> dict[str, Any]:
-        try:
-            payload = yaml.safe_load(self._strategy_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-            raise EngineAuthStrategyLoadError(
-                f"Failed to load engine auth strategy config: {self._strategy_path}"
-            ) from exc
-        if payload is None:
-            payload = {}
-        if not isinstance(payload, dict):
-            raise EngineAuthStrategyLoadError(
-                f"Engine auth strategy config must be a mapping: {self._strategy_path}"
+        if self._strategy_path is not None:
+            try:
+                payload = yaml.safe_load(self._strategy_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+                raise EngineAuthStrategyLoadError(
+                    f"Failed to load engine auth strategy config: {self._strategy_path}"
+                ) from exc
+            if payload is None:
+                return {}
+            if not isinstance(payload, dict):
+                raise EngineAuthStrategyLoadError(
+                    f"Engine auth strategy config must be a mapping: {self._strategy_path}"
+                )
+            return payload
+
+        aggregated: dict[str, Any] = {"version": 1, "engines": {}}
+        for engine in _ENGINE_KEYS:
+            strategy_path = config_registry.engine_config_path(
+                engine=engine,
+                filename=keys.ENGINE_AUTH_STRATEGY_NAME,
             )
-        return payload
+            if not strategy_path.exists():
+                raise EngineAuthStrategyLoadError(
+                    f"Missing engine auth strategy file for `{engine}`: {strategy_path}"
+                )
+            try:
+                engine_payload = yaml.safe_load(strategy_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+                raise EngineAuthStrategyLoadError(
+                    f"Failed to load engine auth strategy config: {strategy_path}"
+                ) from exc
+            if not isinstance(engine_payload, dict):
+                raise EngineAuthStrategyLoadError(
+                    f"Engine auth strategy config must be a mapping: {strategy_path}"
+                )
+            aggregated["engines"][engine] = engine_payload
+        return aggregated
 
     def _normalize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         engines_obj = payload.get("engines")
@@ -348,4 +380,3 @@ class EngineAuthStrategyService:
 
 
 engine_auth_strategy_service = EngineAuthStrategyService()
-

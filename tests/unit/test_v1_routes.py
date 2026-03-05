@@ -815,49 +815,9 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_v1_temp_skill_run_events_stream_available(tmp_path, monkeypatch):
-    run_dir = tmp_path / "run-temp"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
-    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    _write_state_file(
-        run_dir,
-        request_id="temp-1",
-        status="waiting_user",
-        pending_owner="waiting_user",
-        pending_payload={"interaction_id": 1, "kind": "open_text", "prompt": "continue"},
-        pending_interaction_id=1,
-    )
-
-    monkeypatch.setattr(
-        "server.routers.temp_skill_runs.temp_skill_run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-temp"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.temp_skill_runs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_pending_interaction",
-        AsyncMock(return_value={"interaction_id": 1, "kind": "open_text", "prompt": "continue"}),
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.list_interaction_history",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
-        AsyncMock(return_value=None),
-    )
-
+async def test_v1_temp_skill_run_events_stream_unavailable():
     response = await _request("GET", "/v1/temp-skill-runs/temp-1/events")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: snapshot" in response.text
-    assert "event: chat_event" in response.text
-    assert "event: status" not in response.text
-    assert "event: end" not in response.text
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

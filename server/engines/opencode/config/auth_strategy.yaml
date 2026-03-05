@@ -1,0 +1,118 @@
+in_conversation:
+  transport: oauth_proxy
+providers:
+  openai:
+    transports:
+      oauth_proxy:
+        methods:
+          - callback
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+      cli_delegate:
+        methods:
+          - callback
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: cli_delegate
+    in_conversation:
+      methods:
+        - callback
+        - device_auth
+  google:
+    transports:
+      oauth_proxy:
+        methods:
+          - callback
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+      cli_delegate:
+        methods:
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: cli_delegate
+    in_conversation:
+      methods:
+        - callback
+  deepseek:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  iflowcn:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  minimax:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  moonshotai:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  opencode:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  openrouter:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  zai-coding-plan:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key

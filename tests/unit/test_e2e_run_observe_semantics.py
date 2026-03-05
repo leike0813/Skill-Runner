@@ -120,15 +120,12 @@ def test_run_observe_template_renders_all_assistant_messages_as_bubbles():
 def test_run_observe_template_keeps_stream_open_until_terminal_chat_event():
     content = _read_template()
     assert 'if (isTerminal(currentStatus)) {' in content
-    terminal_refresh_block = """if (isTerminal(currentStatus)) {
-            clearWaitingUserWatchdog();
-            setReplyEnabled(false);
-            clearPromptCard();
-            await catchUpHistory();
-            await maybeAppendFinalSummary();
-            await maybeLoadFileTreeOnTerminal();
-        }"""
-    assert terminal_refresh_block in content
+    assert "clearWaitingUserWatchdog();" in content
+    assert "setReplyEnabled(false);" in content
+    assert "clearPromptCard();" in content
+    assert "await catchUpHistory();" in content
+    assert "await maybeAppendFinalSummary();" in content
+    assert "await maybeLoadFileTreeOnTerminal();" in content
 
 
 def test_run_observe_template_catches_up_history_for_waiting_and_terminal_states():
@@ -137,6 +134,8 @@ def test_run_observe_template_catches_up_history_for_waiting_and_terminal_states
     assert "await catchUpHistory();" in content
     assert "catchUpHistory().catch(() => {});" in content
     assert "catchUpHistory()\n                .catch(() => {})" in content
+    assert "function shouldShowBackendUnreachable(evt)" in content
+    assert "if (shouldShowBackendUnreachable(evt)) {" in content
 
 
 def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():

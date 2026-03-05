@@ -261,9 +261,7 @@ async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs
     assert second_counts["cache_entries"] == 0
 
     runs_dir = Path(config.SYSTEM.RUNS_DIR)
-    requests_dir = Path(config.SYSTEM.REQUESTS_DIR)
     assert not any(runs_dir.iterdir())
-    assert not any(requests_dir.iterdir())
 
 
 @pytest.mark.asyncio

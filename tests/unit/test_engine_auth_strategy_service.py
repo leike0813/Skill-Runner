@@ -48,13 +48,8 @@ def test_strategy_service_opencode_conversation_methods_use_provider_scope() -> 
 def test_strategy_service_raises_for_invalid_payload(tmp_path: Path) -> None:
     invalid_strategy = tmp_path / "engine_auth_strategy.yaml"
     invalid_strategy.write_text("version: 1\nengines: {}\n", encoding="utf-8")
-    schema_path = (
-        Path("server")
-        / "assets"
-        / "schemas"
-        / "engine_auth"
-        / "engine_auth_strategy.schema.json"
-    )
+    schema_path = Path("server") / "contracts" / "schemas" / "engine_auth_strategy.schema.json"
+    assert schema_path.exists()
     service = EngineAuthStrategyService(
         strategy_path=invalid_strategy,
         schema_path=schema_path,

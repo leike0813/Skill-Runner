@@ -19,7 +19,7 @@
 
 Schema 文件：
 
-- `server/assets/schemas/protocol/runtime_contract.schema.json`
+- `server/contracts/schemas/runtime_contract.schema.json`
 
 ## Validation Policy
 

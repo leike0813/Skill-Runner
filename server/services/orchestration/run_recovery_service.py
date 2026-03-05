@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from server.models import InteractiveErrorCode, RunStatus
+from server.runtime.logging.structured_trace import log_event
 from server.runtime.session.statechart import SessionEvent, waiting_recovery_event
 from server.services.orchestration.workspace_manager import workspace_manager
 
@@ -62,11 +63,40 @@ class RunRecoveryService:
     ) -> bool:
         if not request_id or not run_id or resume_run_job is None:
             return False
+        log_event(
+            logger,
+            event="recovery.redrive.requested",
+            phase="recovery",
+            outcome="start",
+            request_id=request_id,
+            run_id=run_id,
+            engine=engine_name,
+        )
         resume_ticket = await run_store_backend.get_resume_ticket(request_id)
         if not isinstance(resume_ticket, dict) or resume_ticket.get("state") not in {"issued", "dispatched"}:
+            log_event(
+                logger,
+                event="recovery.redrive.skipped",
+                phase="recovery",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                engine=engine_name,
+                error_code="NO_RESUME_TICKET",
+            )
             return False
         request_record = await run_store_backend.get_request(request_id)
         if not isinstance(request_record, dict):
+            log_event(
+                logger,
+                event="recovery.redrive.skipped",
+                phase="recovery",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                engine=engine_name,
+                error_code="REQUEST_NOT_FOUND",
+            )
             return False
         resolved_workspace = workspace_backend or workspace_manager
         run_dir = resolved_workspace.get_run_dir(run_id)
@@ -81,6 +111,16 @@ class RunRecoveryService:
                 request_id=request_id,
                 run_id=run_id,
                 run_store_backend=run_store_backend,
+            )
+            log_event(
+                logger,
+                event="recovery.reconciled_terminal",
+                phase="recovery",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                engine=engine_name,
+                error_code="MISSING_RUN_DIR_BEFORE_REDRIVE",
             )
             return True
         effective_runtime_options = request_record.get(
@@ -102,20 +142,12 @@ class RunRecoveryService:
                 options["__interactive_reply_payload"] = payload.get("response")
             if isinstance(payload.get("resolution_mode"), str):
                 options["__interactive_resolution_mode"] = payload.get("resolution_mode")
-        temp_request_id: str | None = None
-        with contextlib.suppress(Exception):
-            from server.services.skill.temp_skill_run_store import temp_skill_run_store
-
-            temp_record = await temp_skill_run_store.get_request(request_id)
-            if isinstance(temp_record, dict):
-                temp_request_id = request_id
         task = resume_run_job(
             run_id=run_id,
             skill_id=str(request_record.get("skill_id") or ""),
             engine_name=engine_name,
             options=options,
             cache_key=None,
-            temp_request_id=temp_request_id,
         )
         if asyncio.iscoroutine(task):
             asyncio.create_task(task)
@@ -125,6 +157,17 @@ class RunRecoveryService:
                 recovery_state="recovered_waiting",
                 recovery_reason=recovery_reason,
             )
+        log_event(
+            logger,
+            event="recovery.redrive.requested",
+            phase="recovery",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=int(resume_ticket.get("target_attempt") or 1),
+            engine=engine_name,
+            ticket_id=resume_ticket.get("ticket_id"),
+        )
         return True
 
     async def recover_incomplete_runs_on_startup(

@@ -30,7 +30,7 @@ _load_local_env_file()
 from fastapi import FastAPI, APIRouter  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
-from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, temp_skill_runs, ui
+from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, ui
 from .services.engine_management.runtime_profile import get_runtime_profile
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ async def lifespan(_app: FastAPI):
     from .services.orchestration.run_cleanup_manager import run_cleanup_manager
     from .services.orchestration.runtime_observability_ports import install_runtime_observability_ports
     from .services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
-    from .services.skill.temp_skill_cleanup_manager import temp_skill_cleanup_manager
     from .services.ui.ui_auth import validate_ui_basic_auth_config
     from .services.orchestration.job_orchestrator import job_orchestrator
     from .engines.opencode.models.catalog_service import opencode_model_catalog
@@ -92,7 +91,6 @@ async def lifespan(_app: FastAPI):
     cache_manager.start()
     engine_status_cache_service.start()
     run_cleanup_manager.start()
-    temp_skill_cleanup_manager.start()
     await job_orchestrator.recover_incomplete_runs_on_startup()
     try:
         yield
@@ -115,7 +113,6 @@ v1_router.include_router(jobs.router)
 v1_router.include_router(engines.router)
 v1_router.include_router(management.router)
 v1_router.include_router(skill_packages.router)
-v1_router.include_router(temp_skill_runs.router)
 app.include_router(v1_router)
 app.include_router(ui.router)
 app.include_router(oauth_callback.router)

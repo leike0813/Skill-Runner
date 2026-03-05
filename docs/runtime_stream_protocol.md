@@ -371,7 +371,7 @@ FCMP 关键对齐：
 
 协议 Schema SSOT：
 
-- `server/assets/schemas/protocol/runtime_contract.schema.json`
+- `server/contracts/schemas/runtime_contract.schema.json`
 
 核心 `$defs`：
 

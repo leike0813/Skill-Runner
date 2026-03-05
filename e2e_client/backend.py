@@ -133,7 +133,7 @@ class BackendClient:
         ) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def stream_run_chat(
+    def stream_run_chat(
         self,
         request_id: str,
         *,
@@ -198,7 +198,10 @@ class HttpBackendClient(BackendClient):
         return await self._request_json("POST", "/v1/jobs", json_payload=payload)
 
     async def create_temp_run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._request_json("POST", "/v1/temp-skill-runs", json_payload=payload)
+        normalized = dict(payload)
+        normalized["skill_source"] = "temp_upload"
+        normalized.pop("skill_id", None)
+        return await self._request_json("POST", "/v1/jobs", json_payload=normalized)
 
     async def upload_run_file(self, request_id: str, zip_bytes: bytes) -> dict[str, Any]:
         files = {
@@ -224,7 +227,7 @@ class HttpBackendClient(BackendClient):
             files["file"] = ("input.zip", input_zip, "application/zip")
         return await self._request_json(
             "POST",
-            f"/v1/temp-skill-runs/{request_id}/upload",
+            f"/v1/jobs/{request_id}/upload",
             files=files,
         )
 
@@ -277,8 +280,7 @@ class HttpBackendClient(BackendClient):
         *,
         run_source: RunSource = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
-        if run_source == RUN_SOURCE_TEMP:
-            return await self._request_json("GET", f"/v1/temp-skill-runs/{request_id}/result")
+        _ = run_source
         return await self._request_json("GET", f"/v1/jobs/{request_id}/result")
 
     async def get_run_artifacts(
@@ -287,8 +289,7 @@ class HttpBackendClient(BackendClient):
         *,
         run_source: RunSource = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
-        if run_source == RUN_SOURCE_TEMP:
-            return await self._request_json("GET", f"/v1/temp-skill-runs/{request_id}/artifacts")
+        _ = run_source
         return await self._request_json("GET", f"/v1/jobs/{request_id}/artifacts")
 
     async def get_run_final_summary(
@@ -311,8 +312,7 @@ class HttpBackendClient(BackendClient):
         *,
         run_source: RunSource = RUN_SOURCE_INSTALLED,
     ) -> bytes:
-        if run_source == RUN_SOURCE_TEMP:
-            return await self._request_bytes("GET", f"/v1/temp-skill-runs/{request_id}/bundle")
+        _ = run_source
         return await self._request_bytes("GET", f"/v1/jobs/{request_id}/bundle")
 
     async def stream_run_events(
@@ -325,14 +325,17 @@ class HttpBackendClient(BackendClient):
         params = {"cursor": cursor}
         path = f"{self._run_base_path(request_id, run_source=run_source)}/events"
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("GET", url, params=params) as response:
-                if response.status_code >= 400:
-                    detail = await _extract_error_detail(response)
-                    raise BackendApiError(response.status_code, detail)
-                async for chunk in response.aiter_bytes():
-                    if chunk:
-                        yield chunk
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", url, params=params) as response:
+                    if response.status_code >= 400:
+                        detail = await _extract_error_detail(response)
+                        raise BackendApiError(response.status_code, detail)
+                    async for chunk in response.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise _backend_unreachable_error(exc) from exc
 
     async def get_run_event_history(
         self,
@@ -369,14 +372,17 @@ class HttpBackendClient(BackendClient):
         params = {"cursor": cursor}
         path = f"{self._run_base_path(request_id, run_source=run_source)}/chat"
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("GET", url, params=params) as response:
-                if response.status_code >= 400:
-                    detail = await _extract_error_detail(response)
-                    raise BackendApiError(response.status_code, detail)
-                async for chunk in response.aiter_bytes():
-                    if chunk:
-                        yield chunk
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", url, params=params) as response:
+                    if response.status_code >= 400:
+                        detail = await _extract_error_detail(response)
+                        raise BackendApiError(response.status_code, detail)
+                    async for chunk in response.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise _backend_unreachable_error(exc) from exc
 
     async def get_run_chat_history(
         self,
@@ -423,8 +429,7 @@ class HttpBackendClient(BackendClient):
         )
 
     def _run_base_path(self, request_id: str, *, run_source: RunSource) -> str:
-        if run_source == RUN_SOURCE_TEMP:
-            return f"/v1/temp-skill-runs/{request_id}"
+        _ = run_source
         return f"/v1/jobs/{request_id}"
 
     async def _request_json(
@@ -437,14 +442,17 @@ class HttpBackendClient(BackendClient):
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                json=json_payload,
-                files=files,
-                params=params,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    json=json_payload,
+                    files=files,
+                    params=params,
+                )
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise _backend_unreachable_error(exc) from exc
         if response.status_code >= 400:
             detail = _extract_error_detail_from_response(response)
             raise BackendApiError(response.status_code, detail)
@@ -459,15 +467,23 @@ class HttpBackendClient(BackendClient):
         path: str,
     ) -> bytes:
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                )
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise _backend_unreachable_error(exc) from exc
         if response.status_code >= 400:
             detail = _extract_error_detail_from_response(response)
             raise BackendApiError(response.status_code, detail)
         return response.content
+
+
+def _backend_unreachable_error(exc: Exception) -> BackendApiError:
+    _ = exc
+    return BackendApiError(503, "backend_unreachable")
 
 
 def _extract_error_detail_from_response(response: httpx.Response) -> Any:

@@ -238,6 +238,8 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "await catchUpConversationHistory();" in content
     assert "catchUpConversationHistory().catch(() => {});" in content
     assert "catchUpConversationHistory()\n                .catch(() => {})" in content
+    assert "appendChatEvent(role, text, event, extractRawRef(event));" in content
+    assert "refreshState().catch(() => {});" in content
 
 
 @pytest.mark.asyncio

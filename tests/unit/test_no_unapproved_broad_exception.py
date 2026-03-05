@@ -69,7 +69,7 @@ def _scan_server_broad_exception_counts(repo_root: Path) -> dict[str, dict[str, 
 
 def test_no_unapproved_broad_exception_usage() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    contract_path = repo_root / "docs" / "contracts" / "exception_handling_allowlist.yaml"
+    contract_path = repo_root / "server" / "contracts" / "invariants" / "exception_handling_allowlist.yaml"
     policy = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
 
     baseline: dict[str, dict[str, int]] = policy.get("baseline", {})

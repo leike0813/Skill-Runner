@@ -56,6 +56,7 @@ class RunStore:
                 CREATE TABLE IF NOT EXISTS requests (
                     request_id TEXT PRIMARY KEY,
                     skill_id TEXT NOT NULL,
+                    skill_source TEXT NOT NULL DEFAULT 'installed',
                     engine TEXT NOT NULL,
                     input_json TEXT NOT NULL,
                     parameter_json TEXT NOT NULL,
@@ -67,6 +68,10 @@ class RunStore:
                     input_manifest_hash TEXT,
                     skill_fingerprint TEXT,
                     cache_key TEXT,
+                    request_upload_mode TEXT NOT NULL DEFAULT 'none',
+                    temp_skill_package_sha256 TEXT,
+                    temp_skill_manifest_id TEXT,
+                    temp_skill_manifest_json TEXT,
                     run_id TEXT,
                     status TEXT,
                     created_at TEXT NOT NULL
@@ -77,8 +82,20 @@ class RunStore:
             existing_cols = {row["name"] for row in await request_info_cur.fetchall()}
             if "run_id" not in existing_cols:
                 await conn.execute("ALTER TABLE requests ADD COLUMN run_id TEXT")
+            if "skill_source" not in existing_cols:
+                await conn.execute("ALTER TABLE requests ADD COLUMN skill_source TEXT NOT NULL DEFAULT 'installed'")
             if "input_json" not in existing_cols:
                 await conn.execute("ALTER TABLE requests ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}'")
+            if "request_upload_mode" not in existing_cols:
+                await conn.execute(
+                    "ALTER TABLE requests ADD COLUMN request_upload_mode TEXT NOT NULL DEFAULT 'none'"
+                )
+            if "temp_skill_package_sha256" not in existing_cols:
+                await conn.execute("ALTER TABLE requests ADD COLUMN temp_skill_package_sha256 TEXT")
+            if "temp_skill_manifest_id" not in existing_cols:
+                await conn.execute("ALTER TABLE requests ADD COLUMN temp_skill_manifest_id TEXT")
+            if "temp_skill_manifest_json" not in existing_cols:
+                await conn.execute("ALTER TABLE requests ADD COLUMN temp_skill_manifest_json TEXT")
             if "effective_runtime_options_json" not in existing_cols:
                 await conn.execute(
                     "ALTER TABLE requests ADD COLUMN effective_runtime_options_json TEXT NOT NULL DEFAULT '{}'"
@@ -359,6 +376,11 @@ class RunStore:
         effective_runtime_options: Optional[Dict[str, Any]] = None,
         client_metadata: Optional[Dict[str, Any]] = None,
         input_data: Optional[Dict[str, Any]] = None,
+        skill_source: str = "installed",
+        request_upload_mode: str = "none",
+        temp_skill_package_sha256: Optional[str] = None,
+        temp_skill_manifest_id: Optional[str] = None,
+        temp_skill_manifest_json: Optional[Dict[str, Any]] = None,
     ) -> None:
         await self._ensure_initialized()
         created_at = datetime.utcnow().isoformat()
@@ -367,15 +389,17 @@ class RunStore:
             await conn.execute(
                 """
                 INSERT INTO requests (
-                    request_id, skill_id, engine, input_json, parameter_json,
+                    request_id, skill_id, skill_source, engine, input_json, parameter_json,
                     engine_options_json, runtime_options_json, effective_runtime_options_json,
-                    client_metadata_json, status, created_at
+                    client_metadata_json, request_upload_mode, temp_skill_package_sha256,
+                    temp_skill_manifest_id, temp_skill_manifest_json, status, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
                     skill_id,
+                    skill_source,
                     engine,
                     json.dumps(input_data or {}, sort_keys=True),
                     json.dumps(parameter, sort_keys=True),
@@ -383,23 +407,39 @@ class RunStore:
                     json.dumps(runtime_options, sort_keys=True),
                     json.dumps(effective_runtime_options or runtime_options, sort_keys=True),
                     json.dumps(client_metadata or {}, sort_keys=True),
+                    request_upload_mode,
+                    temp_skill_package_sha256,
+                    temp_skill_manifest_id,
+                    (
+                        json.dumps(temp_skill_manifest_json, sort_keys=True)
+                        if temp_skill_manifest_json is not None
+                        else None
+                    ),
                     "created",
                     created_at,
                 ),
             )
             await conn.commit()
 
-    async def update_request_manifest(self, request_id: str, manifest_path: str, manifest_hash: str) -> None:
+    async def update_request_manifest(
+        self,
+        request_id: str,
+        manifest_path: str | None,
+        manifest_hash: str,
+        *,
+        request_upload_mode: str | None = None,
+    ) -> None:
         await self._ensure_initialized()
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute(
                 """
                 UPDATE requests
-                SET input_manifest_path = ?, input_manifest_hash = ?
+                SET input_manifest_path = ?, input_manifest_hash = ?,
+                    request_upload_mode = COALESCE(?, request_upload_mode)
                 WHERE request_id = ?
                 """,
-                (manifest_path, manifest_hash, request_id),
+                (manifest_path, manifest_hash, request_upload_mode, request_id),
             )
             await conn.commit()
 
@@ -414,6 +454,41 @@ class RunStore:
                 WHERE request_id = ?
                 """,
                 (cache_key, skill_fingerprint, "ready", request_id),
+            )
+            await conn.commit()
+
+    async def update_request_skill_identity(
+        self,
+        request_id: str,
+        *,
+        skill_id: str,
+        temp_skill_manifest_id: str | None = None,
+        temp_skill_manifest_json: Dict[str, Any] | None = None,
+        temp_skill_package_sha256: str | None = None,
+    ) -> None:
+        await self._ensure_initialized()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
+                """
+                UPDATE requests
+                SET skill_id = ?,
+                    temp_skill_manifest_id = COALESCE(?, temp_skill_manifest_id),
+                    temp_skill_manifest_json = COALESCE(?, temp_skill_manifest_json),
+                    temp_skill_package_sha256 = COALESCE(?, temp_skill_package_sha256)
+                WHERE request_id = ?
+                """,
+                (
+                    skill_id,
+                    temp_skill_manifest_id,
+                    (
+                        json.dumps(temp_skill_manifest_json, sort_keys=True)
+                        if temp_skill_manifest_json is not None
+                        else None
+                    ),
+                    temp_skill_package_sha256,
+                    request_id,
+                ),
             )
             await conn.commit()
 
@@ -473,6 +548,7 @@ class RunStore:
                 SELECT
                     req.request_id AS request_id,
                     req.skill_id AS skill_id,
+                    req.skill_source AS skill_source,
                     req.engine AS engine,
                     req.run_id AS run_id,
                     req.runtime_options_json AS runtime_options_json,
@@ -542,6 +618,7 @@ class RunStore:
                 SELECT
                     req.request_id AS request_id,
                     req.skill_id AS skill_id,
+                    req.skill_source AS skill_source,
                     req.engine AS engine,
                     req.run_id AS run_id,
                     req.created_at AS request_created_at,
@@ -761,9 +838,12 @@ class RunStore:
     async def get_current_projection(self, request_id: str) -> Optional[Dict[str, Any]]:
         state_payload = await self.get_run_state(request_id)
         if isinstance(state_payload, dict):
-            pending = state_payload.get("pending") if isinstance(state_payload.get("pending"), dict) else {}
-            resume = state_payload.get("resume") if isinstance(state_payload.get("resume"), dict) else {}
-            runtime = state_payload.get("runtime") if isinstance(state_payload.get("runtime"), dict) else {}
+            pending_obj = state_payload.get("pending")
+            resume_obj = state_payload.get("resume")
+            runtime_obj = state_payload.get("runtime")
+            pending: Dict[str, Any] = pending_obj if isinstance(pending_obj, dict) else {}
+            resume: Dict[str, Any] = resume_obj if isinstance(resume_obj, dict) else {}
+            runtime: Dict[str, Any] = runtime_obj if isinstance(runtime_obj, dict) else {}
             try:
                 projection = CurrentRunProjection(
                     request_id=str(state_payload.get("request_id") or ""),
@@ -851,6 +931,11 @@ class RunStore:
 
     async def get_temp_cached_run(self, cache_key: str) -> Optional[str]:
         return await self._get_cached_run(table="temp_cache_entries", cache_key=cache_key)
+
+    async def get_cached_run_for_source(self, cache_key: str, source: str) -> Optional[str]:
+        if source == "temp_upload":
+            return await self.get_temp_cached_run(cache_key)
+        return await self.get_cached_run(cache_key)
 
     async def _get_cached_run(self, table: str, cache_key: str) -> Optional[str]:
         await self._ensure_initialized()

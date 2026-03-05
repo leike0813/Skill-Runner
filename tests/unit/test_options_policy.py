@@ -31,15 +31,10 @@ def test_runtime_debug_allowed():
     }
 
 
-def test_runtime_debug_keep_temp_allowed():
+def test_runtime_debug_keep_temp_rejected():
     policy = OptionsPolicy()
-    runtime_opts = policy.validate_runtime_options({"debug_keep_temp": True})
-    assert runtime_opts == {
-        "debug_keep_temp": True,
-        "execution_mode": "auto",
-        "interactive_auto_reply": False,
-        "interactive_reply_timeout_sec": 1200,
-    }
+    with pytest.raises(ValueError, match="Unknown runtime_options"):
+        policy.validate_runtime_options({"debug_keep_temp": True})
 
 
 def test_runtime_execution_mode_interactive_allowed():

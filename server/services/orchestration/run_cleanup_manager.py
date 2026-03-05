@@ -40,9 +40,7 @@ class RunCleanupManager:
         for row in candidates:
             run_id = row["run_id"]
             request_ids = await run_store.delete_run_records(run_id)
-            for request_id in request_ids:
-                workspace_manager.delete_request_dir(request_id)
-                deleted_requests += 1
+            deleted_requests += len(request_ids)
             workspace_manager.delete_run_dir(run_id)
             deleted_runs += 1
         if deleted_runs or deleted_requests:
@@ -54,12 +52,8 @@ class RunCleanupManager:
         await self.cleanup_stale_trust_entries()
 
     async def clear_all(self) -> dict:
-        request_ids = await run_store.list_request_ids()
         counts = await run_store.clear_all()
-        for request_id in request_ids:
-            workspace_manager.delete_request_dir(request_id)
         workspace_manager.purge_runs_dir()
-        workspace_manager.purge_requests_dir()
         return counts
 
     async def cleanup_stale_trust_entries(self) -> None:

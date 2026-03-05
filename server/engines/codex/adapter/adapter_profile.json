@@ -29,16 +29,16 @@
     "unknown_fallback": false
   },
   "config_assets": {
-    "bootstrap_path": "../../../assets/configs/codex/bootstrap.toml",
-    "default_path": "../../../assets/configs/codex/default.toml",
-    "enforced_path": "../../../assets/configs/codex/enforced.toml",
-    "settings_schema_path": "../../../assets/schemas/codex_profile_schema.json",
+    "bootstrap_path": "../config/bootstrap.toml",
+    "default_path": "../config/default.toml",
+    "enforced_path": "../config/enforced.toml",
+    "settings_schema_path": "../schemas/codex_profile_schema.json",
     "skill_defaults_path": "assets/codex_config.toml"
   },
   "model_catalog": {
     "mode": "manifest",
-    "manifest_path": "../../../assets/models/codex/manifest.json",
-    "models_root": "../../../assets/models/codex",
+    "manifest_path": "../models/manifest.json",
+    "models_root": "../models",
     "seed_path": null
   }
 }

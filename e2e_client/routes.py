@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request  # type: ignore[import-not-found]
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
@@ -27,7 +28,7 @@ templates = Jinja2Templates(directory=str(TEMPLATE_ROOT))
 
 router = APIRouter(tags=["e2e-client"])
 
-RUNTIME_BOOL_OPTIONS = ("no_cache", "debug", "debug_keep_temp", "interactive_auto_reply")
+RUNTIME_BOOL_OPTIONS = ("no_cache", "debug", "interactive_auto_reply")
 RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec",)
 PREVIEW_MAX_BYTES = 256 * 1024
 TEXT_DECODE_CANDIDATES = (
@@ -42,6 +43,20 @@ ENGINE_DEFAULT_PROVIDER = {
     "gemini": "google",
     "iflow": "iflowcn",
 }
+
+
+def _to_http_exception(exc: Exception) -> HTTPException:
+    if isinstance(exc, BackendApiError):
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+    if isinstance(exc, (httpx.RequestError, httpx.TimeoutException)):
+        return HTTPException(status_code=503, detail="backend_unreachable")
+    return HTTPException(status_code=500, detail="internal_e2e_proxy_error")
+
+
+def _sse_error_frame(*, detail: Any, status_code: int) -> bytes:
+    payload = {"error": detail, "status_code": status_code}
+    frame = f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    return frame.encode("utf-8")
 
 
 def get_settings(request: Request) -> E2EClientSettings:
@@ -221,7 +236,7 @@ async def submit_run(
         _ = upload_response
 
     return RedirectResponse(
-        url=f"/runs/{request_id}?source={RUN_SOURCE_INSTALLED}",
+        url=f"/runs/{request_id}",
         status_code=303,
     )
 
@@ -303,7 +318,7 @@ async def submit_fixture_run(
     _ = upload_response
 
     return RedirectResponse(
-        url=f"/runs/{request_id}?source={RUN_SOURCE_TEMP}",
+        url=f"/runs/{request_id}",
         status_code=303,
     )
 
@@ -372,8 +387,8 @@ async def get_run_state_api(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_state(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
 
 
 @router.get("/api/runs/{request_id}/pending")
@@ -385,8 +400,8 @@ async def get_run_pending_api(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         return await backend.get_run_pending(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
 
 
 @router.get("/api/runs/{request_id}/bundle/entries")
@@ -398,8 +413,8 @@ async def get_run_bundle_entries_api(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
     try:
         entries = _list_bundle_entries(bundle_bytes)
     except ValueError as exc:
@@ -417,8 +432,8 @@ async def get_run_bundle_file_api(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
     try:
         preview = _build_bundle_file_preview(bundle_bytes, path)
     except ValueError as exc:
@@ -441,8 +456,8 @@ async def get_run_bundle_file_view(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
     try:
         preview = _build_bundle_file_preview(bundle_bytes, path)
     except ValueError as exc:
@@ -474,8 +489,8 @@ async def post_run_reply_api(
         raise HTTPException(status_code=400, detail="Reply payload must be an object")
     try:
         reply = await backend.post_run_reply(request_id, payload, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
     return reply
 
 
@@ -496,9 +511,10 @@ async def stream_run_events_api(
             ):
                 yield chunk
         except BackendApiError as exc:
-            payload = {"error": exc.detail, "status_code": exc.status_code}
-            frame = f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            yield frame.encode("utf-8")
+            yield _sse_error_frame(detail=exc.detail, status_code=exc.status_code)
+        except Exception as exc:
+            mapped = _to_http_exception(exc)
+            yield _sse_error_frame(detail=mapped.detail, status_code=mapped.status_code)
 
     return StreamingResponse(
         _stream(),
@@ -531,8 +547,8 @@ async def get_run_events_history_api(
             from_ts=from_ts,
             to_ts=to_ts,
         )
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
 
 
 @router.get("/api/runs/{request_id}/chat")
@@ -553,9 +569,10 @@ async def stream_run_chat_api(
             ):
                 yield chunk
         except BackendApiError as exc:
-            payload = {"error": exc.detail, "status_code": exc.status_code}
-            frame = f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            yield frame.encode("utf-8")
+            yield _sse_error_frame(detail=exc.detail, status_code=exc.status_code)
+        except Exception as exc:
+            mapped = _to_http_exception(exc)
+            yield _sse_error_frame(detail=mapped.detail, status_code=mapped.status_code)
 
     return StreamingResponse(
         _stream(),
@@ -588,8 +605,8 @@ async def get_run_chat_history_api(
             from_ts=from_ts,
             to_ts=to_ts,
         )
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
 
 
 @router.get("/api/runs/{request_id}/logs/range")
@@ -610,8 +627,8 @@ async def get_run_logs_range_api(
             byte_from=byte_from,
             byte_to=byte_to,
         )
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
 
 
 @router.get("/api/runs/{request_id}/final-summary")
@@ -623,8 +640,8 @@ async def get_run_final_summary_api(
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
         payload = await backend.get_run_final_summary(request_id, run_source=run_source)
-    except BackendApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except Exception as exc:
+        raise _to_http_exception(exc)
     artifacts_raw = payload.get("artifacts")
     artifacts = artifacts_raw if isinstance(artifacts_raw, list) else []
     result_obj = payload.get("result")
@@ -975,10 +992,8 @@ def _resolve_run_source(
     source: Any,
     request_id: str,
 ) -> RunSource:
-    del request_id
-    requested = _normalize_run_source(source)
-    if requested is not None:
-        return requested
+    _ = source
+    _ = request_id
     return RUN_SOURCE_INSTALLED
 
 
@@ -1218,14 +1233,13 @@ def _build_runtime_options(
     submitted: dict[str, Any],
     run_source: RunSource,
 ) -> tuple[dict[str, Any], list[str]]:
+    _ = run_source
     options: dict[str, Any] = {"execution_mode": execution_mode}
     errors: list[str] = []
     if bool(submitted.get("no_cache")):
         options["no_cache"] = True
     if bool(submitted.get("debug")):
         options["debug"] = True
-    if run_source == RUN_SOURCE_TEMP and bool(submitted.get("debug_keep_temp")):
-        options["debug_keep_temp"] = True
 
     if execution_mode == "interactive":
         interactive_auto_reply = bool(submitted.get("interactive_auto_reply"))

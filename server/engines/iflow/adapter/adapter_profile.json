@@ -29,16 +29,16 @@
     "unknown_fallback": false
   },
   "config_assets": {
-    "bootstrap_path": "../../../assets/configs/iflow/bootstrap.json",
-    "default_path": "../../../assets/configs/iflow/default.json",
-    "enforced_path": "../../../assets/configs/iflow/enforced.json",
-    "settings_schema_path": "../../../assets/schemas/iflow_settings_schema.json",
+    "bootstrap_path": "../config/bootstrap.json",
+    "default_path": "../config/default.json",
+    "enforced_path": "../config/enforced.json",
+    "settings_schema_path": "../schemas/iflow_settings_schema.json",
     "skill_defaults_path": "assets/iflow_settings.json"
   },
   "model_catalog": {
     "mode": "manifest",
-    "manifest_path": "../../../assets/models/iflow/manifest.json",
-    "models_root": "../../../assets/models/iflow",
+    "manifest_path": "../models/manifest.json",
+    "models_root": "../models",
     "seed_path": null
   }
 }

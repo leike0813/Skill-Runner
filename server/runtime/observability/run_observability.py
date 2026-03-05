@@ -37,7 +37,7 @@ from server.services.platform.async_compat import maybe_await
 from server.services.skill.skill_browser import (
     build_preview_payload,
 )
-from server.services.orchestration.run_file_filter_service import (
+from server.services.platform.run_file_filter_service import (
     normalize_relative_path,
     run_file_filter_service,
 )

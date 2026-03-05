@@ -3,6 +3,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +11,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import BackgroundTasks, UploadFile, HTTPException
 
 from server.config import config
-from server.models import RunCreateRequest, RunStatus, SkillManifest
+from server.models import RequestSkillSource, RunCreateRequest, RunStatus, SkillManifest
 from server.routers import jobs as jobs_router
 from server.services.platform.cache_key_builder import (
     build_input_manifest,
@@ -137,6 +138,11 @@ def _patch_skill_registry(monkeypatch: pytest.MonkeyPatch, skill: SkillManifest)
     monkeypatch.setattr(jobs_router.skill_registry, "get_skill", _get_skill)
 
 
+def _patch_run_store(monkeypatch: pytest.MonkeyPatch, store: RunStore) -> None:
+    monkeypatch.setattr(jobs_router, "run_store", store)
+    monkeypatch.setattr("server.runtime.observability.run_source_adapter.run_store", store)
+
+
 def _manifest_hash_for_content(tmp_path: Path, filename: str, content: str) -> str:
     uploads_dir = tmp_path / "uploads"
     uploads_dir.mkdir()
@@ -159,6 +165,34 @@ def _build_upload_zip(filename: str, content: str) -> UploadFile:
     file_obj.write(buffer.getvalue())
     file_obj.seek(0)
     return UploadFile(filename="input.zip", file=file_obj)
+
+
+def _build_skill_package_upload(
+    *,
+    skill_id: str = "temp-upload-skill",
+    engine: str = "gemini",
+) -> UploadFile:
+    buffer = io.BytesIO()
+    runner = {
+        "id": skill_id,
+        "engines": [engine],
+        "execution_modes": ["auto", "interactive"],
+        "schemas": {
+            "input": "assets/input.schema.json",
+            "parameter": "assets/parameter.schema.json",
+            "output": "assets/output.schema.json",
+        },
+    }
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
+        zf.writestr(f"{skill_id}/assets/runner.json", json.dumps(runner))
+        zf.writestr(f"{skill_id}/assets/input.schema.json", json.dumps({"type": "object", "properties": {}}))
+        zf.writestr(f"{skill_id}/assets/parameter.schema.json", json.dumps({"type": "object", "properties": {}}))
+        zf.writestr(f"{skill_id}/assets/output.schema.json", json.dumps({"type": "object", "properties": {}}))
+    file_obj = SpooledTemporaryFile()
+    file_obj.write(buffer.getvalue())
+    file_obj.seek(0)
+    return UploadFile(filename="skill_package.zip", file=file_obj)
 
 
 @pytest.mark.asyncio
@@ -454,7 +488,7 @@ async def test_create_run_rejects_engine_denied_by_unsupported_engines(monkeypat
 @pytest.mark.asyncio
 async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
     _patch_skill_registry(monkeypatch, skill)
@@ -490,9 +524,9 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     upload = _build_upload_zip("input.txt", "hello")
 
     upload_response = await jobs_router.upload_file(
-        create_response.request_id,
-        upload,
-        BackgroundTasks()
+        request_id=create_response.request_id,
+        background_tasks=BackgroundTasks(),
+        file=upload,
     )
 
     assert upload_response.cache_hit is True
@@ -509,7 +543,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
     _patch_skill_registry(monkeypatch, skill)
@@ -545,9 +579,9 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
 
     upload = _build_upload_zip("input.txt", "hello")
     upload_response = await jobs_router.upload_file(
-        create_response.request_id,
-        upload,
-        BackgroundTasks()
+        request_id=create_response.request_id,
+        background_tasks=BackgroundTasks(),
+        file=upload,
     )
 
     assert upload_response.cache_hit is False
@@ -559,7 +593,7 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
 @pytest.mark.asyncio
 async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
     _patch_skill_registry(monkeypatch, skill)
@@ -584,9 +618,9 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
 
     upload_tasks = BackgroundTasks()
     upload_response = await jobs_router.upload_file(
-        create_response.request_id,
-        upload,
-        upload_tasks
+        request_id=create_response.request_id,
+        background_tasks=upload_tasks,
+        file=upload,
     )
 
     assert upload_response.cache_hit is False
@@ -605,7 +639,7 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_upload_file_rejects_when_queue_full(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
     monkeypatch.setattr(jobs_router, "concurrency_manager", _RejectConcurrency())
 
     skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=True)
@@ -630,12 +664,63 @@ async def test_upload_file_rejects_when_queue_full(monkeypatch, temp_config_dirs
 
     with pytest.raises(HTTPException) as excinfo:
         await jobs_router.upload_file(
-            create_response.request_id,
-            upload,
-            BackgroundTasks()
+            request_id=create_response.request_id,
+            background_tasks=BackgroundTasks(),
+            file=upload,
         )
 
     assert excinfo.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_upload_temp_skill_creates_run_without_installed_registry_lookup(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+    monkeypatch.setattr(
+        jobs_router.concurrency_manager,
+        "admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        jobs_router.skill_registry,
+        "get_skill",
+        lambda _skill_id: (_ for _ in ()).throw(AssertionError("installed registry lookup should not happen")),
+    )
+
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_source=RequestSkillSource.TEMP_UPLOAD,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"no_cache": True},
+        ),
+        BackgroundTasks(),
+    )
+    assert create_response.status is None
+
+    upload_tasks = BackgroundTasks()
+    upload_response = await jobs_router.upload_file(
+        request_id=create_response.request_id,
+        background_tasks=upload_tasks,
+        file=None,
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+    )
+
+    assert upload_response.cache_hit is False
+    assert len(upload_tasks.tasks) == 1
+    request_record = await store.get_request(create_response.request_id)
+    assert request_record is not None
+    assert request_record["skill_source"] == "temp_upload"
+    assert request_record["skill_id"] == "temp-upload-skill"
+    assert request_record["run_id"]
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / request_record["run_id"]
+    assert run_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -769,7 +854,7 @@ async def test_create_run_rejects_interactive_when_skill_declares_auto_only(monk
 @pytest.mark.asyncio
 async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     request_id = "request-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
@@ -796,7 +881,7 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     request_id = "request-empty-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
@@ -820,7 +905,7 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
 @pytest.mark.asyncio
 async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     request_id = "request-bundle"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
@@ -872,7 +957,7 @@ async def test_download_run_artifact_rejects_invalid_path(monkeypatch, temp_conf
 @pytest.mark.asyncio
 async def test_download_run_artifact_success(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     request_id = "request-download-artifact"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})

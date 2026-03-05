@@ -30,6 +30,7 @@ class SkillPackageValidator:
         "parameter": "skill_parameter_schema.schema.json",
         "output": "skill_output_schema.schema.json",
     }
+    CONTRACT_SCHEMAS_ROOT = Path(__file__).resolve().parents[2] / "contracts" / "schemas" / "skill"
 
     def inspect_zip_top_level_from_bytes(self, payload: bytes) -> str:
         try:
@@ -149,9 +150,7 @@ class SkillPackageValidator:
         return skill_id, version
 
     def _validate_runner_schema(self, runner: dict[str, Any]) -> None:
-        schema_path = (
-            Path(__file__).resolve().parents[2] / "assets" / "schemas" / "skill_runner_manifest.schema.json"
-        )
+        schema_path = self.CONTRACT_SCHEMAS_ROOT / "skill_runner_manifest.schema.json"
         try:
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError) as exc:
@@ -165,7 +164,7 @@ class SkillPackageValidator:
         meta_filename = self.SCHEMA_META_FILES.get(schema_key)
         if not meta_filename:
             return
-        meta_schema_path = Path(__file__).resolve().parents[2] / "assets" / "schemas" / meta_filename
+        meta_schema_path = self.CONTRACT_SCHEMAS_ROOT / meta_filename
         try:
             schema_payload = json.loads(schema_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:

@@ -1,6 +1,4 @@
 import asyncio
-import json
-from pathlib import Path
 
 import pytest
 
@@ -9,51 +7,54 @@ from server.services.platform.concurrency_manager import ConcurrencyManager
 
 
 @pytest.fixture
-def temp_concurrency_policy(tmp_path):
-    policy_path = tmp_path / "concurrency_policy.json"
-    policy_path.write_text(
-        json.dumps(
-            {
-                "max_concurrent_hard_cap": 16,
-                "max_queue_size": 8,
-                "cpu_factor": 1.0,
-                "mem_reserve_mb": 256,
-                "estimated_mem_per_run_mb": 256,
-                "fd_reserve": 64,
-                "estimated_fd_per_run": 8,
-                "pid_reserve": 16,
-                "estimated_pid_per_run": 1,
-                "fallback_max_concurrent": 2,
-            }
-        ),
-        encoding="utf-8",
-    )
-    old_policy = config.SYSTEM.CONCURRENCY_POLICY
+def temp_concurrency_profile():
     config.defrost()
-    config.SYSTEM.CONCURRENCY_POLICY = str(policy_path)
+    old_cfg = {
+        "MAX_CONCURRENT_HARD_CAP": config.SYSTEM.CONCURRENCY.MAX_CONCURRENT_HARD_CAP,
+        "MAX_QUEUE_SIZE": config.SYSTEM.CONCURRENCY.MAX_QUEUE_SIZE,
+        "CPU_FACTOR": config.SYSTEM.CONCURRENCY.CPU_FACTOR,
+        "MEM_RESERVE_MB": config.SYSTEM.CONCURRENCY.MEM_RESERVE_MB,
+        "ESTIMATED_MEM_PER_RUN_MB": config.SYSTEM.CONCURRENCY.ESTIMATED_MEM_PER_RUN_MB,
+        "FD_RESERVE": config.SYSTEM.CONCURRENCY.FD_RESERVE,
+        "ESTIMATED_FD_PER_RUN": config.SYSTEM.CONCURRENCY.ESTIMATED_FD_PER_RUN,
+        "PID_RESERVE": config.SYSTEM.CONCURRENCY.PID_RESERVE,
+        "ESTIMATED_PID_PER_RUN": config.SYSTEM.CONCURRENCY.ESTIMATED_PID_PER_RUN,
+        "FALLBACK_MAX_CONCURRENT": config.SYSTEM.CONCURRENCY.FALLBACK_MAX_CONCURRENT,
+    }
+    config.SYSTEM.CONCURRENCY.MAX_CONCURRENT_HARD_CAP = 16
+    config.SYSTEM.CONCURRENCY.MAX_QUEUE_SIZE = 8
+    config.SYSTEM.CONCURRENCY.CPU_FACTOR = 1.0
+    config.SYSTEM.CONCURRENCY.MEM_RESERVE_MB = 256
+    config.SYSTEM.CONCURRENCY.ESTIMATED_MEM_PER_RUN_MB = 256
+    config.SYSTEM.CONCURRENCY.FD_RESERVE = 64
+    config.SYSTEM.CONCURRENCY.ESTIMATED_FD_PER_RUN = 8
+    config.SYSTEM.CONCURRENCY.PID_RESERVE = 16
+    config.SYSTEM.CONCURRENCY.ESTIMATED_PID_PER_RUN = 1
+    config.SYSTEM.CONCURRENCY.FALLBACK_MAX_CONCURRENT = 2
     config.freeze()
     try:
-        yield policy_path
+        yield
     finally:
         config.defrost()
-        config.SYSTEM.CONCURRENCY_POLICY = old_policy
+        config.SYSTEM.CONCURRENCY.MAX_CONCURRENT_HARD_CAP = old_cfg["MAX_CONCURRENT_HARD_CAP"]
+        config.SYSTEM.CONCURRENCY.MAX_QUEUE_SIZE = old_cfg["MAX_QUEUE_SIZE"]
+        config.SYSTEM.CONCURRENCY.CPU_FACTOR = old_cfg["CPU_FACTOR"]
+        config.SYSTEM.CONCURRENCY.MEM_RESERVE_MB = old_cfg["MEM_RESERVE_MB"]
+        config.SYSTEM.CONCURRENCY.ESTIMATED_MEM_PER_RUN_MB = old_cfg["ESTIMATED_MEM_PER_RUN_MB"]
+        config.SYSTEM.CONCURRENCY.FD_RESERVE = old_cfg["FD_RESERVE"]
+        config.SYSTEM.CONCURRENCY.ESTIMATED_FD_PER_RUN = old_cfg["ESTIMATED_FD_PER_RUN"]
+        config.SYSTEM.CONCURRENCY.PID_RESERVE = old_cfg["PID_RESERVE"]
+        config.SYSTEM.CONCURRENCY.ESTIMATED_PID_PER_RUN = old_cfg["ESTIMATED_PID_PER_RUN"]
+        config.SYSTEM.CONCURRENCY.FALLBACK_MAX_CONCURRENT = old_cfg["FALLBACK_MAX_CONCURRENT"]
         config.freeze()
 
 
-def test_start_fallback_when_policy_missing(monkeypatch):
+def test_start_fallback_when_policy_invalid(monkeypatch):
     manager = ConcurrencyManager()
-    old_policy = config.SYSTEM.CONCURRENCY_POLICY
-    config.defrost()
-    config.SYSTEM.CONCURRENCY_POLICY = "/tmp/does-not-exist-concurrency-policy.json"
-    config.freeze()
-    try:
-        manager.start()
-        assert manager._max_concurrent == 2
-        assert manager._max_queue_size == 128
-    finally:
-        config.defrost()
-        config.SYSTEM.CONCURRENCY_POLICY = old_policy
-        config.freeze()
+    monkeypatch.setattr(manager, "_load_policy", lambda: (_ for _ in ()).throw(ValueError("bad policy")))
+    manager.start()
+    assert manager._max_concurrent == 2
+    assert manager._max_queue_size == 128
 
 
 @pytest.mark.asyncio
@@ -90,7 +91,7 @@ async def test_acquire_and_release_slot_updates_state():
     assert state_done["running"] == 0
 
 
-def test_env_override_for_queue_size(monkeypatch, temp_concurrency_policy):
+def test_env_override_for_queue_size(monkeypatch, temp_concurrency_profile):
     monkeypatch.setenv("SKILL_RUNNER_MAX_QUEUE_SIZE", "3")
     manager = ConcurrencyManager()
     monkeypatch.setattr(manager, "_compute_max_concurrency", lambda policy: 4)

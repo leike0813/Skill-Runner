@@ -58,6 +58,7 @@ from server.runtime.protocol.event_protocol import translate_orchestrator_event_
 from server.runtime.protocol.factories import make_fcmp_event
 from server.runtime.protocol.live_publish import fcmp_event_publisher
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
+from server.runtime.logging.structured_trace import log_event
 from server.config import config
 
 
@@ -135,6 +136,15 @@ class JobOrchestrator:
         skill_override: Optional[SkillManifest] = None,
         temp_request_id: Optional[str] = None,
     ) -> None:
+        log_event(
+            logger,
+            event="run.lifecycle.queued",
+            phase="orchestrator_dispatch",
+            outcome="start",
+            request_id=None,
+            run_id=run_id,
+            engine=engine_name,
+        )
         request = RunJobRequest(
             run_id=run_id,
             skill_id=skill_id,
@@ -201,14 +211,6 @@ class JobOrchestrator:
             )
         await run_store.update_run_status(run_id, RunStatus.CANCELED)
 
-        if temp_request_id:
-            from server.services.skill.temp_skill_run_store import temp_skill_run_store
-
-            await temp_skill_run_store.update_status(
-                temp_request_id,
-                RunStatus.CANCELED,
-                error=canceled_error["message"],
-            )
         return changed
 
     def _build_canceled_error(self) -> Dict[str, Any]:

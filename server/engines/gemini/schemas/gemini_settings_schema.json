@@ -1,0 +1,143 @@
+{
+    "general": {
+        "previewFeatures": "bool",
+        "preferredEditor": "str",
+        "vimMode": "bool",
+        "enableAutoUpdate": "bool",
+        "enableAutoUpdateNotification": "bool",
+        "checkpointing": {
+            "enabled": "bool"
+        },
+        "enablePromptCompletion": "bool",
+        "retryFetchErrors": "bool",
+        "debugKeystrokeLogging": "bool",
+        "sessionRetention": {
+            "enabled": "bool",
+            "maxAge": "str",
+            "maxCount": "int",
+            "minRetention": "str"
+        }
+    },
+    "output": {
+        "format": "str"
+    },
+    "ui": {
+        "theme": "str",
+        "customThemes": "dict",
+        "hideWindowTitle": "bool",
+        "showStatusInTitle": "bool",
+        "dynamicWindowTitle": "bool",
+        "showHomeDirectoryWarning": "bool",
+        "hideTips": "bool",
+        "hideBanner": "bool",
+        "hideContextSummary": "bool",
+        "footer": {
+            "hideCWD": "bool",
+            "hideSandboxStatus": "bool",
+            "hideModelInfo": "bool",
+            "hideContextPercentage": "bool"
+        },
+        "hideFooter": "bool",
+        "showMemoryUsage": "bool",
+        "showLineNumbers": "bool",
+        "showCitations": "bool",
+        "showModelInfoInChat": "bool",
+        "useFullWidth": "bool",
+        "useAlternateBuffer": "bool",
+        "incrementalRendering": "bool",
+        "customWittyPhrases": "list",
+        "accessibility": {
+            "enableLoadingPhrases": "bool",
+            "screenReader": "bool"
+        },
+        "quiet": "bool"
+    },
+    "ide": {
+        "enabled": "bool",
+        "hasSeenNudge": "bool"
+    },
+    "privacy": {
+        "usageStatisticsEnabled": "bool"
+    },
+    "model": {
+        "name": "str",
+        "maxSessionTurns": "int",
+        "summarizeToolOutput": "dict",
+        "compressionThreshold": "float",
+        "skipNextSpeakerCheck": "bool"
+    },
+    "modelConfigs": {
+        "aliases": "dict",
+        "customAliases": "dict",
+        "customOverrides": "list",
+        "overrides": "list"
+    },
+    "agents": {
+        "overrides": "dict"
+    },
+    "context": {
+        "fileName": "str",
+        "importFormat": "str",
+        "discoveryMaxDirs": "int",
+        "includeDirectories": "list",
+        "loadMemoryFromIncludeDirectories": "bool",
+        "fileFiltering": {
+            "respectGitIgnore": "bool",
+            "respectGeminiIgnore": "bool",
+            "enableRecursiveFileSearch": "bool",
+            "enableFuzzySearch": "bool"
+        }
+    },
+    "tools": {
+        "sandbox": "bool",
+        "shell": {
+            "enableInteractiveShell": "bool",
+            "pager": "str",
+            "showColor": "bool",
+            "inactivityTimeout": "int",
+            "enableShellOutputEfficiency": "bool"
+        },
+        "autoAccept": "bool",
+        "core": "list",
+        "allowed": "list",
+        "exclude": "list",
+        "discoveryCommand": "str",
+        "callCommand": "str",
+        "useRipgrep": "bool",
+        "enableToolOutputTruncation": "bool",
+        "truncateToolOutputThreshold": "int",
+        "truncateToolOutputLines": "int",
+        "disableLLMCorrection": "bool",
+        "enableHooks": "bool"
+    },
+    "mcp": {
+        "serverCommand": "str",
+        "allowed": "list",
+        "excluded": "list"
+    },
+    "useWriteTodos": "bool",
+    "security": {
+        "disableYoloMode": "bool",
+        "enablePermanentToolApproval": "bool",
+        "blockGitExtensions": "bool",
+        "folderTrust": {
+            "enabled": "bool"
+        },
+        "environmentVariableRedaction": {
+            "allowed": "list",
+            "blocked": "list",
+            "enabled": "bool"
+        },
+        "auth": {
+            "selectedType": "str",
+            "enforcedType": "str",
+            "useExternal": "bool"
+        }
+    },
+    "advanced": {
+        "autoConfigureMemory": "bool"
+    },
+    "experimental": {
+        "skills": "bool"
+    }
+}

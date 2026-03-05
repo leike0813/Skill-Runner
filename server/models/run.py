@@ -1,6 +1,7 @@
 """Run/request/result domain models."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -17,10 +18,18 @@ from .common import (
 from .interaction import PendingOwner, ResumeCause
 
 
+class RequestSkillSource(str, Enum):
+    """Request-level skill source for unified /jobs entry."""
+
+    INSTALLED = "installed"
+    TEMP_UPLOAD = "temp_upload"
+
+
 class RunCreateRequest(BaseModel):
     """Payload for creating a new execution job via POST /jobs."""
 
-    skill_id: str
+    skill_source: RequestSkillSource = RequestSkillSource.INSTALLED
+    skill_id: Optional[str] = None
     engine: str = "codex"
     input: Dict[str, Any] = {}
     parameter: Dict[str, Any] = {}
@@ -42,11 +51,12 @@ class RunUploadResponse(BaseModel):
 
     request_id: str
     cache_hit: bool = False
+    status: Optional[RunStatus] = None
     extracted_files: List[str] = []
 
 
 class TempSkillRunCreateRequest(BaseModel):
-    """Payload for creating a temporary skill run request."""
+    """Deprecated temp-skill create payload retained for compatibility in tests/tools."""
 
     engine: str = "codex"
     parameter: Dict[str, Any] = {}
@@ -56,14 +66,14 @@ class TempSkillRunCreateRequest(BaseModel):
 
 
 class TempSkillRunCreateResponse(BaseModel):
-    """Response for temporary skill run request creation."""
+    """Deprecated temp-skill create response."""
 
     request_id: str
     status: RunStatus
 
 
 class TempSkillRunUploadResponse(BaseModel):
-    """Response for temporary skill package/input upload."""
+    """Deprecated temp-skill upload response."""
 
     request_id: str
     cache_hit: bool = False

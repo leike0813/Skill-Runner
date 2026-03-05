@@ -2,7 +2,6 @@
 
 ## Purpose
 定义 Run 观测 UI 的入口、文件只读预览和实时日志展示约束。
-
 ## Requirements
 ### Requirement: 系统 MUST 提供 Run 观测 UI 入口
 系统 MUST 提供按 request_id 查询 run 观测信息的 UI 页面，并关联 run_id 展示运行实体信息。
@@ -98,4 +97,27 @@ Run 管理页面 MUST 作为观测/审计工具，不承担终端用户交互回
 - **WHEN** 用户在 run 详情页审计协议与 raw 日志
 - **THEN** `raw_ref` 预览窗口位于对话区旁
 - **AND** `Raw stderr` 位于下方审计操作区，便于联动查看
+
+### Requirement: 管理 UI Run 文件树 MUST 默认目录折叠
+
+管理 UI run 详情页文件树 MUST 在初始渲染时将所有目录设为折叠状态，并允许用户按目录逐级展开。
+
+#### Scenario: run detail tree starts collapsed
+- **WHEN** 用户首次打开 `/ui/runs/{request_id}`
+- **THEN** 文件树中的目录节点默认处于折叠状态
+- **AND** 文件节点在目录展开前不可见
+
+#### Scenario: directory node toggles expand/collapse
+- **WHEN** 用户点击目录节点
+- **THEN** 该目录在折叠与展开状态间切换
+- **AND** 不影响文件预览接口行为
+
+### Requirement: 管理 UI run 文件浏览 MUST obey explorer denylist filtering
+
+管理 UI 展示的 run 文件树与预览 MUST 服从 run explorer 过滤规则（复用 debug 黑名单），并完全隐藏命中过滤项。
+
+#### Scenario: ignored directories are absent from tree
+- **WHEN** run 目录包含命中黑名单的目录（例如 `node_modules`）
+- **THEN** 文件树中 MUST 不显示这些目录节点
+- **AND** 其子文件也 MUST 不显示
 

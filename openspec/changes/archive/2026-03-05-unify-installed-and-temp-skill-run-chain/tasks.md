@@ -1,0 +1,9 @@
+- [x] 1. 新增并迁移 `run_store.requests` 统一字段（`skill_source`、`request_upload_mode`、temp 元数据字段）。
+- [x] 2. `/v1/jobs` 支持 `installed | temp_upload` 单入口创建；移除 `/v1/temp-skill-runs/*`。
+- [x] 3. 上传流程改为请求内临时 staging；移除 request 目录持久化依赖。
+- [x] 4. 保持 cache 双命名空间并新增统一 `get_cached_run(cache_key, source)` 读取接口。
+- [x] 5. 删除 temp 生命周期残留（cleanup manager、`on_terminal` 分支、`temp_request_id` 传播）。
+- [x] 6. 收敛 `run_source_adapter` 与 interaction/read facade 的 source 分叉参数。
+- [x] 7. e2e 客户端移除 `run_source` 与双 API 基路径，统一走 `/v1/jobs/*`。
+- [x] 8. 更新 OpenSpec delta specs 与相关文档，补齐单元/集成回归测试。
+- [x] 9. 修复 `/v1/jobs/{request_id}/upload` 的 temp run 创建入口，统一基于已解析 `SkillManifest` 创建 run，避免回退 installed registry。

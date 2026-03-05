@@ -6,9 +6,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Set, Tuple
 
 import yaml
 
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_PATH = PROJECT_ROOT / "docs" / "contracts" / "session_fcmp_invariants.yaml"
+_CONTRACT_CANDIDATES = config_registry.invariant_contract_paths(keys.SESSION_FCMP_INVARIANTS_NAME)
+CONTRACT_PATH = next((path for path in _CONTRACT_CANDIDATES if path.exists()), _CONTRACT_CANDIDATES[0])
 
 
 def _as_str(value: Any, *, field: str) -> str:

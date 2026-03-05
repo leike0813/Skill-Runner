@@ -1,0 +1,10 @@
+{
+  "start": [
+    "--format",
+    "json"
+  ],
+  "resume": [
+    "--format",
+    "json"
+  ]
+}

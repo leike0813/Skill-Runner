@@ -218,7 +218,7 @@ class ModelRegistry:
         profile = self._adapter_profile(engine)
         models_root = profile.resolve_models_root()
         if models_root is None:
-            return Path(config.SYSTEM.ROOT) / "server" / "assets" / "models" / engine
+            return Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "models"
         return models_root
 
     def _adapter_profile(self, engine: str) -> AdapterProfile:

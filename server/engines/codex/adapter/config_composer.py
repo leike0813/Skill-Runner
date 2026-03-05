@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 RUNNER_ONLY_OPTION_KEYS = {
     "no_cache",
     "debug",
-    "debug_keep_temp",
     "execution_mode",
     "interactive_auto_reply",
     "interactive_reply_timeout_sec",

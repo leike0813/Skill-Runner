@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from server.models import (
     SkillManifest,
 )
 from server.runtime.logging.run_context import bind_run_logging_context
+from server.runtime.logging.structured_trace import log_event
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.protocol.factories import make_diagnostic_warning_payload
 from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
@@ -108,6 +110,22 @@ def _opencode_provider_unresolved_detail(
     )
 
 
+def _adapter_accepts_live_runtime_emitter(adapter: Any) -> bool:
+    run_callable = getattr(adapter, "run", None)
+    if run_callable is None:
+        return False
+    try:
+        signature = inspect.signature(run_callable)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "live_runtime_emitter":
+            return True
+    return False
+
+
 class RunCanceled(Exception):
     """Raised when run is canceled by user request."""
 
@@ -178,10 +196,29 @@ class _RunJobLifecyclePipeline:
         run_folder_trust_manager = self._trust_manager_backend()
         await concurrency_manager.acquire_slot()
         slot_acquired = True
+        log_event(
+            logger,
+            event="run.lifecycle.slot_acquired",
+            phase="run_lifecycle",
+            outcome="ok",
+            request_id=None,
+            run_id=run_id,
+            engine=engine_name,
+        )
         try:
             run_dir = workspace_manager.get_run_dir(run_id)
             if not run_dir:
-                logger.error("Run dir %s not found", run_id)
+                log_event(
+                    logger,
+                    event="run.lifecycle.failed",
+                    phase="run_lifecycle",
+                    outcome="error",
+                    level=logging.ERROR,
+                    request_id=None,
+                    run_id=run_id,
+                    engine=engine_name,
+                    error_code="RUN_DIR_NOT_FOUND",
+                )
                 return RunJobOutcome(run_id=run_id)
             request_record = await run_store.get_request_by_run_id(run_id)
             request_id = request_record.get("request_id") if request_record else None
@@ -240,6 +277,18 @@ class _RunJobLifecyclePipeline:
                     )
                 )
                 if not resume_started:
+                    log_event(
+                        logger,
+                        event="run.lifecycle.failed",
+                        phase="run_lifecycle",
+                        outcome="error",
+                        level=logging.WARNING,
+                        request_id=request_id,
+                        run_id=run_id,
+                        attempt=attempt_number,
+                        engine=engine_name,
+                        error_code="RESUME_TICKET_NOT_OWNED",
+                    )
                     return RunJobOutcome(run_id=run_id)
             if request_id:
                 await run_projection_service.claim_dispatch(
@@ -270,6 +319,7 @@ class _RunJobLifecyclePipeline:
                     run_id=run_id,
                     request_id=request_id,
                     attempt_number=attempt_number,
+                    phase="run_lifecycle",
                 )
             )
             run_log_mirror_stack.enter_context(
@@ -292,6 +342,17 @@ class _RunJobLifecyclePipeline:
                 attempt_number,
                 engine_name,
                 execution_mode,
+            )
+            log_event(
+                logger,
+                event="run.lifecycle.resumed" if attempt_number > 1 else "run.lifecycle.started",
+                phase="run_lifecycle",
+                outcome="start",
+                request_id=request_id,
+                run_id=run_id,
+                attempt=attempt_number,
+                engine=engine_name,
+                execution_mode=execution_mode,
             )
             attempt_started_at = datetime.utcnow()
             fs_before_snapshot = self._capture_filesystem_snapshot(run_dir)
@@ -327,15 +388,6 @@ class _RunJobLifecyclePipeline:
                     RunStatus.CANCELED,
                     str(result_path) if result_path is not None else None,
                 )
-                if temp_request_id:
-                    with contextlib.suppress(OSError, RuntimeError, TypeError, ValueError):
-                        from server.services.skill.temp_skill_run_store import temp_skill_run_store
-
-                        await temp_skill_run_store.update_status(
-                            temp_request_id,
-                            RunStatus.CANCELED,
-                            error=canceled_error["message"],
-                        )
                 return RunJobOutcome(
                     run_id=run_id,
                     final_status=RunStatus.CANCELED,
@@ -392,7 +444,7 @@ class _RunJobLifecyclePipeline:
                     )
                 if skill is None:
                     skill = skill_registry.get_skill(skill_id)
-                if skill is None and (is_interactive or temp_request_id):
+                if skill is None and is_interactive:
                     skill = self._load_skill_from_run_dir(
                         run_dir=run_dir,
                         skill_id=skill_id,
@@ -450,12 +502,13 @@ class _RunJobLifecyclePipeline:
                     )
 
                 # 5. Execute
+                adapter_stream_parser = getattr(adapter, "stream_parser", adapter)
                 live_runtime_emitter = LiveRuntimeEmitterImpl(
                     run_id=run_id,
                     run_dir=run_dir,
                     engine=engine_name,
                     attempt_number=attempt_number,
-                    stream_parser=adapter.stream_parser,
+                    stream_parser=adapter_stream_parser,
                 )
                 try:
                     logger.info(
@@ -465,13 +518,21 @@ class _RunJobLifecyclePipeline:
                         attempt_number,
                         engine_name,
                     )
-                    result = await adapter.run(
-                        skill,
-                        input_data,
-                        run_dir,
-                        run_options,
-                        live_runtime_emitter=live_runtime_emitter,
-                    )
+                    if _adapter_accepts_live_runtime_emitter(adapter):
+                        result = await adapter.run(
+                            skill,
+                            input_data,
+                            run_dir,
+                            run_options,
+                            live_runtime_emitter=live_runtime_emitter,
+                        )
+                    else:
+                        result = await adapter.run(
+                            skill,
+                            input_data,
+                            run_dir,
+                            run_options,
+                        )
                 finally:
                     if trust_registered:
                         try:
@@ -502,22 +563,13 @@ class _RunJobLifecyclePipeline:
                     raw_stdout=process_raw_stdout,
                     raw_stderr=process_raw_stderr,
                 )
-                try:
-                    auth_detection_result = self.auth_detection_service.detect(
-                        engine=engine_name,
-                        raw_stdout=process_raw_stdout,
-                        raw_stderr=process_raw_stderr,
-                        pty_output=f"{process_raw_stdout}{process_raw_stderr}",
-                        runtime_parse_result=runtime_parse_result,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Auth detection failed for run_id=%s attempt=%s engine=%s",
-                        run_id,
-                        attempt_number,
-                        engine_name,
-                    )
-                    raise
+                auth_detection_result = self.auth_detection_service.detect(
+                    engine=engine_name,
+                    raw_stdout=process_raw_stdout,
+                    raw_stderr=process_raw_stderr,
+                    pty_output=f"{process_raw_stdout}{process_raw_stderr}",
+                    runtime_parse_result=runtime_parse_result,
+                )
                 auth_detection_high = (
                     auth_detection_result.detected
                     and auth_detection_result.confidence == "high"
@@ -684,30 +736,20 @@ class _RunJobLifecyclePipeline:
                         options=options,
                         request_record=request_record,
                     )
-                    try:
-                        created_pending_auth = await self.auth_orchestration_service.create_pending_auth(
-                            run_id=run_id,
-                            run_dir=run_dir,
-                            request_id=request_id,
-                            skill_id=skill_id,
-                            engine_name=engine_name,
-                            options=options,
-                            attempt_number=attempt_number,
-                            auth_detection=auth_detection_result,
-                            canonical_provider_id=canonical_provider_id,
-                            run_store_backend=run_store,
-                            append_orchestrator_event=self._append_orchestrator_event,
-                            update_status=self._update_status,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to create pending auth for run_id=%s attempt=%s engine=%s provider=%s",
-                            run_id,
-                            attempt_number,
-                            engine_name,
-                            canonical_provider_id,
-                        )
-                        raise
+                    created_pending_auth = await self.auth_orchestration_service.create_pending_auth(
+                        run_id=run_id,
+                        run_dir=run_dir,
+                        request_id=request_id,
+                        skill_id=skill_id,
+                        engine_name=engine_name,
+                        options=options,
+                        attempt_number=attempt_number,
+                        auth_detection=auth_detection_result,
+                        canonical_provider_id=canonical_provider_id,
+                        run_store_backend=run_store,
+                        append_orchestrator_event=self._append_orchestrator_event,
+                        update_status=self._update_status,
+                    )
                     if created_pending_auth is not None:
                         created_pending_payload = created_pending_auth.model_dump(mode="json")
                         if "auth_session_id" in created_pending_payload:
@@ -927,6 +969,17 @@ class _RunJobLifecyclePipeline:
                         run_store_backend=run_store,
                     )
                     await run_store.update_run_status(run_id, final_status)
+                    log_event(
+                        logger,
+                        event="run.lifecycle.waiting_user",
+                        phase="run_lifecycle",
+                        outcome="ok",
+                        request_id=request_id,
+                        run_id=run_id,
+                        attempt=attempt_number,
+                        engine=engine_name,
+                        interaction_id=pending_interaction.get("interaction_id"),
+                    )
                 elif final_status == RunStatus.WAITING_AUTH:
                     logger.info(
                         "run_attempt_waiting_auth run_id=%s request_id=%s attempt=%s",
@@ -956,6 +1009,16 @@ class _RunJobLifecyclePipeline:
                         run_store_backend=run_store,
                     )
                     await run_store.update_run_status(run_id, final_status)
+                    log_event(
+                        logger,
+                        event="run.lifecycle.waiting_auth",
+                        phase="run_lifecycle",
+                        outcome="ok",
+                        request_id=request_id,
+                        run_id=run_id,
+                        attempt=attempt_number,
+                        engine=engine_name,
+                    )
                 else:
                     logger.info(
                         "run_attempt_terminal run_id=%s request_id=%s attempt=%s status=%s",
@@ -985,6 +1048,22 @@ class _RunJobLifecyclePipeline:
                     )
                     result_path = run_dir / "result" / "result.json"
                     await run_store.update_run_status(run_id, final_status, str(result_path))
+                    log_event(
+                        logger,
+                        event=(
+                            "run.lifecycle.succeeded"
+                            if final_status == RunStatus.SUCCEEDED
+                            else "run.lifecycle.failed"
+                        ),
+                        phase="run_lifecycle",
+                        outcome="ok" if final_status == RunStatus.SUCCEEDED else "error",
+                        level=logging.INFO if final_status == RunStatus.SUCCEEDED else logging.ERROR,
+                        request_id=request_id,
+                        run_id=run_id,
+                        attempt=attempt_number,
+                        engine=engine_name,
+                        error_code=final_error_code,
+                    )
                     self._build_run_bundle(run_dir, debug=False)
                     self._build_run_bundle(run_dir, debug=True)
                 if final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}:
@@ -997,7 +1076,12 @@ class _RunJobLifecyclePipeline:
                         engine_name=engine_name,
                     )
                 if cache_key and final_status == RunStatus.SUCCEEDED:
-                    if temp_request_id:
+                    skill_source = (
+                        str((request_record or {}).get("skill_source") or "installed")
+                        if isinstance(request_record, dict)
+                        else "installed"
+                    )
+                    if skill_source == "temp_upload":
                         await run_store.record_temp_cache_entry(cache_key, run_id)
                     else:
                         await run_store.record_cache_entry(cache_key, run_id)
@@ -1045,7 +1129,20 @@ class _RunJobLifecyclePipeline:
                         data={"status": RunStatus.CANCELED.value},
                         engine_name=engine_name,
                     )
-            except (RuntimeError, OSError, TypeError, ValueError, LookupError) as e:
+                log_event(
+                    logger,
+                    event="run.lifecycle.failed",
+                    phase="run_lifecycle",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    attempt=attempt_number,
+                    engine=engine_name,
+                    error_code=final_error_code,
+                    error_type="RunCanceled",
+                )
+            except (AttributeError, RuntimeError, OSError, TypeError, ValueError, LookupError) as e:
                 # Orchestration boundary: normalize unknown runtime exceptions into terminal error payload.
                 logger.exception("Job failed")
                 final_status = RunStatus.FAILED
@@ -1094,6 +1191,19 @@ class _RunJobLifecyclePipeline:
                         data={"message": normalized_error_message or "unknown"},
                         engine_name=engine_name,
                     )
+                log_event(
+                    logger,
+                    event="run.lifecycle.failed",
+                    phase="run_lifecycle",
+                    outcome="error",
+                    level=logging.ERROR,
+                    request_id=request_id,
+                    run_id=run_id,
+                    attempt=attempt_number,
+                    engine=engine_name,
+                    error_code=final_error_code,
+                    error_type=type(e).__name__,
+                )
             finally:
                 if run_dir is not None:
                     try:
@@ -1139,29 +1249,6 @@ class _RunJobLifecyclePipeline:
                             run_id,
                             exc_info=True,
                         )
-                if temp_request_id and final_status in {
-                    RunStatus.SUCCEEDED,
-                    RunStatus.FAILED,
-                    RunStatus.CANCELED,
-                }:
-                    try:
-                        from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
-
-                        await maybe_await(
-                            temp_skill_run_manager.on_terminal(
-                                temp_request_id,
-                                final_status,
-                                error=normalized_error_message,
-                                debug_keep_temp=bool(options.get("debug_keep_temp")),
-                            )
-                        )
-                    except (RuntimeError, OSError, TypeError, ValueError):
-                        # Temp lifecycle callback must not change parent run terminal status.
-                        logger.warning(
-                            "Failed to finalize temporary-skill lifecycle for request %s",
-                            temp_request_id,
-                            exc_info=True,
-                        )
                 return RunJobOutcome(
                     run_id=run_id,
                     final_status=final_status,
@@ -1174,6 +1261,16 @@ class _RunJobLifecyclePipeline:
                 run_log_mirror_stack.close()
             if slot_acquired and release_slot_on_exit:
                 await concurrency_manager.release_slot()
+                log_event(
+                    logger,
+                    event="run.lifecycle.slot_released",
+                    phase="run_lifecycle",
+                    outcome="ok",
+                    request_id=request_id if "request_id" in locals() else None,
+                    run_id=run_id,
+                    attempt=attempt_number if "attempt_number" in locals() else None,
+                    engine=engine_name,
+                )
 
 
 class RunJobLifecycleService:

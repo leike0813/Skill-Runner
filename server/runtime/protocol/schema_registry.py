@@ -2,19 +2,12 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import jsonschema  # type: ignore[import-untyped]
+from server.config_registry.registry import config_registry
 
-
-SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "assets"
-    / "schemas"
-    / "protocol"
-    / "runtime_contract.schema.json"
-)
+SCHEMA_PATHS = config_registry.runtime_contract_schema_paths()
 
 
 class ProtocolSchemaViolation(ValueError):
@@ -36,11 +29,13 @@ def _normalize_path(path_items: Iterable[Any]) -> str:
 
 @lru_cache(maxsize=1)
 def _schema_document() -> Dict[str, Any]:
-    if not SCHEMA_PATH.exists():
-        raise RuntimeError(f"Protocol schema file not found: {SCHEMA_PATH}")
-    payload = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema_path = next((path for path in SCHEMA_PATHS if path.exists()), None)
+    if schema_path is None:
+        joined = ", ".join(str(path) for path in SCHEMA_PATHS)
+        raise RuntimeError(f"Protocol schema file not found. tried: {joined}")
+    payload = json.loads(schema_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise RuntimeError(f"Protocol schema must be a JSON object: {SCHEMA_PATH}")
+        raise RuntimeError(f"Protocol schema must be a JSON object: {schema_path}")
     return payload
 
 

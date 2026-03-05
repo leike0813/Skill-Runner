@@ -9,6 +9,10 @@ Exposes endpoints for:
 
 import logging
 import contextlib
+import io
+import tempfile
+import zipfile
+from pathlib import Path
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
@@ -27,6 +31,7 @@ from ..models import (
     RunCreateResponse,
     RunUploadResponse,
     RequestStatusResponse,
+    RequestSkillSource,
     RecoveryState,
     ResumeCause,
     RunLocalSkillSource,
@@ -44,6 +49,8 @@ from ..services.orchestration.runtime_protocol_ports import install_runtime_prot
 from ..services.platform.schema_validator import schema_validator
 from ..services.engine_management.model_registry import model_registry
 from ..services.platform.cache_key_builder import (
+    build_input_manifest,
+    compute_bytes_hash,
     compute_skill_fingerprint,
     compute_input_manifest_hash,
     compute_inline_input_hash,
@@ -71,8 +78,8 @@ from ..services.orchestration.run_execution_core import (
 )
 from ..services.orchestration.run_interaction_service import run_interaction_service
 from ..runtime.observability.run_read_facade import run_read_facade
-from ..runtime.observability.run_source_adapter import RunSourceCapabilities
-from ..runtime.logging.run_context import bind_run_logging_context
+from ..runtime.logging.run_context import bind_request_logging_context, bind_run_logging_context
+from ..runtime.logging.structured_trace import log_event
 import uuid
 import json
 
@@ -88,64 +95,55 @@ def _execution_mode_value(mode: object) -> str:
     return str(value)
 
 
-class _InstalledRouterSourceAdapter:
-    source = "installed"
-    cache_namespace = "cache_entries"
-    capabilities = RunSourceCapabilities(
-        supports_pending_reply=True,
-        supports_event_history=True,
-        supports_log_range=True,
-        supports_inline_input_create=True,
-    )
-
-    async def get_request(self, request_id: str):
-        return await maybe_await(run_store.get_request(request_id))
-
-    async def get_cached_run(self, cache_key: str):
-        return await maybe_await(run_store.get_cached_run(cache_key))
-
-    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        await maybe_await(run_store.bind_request_run_id(request_id, run_id, status=RunStatus.SUCCEEDED.value))
-
-    async def mark_run_started(self, request_id: str, run_id: str) -> None:
-        await maybe_await(run_store.bind_request_run_id(request_id, run_id, status=RunStatus.QUEUED.value))
-
-    async def mark_failed(self, request_id: str, error_message: str) -> None:
-        _ = request_id
-        _ = error_message
-
-    def get_run_job_temp_request_id(self, request_id: str) -> str | None:
-        _ = request_id
-        return None
-
-    def build_cancel_kwargs(self, request_id: str) -> dict[str, str]:
-        return {"request_id": request_id}
+def _extract_zip_to_dir(file_bytes: bytes, target_dir: Path) -> list[str]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            archive.extractall(target_dir)
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Invalid zip file") from exc
+    return [str(p.relative_to(target_dir)) for p in target_dir.rglob("*") if p.is_file()]
 
 
-installed_source_adapter = _InstalledRouterSourceAdapter()
+def _copy_tree(src: Path, dst: Path) -> None:
+    dst.mkdir(parents=True, exist_ok=True)
+    for path in src.rglob("*"):
+        if path.is_dir():
+            continue
+        rel = path.relative_to(src)
+        target = dst / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
 
 @router.post("", response_model=RunCreateResponse)
 async def create_run(request: RunCreateRequest, background_tasks: BackgroundTasks):
-    # Verify skill exists
-    skill = skill_registry.get_skill(request.skill_id)
-    if not skill:
-        raise HTTPException(status_code=404, detail=f"Skill '{request.skill_id}' not found")
-
     try:
-        engine_policy = resolve_skill_engine_policy(skill)
-        ensure_skill_engine_supported(
-            skill_id=skill.id,
-            requested_engine=request.engine,
-            policy=engine_policy,
-        )
+        skill = None
+        if request.skill_source == RequestSkillSource.INSTALLED:
+            if not request.skill_id:
+                raise HTTPException(status_code=422, detail="skill_id is required for installed source")
+            skill = skill_registry.get_skill(request.skill_id)
+            if not skill:
+                raise HTTPException(status_code=404, detail=f"Skill '{request.skill_id}' not found")
+
+        if request.skill_source == RequestSkillSource.TEMP_UPLOAD and request.skill_id:
+            raise HTTPException(status_code=422, detail="skill_id must be empty for temp_upload source")
+
+        if skill is not None:
+            engine_policy = resolve_skill_engine_policy(skill)
+            ensure_skill_engine_supported(
+                skill_id=skill.id,
+                requested_engine=request.engine,
+                policy=engine_policy,
+            )
         runtime_opts, engine_opts = validate_runtime_and_model_options(
             engine=request.engine,
             model=request.model,
             runtime_options=request.runtime_options,
         )
         client_metadata = request.client_metadata.model_dump(mode="json")
+        declared_modes = declared_execution_modes(skill) if skill is not None else [ExecutionMode.AUTO.value]
         policy = normalize_effective_runtime_policy(
-            declared_modes=declared_execution_modes(skill),
+            declared_modes=declared_modes,
             runtime_options=runtime_opts,
             client_metadata=client_metadata,
         )
@@ -153,27 +151,35 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             runtime_options=runtime_opts,
             policy=policy,
         )
-        ensure_skill_execution_mode_supported(
-            skill_id=skill.id,
-            requested_mode=policy.effective_execution_mode,
-            declared_modes=declared_execution_modes(skill),
-        )
+        if skill is not None:
+            ensure_skill_execution_mode_supported(
+                skill_id=skill.id,
+                requested_mode=policy.effective_execution_mode,
+                declared_modes=declared_execution_modes(skill),
+            )
 
         request_id = str(uuid.uuid4())
         inline_input = request.input if isinstance(request.input, dict) else {}
         inline_input_hash = compute_inline_input_hash(inline_input)
-        inline_input_errors = schema_validator.validate_inline_input_create(skill, inline_input)
-        if inline_input_errors:
-            raise HTTPException(status_code=400, detail=f"Input validation failed: {inline_input_errors}")
+        if skill is not None:
+            inline_input_errors = schema_validator.validate_inline_input_create(skill, inline_input)
+            if inline_input_errors:
+                raise HTTPException(status_code=400, detail=f"Input validation failed: {inline_input_errors}")
 
         request_payload = request.model_dump()
         request_payload["engine_options"] = engine_opts
         request_payload["runtime_options"] = runtime_opts
         request_payload["effective_runtime_options"] = effective_runtime_opts
-        workspace_manager.create_request(request_id, request_payload)
+
+        has_required_file_inputs = (
+            bool(skill and skill.schemas and "input" in skill.schemas)
+            and bool(skill and schema_validator.has_required_file_inputs(skill))
+        )
+        requires_upload = request.skill_source == RequestSkillSource.TEMP_UPLOAD or has_required_file_inputs
+
         await run_store.create_request(
             request_id=request_id,
-            skill_id=request.skill_id,
+            skill_id=(skill.id if skill is not None else "__temp_upload__"),
             engine=request.engine,
             input_data=inline_input,
             parameter=request.parameter,
@@ -181,134 +187,150 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             runtime_options=runtime_opts,
             effective_runtime_options=effective_runtime_opts,
             client_metadata=client_metadata,
+            skill_source=request.skill_source.value,
+            request_upload_mode=("pending_upload" if requires_upload else "none"),
         )
 
-        has_input_schema = bool(skill.schemas and "input" in skill.schemas)
-        has_required_file_inputs = schema_validator.has_required_file_inputs(skill)
         cache_enabled = is_cache_enabled(effective_runtime_opts)
-        if not has_input_schema or not has_required_file_inputs:
-            manifest_path = workspace_manager.write_input_manifest(request_id)
-            manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
-            skill_fingerprint = compute_skill_fingerprint(skill, request.engine)
-            cache_key = compute_cache_key(
-                skill_id=request.skill_id,
-                engine=request.engine,
-                skill_fingerprint=skill_fingerprint,
-                parameter=request.parameter,
-                engine_options=engine_opts,
-                input_manifest_hash=manifest_hash,
-                inline_input_hash=inline_input_hash
-            )
-            await run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
-            await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-            if cache_enabled:
-                cached_run = await installed_source_adapter.get_cached_run(cache_key)
-                if cached_run:
-                    await installed_source_adapter.bind_cached_run(request_id, cached_run)
-                    return RunCreateResponse(
-                        request_id=request_id,
-                        cache_hit=True,
-                        status=RunStatus.SUCCEEDED
-                    )
-
-            run_request = RunCreateRequest(
-                skill_id=request.skill_id,
-                engine=request.engine,
-                input=inline_input,
-                parameter=request.parameter,
-                model=request.model,
-                runtime_options=effective_runtime_opts,
-                client_metadata=request.client_metadata,
-            )
-            run_status = workspace_manager.create_run(run_request)
-            run_cache_key: str | None = cache_key if cache_enabled else None
-            await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-            await installed_source_adapter.mark_run_started(request_id, run_status.run_id)
-            request_record = await maybe_await(run_store.get_request(request_id))
-            run_dir = workspace_manager.get_run_dir(run_status.run_id)
-            if run_dir is None:
-                raise HTTPException(status_code=500, detail="Run directory not found")
-            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
-            with contextlib.ExitStack() as run_log_stack:
-                run_log_stack.enter_context(
-                    bind_run_logging_context(
-                        run_id=run_status.run_id,
-                        request_id=request_id,
-                        attempt_number=None,
-                    )
-                )
-                run_log_stack.enter_context(
-                    RunServiceLogMirrorSession.open_run_scope(
-                        run_dir=run_dir,
-                        run_id=run_status.run_id,
-                    )
-                )
-                logger.info(
-                    "run_create_orchestration_begin run_id=%s request_id=%s engine=%s",
-                    run_status.run_id,
-                    request_id,
-                    request.engine,
-                )
-                run_audit_contract_service.write_request_input_snapshot(
-                    run_dir=run_dir,
-                    request_payload=request_payload,
-                )
-                run_folder_bootstrapper.materialize_skill(
-                    skill=skill,
-                    run_dir=run_dir,
-                    engine_name=request.engine,
-                    execution_mode=_execution_mode_value(policy.effective_execution_mode),
-                    source=RunLocalSkillSource.INSTALLED,
-                )
-                await run_state_service.initialize_queued_state(
-                    run_dir=run_dir,
-                    request_id=request_id,
-                    run_id=run_status.run_id,
-                    request_record=request_record,
-                    run_store_backend=run_store,
-                )
-                merged_options = {**engine_opts, **effective_runtime_opts}
-                admitted = await concurrency_manager.admit_or_reject()
-                if not admitted:
-                    raise HTTPException(status_code=429, detail="Job queue is full")
-                await run_state_service.advance_dispatch_phase(
-                    run_dir=run_dir,
-                    request_id=request_id,
-                    run_id=run_status.run_id,
-                    phase=DispatchPhase.ADMITTED,
-                    run_store_backend=run_store,
-                )
-                await run_state_service.advance_dispatch_phase(
-                    run_dir=run_dir,
-                    request_id=request_id,
-                    run_id=run_status.run_id,
-                    phase=DispatchPhase.DISPATCH_SCHEDULED,
-                    run_store_backend=run_store,
-                )
-                logger.info(
-                    "run_create_orchestration_ready run_id=%s request_id=%s engine=%s",
-                    run_status.run_id,
-                    request_id,
-                    request.engine,
-                )
-            background_tasks.add_task(
-                job_orchestrator.run_job,
-                run_id=run_status.run_id,
-                skill_id=request.skill_id,
-                engine_name=request.engine,
-                options=merged_options,
-                cache_key=run_cache_key
-            )
+        if requires_upload:
             return RunCreateResponse(
                 request_id=request_id,
                 cache_hit=False,
-                status=run_status.status
+                status=None,
             )
 
+        if skill is None:
+            raise HTTPException(status_code=500, detail="temp_upload request must go through upload flow")
+
+        manifest_hash = compute_input_manifest_hash({"files": []})
+        skill_fingerprint = compute_skill_fingerprint(skill, request.engine)
+        cache_key = compute_cache_key(
+            skill_id=skill.id,
+            engine=request.engine,
+            skill_fingerprint=skill_fingerprint,
+            parameter=request.parameter,
+            engine_options=engine_opts,
+            input_manifest_hash=manifest_hash,
+            inline_input_hash=inline_input_hash,
+        )
+        await run_store.update_request_manifest(
+            request_id,
+            None,
+            manifest_hash,
+            request_upload_mode="uploaded",
+        )
+        await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+        if cache_enabled:
+            cached_run = await run_store.get_cached_run_for_source(cache_key, request.skill_source.value)
+            if cached_run:
+                await run_store.bind_request_run_id(
+                    request_id,
+                    cached_run,
+                    status=RunStatus.SUCCEEDED.value,
+                )
+                return RunCreateResponse(
+                    request_id=request_id,
+                    cache_hit=True,
+                    status=RunStatus.SUCCEEDED,
+                )
+
+        run_request = RunCreateRequest(
+            skill_source=RequestSkillSource.INSTALLED,
+            skill_id=skill.id,
+            engine=request.engine,
+            input=inline_input,
+            parameter=request.parameter,
+            model=request.model,
+            runtime_options=effective_runtime_opts,
+            client_metadata=request.client_metadata,
+        )
+        run_status = workspace_manager.create_run(run_request)
+        run_cache_key: str | None = cache_key if cache_enabled else None
+        await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+        await run_store.bind_request_run_id(
+            request_id,
+            run_status.run_id,
+            status=RunStatus.QUEUED.value,
+        )
+        request_record = await maybe_await(run_store.get_request(request_id))
+        run_dir = workspace_manager.get_run_dir(run_status.run_id)
+        if run_dir is None:
+            raise HTTPException(status_code=500, detail="Run directory not found")
+        run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+        with contextlib.ExitStack() as run_log_stack:
+            run_log_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=run_status.run_id,
+                    request_id=request_id,
+                    attempt_number=None,
+                )
+            )
+            run_log_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=run_status.run_id,
+                )
+            )
+            logger.info(
+                "run_create_orchestration_begin run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                request.engine,
+            )
+            run_audit_contract_service.write_request_input_snapshot(
+                run_dir=run_dir,
+                request_payload=request_payload,
+            )
+            run_folder_bootstrapper.materialize_skill(
+                skill=skill,
+                run_dir=run_dir,
+                engine_name=request.engine,
+                execution_mode=_execution_mode_value(policy.effective_execution_mode),
+                source=RunLocalSkillSource.INSTALLED,
+            )
+            await run_state_service.initialize_queued_state(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                request_record=request_record,
+                run_store_backend=run_store,
+            )
+            merged_options = {**engine_opts, **effective_runtime_opts}
+            admitted = await concurrency_manager.admit_or_reject()
+            if not admitted:
+                raise HTTPException(status_code=429, detail="Job queue is full")
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.ADMITTED,
+                run_store_backend=run_store,
+            )
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.DISPATCH_SCHEDULED,
+                run_store_backend=run_store,
+            )
+            logger.info(
+                "run_create_orchestration_ready run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                request.engine,
+            )
+        background_tasks.add_task(
+            job_orchestrator.run_job,
+            run_id=run_status.run_id,
+            skill_id=skill.id,
+            engine_name=request.engine,
+            options=merged_options,
+            cache_key=run_cache_key
+        )
         return RunCreateResponse(
             request_id=request_id,
             cache_hit=False,
-            status=None
+            status=run_status.status
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -569,47 +591,31 @@ async def get_run_status(request_id: str):
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
 async def get_run_result(request_id: str):
-    return await run_read_facade.get_result(
-        source_adapter=installed_source_adapter,
-        request_id=request_id,
-    )
+    return await run_read_facade.get_result(request_id=request_id)
 
 @router.get("/{request_id}/artifacts", response_model=RunArtifactsResponse)
 async def get_run_artifacts(request_id: str):
-    return await run_read_facade.get_artifacts(
-        source_adapter=installed_source_adapter,
-        request_id=request_id,
-    )
+    return await run_read_facade.get_artifacts(request_id=request_id)
 
 @router.get("/{request_id}/bundle")
 async def get_run_bundle(request_id: str):
-    return await run_read_facade.get_bundle(
-        source_adapter=installed_source_adapter,
-        request_id=request_id,
-    )
+    return await run_read_facade.get_bundle(request_id=request_id)
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_run_artifact(request_id: str, artifact_path: str):
     return await run_read_facade.get_artifact_file(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         artifact_path=artifact_path,
     )
 
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_run_logs(request_id: str):
-    return await run_read_facade.get_logs(
-        source_adapter=installed_source_adapter,
-        request_id=request_id,
-    )
+    return await run_read_facade.get_logs(request_id=request_id)
 
 
 @router.post("/{request_id}/cancel", response_model=CancelResponse)
 async def cancel_run(request_id: str):
-    return await run_read_facade.cancel_run(
-        source_adapter=installed_source_adapter,
-        request_id=request_id,
-    )
+    return await run_read_facade.cancel_run(request_id=request_id)
 
 
 @router.get("/{request_id}/events")
@@ -619,7 +625,6 @@ async def stream_run_events(
     cursor: int = Query(default=0, ge=0),
 ):
     return await run_read_facade.stream_events(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         request=request,
         cursor=cursor,
@@ -635,7 +640,6 @@ async def list_run_event_history(
     to_ts: str | None = Query(default=None),
 ):
     return await run_read_facade.list_event_history(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         from_seq=from_seq,
         to_seq=to_seq,
@@ -651,7 +655,6 @@ async def stream_run_chat(
     cursor: int = Query(default=0, ge=0),
 ):
     return await run_read_facade.stream_chat(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         request=request,
         cursor=cursor,
@@ -667,7 +670,6 @@ async def list_run_chat_history(
     to_ts: str | None = Query(default=None),
 ):
     return await run_read_facade.list_chat_history(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         from_seq=from_seq,
         to_seq=to_seq,
@@ -685,7 +687,6 @@ async def get_run_log_range(
     attempt: int | None = Query(default=None, ge=1),
 ):
     return await run_read_facade.read_log_range(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         stream=stream,
         byte_from=byte_from,
@@ -697,7 +698,6 @@ async def get_run_log_range(
 @router.get("/{request_id}/interaction/pending", response_model=InteractionPendingResponse)
 async def get_interaction_pending(request_id: str):
     return await run_interaction_service.get_pending(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         run_store_backend=run_store,
     )
@@ -710,7 +710,6 @@ async def reply_interaction(
     background_tasks: BackgroundTasks,
 ):
     return await run_interaction_service.submit_reply(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         request=request,
         background_tasks=background_tasks,
@@ -721,159 +720,363 @@ async def reply_interaction(
 @router.get("/{request_id}/auth/session", response_model=AuthSessionStatusResponse)
 async def get_auth_session_status(request_id: str):
     return await run_interaction_service.get_auth_session_status(
-        source_adapter=installed_source_adapter,
         request_id=request_id,
         run_store_backend=run_store,
     )
 
 @router.post("/{request_id}/upload", response_model=RunUploadResponse)
-async def upload_file(request_id: str, file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def upload_file(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile | None = File(default=None),
+    skill_package: UploadFile | None = File(default=None),
+):
+    request_record: dict[str, Any] | None = None
+    source = "unknown"
+    run_id_for_log: str | None = None
     try:
-        content = await file.read()
-        result = workspace_manager.handle_upload(request_id, content)
-        request_record = await run_store.get_request(request_id)
-        if not request_record:
-            raise ValueError(f"Request {request_id} not found")
-
-        skill = skill_registry.get_skill(request_record["skill_id"])
-        if not skill:
-            raise ValueError(f"Skill '{request_record['skill_id']}' not found")
-
-        manifest_path = workspace_manager.write_input_manifest(request_id)
-        manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
-        skill_fingerprint = compute_skill_fingerprint(skill, request_record["engine"])
-        cache_key = compute_cache_key(
-            skill_id=request_record["skill_id"],
-            engine=request_record["engine"],
-            skill_fingerprint=skill_fingerprint,
-            parameter=request_record["parameter"],
-            engine_options=request_record["engine_options"],
-            input_manifest_hash=manifest_hash,
-            inline_input_hash=compute_inline_input_hash(request_record.get("input", {}))
-        )
-        await run_store.update_request_manifest(request_id, str(manifest_path), manifest_hash)
-        await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
-        runtime_options = request_record.get("runtime_options", {})
-        cache_enabled = is_cache_enabled(runtime_options)
-        if cache_enabled:
-            cached_run = await installed_source_adapter.get_cached_run(cache_key)
-            if cached_run:
-                await installed_source_adapter.bind_cached_run(request_id, cached_run)
-                return RunUploadResponse(
-                    request_id=request_id,
-                    cache_hit=True,
-                    extracted_files=result["extracted_files"]
-                )
-
-        run_status = workspace_manager.create_run(
-            RunCreateRequest(
-                skill_id=request_record["skill_id"],
-                engine=request_record["engine"],
-                input=request_record.get("input", {}),
-                parameter=request_record["parameter"],
-                model=request_record["engine_options"].get("model"),
-                runtime_options=request_record["runtime_options"]
+        with bind_request_logging_context(request_id=request_id, phase="upload"):
+            log_event(
+                logger,
+                event="upload.request.received",
+                phase="upload",
+                outcome="start",
+                request_id=request_id,
             )
-        )
-        workspace_manager.promote_request_uploads(request_id, run_status.run_id)
-        run_cache_key: str | None = cache_key if cache_enabled else None
-        await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
-        await installed_source_adapter.mark_run_started(request_id, run_status.run_id)
-        run_dir = workspace_manager.get_run_dir(run_status.run_id)
-        if run_dir is None:
-            raise HTTPException(status_code=500, detail="Run directory not found")
-        run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
-        effective_runtime_options = request_record.get(
-            "effective_runtime_options",
-            request_record.get("runtime_options", {}),
-        )
-        effective_execution_mode_obj = effective_runtime_options.get(
-            "execution_mode",
-            request_record.get("runtime_options", {}).get("execution_mode", ExecutionMode.AUTO.value),
-        )
-        execution_mode = (
-            effective_execution_mode_obj
-            if isinstance(effective_execution_mode_obj, str)
-            else ExecutionMode.AUTO.value
-        )
-        with contextlib.ExitStack() as run_log_stack:
-            run_log_stack.enter_context(
-                bind_run_logging_context(
+            request_record = await run_store.get_request(request_id)
+            if not request_record:
+                raise ValueError(f"Request {request_id} not found")
+
+            source = str(request_record.get("skill_source") or RequestSkillSource.INSTALLED.value)
+            effective_runtime_options = request_record.get(
+                "effective_runtime_options",
+                request_record.get("runtime_options", {}),
+            )
+            runtime_options = request_record.get("runtime_options", {})
+            skill = None
+            skill_package_bytes: bytes | None = None
+            temp_skill_package_hash = ""
+            log_event(
+                logger,
+                event="upload.request.loaded",
+                phase="upload",
+                outcome="ok",
+                request_id=request_id,
+                engine=request_record.get("engine"),
+                skill_source=source,
+            )
+
+            if source == RequestSkillSource.TEMP_UPLOAD.value:
+                if skill_package is None:
+                    raise HTTPException(status_code=422, detail="skill_package is required for temp_upload source")
+                skill_package_bytes = await skill_package.read()
+                temp_skill_package_hash = compute_bytes_hash(skill_package_bytes)
+                from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
+
+                skill = await temp_skill_run_manager.inspect_skill_package(skill_package_bytes)
+                await run_store.update_request_skill_identity(
+                    request_id,
+                    skill_id=skill.id,
+                    temp_skill_manifest_id=skill.id,
+                    temp_skill_manifest_json=skill.model_dump(mode="json"),
+                    temp_skill_package_sha256=temp_skill_package_hash,
+                )
+                request_record = await run_store.get_request(request_id) or request_record
+            else:
+                skill = skill_registry.get_skill(request_record["skill_id"])
+                if not skill:
+                    raise ValueError(f"Skill '{request_record['skill_id']}' not found")
+            log_event(
+                logger,
+                event="upload.payload.validated",
+                phase="upload",
+                outcome="ok",
+                request_id=request_id,
+                engine=request_record.get("engine"),
+                skill_source=source,
+                skill_id=skill.id if skill is not None else None,
+            )
+
+            with tempfile.TemporaryDirectory(prefix=f"run-upload-{request_id}-", dir="/tmp") as tmp_dir_str:
+                uploads_dir = Path(tmp_dir_str) / "uploads"
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                log_event(
+                    logger,
+                    event="upload.temp_staged",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    stage_dir=str(uploads_dir),
+                )
+                extracted_files: list[str] = []
+                if file is not None:
+                    content = await file.read()
+                    extracted_files = _extract_zip_to_dir(content, uploads_dir)
+
+                manifest = build_input_manifest(uploads_dir)
+                manifest_hash = compute_input_manifest_hash(manifest)
+                log_event(
+                    logger,
+                    event="upload.manifest.built",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    manifest_hash=manifest_hash,
+                    extracted_files=len(extracted_files),
+                )
+                skill_fingerprint = compute_skill_fingerprint(skill, request_record["engine"])
+                inline_input_hash = compute_inline_input_hash(request_record.get("input", {}))
+                if source == RequestSkillSource.TEMP_UPLOAD.value:
+                    inline_input_hash = compute_inline_input_hash({})
+
+                await run_store.update_request_manifest(
+                    request_id,
+                    None,
+                    manifest_hash,
+                    request_upload_mode="uploaded",
+                )
+                log_event(
+                    logger,
+                    event="upload.request_state.persisted",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    request_upload_mode="uploaded",
+                    manifest_hash=manifest_hash,
+                )
+                cache_key = compute_cache_key(
+                    skill_id=skill.id,
+                    engine=request_record["engine"],
+                    skill_fingerprint=skill_fingerprint,
+                    parameter=request_record["parameter"],
+                    engine_options=request_record["engine_options"],
+                    input_manifest_hash=manifest_hash,
+                    inline_input_hash=inline_input_hash,
+                    temp_skill_package_hash=temp_skill_package_hash,
+                )
+                await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+                log_event(
+                    logger,
+                    event="upload.cache_key.computed",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    cache_key=cache_key,
+                    skill_fingerprint=skill_fingerprint,
+                )
+                cache_enabled = is_cache_enabled(effective_runtime_options)
+                if cache_enabled:
+                    cached_run = await run_store.get_cached_run_for_source(cache_key, source)
+                    if cached_run:
+                        await run_store.bind_request_run_id(
+                            request_id,
+                            cached_run,
+                            status=RunStatus.SUCCEEDED.value,
+                        )
+                        log_event(
+                            logger,
+                            event="upload.cache.hit",
+                            phase="upload",
+                            outcome="ok",
+                            request_id=request_id,
+                            run_id=cached_run,
+                            cache_key=cache_key,
+                            skill_source=source,
+                        )
+                        return RunUploadResponse(
+                            request_id=request_id,
+                            cache_hit=True,
+                            status=RunStatus.SUCCEEDED,
+                            extracted_files=extracted_files,
+                        )
+                log_event(
+                    logger,
+                    event="upload.cache.miss",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    cache_key=cache_key,
+                    skill_source=source,
+                )
+                request_skill_source = (
+                    RequestSkillSource.TEMP_UPLOAD
+                    if source == RequestSkillSource.TEMP_UPLOAD.value
+                    else RequestSkillSource.INSTALLED
+                )
+                run_status = workspace_manager.create_run_for_skill(
+                    RunCreateRequest(
+                        skill_source=request_skill_source,
+                        skill_id=skill.id,
+                        engine=request_record["engine"],
+                        input=request_record.get("input", {}),
+                        parameter=request_record["parameter"],
+                        model=request_record["engine_options"].get("model"),
+                        runtime_options=effective_runtime_options,
+                    ),
+                    skill=skill,
+                )
+                run_id_for_log = run_status.run_id
+                log_event(
+                    logger,
+                    event="upload.run.created",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
                     run_id=run_status.run_id,
-                    request_id=request_id,
-                    attempt_number=None,
+                    engine=request_record["engine"],
                 )
+                run_dir = workspace_manager.get_run_dir(run_status.run_id)
+                if run_dir is None:
+                    raise HTTPException(status_code=500, detail="Run directory not found")
+                _copy_tree(uploads_dir, run_dir / "uploads")
+                run_cache_key: str | None = cache_key if cache_enabled else None
+                await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+                await run_store.bind_request_run_id(
+                    request_id,
+                    run_status.run_id,
+                    status=RunStatus.QUEUED.value,
+                )
+                log_event(
+                    logger,
+                    event="upload.request_run.bound",
+                    phase="upload",
+                    outcome="ok",
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                )
+            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+            effective_execution_mode_obj = effective_runtime_options.get(
+                "execution_mode",
+                runtime_options.get("execution_mode", ExecutionMode.AUTO.value),
             )
-            run_log_stack.enter_context(
-                RunServiceLogMirrorSession.open_run_scope(
+            execution_mode = (
+                effective_execution_mode_obj
+                if isinstance(effective_execution_mode_obj, str)
+                else ExecutionMode.AUTO.value
+            )
+            with contextlib.ExitStack() as run_log_stack:
+                run_log_stack.enter_context(
+                    bind_run_logging_context(
+                        run_id=run_status.run_id,
+                        request_id=request_id,
+                        attempt_number=None,
+                        phase="dispatch",
+                    )
+                )
+                run_log_stack.enter_context(
+                    RunServiceLogMirrorSession.open_run_scope(
+                        run_dir=run_dir,
+                        run_id=run_status.run_id,
+                    )
+                )
+                log_event(
+                    logger,
+                    event="upload.dispatch.started",
+                    phase="dispatch",
+                    outcome="start",
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    engine=request_record["engine"],
+                )
+                run_audit_contract_service.write_request_input_snapshot(
                     run_dir=run_dir,
-                    run_id=run_status.run_id,
+                    request_payload=request_record,
                 )
-            )
-            logger.info(
-                "run_upload_orchestration_begin run_id=%s request_id=%s engine=%s",
-                run_status.run_id,
-                request_id,
-                request_record["engine"],
-            )
-            run_audit_contract_service.write_request_input_snapshot(
-                run_dir=run_dir,
-                request_payload=request_record,
-            )
-            run_folder_bootstrapper.materialize_skill(
-                skill=skill,
-                run_dir=run_dir,
+                if source == RequestSkillSource.TEMP_UPLOAD.value:
+                    if skill_package_bytes is None:
+                        raise HTTPException(status_code=500, detail="missing temp skill package payload")
+                    run_folder_bootstrapper.materialize_temp_skill_package(
+                        package_bytes=skill_package_bytes,
+                        run_dir=run_dir,
+                        engine_name=request_record["engine"],
+                        execution_mode=execution_mode,
+                        source=RunLocalSkillSource.TEMP_UPLOAD,
+                    )
+                else:
+                    run_folder_bootstrapper.materialize_skill(
+                        skill=skill,
+                        run_dir=run_dir,
+                        engine_name=request_record["engine"],
+                        execution_mode=execution_mode,
+                        source=RunLocalSkillSource.INSTALLED,
+                    )
+                await run_state_service.initialize_queued_state(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    request_record=request_record,
+                    run_store_backend=run_store,
+                )
+                merged_options = {**request_record["engine_options"], **effective_runtime_options}
+                admitted = await concurrency_manager.admit_or_reject()
+                if not admitted:
+                    raise HTTPException(status_code=429, detail="Job queue is full")
+                await run_state_service.advance_dispatch_phase(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    phase=DispatchPhase.ADMITTED,
+                    run_store_backend=run_store,
+                )
+                await run_state_service.advance_dispatch_phase(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    phase=DispatchPhase.DISPATCH_SCHEDULED,
+                    run_store_backend=run_store,
+                )
+                log_event(
+                    logger,
+                    event="upload.dispatch.completed",
+                    phase="dispatch",
+                    outcome="ok",
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    engine=request_record["engine"],
+                )
+            background_tasks.add_task(
+                job_orchestrator.run_job,
+                run_id=run_status.run_id,
+                skill_id=skill.id,
                 engine_name=request_record["engine"],
-                execution_mode=execution_mode,
-                source=RunLocalSkillSource.INSTALLED,
+                options=merged_options,
+                cache_key=run_cache_key
             )
-            await run_state_service.initialize_queued_state(
-                run_dir=run_dir,
+            return RunUploadResponse(
                 request_id=request_id,
-                run_id=run_status.run_id,
-                request_record=request_record,
-                run_store_backend=run_store,
+                cache_hit=False,
+                status=run_status.status,
+                extracted_files=extracted_files,
             )
-            merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
-            admitted = await concurrency_manager.admit_or_reject()
-            if not admitted:
-                raise HTTPException(status_code=429, detail="Job queue is full")
-            await run_state_service.advance_dispatch_phase(
-                run_dir=run_dir,
-                request_id=request_id,
-                run_id=run_status.run_id,
-                phase=DispatchPhase.ADMITTED,
-                run_store_backend=run_store,
-            )
-            await run_state_service.advance_dispatch_phase(
-                run_dir=run_dir,
-                request_id=request_id,
-                run_id=run_status.run_id,
-                phase=DispatchPhase.DISPATCH_SCHEDULED,
-                run_store_backend=run_store,
-            )
-            logger.info(
-                "run_upload_orchestration_ready run_id=%s request_id=%s engine=%s",
-                run_status.run_id,
-                request_id,
-                request_record["engine"],
-            )
-        background_tasks.add_task(
-            job_orchestrator.run_job,
-            run_id=run_status.run_id,
-            skill_id=request_record["skill_id"],
-            engine_name=request_record["engine"],
-            options=merged_options,
-            cache_key=run_cache_key
-        )
-        return RunUploadResponse(
-            request_id=request_id,
-            cache_hit=False,
-            extracted_files=result["extracted_files"]
-        )
     except ValueError as e:
+        log_event(
+            logger,
+            event="upload.failed",
+            phase="upload",
+            outcome="error",
+            level=logging.ERROR,
+            request_id=request_id,
+            run_id=run_id_for_log,
+            error_code="VALUE_ERROR",
+            error_type=type(e).__name__,
+            detail=str(e),
+            skill_source=source,
+        )
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
+    except HTTPException as e:
+        log_event(
+            logger,
+            event="upload.failed",
+            phase="upload",
+            outcome="error",
+            level=logging.ERROR,
+            request_id=request_id,
+            run_id=run_id_for_log,
+            error_code=f"HTTP_{e.status_code}",
+            error_type="HTTPException",
+            detail=e.detail,
+            skill_source=source,
+        )
         raise
     except Exception as e:
         # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
@@ -885,6 +1088,19 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
                 "error_type": type(e).__name__,
                 "fallback": "http_500",
             },
+        )
+        log_event(
+            logger,
+            event="upload.failed",
+            phase="upload",
+            outcome="error",
+            level=logging.ERROR,
+            request_id=request_id,
+            run_id=run_id_for_log,
+            error_code="UNCLASSIFIED_EXCEPTION",
+            error_type=type(e).__name__,
+            detail=str(e),
+            skill_source=source,
         )
         raise HTTPException(status_code=500, detail=str(e))
 

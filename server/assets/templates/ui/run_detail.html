@@ -221,7 +221,10 @@
     }
 
     function extractRawRef(event) {
-        const candidate = event && event.raw_ref;
+        const fromCorrelation = event && event.correlation && event.correlation.raw_ref;
+        const candidate = (fromCorrelation && typeof fromCorrelation === "object")
+            ? fromCorrelation
+            : event && event.raw_ref;
         if (!candidate || typeof candidate !== "object") return null;
         if (typeof candidate.stream !== "string") return null;
         const from = Number(candidate.byte_from || 0);
@@ -676,7 +679,7 @@
             const role = typeof event.role === "string" ? event.role : "";
             const text = typeof event.text === "string" ? event.text : "";
             if (role && text.trim()) {
-                appendChatEvent(role, text, event, null);
+                appendChatEvent(role, text, event, extractRawRef(event));
             }
         }
     }
@@ -699,7 +702,7 @@
             const role = typeof event.role === "string" ? event.role : "";
             const text = typeof event.text === "string" ? event.text : "";
             if (role && text.trim()) {
-                appendChatEvent(role, text, event, null);
+                appendChatEvent(role, text, event, extractRawRef(event));
             }
         }
     }
@@ -762,7 +765,7 @@
             const role = typeof data.role === "string" ? data.role : "";
             const text = typeof data.text === "string" ? data.text : "";
             if (role && text.trim()) {
-                appendChatEvent(role, text, data, null);
+                appendChatEvent(role, text, data, extractRawRef(data));
             }
         });
 
@@ -771,7 +774,7 @@
             catchUpConversationHistory()
                 .catch(() => {})
                 .finally(() => {
-                    if (!terminal && statusEl.textContent !== "waiting_user" && statusEl.textContent !== "waiting_auth") {
+                    if (!terminal) {
                         scheduleReconnect();
                     }
                 });
@@ -811,6 +814,7 @@
 
     setInterval(() => {
         loadStderrForAttempt().catch(() => {});
+        refreshState().catch(() => {});
         refreshProtocolHistory("fcmp", fcmpAuditEl).catch(() => {});
         refreshProtocolHistory("rasp", raspAuditEl).catch(() => {});
         refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});

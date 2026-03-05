@@ -955,7 +955,7 @@ OpenCode 返回示例（动态探测缓存）：
 OpenCode 兼容视图说明：
 - 返回动态缓存兼容结构（`manifest.dynamic=true`、`manifest.source=runtime_probe_cache`）。
 - `resolved_snapshot_file` 指向本地缓存文件名（默认 `opencode_models_cache.json`）。
-- 不要求存在 `server/assets/models/opencode/manifest.json` 快照文件。
+- 不要求存在 `server/engines/opencode/models/manifest.json` 快照文件。
 
 ### 新增当前版本模型快照（受 Basic Auth 保护）
 `POST /v1/engines/{engine}/models/snapshots`

@@ -1,0 +1,9 @@
+- [x] 1. 新建 OpenSpec change 产物（proposal/design/tasks）并定义关键事件码与字段约束。
+- [x] 2. 新增 `server/runtime/logging/structured_trace.py`，统一结构化日志序列化与敏感字段脱敏。
+- [x] 3. 扩展 `server/runtime/logging/run_context.py`，补充 request 级上下文绑定与 phase 上下文字段。
+- [x] 4. 在 `/v1/jobs/{request_id}/upload` 关键段接入 request 级结构化日志。
+- [x] 5. 在 run lifecycle（queued/slot/start/waiting/terminal）接入结构化日志。
+- [x] 6. 在 interaction/auth/recovery 主链路接入结构化日志事件。
+- [x] 7. 新增结构化日志单元测试，覆盖上下文注入、字段格式与脱敏行为。
+- [x] 8. 运行回归测试并修复失败项。
+- [x] 9. 完成 `openspec validate --changes request-scoped-structured-run-trace-logging`。

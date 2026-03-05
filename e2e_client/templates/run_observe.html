@@ -5,7 +5,6 @@
     <div class="row">
         <div style="flex: 1 1 200px;"><strong>Status:</strong> <span id="run-status">loading</span></div>
         <div style="flex: 1 1 200px;"><strong>Pending ID:</strong> <span id="pending-id">-</span></div>
-        <div style="flex: 1 1 200px;"><strong>Source:</strong> <span id="run-source">{{ run_source }}</span></div>
         <div style="flex: 1 1 200px;"><strong>Cursor:</strong> <span id="run-cursor">0</span></div>
         <div style="flex: 1 1 220px;">
             <a class="btn secondary" href="/runs">Runs</a>
@@ -337,7 +336,6 @@
 <script>
 (() => {
     const requestId = "{{ request_id }}";
-    const runSource = "{{ run_source }}";
     const statusEl = document.getElementById("run-status");
     const pendingIdEl = document.getElementById("pending-id");
     const cursorEl = document.getElementById("run-cursor");
@@ -406,8 +404,7 @@
     let waitingAuthWatchdogInFlight = false;
 
     function apiUrl(path) {
-        const separator = path.includes("?") ? "&" : "?";
-        return `${path}${separator}source=${encodeURIComponent(runSource)}`;
+        return path;
     }
 
     function safeText(value) {
@@ -1349,55 +1346,67 @@
     }
 
     async function refreshState() {
-        const res = await fetch(apiUrl(`/api/runs/${requestId}`));
-        if (!res.ok) return;
-        const payload = await res.json();
-        updateInteractiveAutoReplyConfig(payload);
-        currentStatus = safeText(payload.status || "unknown");
-        statusEl.textContent = currentStatus;
-        updateThinkingCard(currentStatus);
-        pendingIdEl.textContent = payload.pending_interaction_id == null ? "-" : String(payload.pending_interaction_id);
-        if (typeof payload.cursor === "number") updateCursor(payload.cursor);
+        try {
+            const res = await fetch(apiUrl(`/api/runs/${requestId}`));
+            if (!res.ok) {
+                if (res.status === 503) {
+                    showReplyError("Backend unreachable.");
+                }
+                return false;
+            }
+            const payload = await res.json();
+            clearReplyError();
+            updateInteractiveAutoReplyConfig(payload);
+            currentStatus = safeText(payload.status || "unknown");
+            statusEl.textContent = currentStatus;
+            updateThinkingCard(currentStatus);
+            pendingIdEl.textContent = payload.pending_interaction_id == null ? "-" : String(payload.pending_interaction_id);
+            if (typeof payload.cursor === "number") updateCursor(payload.cursor);
 
-        if (currentStatus === "waiting_user") {
-            clearWaitingAuthWatchdog();
-            clearFinalSummaryCard();
-            await refreshPending();
-            await catchUpHistory();
-            maybeStartWaitingUserWatchdog();
-        } else if (currentStatus === "waiting_auth") {
-            clearWaitingUserWatchdog();
-            clearFinalSummaryCard();
-            await refreshPending();
-            await catchUpHistory();
-            maybeStartWaitingAuthWatchdog();
-        } else {
-            clearWaitingUserWatchdog();
-            clearWaitingAuthWatchdog();
-            setReplyEnabled(false);
-            if (currentStatus !== "waiting_user") {
-                clearPromptCard();
-            }
-            if (currentStatus !== "waiting_auth") {
-                clearAuthCard();
-                pendingIdEl.textContent = "-";
-            }
-            if (!isTerminal(currentStatus)) {
+            if (currentStatus === "waiting_user") {
+                clearWaitingAuthWatchdog();
                 clearFinalSummaryCard();
+                await refreshPending();
+                await catchUpHistory();
+                maybeStartWaitingUserWatchdog();
+            } else if (currentStatus === "waiting_auth") {
+                clearWaitingUserWatchdog();
+                clearFinalSummaryCard();
+                await refreshPending();
+                await catchUpHistory();
+                maybeStartWaitingAuthWatchdog();
+            } else {
+                clearWaitingUserWatchdog();
+                clearWaitingAuthWatchdog();
+                setReplyEnabled(false);
+                if (currentStatus !== "waiting_user") {
+                    clearPromptCard();
+                }
+                if (currentStatus !== "waiting_auth") {
+                    clearAuthCard();
+                    pendingIdEl.textContent = "-";
+                }
+                if (!isTerminal(currentStatus)) {
+                    clearFinalSummaryCard();
+                }
             }
-        }
-        if (isTerminal(currentStatus)) {
-            clearWaitingUserWatchdog();
-            setReplyEnabled(false);
-            clearPromptCard();
-            await catchUpHistory();
-            await maybeAppendFinalSummary();
-            await maybeLoadFileTreeOnTerminal();
+            if (isTerminal(currentStatus)) {
+                clearWaitingUserWatchdog();
+                setReplyEnabled(false);
+                clearPromptCard();
+                await catchUpHistory();
+                await maybeAppendFinalSummary();
+                await maybeLoadFileTreeOnTerminal();
+            }
+            return true;
+        } catch (_err) {
+            showReplyError("Backend unreachable.");
+            return false;
         }
     }
 
     function scheduleReconnect() {
-        if (reconnectTimer || currentStatus === "waiting_user" || isTerminal(currentStatus)) return;
+        if (reconnectTimer || isTerminal(currentStatus)) return;
         const delay = Math.min(1000 * (2 ** reconnectAttempts), 10000);
         reconnectAttempts += 1;
         reconnectTimer = setTimeout(async () => {
@@ -1405,6 +1414,21 @@
             await startStream();
             await refreshState();
         }, delay);
+    }
+
+    function shouldShowBackendUnreachable(evt) {
+        if (!evt || typeof evt.data !== "string") return false;
+        const raw = evt.data.trim();
+        if (!raw) return false;
+        try {
+            const payload = JSON.parse(raw);
+            const statusCode = Number(payload && payload.status_code);
+            const errorText = safeText(payload && payload.error).trim().toLowerCase();
+            if (statusCode === 503) return true;
+            return errorText === "backend_unreachable";
+        } catch (_err) {
+            return false;
+        }
     }
 
     function handleChatEvent(event) {
@@ -1460,6 +1484,7 @@
         stream = new EventSource(apiUrl(`/api/runs/${requestId}/chat?cursor=${cursor}`));
         stream.addEventListener("snapshot", (evt) => {
             reconnectAttempts = 0;
+            clearReplyError();
             const payload = JSON.parse(evt.data || "{}");
             currentStatus = safeText(payload.status || currentStatus);
             statusEl.textContent = currentStatus;
@@ -1476,13 +1501,17 @@
         });
         stream.addEventListener("chat_event", (evt) => {
             reconnectAttempts = 0;
+            clearReplyError();
             const payload = JSON.parse(evt.data || "{}");
             handleChatEvent(payload);
         });
-        stream.addEventListener("error", () => {
+        stream.addEventListener("error", (evt) => {
             if (stream) {
                 stream.close();
                 stream = null;
+            }
+            if (shouldShowBackendUnreachable(evt)) {
+                showReplyError("Backend unreachable.");
             }
             catchUpHistory()
                 .catch(() => {})
@@ -1555,9 +1584,13 @@
     });
 
     (async () => {
-        await loadHistory();
-        await startStream();
-        await refreshState();
+        try {
+            await loadHistory();
+            await startStream();
+            await refreshState();
+        } catch (_err) {
+            showReplyError("Backend unreachable.");
+        }
     })();
 
     window.addEventListener("beforeunload", () => {

@@ -6,9 +6,12 @@ from typing import Any, Dict, List, Mapping
 
 import yaml
 
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_PATH = PROJECT_ROOT / "docs" / "contracts" / "runtime_event_ordering_contract.yaml"
+_CONTRACT_CANDIDATES = config_registry.invariant_contract_paths(keys.RUNTIME_EVENT_ORDERING_CONTRACT_NAME)
+CONTRACT_PATH = next((path for path in _CONTRACT_CANDIDATES if path.exists()), _CONTRACT_CANDIDATES[0])
 
 
 def _as_mapping(value: Any, *, field: str) -> Mapping[str, Any]:

@@ -1,9 +1,9 @@
 import json
 import logging
-from pathlib import Path
 from typing import Dict, Any
 
 from server.config import config
+from server.config_registry.registry import config_registry
 from server.models import ExecutionMode
 from server.runtime.session.timeout import (
     INTERACTIVE_REPLY_TIMEOUT_KEY,
@@ -16,9 +16,9 @@ class OptionsPolicy:
         self._policy = self._load_policy()
 
     def _load_policy(self) -> Dict[str, Any]:
-        policy_path = Path(config.SYSTEM.ROOT) / "server" / "assets" / "configs" / "options_policy.json"
+        policy_path = config_registry.root / "server" / "config" / "policy" / "options_policy.json"
         if policy_path.exists():
-            with open(policy_path, "r") as f:
+            with open(policy_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {
             "runtime_options": [],

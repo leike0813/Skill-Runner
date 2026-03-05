@@ -6,6 +6,13 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.models import AdapterTurnOutcome, SkillManifest
 
+
+def _stub_generate_config(_schema_name: str, _layers, output_path: Path):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("{}", encoding="utf-8")
+    return output_path
+
+
 @pytest.fixture
 def adapter():
     adapter = GeminiExecutionAdapter()
@@ -16,6 +23,9 @@ def adapter():
 def mock_skill(tmp_path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill", encoding="utf-8")
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
     
     # Create schema files
     input_schema = {
@@ -37,6 +47,21 @@ def mock_skill(tmp_path):
         "properties": {"value": {"type": "integer"}},
     }
     (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "test-skill",
+                "engines": ["gemini"],
+                "execution_modes": ["auto", "interactive"],
+                "schemas": {
+                    "input": "input.schema.json",
+                    "parameter": "parameter.schema.json",
+                    "output": "output.schema.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     
     return SkillManifest(
         id="test-skill",
@@ -118,7 +143,10 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
     )
 
     # Mock dependencies
-    with patch("server.engines.common.config.json_layer_config_generator.config_generator.generate_config"), \
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), \
          patch("server.services.skill.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
 
@@ -144,11 +172,7 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
 
         # parameter.divisor should be 5
         assert "divisor: 5" in prompt_content
-        assert mock_patch.call_count == 1
-        _, kwargs = mock_patch.call_args
-        assert "output_schema" in kwargs
-        assert isinstance(kwargs["output_schema"], dict)
-        assert kwargs["output_schema"]["type"] == "object"
+        mock_patch.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
@@ -178,7 +202,10 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
         }
     )
 
-    with patch("server.engines.common.config.json_layer_config_generator.config_generator.generate_config"), \
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), \
          patch("server.services.skill.skill_patcher.skill_patcher.patch_skill_md") as mock_patch, \
          patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
 
@@ -191,10 +218,7 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
         mock_exec.return_value = mock_proc
         with pytest.raises(ValueError, match="Missing required input files"):
             await adapter.run(skill_with_prompt, input_data, run_dir, options)
-        assert mock_patch.call_count == 1
-        _, kwargs = mock_patch.call_args
-        assert "output_schema" in kwargs
-        assert isinstance(kwargs["output_schema"], dict)
+        mock_patch.assert_not_called()
 
 
 def test_extract_session_handle_missing_session_id_raises(adapter):

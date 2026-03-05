@@ -31,7 +31,7 @@ graph TD
     -   *Layer 0*: **Base Defaults** (Hardcoded minimums, e.g. `quiet=true`)
     -   *Layer 1*: **Skill Defaults** (Loaded from `assets/<engine>_settings.json` or `config.toml`)
     -   *Layer 2*: **User Options** (Runtime overrides from API `model` + `runtime_options`)
-    -   *Layer 3*: **System Enforced** (Loaded from `server/assets/configs/<engine>_enforced.json`)
+    -   *Layer 3*: **System Enforced** (Loaded from `server/engines/<engine>/config/enforced.*`)
 2.  **Isolation**: The resulting config file must be written to `run_dir/.<engine>/` to avoid polluting global state.
 
 **Interface Definition**:

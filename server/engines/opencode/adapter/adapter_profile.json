@@ -29,16 +29,16 @@
     "unknown_fallback": false
   },
   "config_assets": {
-    "bootstrap_path": "../../../assets/configs/opencode/bootstrap.json",
-    "default_path": "../../../assets/configs/opencode/default.json",
-    "enforced_path": "../../../assets/configs/opencode/enforced.json",
-    "settings_schema_path": "../../../assets/schemas/opencode_config_schema.json",
+    "bootstrap_path": "../config/bootstrap.json",
+    "default_path": "../config/default.json",
+    "enforced_path": "../config/enforced.json",
+    "settings_schema_path": "../schemas/opencode_config_schema.json",
     "skill_defaults_path": "assets/opencode_config.json"
   },
   "model_catalog": {
     "mode": "runtime_probe",
     "manifest_path": null,
-    "models_root": "../../../assets/models/opencode",
-    "seed_path": "../../../assets/models/opencode/models_seed.json"
+    "models_root": "../models",
+    "seed_path": "../models/models_seed.json"
   }
 }

@@ -28,6 +28,7 @@ from server.models import (
     RunStatus,
 )
 from server.runtime.auth_detection.types import AuthDetectionResult
+from server.runtime.logging.structured_trace import log_event
 from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
 from server.services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
@@ -36,7 +37,6 @@ from server.services.orchestration.run_projection_service import run_projection_
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.concurrency_manager import concurrency_manager
-from server.services.skill.temp_skill_run_store import temp_skill_run_store
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,19 @@ class RunAuthOrchestrationService:
         )
         available_methods = self._available_methods_for(engine_name, provider_id)
         if not available_methods:
+            log_event(
+                logger,
+                event="auth.failed",
+                phase="auth_orchestration",
+                outcome="error",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=run_id,
+                attempt=attempt_number,
+                engine=engine_name,
+                provider_id=provider_id,
+                error_code="NO_AVAILABLE_AUTH_METHODS",
+            )
             return None
         if len(available_methods) > 1:
             selection = self._build_method_selection(
@@ -239,6 +252,19 @@ class RunAuthOrchestrationService:
             provider_id,
         )
         if selection.value not in available_methods:
+            log_event(
+                logger,
+                event="auth.failed",
+                phase="auth_orchestration",
+                outcome="error",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=resolved_run_id,
+                attempt=source_attempt,
+                selected_method=selection.value,
+                available_methods=available_methods,
+                error_code="UNSUPPORTED_AUTH_METHOD",
+            )
             raise HTTPException(status_code=422, detail="Unsupported auth method")
         try:
             pending_auth = await self._start_pending_auth(
@@ -323,9 +349,32 @@ class RunAuthOrchestrationService:
                 submission_kind=request.kind,
             ),
         )
+        log_event(
+            logger,
+            event="auth.input.accepted",
+            phase="auth_orchestration",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=self._resolve_source_attempt(pending_payload, resume_context),
+            auth_session_id=auth_session_id,
+            submission_kind=request.kind,
+        )
         try:
             snapshot = engine_auth_flow_manager.input_session(auth_session_id, runtime_kind, request.value)
         except KeyError as exc:
+            log_event(
+                logger,
+                event="auth.failed",
+                phase="auth_orchestration",
+                outcome="error",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=run_id,
+                auth_session_id=auth_session_id,
+                error_code="STALE_AUTH_SESSION",
+                error_type=type(exc).__name__,
+            )
             raise HTTPException(status_code=409, detail="stale auth session") from exc
         except ValueError as exc:
             reconciled = await self._reconcile_completed_auth_session_if_needed(
@@ -339,7 +388,31 @@ class RunAuthOrchestrationService:
                 raise HTTPException(status_code=409, detail="Auth session already completed") from exc
             detail = str(exc).strip() or "Invalid auth input"
             if self._is_stale_auth_input_error(detail):
+                log_event(
+                    logger,
+                    event="auth.failed",
+                    phase="auth_orchestration",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    auth_session_id=auth_session_id,
+                    error_code="STALE_AUTH_INPUT",
+                    error_type=type(exc).__name__,
+                )
                 raise HTTPException(status_code=409, detail=detail) from exc
+            log_event(
+                logger,
+                event="auth.failed",
+                phase="auth_orchestration",
+                outcome="error",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=run_id,
+                auth_session_id=auth_session_id,
+                error_code="INVALID_AUTH_INPUT",
+                error_type=type(exc).__name__,
+            )
             raise HTTPException(status_code=422, detail=detail) from exc
         resolved_auth_method = self._require_auth_method(
             self._resolve_auth_method(pending_payload, resume_context),
@@ -408,6 +481,17 @@ class RunAuthOrchestrationService:
                     resume_ticket_id=str(resume_ticket["ticket_id"]),
                     resume_cause=ResumeCause.AUTH_COMPLETED.value,
                 )
+            log_event(
+                logger,
+                event="auth.completed",
+                phase="auth_orchestration",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                attempt=source_attempt,
+                auth_session_id=auth_session_id,
+                resume_ticket_id=str(resume_ticket["ticket_id"]),
+            )
             return InteractionReplyResponse(
                 request_id=request_id,
                 status=RunStatus.QUEUED,
@@ -435,6 +519,17 @@ class RunAuthOrchestrationService:
                 else OrchestratorEventType.AUTH_CHALLENGE_UPDATED.value
             ),
             data=self._build_pending_auth_event_payload(pending_auth),
+        )
+        log_event(
+            logger,
+            event="auth.challenge.published",
+            phase="auth_orchestration",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=pending_auth.source_attempt,
+            auth_session_id=pending_auth.auth_session_id,
+            challenge_kind=pending_auth.challenge_kind,
         )
         await run_projection_service.write_non_terminal_projection(
             run_dir=run_dir,
@@ -808,6 +903,19 @@ class RunAuthOrchestrationService:
             append_orchestrator_event=append_orchestrator_event,
             event_type=event_type,
         )
+        log_event(
+            logger,
+            event="auth.session.created",
+            phase="auth_orchestration",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=source_attempt,
+            auth_session_id=pending_auth.auth_session_id,
+            auth_method=pending_auth.auth_method.value,
+            provider_id=pending_auth.provider_id,
+            engine=engine,
+        )
         return pending_auth
 
     async def _persist_pending_auth(
@@ -955,7 +1063,6 @@ class RunAuthOrchestrationService:
         if run_id is None or skill_id is None or engine_name is None:
             raise HTTPException(status_code=404, detail="Run not found")
         merged_options = self._merge_request_options(request_record)
-        temp_request_id = await self._resolve_temp_request_id(request_id)
         background_tasks.add_task(
             resume_run_job,
             run_id=run_id,
@@ -968,7 +1075,6 @@ class RunAuthOrchestrationService:
                 "__resume_cause": resume_cause,
             },
             cache_key=None,
-            temp_request_id=temp_request_id,
         )
 
     async def _schedule_resume_async(
@@ -990,7 +1096,6 @@ class RunAuthOrchestrationService:
         if run_id is None or skill_id is None or engine_name is None:
             return
         merged_options = self._merge_request_options(request_record)
-        temp_request_id = await self._resolve_temp_request_id(request_id)
         task = resume_run_job(
             run_id=run_id,
             skill_id=skill_id,
@@ -1002,7 +1107,6 @@ class RunAuthOrchestrationService:
                 "__resume_cause": resume_cause,
             },
             cache_key=None,
-            temp_request_id=temp_request_id,
         )
         if asyncio.iscoroutine(task):
             asyncio.create_task(task)
@@ -1061,12 +1165,6 @@ class RunAuthOrchestrationService:
             update_status or job_orchestrator._update_status,
             resume_run_job or job_orchestrator.run_job,
         )
-
-    async def _resolve_temp_request_id(self, request_id: str) -> str | None:
-        temp_record: object = await maybe_await(temp_skill_run_store.get_request(request_id))
-        if isinstance(temp_record, dict):
-            return request_id
-        return None
 
     def _log_callback_dispatch_result(self, future: concurrent.futures.Future[Any]) -> None:
         try:

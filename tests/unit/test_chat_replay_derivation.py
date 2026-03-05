@@ -98,3 +98,29 @@ def test_assistant_final_derivation_strips_ask_user_yaml_block() -> None:
     assert rows[0]["role"] == "assistant"
     assert rows[0]["kind"] == "assistant_final"
     assert rows[0]["text"] == "请补充信息。"
+
+
+def test_assistant_final_derivation_keeps_raw_ref_in_correlation() -> None:
+    rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 11,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:03:30Z",
+            "type": "assistant.message.final",
+            "data": {
+                "message_id": "m-11",
+                "text": "最终答复",
+            },
+            "raw_ref": {
+                "stream": "stdout",
+                "byte_from": 10,
+                "byte_to": 20,
+                "attempt_number": 2,
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["correlation"]["raw_ref"]["stream"] == "stdout"
+    assert rows[0]["correlation"]["raw_ref"]["byte_from"] == 10

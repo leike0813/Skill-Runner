@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 import jsonschema  # type: ignore[import-untyped]
+from server.config_registry.registry import config_registry
 
 
 SUPPORTED_ENGINES = ("codex", "gemini", "iflow", "opencode")
-SCHEMA_PATH = Path(__file__).resolve().parents[3] / "assets" / "schemas" / "adapter_profile_schema.json"
+SCHEMA_PATHS = config_registry.adapter_profile_schema_paths()
 
 
 PromptParamsJsonSource = Literal["none", "input_data", "combined_input_parameter"]
@@ -148,9 +149,11 @@ class AdapterProfile:
 
 
 def _load_schema() -> dict[str, Any]:
-    if not SCHEMA_PATH.exists():
-        raise RuntimeError(f"Adapter profile schema not found: {SCHEMA_PATH}")
-    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema_path = next((path for path in SCHEMA_PATHS if path.exists()), None)
+    if schema_path is None:
+        joined = ", ".join(str(path) for path in SCHEMA_PATHS)
+        raise RuntimeError(f"Adapter profile schema not found. tried: {joined}")
+    return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
 def _validate_resolved_path(

@@ -10,7 +10,11 @@ from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[im
 from server.models import CancelResponse, RunArtifactsResponse, RunLogsResponse, RunResultResponse, RunStatus
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
-from .run_source_adapter import RunSourceAdapter, get_request_and_run_dir, require_capability
+from .run_source_adapter import (
+    RunSourceAdapter,
+    get_request_and_run_dir,
+    installed_run_source_adapter,
+)
 
 TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
 ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_AUTH}
@@ -43,13 +47,25 @@ class RunReadFacade:
     def _job_control(self) -> JobControlPort:
         return job_control
 
+    async def _resolve_request_and_run_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+    ) -> tuple[dict[str, Any], Path]:
+        resolved_source = source_adapter or installed_run_source_adapter
+        return await get_request_and_run_dir(resolved_source, request_id)
+
     async def get_result(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunResultResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         current_status = _read_status(run_dir).value
         if current_status not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
             raise HTTPException(status_code=409, detail="terminal result not ready")
@@ -64,10 +80,13 @@ class RunReadFacade:
     async def get_artifacts(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunArtifactsResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         artifacts_dir = run_dir / "artifacts"
         artifacts: list[str] = []
         if artifacts_dir.exists():
@@ -79,10 +98,13 @@ class RunReadFacade:
     async def get_bundle(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> FileResponse:
-        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         debug_mode = bool(request_record.get("runtime_options", {}).get("debug"))
         bundle_name = "run_bundle_debug.zip" if debug_mode else "run_bundle.zip"
         bundle_path = run_dir / "bundle" / bundle_name
@@ -103,11 +125,14 @@ class RunReadFacade:
     async def get_artifact_file(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         artifact_path: str,
     ) -> FileResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         if not artifact_path:
             raise HTTPException(status_code=400, detail="Artifact path is required")
         if not artifact_path.startswith("artifacts/"):
@@ -123,10 +148,13 @@ class RunReadFacade:
     async def get_logs(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunLogsResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         latest_attempt = _latest_attempt_from_audit(run_dir)
         if latest_attempt <= 0:
             return RunLogsResponse(request_id=request_id)
@@ -142,12 +170,15 @@ class RunReadFacade:
     async def stream_events(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         request: Request,
         cursor: int = 0,
     ) -> StreamingResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
 
         async def _event_stream():
             async for item in run_observability_service.iter_sse_events(
@@ -174,12 +205,15 @@ class RunReadFacade:
     async def stream_chat(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         request: Request,
         cursor: int = 0,
     ) -> StreamingResponse:
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
 
         async def _event_stream():
             async for item in run_observability_service.iter_chat_events(
@@ -206,15 +240,17 @@ class RunReadFacade:
     async def list_event_history(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         from_seq: int | None,
         to_seq: int | None,
         from_ts: str | None,
         to_ts: str | None,
     ) -> dict[str, Any]:
-        require_capability(source_adapter, capability="supports_event_history")
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         payload = await run_observability_service.get_event_history_payload(
             run_dir=run_dir,
             request_id=request_id,
@@ -237,15 +273,17 @@ class RunReadFacade:
     async def list_chat_history(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         from_seq: int | None,
         to_seq: int | None,
         from_ts: str | None,
         to_ts: str | None,
     ) -> dict[str, Any]:
-        require_capability(source_adapter, capability="supports_event_history")
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         payload = await run_observability_service.get_chat_history_payload(
             run_dir=run_dir,
             request_id=request_id,
@@ -268,15 +306,17 @@ class RunReadFacade:
     async def read_log_range(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         stream: str,
         byte_from: int,
         byte_to: int,
         attempt: int | None = None,
     ) -> dict[str, Any]:
-        require_capability(source_adapter, capability="supports_log_range")
-        _request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         if byte_to > 0 and byte_to < byte_from:
             raise HTTPException(status_code=400, detail="byte_to must be greater than or equal to byte_from")
         try:
@@ -294,10 +334,14 @@ class RunReadFacade:
     async def cancel_run(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> CancelResponse:
-        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        resolved_source = source_adapter or installed_run_source_adapter
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=resolved_source,
+            request_id=request_id,
+        )
         run_id_obj = request_record.get("run_id")
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise HTTPException(status_code=404, detail="Run not found")
@@ -321,13 +365,14 @@ class RunReadFacade:
                 message="Run is not cancelable",
             )
 
-        accepted = await self._job_control().cancel_run(
-            run_id=run_id,
-            engine_name=str(request_record.get("engine", "")),
-            run_dir=run_dir,
-            status=status,
-            **source_adapter.build_cancel_kwargs(request_id),
-        )
+        cancel_kwargs: dict[str, Any] = {
+            "run_id": run_id,
+            "engine_name": str(request_record.get("engine", "")),
+            "run_dir": run_dir,
+            "status": status,
+        }
+        cancel_kwargs.update(resolved_source.build_cancel_kwargs(request_id))
+        accepted = await self._job_control().cancel_run(**cancel_kwargs)
         return CancelResponse(
             request_id=request_id,
             run_id=run_id,

@@ -62,6 +62,7 @@ class RunFolderBootstrapper:
         if snapshot_dir.exists():
             shutil.rmtree(snapshot_dir, ignore_errors=True)
         snapshot_dir.mkdir(parents=True, exist_ok=True)
+        materialized = False
         try:
             with zipfile.ZipFile(io.BytesIO(package_bytes), "r") as zf:
                 snapshot_root = snapshot_dir.resolve()
@@ -98,6 +99,7 @@ class RunFolderBootstrapper:
                 snapshot_dir=snapshot_dir,
                 execution_mode=execution_mode,
             )
+            materialized = True
             return (
                 manifest,
                 RunLocalSkillRef(
@@ -107,9 +109,9 @@ class RunFolderBootstrapper:
                     source=source,
                 ),
             )
-        except Exception:
-            shutil.rmtree(snapshot_dir, ignore_errors=True)
-            raise
+        finally:
+            if not materialized:
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
 
     def load_from_snapshot(
         self,

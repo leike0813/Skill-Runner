@@ -59,7 +59,7 @@ async def test_inspect_skill_package_records_identity_without_persisting_temp_pa
         engine_options={},
         runtime_options={},
     )
-    manifest = await manager.inspect_skill_package(request_id, _build_skill_zip())
+    manifest = await manager.inspect_skill_package(_build_skill_zip(), request_id=request_id)
     assert manifest.id == "demo-temp-skill"
     record = await store.get_request(request_id)
     assert record is not None
@@ -93,7 +93,7 @@ async def test_reject_oversized_skill_package(monkeypatch, temp_config_dirs):
         runtime_options={},
     )
     with pytest.raises(ValueError, match="exceeds size limit"):
-        await manager.inspect_skill_package(request_id, b"x" * 128)
+        await manager.inspect_skill_package(b"x" * 128, request_id=request_id)
 
 
 @pytest.mark.asyncio
@@ -109,10 +109,10 @@ async def test_on_terminal_updates_status_without_runtime_temp_assets(monkeypatc
         parameter={},
         model=None,
         engine_options={},
-        runtime_options={"debug_keep_temp": True},
+        runtime_options={},
     )
-    await manager.inspect_skill_package(request_id, _build_skill_zip())
-    await manager.on_terminal(request_id, RunStatus.SUCCEEDED, debug_keep_temp=True)
+    await manager.inspect_skill_package(_build_skill_zip(), request_id=request_id)
+    await manager.on_terminal(request_id, RunStatus.SUCCEEDED)
     record = await store.get_request(request_id)
     assert record is not None
     assert record["status"] == "succeeded"
@@ -136,8 +136,8 @@ async def test_inspect_missing_engines_defaults_to_all_supported(monkeypatch, te
         runtime_options={},
     )
     manifest = await manager.inspect_skill_package(
-        request_id,
         _build_skill_zip(include_engines=False),
+        request_id=request_id,
     )
     assert manifest.engines == []
     assert manifest.effective_engines == ["codex", "gemini", "iflow", "opencode"]

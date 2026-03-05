@@ -25,6 +25,10 @@ class FakeBackend:
         self.temp_create_payloads: list[dict[str, Any]] = []
         self.temp_upload_payloads: list[dict[str, Any]] = []
 
+    @staticmethod
+    def _is_temp_request(request_id: str) -> bool:
+        return request_id == "req-temp-1"
+
     async def list_management_engines(self) -> dict[str, Any]:
         return {
             "engines": [
@@ -156,7 +160,7 @@ class FakeBackend:
         *,
         run_source: str = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
-        if run_source == RUN_SOURCE_TEMP:
+        if self._is_temp_request(request_id):
             return {
                 "request_id": request_id,
                 "run_id": "run-temp-1",
@@ -181,7 +185,7 @@ class FakeBackend:
         run_source: str = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
         self.pending_sources.append(run_source)
-        if run_source == RUN_SOURCE_TEMP:
+        if self._is_temp_request(request_id):
             return {
                 "request_id": request_id,
                 "status": "waiting_user",
@@ -218,7 +222,7 @@ class FakeBackend:
         *,
         run_source: str = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
-        if run_source == RUN_SOURCE_TEMP:
+        if self._is_temp_request(request_id):
             return {"request_id": request_id, "result": {"answer": "temp-ok"}}
         return {"request_id": request_id, "result": {"answer": "ok"}}
 
@@ -228,7 +232,7 @@ class FakeBackend:
         *,
         run_source: str = RUN_SOURCE_INSTALLED,
     ) -> dict[str, Any]:
-        if run_source == RUN_SOURCE_TEMP:
+        if self._is_temp_request(request_id):
             return {"request_id": request_id, "artifacts": ["artifacts/temp-out.txt"]}
         return {"request_id": request_id, "artifacts": ["artifacts/out.txt"]}
 
@@ -238,10 +242,10 @@ class FakeBackend:
         *,
         run_source: str = RUN_SOURCE_INSTALLED,
     ) -> bytes:
-        del request_id
+        del run_source
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-            if run_source == RUN_SOURCE_TEMP:
+            if self._is_temp_request(request_id):
                 archive.writestr("result/result.json", '{"answer":"temp-ok"}')
                 archive.writestr("artifacts/temp-out.txt", "temp artifact text")
             else:
@@ -273,6 +277,7 @@ class FakeBackend:
         from_ts: str | None = None,
         to_ts: str | None = None,
     ) -> dict[str, Any]:
+        resolved_source = RUN_SOURCE_TEMP if self._is_temp_request(request_id) else RUN_SOURCE_INSTALLED
         self.history_requests.append(
             {
                 "request_id": request_id,
@@ -286,7 +291,7 @@ class FakeBackend:
         return {
             "request_id": request_id,
             "events": [
-                {"seq": 2, "type": "chat_event", "run_source": run_source},
+                {"seq": 2, "type": "chat_event", "run_source": resolved_source},
             ],
         }
 
@@ -299,6 +304,7 @@ class FakeBackend:
         byte_from: int = 0,
         byte_to: int = 0,
     ) -> dict[str, Any]:
+        resolved_source = RUN_SOURCE_TEMP if self._is_temp_request(request_id) else RUN_SOURCE_INSTALLED
         self.log_range_requests.append(
             {
                 "request_id": request_id,
@@ -313,7 +319,7 @@ class FakeBackend:
             "stream": stream,
             "byte_from": byte_from,
             "byte_to": byte_to,
-            "run_source": run_source,
+            "run_source": resolved_source,
             "content": "sample-log",
         }
 
@@ -412,6 +418,34 @@ class FakeBackendOpencode(FakeBackend):
         }
 
 
+class FakeBackendUnreachable(FakeBackend):
+    async def get_run_state(
+        self,
+        request_id: str,
+        *,
+        run_source: str = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        _ = request_id, run_source
+        raise httpx.ConnectError(
+            "backend down",
+            request=httpx.Request("GET", "http://backend.test/v1/jobs/req-unreachable"),
+        )
+
+    async def stream_run_chat(
+        self,
+        request_id: str,
+        *,
+        run_source: str = RUN_SOURCE_INSTALLED,
+        cursor: int = 0,
+    ):
+        _ = request_id, run_source, cursor
+        raise httpx.ConnectError(
+            "backend down",
+            request=httpx.Request("GET", "http://backend.test/v1/jobs/req-unreachable/chat"),
+        )
+        yield b""
+
+
 async def _request(app, method: str, path: str, **kwargs):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -468,7 +502,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
             follow_redirects=False,
         )
         assert create.status_code == 303
-        assert create.headers.get("location") == "/runs/req-e2e-1?source=installed"
+        assert create.headers.get("location") == "/runs/req-e2e-1"
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
@@ -480,7 +514,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert "Details" in runs.text
         assert "/runs/req-e2e-1" in runs.text
 
-        observe_page = await _request(app, "GET", "/runs/req-e2e-1?source=installed")
+        observe_page = await _request(app, "GET", "/runs/req-e2e-1")
         assert observe_page.status_code == 200
         assert "Pending Input Request" in observe_page.text
         assert "Ctrl+Enter / Cmd+Enter to send" in observe_page.text
@@ -553,7 +587,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         preview_partial = await _request(
             app,
             "GET",
-            "/runs/req-e2e-1/bundle/view?path=result/result.json&source=installed",
+            "/runs/req-e2e-1/bundle/view?path=result/result.json",
         )
         assert preview_partial.status_code == 200
         assert "result/result.json" in preview_partial.text
@@ -593,36 +627,36 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
             follow_redirects=False,
         )
         assert create.status_code == 303
-        assert create.headers.get("location") == "/runs/req-temp-1?source=temp"
+        assert create.headers.get("location") == "/runs/req-temp-1"
         assert fake_backend.temp_create_payloads
         assert fake_backend.temp_create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.temp_upload_payloads
         assert "demo-prime-number/SKILL.md" in fake_backend.temp_upload_payloads[-1]["skill_entries"]
         assert "input_file" in fake_backend.temp_upload_payloads[-1]["input_entries"]
 
-        state = await _request(app, "GET", "/api/runs/req-temp-1?source=temp")
+        state = await _request(app, "GET", "/api/runs/req-temp-1")
         assert state.status_code == 200
         assert state.json()["status"] == "waiting_user"
 
-        pending = await _request(app, "GET", "/api/runs/req-temp-1/pending?source=temp")
+        pending = await _request(app, "GET", "/api/runs/req-temp-1/pending")
         assert pending.status_code == 200
         assert pending.json()["pending"]["interaction_id"] == 11
-        assert fake_backend.pending_sources[-1] == RUN_SOURCE_TEMP
+        assert fake_backend.pending_sources[-1] == RUN_SOURCE_INSTALLED
 
         reply = await _request(
             app,
             "POST",
-            "/api/runs/req-temp-1/reply?source=temp",
+            "/api/runs/req-temp-1/reply",
             json={"interaction_id": 11, "response": {"text": "continue temp"}},
         )
         assert reply.status_code == 200
         assert reply.json()["accepted"] is True
-        assert fake_backend.reply_sources[-1] == RUN_SOURCE_TEMP
+        assert fake_backend.reply_sources[-1] == RUN_SOURCE_INSTALLED
 
         history = await _request(
             app,
             "GET",
-            "/api/runs/req-temp-1/events/history?source=temp&from_seq=1",
+            "/api/runs/req-temp-1/events/history?from_seq=1",
         )
         assert history.status_code == 200
         assert history.json()["events"][0]["run_source"] == RUN_SOURCE_TEMP
@@ -630,7 +664,7 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         logs_range = await _request(
             app,
             "GET",
-            "/api/runs/req-temp-1/logs/range?source=temp&stream=stderr&byte_from=1&byte_to=8",
+            "/api/runs/req-temp-1/logs/range?stream=stderr&byte_from=1&byte_to=8",
         )
         assert logs_range.status_code == 200
         assert logs_range.json()["run_source"] == RUN_SOURCE_TEMP
@@ -638,14 +672,14 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         final_summary = await _request(
             app,
             "GET",
-            "/api/runs/req-temp-1/final-summary?source=temp",
+            "/api/runs/req-temp-1/final-summary",
         )
         assert final_summary.status_code == 200
         assert final_summary.json()["has_result"] is True
         assert final_summary.json()["has_artifacts"] is True
         assert final_summary.json()["artifacts"] == ["artifacts/temp-out.txt"]
 
-        result = await _request(app, "GET", "/runs/req-temp-1/result?source=temp")
+        result = await _request(app, "GET", "/runs/req-temp-1/result")
         assert result.status_code == 404
 
     finally:
@@ -838,5 +872,23 @@ async def test_e2e_example_client_observe_summary_route_removed(tmp_path: Path):
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_example_client_handles_backend_unreachable_for_run_api():
+    app = create_app()
+    fake_backend = FakeBackendUnreachable()
+    _install_backend_override(app, fake_backend)
+    try:
+        state = await _request(app, "GET", "/api/runs/req-unreachable")
+        assert state.status_code == 503
+        assert state.json()["detail"] == "backend_unreachable"
+
+        stream_res = await _request(app, "GET", "/api/runs/req-unreachable/chat")
+        assert stream_res.status_code == 200
+        assert "event: error" in stream_res.text
+        assert "backend_unreachable" in stream_res.text
     finally:
         app.dependency_overrides.clear()

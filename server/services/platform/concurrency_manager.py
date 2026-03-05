@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import resource
@@ -40,7 +39,7 @@ class ConcurrencyManager:
             self._max_concurrent = self._compute_max_concurrency(policy)
             self._max_queue_size = max(1, int(policy["max_queue_size"]))
             self._policy = policy
-        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError, KeyError):
             logger.exception("Failed to initialize concurrency policy, using fallback defaults")
             self._max_concurrent = 2
             self._max_queue_size = 128
@@ -121,9 +120,19 @@ class ConcurrencyManager:
             self._loop_id = current_id
 
     def _load_policy(self) -> Dict[str, Any]:
-        policy_path = Path(config.SYSTEM.CONCURRENCY_POLICY)
-        with open(policy_path, "r", encoding="utf-8") as f:
-            policy: Dict[str, Any] = json.load(f)
+        cfg = config.SYSTEM.CONCURRENCY
+        policy: Dict[str, Any] = {
+            "max_concurrent_hard_cap": int(cfg.MAX_CONCURRENT_HARD_CAP),
+            "max_queue_size": int(cfg.MAX_QUEUE_SIZE),
+            "cpu_factor": float(cfg.CPU_FACTOR),
+            "mem_reserve_mb": int(cfg.MEM_RESERVE_MB),
+            "estimated_mem_per_run_mb": int(cfg.ESTIMATED_MEM_PER_RUN_MB),
+            "fd_reserve": int(cfg.FD_RESERVE),
+            "estimated_fd_per_run": int(cfg.ESTIMATED_FD_PER_RUN),
+            "pid_reserve": int(cfg.PID_RESERVE),
+            "estimated_pid_per_run": int(cfg.ESTIMATED_PID_PER_RUN),
+            "fallback_max_concurrent": int(cfg.FALLBACK_MAX_CONCURRENT),
+        }
 
         policy["max_concurrent_hard_cap"] = self._env_int(
             "SKILL_RUNNER_MAX_CONCURRENT_HARD_CAP",

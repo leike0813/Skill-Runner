@@ -27,9 +27,10 @@ from server.models import (
 from server.runtime.observability.run_source_adapter import (
     RunSourceAdapter,
     get_request_and_run_dir,
-    require_capability,
+    installed_run_source_adapter,
 )
 from server.runtime.logging.run_context import bind_run_logging_context
+from server.runtime.logging.structured_trace import log_event
 from server.runtime.protocol.factories import make_resume_command
 from server.runtime.protocol.schema_registry import ProtocolSchemaViolation, validate_resume_command
 from server.runtime.session.statechart import waiting_reply_target_status
@@ -40,7 +41,6 @@ from server.services.orchestration.run_auth_orchestration_service import (
 )
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_projection_service import run_projection_service
-from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.orchestration.run_store import run_store
 from server.services.platform.async_compat import maybe_await
 
@@ -48,15 +48,26 @@ logger = logging.getLogger(__name__)
 
 
 class RunInteractionService:
+    async def _resolve_request_and_run_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+    ) -> tuple[dict[str, Any], Path]:
+        resolved_source = source_adapter or installed_run_source_adapter
+        return await get_request_and_run_dir(resolved_source, request_id)
+
     async def get_pending(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         run_store_backend: Any = run_store,
     ) -> InteractionPendingResponse:
-        require_capability(source_adapter, capability="supports_pending_reply")
-        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         status, _, _, _ = _read_run_status(run_dir)
         pending_payload = await maybe_await(run_store_backend.get_pending_interaction(request_id))
         pending_auth_method_selection_payload = await maybe_await(
@@ -97,14 +108,17 @@ class RunInteractionService:
     async def submit_reply(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         request: InteractionReplyRequest,
         background_tasks: BackgroundTasks,
         run_store_backend: Any = run_store,
     ) -> InteractionReplyResponse:
-        require_capability(source_adapter, capability="supports_pending_reply")
-        request_record, run_dir = await get_request_and_run_dir(source_adapter, request_id)
+        resolved_source = source_adapter or installed_run_source_adapter
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=resolved_source,
+            request_id=request_id,
+        )
         status, warnings, _, _ = _read_run_status(run_dir)
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
@@ -131,8 +145,29 @@ class RunInteractionService:
                 status.value,
                 request.mode,
             )
+            log_event(
+                logger,
+                event="interaction.reply.received",
+                phase="interaction",
+                outcome="start",
+                request_id=request_id,
+                run_id=run_id,
+                mode=request.mode,
+                current_status=status.value,
+            )
             if request.mode == "auth":
                 if status != RunStatus.WAITING_AUTH:
+                    log_event(
+                        logger,
+                        event="interaction.reply.rejected",
+                        phase="interaction",
+                        outcome="error",
+                        level=logging.WARNING,
+                        request_id=request_id,
+                        run_id=run_id,
+                        error_code="RUN_NOT_WAITING_AUTH",
+                        mode=request.mode,
+                    )
                     raise HTTPException(status_code=409, detail="Run is not waiting for auth")
                 if request.selection is not None:
                     return await run_auth_orchestration_service.select_auth_method(
@@ -169,6 +204,17 @@ class RunInteractionService:
                 )
                 if replay:
                     return replay
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="RUN_NOT_WAITING_USER",
+                    mode=request.mode,
+                )
                 raise HTTPException(status_code=409, detail="Run is not waiting for user interaction")
 
             pending_payload = await maybe_await(run_store_backend.get_pending_interaction(request_id))
@@ -181,6 +227,17 @@ class RunInteractionService:
                 )
                 if replay:
                     return replay
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="NO_PENDING_INTERACTION",
+                    mode=request.mode,
+                )
                 raise HTTPException(status_code=409, detail="No pending interaction")
 
             raw_interaction_id = pending_payload.get("interaction_id")
@@ -190,10 +247,44 @@ class RunInteractionService:
                 try:
                     current_interaction_id = int(raw_interaction_id)
                 except ValueError:
+                    log_event(
+                        logger,
+                        event="interaction.reply.rejected",
+                        phase="interaction",
+                        outcome="error",
+                        level=logging.WARNING,
+                        request_id=request_id,
+                        run_id=run_id,
+                        error_code="STALE_INTERACTION_ID",
+                        mode=request.mode,
+                    )
                     raise HTTPException(status_code=409, detail="stale interaction")
             else:
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="INVALID_INTERACTION_ID",
+                    mode=request.mode,
+                )
                 raise HTTPException(status_code=409, detail="stale interaction")
             if request.interaction_id != current_interaction_id:
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="STALE_INTERACTION_ID",
+                    interaction_id=request.interaction_id,
+                    mode=request.mode,
+                )
                 raise HTTPException(status_code=409, detail="stale interaction")
 
             reply_state = await maybe_await(
@@ -207,11 +298,35 @@ class RunInteractionService:
             if reply_state == "idempotent":
                 return InteractionReplyResponse(request_id=request_id, status=status, accepted=True)
             if reply_state == "idempotency_conflict":
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="IDEMPOTENCY_CONFLICT",
+                    interaction_id=request.interaction_id,
+                    mode=request.mode,
+                )
                 raise HTTPException(
                     status_code=409,
                     detail="idempotency_key already used with different response",
                 )
             if reply_state == "stale":
+                log_event(
+                    logger,
+                    event="interaction.reply.rejected",
+                    phase="interaction",
+                    outcome="error",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    error_code="STALE_INTERACTION",
+                    interaction_id=request.interaction_id,
+                    mode=request.mode,
+                )
                 raise HTTPException(status_code=409, detail="stale interaction")
             source_attempt = int(pending_payload.get("source_attempt") or 1)
             logger.info(
@@ -220,6 +335,17 @@ class RunInteractionService:
                 request_id,
                 request.interaction_id,
                 source_attempt,
+            )
+            log_event(
+                logger,
+                event="interaction.reply.accepted",
+                phase="interaction",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                interaction_id=request.interaction_id,
+                source_attempt=source_attempt,
+                mode=request.mode,
             )
 
             next_status = waiting_reply_target_status()
@@ -320,16 +446,20 @@ class RunInteractionService:
                     str(resume_ticket["ticket_id"]),
                 )
             )
-            temp_request_id = source_adapter.get_run_job_temp_request_id(request_id)
             if ticket_dispatched:
+                temp_request_id = resolved_source.get_run_job_temp_request_id(request_id)
+                run_job_kwargs: dict[str, Any] = {
+                    "run_id": run_id,
+                    "skill_id": str(request_record["skill_id"]),
+                    "engine_name": str(request_record["engine"]),
+                    "options": merged_options,
+                    "cache_key": None,
+                }
+                if temp_request_id is not None:
+                    run_job_kwargs["temp_request_id"] = temp_request_id
                 background_tasks.add_task(
                     job_orchestrator.run_job,
-                    run_id=run_id,
-                    skill_id=str(request_record["skill_id"]),
-                    engine_name=str(request_record["engine"]),
-                    options=merged_options,
-                    cache_key=None,
-                    temp_request_id=temp_request_id,
+                    **run_job_kwargs,
                 )
 
             return InteractionReplyResponse(
@@ -341,18 +471,17 @@ class RunInteractionService:
     async def get_auth_session_status(
         self,
         *,
-        source_adapter: RunSourceAdapter,
+        source_adapter: RunSourceAdapter | None = None,
         request_id: str,
         run_store_backend: Any = run_store,
     ) -> AuthSessionStatusResponse:
-        require_capability(source_adapter, capability="supports_pending_reply")
-        request_record, _ = await get_request_and_run_dir(source_adapter, request_id)
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        run_dir = workspace_manager.get_run_dir(run_id)
-        if run_dir is None:
             raise HTTPException(status_code=404, detail="Run not found")
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(

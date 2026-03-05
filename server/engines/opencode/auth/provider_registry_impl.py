@@ -25,14 +25,7 @@ class OpencodeAuthProviderRegistry:
         self._loaded = False
 
     def _config_path(self) -> Path:
-        return (
-            Path(config.SYSTEM.ROOT)
-            / "server"
-            / "assets"
-            / "configs"
-            / "opencode"
-            / "auth_providers.json"
-        )
+        return Path(config.SYSTEM.ROOT) / "server" / "engines" / "opencode" / "config" / "auth_providers.json"
 
     def _load_locked(self) -> None:
         if self._loaded:

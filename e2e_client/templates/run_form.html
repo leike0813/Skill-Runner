@@ -79,7 +79,7 @@
         <div class="card" style="margin-top: 16px;">
             <h3 style="margin-top: 0;">File Upload</h3>
             {% if run_source == "temp" %}
-                <p class="muted">The selected fixture skill is dynamically packaged and uploaded via <code>/v1/temp-skill-runs/{request_id}/upload</code>. Input files are zipped with schema keys as entry names.</p>
+                <p class="muted">The selected fixture skill is dynamically packaged and uploaded via <code>/v1/jobs/{request_id}/upload</code>. Input files are zipped with schema keys as entry names.</p>
             {% else %}
                 <p class="muted">Each selected file is zipped with its field name as file name before calling <code>/v1/jobs/{request_id}/upload</code>.</p>
             {% endif %}
@@ -102,9 +102,6 @@
                 <div style="flex: 1 1 260px;">
                     <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> 禁用缓存机制</label><br>
                     <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> Debug模式</label><br>
-                    {% if run_source == "temp" %}
-                    <label id="runtime_debug_keep_temp_row"><input type="checkbox" name="runtime__debug_keep_temp" {% if submitted_runtime_options.get("debug_keep_temp") %}checked{% endif %}> 保留上传的临时 Skill 包（Debug用）</label>
-                    {% endif %}
                 </div>
             </div>
             <div id="runtime_interactive_section" class="row" style="margin-top: 12px;">
@@ -144,7 +141,6 @@
     const interactiveSection = document.getElementById("runtime_interactive_section");
     const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
     const timeoutGroup = document.getElementById("runtime_timeout_group");
-    const debugKeepTempRow = document.getElementById("runtime_debug_keep_temp_row");
 
     function splitProviderModel(id) {
         if (typeof id !== "string") return null;
@@ -270,9 +266,6 @@
                 isInteractive && interactiveAutoReply && interactiveAutoReply.checked
             );
             timeoutGroup.style.display = showTimeout ? "block" : "none";
-        }
-        if (debugKeepTempRow) {
-            debugKeepTempRow.style.display = runSource === "temp" ? "block" : "none";
         }
     }
     if (executionModeSelect) {

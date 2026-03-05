@@ -82,8 +82,8 @@ _C.SYSTEM.SETTINGS_FILE = os.path.join(_C.SYSTEM.DATA_DIR, "system_settings.json
 _C.SYSTEM.SETTINGS_BOOTSTRAP_FILE = os.path.join(
     _C.SYSTEM.ROOT,
     "server",
-    "assets",
-    "configs",
+    "config",
+    "policy",
     "system_settings.bootstrap.json",
 )
 
@@ -179,10 +179,18 @@ _C.SYSTEM.RUN_RETENTION_DAYS = 7
 # Run cleanup scheduler interval in hours
 _C.SYSTEM.RUN_CLEANUP_INTERVAL_HOURS = 12
 
-# Concurrency policy config path
-_C.SYSTEM.CONCURRENCY_POLICY = os.path.join(
-    _C.SYSTEM.ROOT, "server", "assets", "configs", "concurrency_policy.json"
-)
+# Concurrency policy (canonical source: YACS)
+_C.SYSTEM.CONCURRENCY = CN()
+_C.SYSTEM.CONCURRENCY.MAX_CONCURRENT_HARD_CAP = 16
+_C.SYSTEM.CONCURRENCY.MAX_QUEUE_SIZE = 128
+_C.SYSTEM.CONCURRENCY.CPU_FACTOR = 0.75
+_C.SYSTEM.CONCURRENCY.MEM_RESERVE_MB = 1024
+_C.SYSTEM.CONCURRENCY.ESTIMATED_MEM_PER_RUN_MB = 1024
+_C.SYSTEM.CONCURRENCY.FD_RESERVE = 256
+_C.SYSTEM.CONCURRENCY.ESTIMATED_FD_PER_RUN = 64
+_C.SYSTEM.CONCURRENCY.PID_RESERVE = 128
+_C.SYSTEM.CONCURRENCY.ESTIMATED_PID_PER_RUN = 1
+_C.SYSTEM.CONCURRENCY.FALLBACK_MAX_CONCURRENT = 2
 
 # UI basic auth
 _C.SYSTEM.UI_BASIC_AUTH_ENABLED = _env_bool("UI_BASIC_AUTH_ENABLED", False)

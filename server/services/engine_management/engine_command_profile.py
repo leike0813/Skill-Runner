@@ -5,11 +5,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from server.config import config
-
-
-def _profile_path() -> Path:
-    return Path(config.SYSTEM.ROOT) / "server" / "assets" / "configs" / "engine_command_profiles.json"
+from server.config_registry import keys
+from server.config_registry.registry import config_registry
 
 
 def _token_key(token: str) -> str:
@@ -66,15 +63,28 @@ def merge_cli_args(default_args: list[str], explicit_args: list[str]) -> list[st
 
 class EngineCommandProfile:
     def __init__(self, profile_path: Path | None = None) -> None:
-        self.profile_path = profile_path or _profile_path()
+        self.profile_path = profile_path
 
     @lru_cache(maxsize=1)
     def _load(self) -> dict[str, Any]:
-        if not self.profile_path.exists():
-            return {}
-        payload = json.loads(self.profile_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            return {}
+        if self.profile_path is not None:
+            if not self.profile_path.exists():
+                return {}
+            loaded_payload = json.loads(self.profile_path.read_text(encoding="utf-8"))
+            return loaded_payload if isinstance(loaded_payload, dict) else {}
+
+        payload: dict[str, Any] = {}
+
+        for engine in keys.ENGINE_KEYS:
+            engine_profile_path = config_registry.engine_config_path(
+                engine=engine,
+                filename=keys.ENGINE_COMMAND_PROFILE_NAME,
+            )
+            if engine_profile_path.exists():
+                raw = json.loads(engine_profile_path.read_text(encoding="utf-8"))
+                payload[engine] = raw if isinstance(raw, dict) else {}
+                continue
+            payload[engine] = {}
         return payload
 
     def clear_cache(self) -> None:

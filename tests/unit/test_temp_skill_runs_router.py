@@ -526,7 +526,6 @@ async def test_upload_success_executes_and_cleans_temp_assets(temp_config_dirs, 
             await temp_skill_run_manager.on_terminal(
                 temp_request_id,
                 RunStatus.SUCCEEDED,
-                debug_keep_temp=False,
             )
 
     monkeypatch.setattr("server.routers.temp_skill_runs.job_orchestrator.run_job", _fake_run_job)

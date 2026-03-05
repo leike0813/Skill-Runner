@@ -78,7 +78,7 @@ The entrypoint and application startup refresh engine versions and write a statu
 - Runtime-editable system settings persist at:
   - `${SKILL_RUNNER_DATA_DIR}/system_settings.json`
   - This file stores the UI-editable logging settings shown on `/ui/settings`
-  - If missing, the service bootstraps it from `server/assets/configs/system_settings.bootstrap.json`
+  - If missing, the service bootstraps it from `server/config/policy/system_settings.bootstrap.json`
 - Concurrency policy (optional env overrides):
   - `SKILL_RUNNER_MAX_CONCURRENT_HARD_CAP`
   - `SKILL_RUNNER_MAX_QUEUE_SIZE`

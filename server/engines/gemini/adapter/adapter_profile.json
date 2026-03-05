@@ -29,16 +29,16 @@
     "unknown_fallback": true
   },
   "config_assets": {
-    "bootstrap_path": "../../../assets/configs/gemini/bootstrap.json",
-    "default_path": "../../../assets/configs/gemini/default.json",
-    "enforced_path": "../../../assets/configs/gemini/enforced.json",
-    "settings_schema_path": "../../../assets/schemas/gemini_settings_schema.json",
+    "bootstrap_path": "../config/bootstrap.json",
+    "default_path": "../config/default.json",
+    "enforced_path": "../config/enforced.json",
+    "settings_schema_path": "../schemas/gemini_settings_schema.json",
     "skill_defaults_path": "assets/gemini_settings.json"
   },
   "model_catalog": {
     "mode": "manifest",
-    "manifest_path": "../../../assets/models/gemini/manifest.json",
-    "models_root": "../../../assets/models/gemini",
+    "manifest_path": "../models/manifest.json",
+    "models_root": "../models",
     "seed_path": null
   }
 }
