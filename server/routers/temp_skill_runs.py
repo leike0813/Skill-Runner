@@ -1,5 +1,6 @@
 import json
 import logging
+import contextlib
 import uuid
 from datetime import datetime
 from typing import Any
@@ -44,6 +45,7 @@ from ..services.platform.cache_key_builder import (
 )
 from ..services.orchestration.run_store import run_store
 from ..services.orchestration.run_audit_contract_service import run_audit_contract_service
+from ..services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from ..services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from ..services.orchestration.run_state_service import run_state_service
 from ..services.skill.temp_skill_run_manager import temp_skill_run_manager
@@ -63,6 +65,7 @@ from ..services.orchestration.run_execution_core import (
 from ..services.orchestration.run_interaction_service import run_interaction_service
 from ..runtime.observability.run_read_facade import run_read_facade
 from ..runtime.observability.run_source_adapter import RunSourceCapabilities
+from ..runtime.logging.run_context import bind_run_logging_context
 
 
 router = APIRouter(prefix="/temp-skill-runs", tags=["temp-skill-runs"])
@@ -282,44 +285,71 @@ async def upload_temp_skill_and_start(
         run_dir = workspace_manager.get_run_dir(run_status.run_id)
         if run_dir is None:
             raise HTTPException(status_code=500, detail="Run directory not found")
-        run_audit_contract_service.write_request_input_snapshot(
-            run_dir=run_dir,
-            request_payload=request_record or record,
-        )
-        skill, _skill_ref = run_folder_bootstrapper.materialize_temp_skill_package(
-            package_bytes=skill_bytes,
-            run_dir=run_dir,
-            engine_name=record["engine"],
-            execution_mode=_execution_mode_value(policy.effective_execution_mode),
-            source=RunLocalSkillSource.TEMP_UPLOAD,
-        )
-        await temp_skill_run_manager.cleanup_temp_assets(request_id)
-        await run_state_service.initialize_queued_state(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            request_record=request_record,
-            run_store_backend=run_store,
-        )
+        run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+        with contextlib.ExitStack() as run_log_stack:
+            run_log_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=run_status.run_id,
+                    request_id=request_id,
+                    attempt_number=None,
+                )
+            )
+            run_log_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=run_status.run_id,
+                )
+            )
+            logger.info(
+                "temp_run_create_orchestration_begin run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                record["engine"],
+            )
+            run_audit_contract_service.write_request_input_snapshot(
+                run_dir=run_dir,
+                request_payload=request_record or record,
+            )
+            skill, _skill_ref = run_folder_bootstrapper.materialize_temp_skill_package(
+                package_bytes=skill_bytes,
+                run_dir=run_dir,
+                engine_name=record["engine"],
+                execution_mode=_execution_mode_value(policy.effective_execution_mode),
+                source=RunLocalSkillSource.TEMP_UPLOAD,
+            )
+            await temp_skill_run_manager.cleanup_temp_assets(request_id)
+            await run_state_service.initialize_queued_state(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                request_record=request_record,
+                run_store_backend=run_store,
+            )
 
-        merged_options = {**record["engine_options"], **effective_runtime_options}
-        admitted = await concurrency_manager.admit_or_reject()
-        if not admitted:
-            raise HTTPException(status_code=429, detail="Job queue is full")
-        await run_state_service.advance_dispatch_phase(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            phase=DispatchPhase.ADMITTED,
-            run_store_backend=run_store,
-        )
-        await run_state_service.advance_dispatch_phase(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            phase=DispatchPhase.DISPATCH_SCHEDULED,
-            run_store_backend=run_store,
-        )
+            merged_options = {**record["engine_options"], **effective_runtime_options}
+            admitted = await concurrency_manager.admit_or_reject()
+            if not admitted:
+                raise HTTPException(status_code=429, detail="Job queue is full")
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.ADMITTED,
+                run_store_backend=run_store,
+            )
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.DISPATCH_SCHEDULED,
+                run_store_backend=run_store,
+            )
+            logger.info(
+                "temp_run_create_orchestration_ready run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                record["engine"],
+            )
         background_tasks.add_task(
             job_orchestrator.run_job,
             run_id=run_status.run_id,

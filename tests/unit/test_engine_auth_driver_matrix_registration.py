@@ -75,8 +75,14 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path) -> Non
     assert manager._driver_registry.supports(  # noqa: SLF001
         transport="oauth_proxy",
         engine="opencode",
-        auth_method="auth_code_or_url",
-        provider_id="openai",
+        auth_method="api_key",
+        provider_id="deepseek",
+    )
+    assert not manager._driver_registry.supports(  # noqa: SLF001
+        transport="oauth_proxy",
+        engine="opencode",
+        auth_method="api_key",
+        provider_id=None,
     )
     assert manager._driver_registry.supports(  # noqa: SLF001
         transport="cli_delegate",

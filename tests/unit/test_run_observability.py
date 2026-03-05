@@ -250,6 +250,81 @@ async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detai
     assert detail["entries"] == []
 
 
+@pytest.mark.asyncio
+async def test_get_run_detail_hides_denylisted_node_modules(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-tree"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    (run_dir / "app").mkdir(parents=True, exist_ok=True)
+    (run_dir / "app" / "main.py").write_text("print('ok')", encoding="utf-8")
+    (run_dir / "workspace" / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+    (run_dir / "workspace" / "node_modules" / "pkg" / "index.js").write_text("module.exports={};", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(
+            return_value={
+                "request_id": "req-tree",
+                "run_id": "run-tree",
+                "skill_id": "demo",
+                "engine": "opencode",
+                "request_created_at": "2026-01-01T00:00:00",
+                "run_status": "running",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+
+    service = RunObservabilityService()
+    detail = await service.get_run_detail("req-tree")
+    rel_paths = [entry["rel_path"] for entry in detail["entries"]]
+
+    assert "app/main.py" in rel_paths
+    assert all("node_modules" not in path for path in rel_paths)
+
+
+@pytest.mark.asyncio
+async def test_run_file_preview_rejects_filtered_node_modules_path(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-preview"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    (run_dir / "workspace" / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+    (run_dir / "workspace" / "node_modules" / "pkg" / "index.js").write_text("secret", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(
+            return_value={
+                "request_id": "req-preview",
+                "run_id": "run-preview",
+                "skill_id": "demo",
+                "engine": "opencode",
+                "request_created_at": "2026-01-01T00:00:00",
+                "run_status": "running",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+
+    service = RunObservabilityService()
+    with pytest.raises(ValueError, match="path is filtered"):
+        await service.build_run_file_preview("req-preview", "workspace/node_modules/pkg/index.js")
+
+
 def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
     log_path = tmp_path / "stdout.txt"
     log_path.write_text("abcdef", encoding="utf-8")

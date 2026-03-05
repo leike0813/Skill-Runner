@@ -36,6 +36,30 @@ def _read_state_payload(run_dir: Path) -> dict[str, object]:
     return json.loads((run_dir / ".state" / "state.json").read_text(encoding="utf-8"))
 
 
+def test_available_methods_for_uses_strategy_service(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_strategy_service.methods_for_conversation",
+        lambda **_kwargs: ("callback", "device_auth"),
+    )
+    service = RunAuthOrchestrationService()
+
+    methods = service._available_methods_for("codex", None)  # noqa: SLF001
+
+    assert methods == [AuthMethod.CALLBACK, AuthMethod.DEVICE_AUTH]
+
+
+def test_available_methods_for_drops_unknown_strategy_values(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_strategy_service.methods_for_conversation",
+        lambda **_kwargs: ("callback", "unsupported_method"),
+    )
+    service = RunAuthOrchestrationService()
+
+    methods = service._available_methods_for("codex", None)  # noqa: SLF001
+
+    assert methods == [AuthMethod.CALLBACK]
+
+
 @pytest.mark.asyncio
 async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-selection"

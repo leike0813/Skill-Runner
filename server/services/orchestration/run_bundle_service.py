@@ -5,6 +5,8 @@ import json
 import zipfile
 from pathlib import Path
 
+from .run_file_filter_service import run_file_filter_service
+
 
 class RunBundleService:
     def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
@@ -57,16 +59,16 @@ class RunBundleService:
         bundle_path: Path,
         manifest_path: Path,
     ) -> list[Path]:
-        if debug:
-            candidates = [path for path in run_dir.rglob("*") if path.is_file()]
-        else:
-            candidates = []
-            result_path = run_dir / "result" / "result.json"
-            if result_path.exists():
-                candidates.append(result_path)
-            artifacts_dir = run_dir / "artifacts"
-            if artifacts_dir.exists():
-                candidates.extend([path for path in artifacts_dir.rglob("*") if path.is_file()])
+        candidates = []
+        for path in run_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            rel_path = path.relative_to(run_dir).as_posix()
+            if debug:
+                if run_file_filter_service.include_in_debug_bundle(rel_path):
+                    candidates.append(path)
+            elif run_file_filter_service.include_in_non_debug_bundle(rel_path):
+                candidates.append(path)
 
         bundle_dir = run_dir / "bundle"
         candidates = [

@@ -19,12 +19,14 @@ from server.models import (
     RunStatus,
     SkillManifest,
 )
+from server.runtime.logging.run_context import bind_run_logging_context
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.protocol.factories import make_diagnostic_warning_payload
 from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
 from server.runtime.session.statechart import timeout_requires_auto_decision
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_audit_contract_service import run_audit_contract_service
+from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.async_compat import maybe_await
@@ -169,6 +171,7 @@ class _RunJobLifecyclePipeline:
         slot_acquired = False
         release_slot_on_exit = True
         run_dir: Path | None = None
+        run_log_mirror_stack: contextlib.ExitStack | None = None
         run_store = self._run_store_backend()
         workspace_manager = self._workspace_backend()
         concurrency_manager = self._concurrency_backend()
@@ -260,6 +263,36 @@ class _RunJobLifecyclePipeline:
                     engine=engine_name,
                     skill_id=skill_id,
                 )
+            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+            run_log_mirror_stack = contextlib.ExitStack()
+            run_log_mirror_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=run_id,
+                    request_id=request_id,
+                    attempt_number=attempt_number,
+                )
+            )
+            run_log_mirror_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=run_id,
+                )
+            )
+            run_log_mirror_stack.enter_context(
+                RunServiceLogMirrorSession.open_attempt_scope(
+                    run_dir=run_dir,
+                    run_id=run_id,
+                    attempt_number=attempt_number,
+                )
+            )
+            logger.info(
+                "run_attempt_started run_id=%s request_id=%s attempt=%s engine=%s mode=%s",
+                run_id,
+                request_id,
+                attempt_number,
+                engine_name,
+                execution_mode,
+            )
             attempt_started_at = datetime.utcnow()
             fs_before_snapshot = self._capture_filesystem_snapshot(run_dir)
             process_exit_code: Optional[int] = None
@@ -425,6 +458,13 @@ class _RunJobLifecyclePipeline:
                     stream_parser=adapter.stream_parser,
                 )
                 try:
+                    logger.info(
+                        "run_attempt_execute_begin run_id=%s request_id=%s attempt=%s engine=%s",
+                        run_id,
+                        request_id,
+                        attempt_number,
+                        engine_name,
+                    )
                     result = await adapter.run(
                         skill,
                         input_data,
@@ -447,6 +487,14 @@ class _RunJobLifecyclePipeline:
                         trust_registered = False
                 process_exit_code = result.exit_code
                 process_failure_reason = result.failure_reason
+                logger.info(
+                    "run_attempt_execute_end run_id=%s request_id=%s attempt=%s exit_code=%s failure_reason=%s",
+                    run_id,
+                    request_id,
+                    attempt_number,
+                    process_exit_code,
+                    process_failure_reason,
+                )
                 process_raw_stdout = result.raw_stdout or ""
                 process_raw_stderr = result.raw_stderr or ""
                 runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
@@ -856,6 +904,13 @@ class _RunJobLifecyclePipeline:
                 )
                 projection_request_id = request_id or f"run:{run_id}"
                 if final_status == RunStatus.WAITING_USER and pending_interaction is not None:
+                    logger.info(
+                        "run_attempt_waiting_user run_id=%s request_id=%s attempt=%s interaction_id=%s",
+                        run_id,
+                        projection_request_id,
+                        attempt_number,
+                        pending_interaction.get("interaction_id"),
+                    )
                     await run_projection_service.write_non_terminal_projection(
                         run_dir=run_dir,
                         request_id=projection_request_id,
@@ -873,6 +928,12 @@ class _RunJobLifecyclePipeline:
                     )
                     await run_store.update_run_status(run_id, final_status)
                 elif final_status == RunStatus.WAITING_AUTH:
+                    logger.info(
+                        "run_attempt_waiting_auth run_id=%s request_id=%s attempt=%s",
+                        run_id,
+                        projection_request_id,
+                        attempt_number,
+                    )
                     pending_owner = None
                     if pending_auth_method_selection is not None:
                         pending_owner = PendingOwner.WAITING_AUTH_METHOD_SELECTION
@@ -896,6 +957,13 @@ class _RunJobLifecyclePipeline:
                     )
                     await run_store.update_run_status(run_id, final_status)
                 else:
+                    logger.info(
+                        "run_attempt_terminal run_id=%s request_id=%s attempt=%s status=%s",
+                        run_id,
+                        projection_request_id,
+                        attempt_number,
+                        final_status.value,
+                    )
                     await run_projection_service.write_terminal_projection(
                         run_dir=run_dir,
                         request_id=projection_request_id,
@@ -1102,6 +1170,8 @@ class _RunJobLifecyclePipeline:
                     warnings=list(final_validation_warnings),
                 )
         finally:
+            if run_log_mirror_stack is not None:
+                run_log_mirror_stack.close()
             if slot_acquired and release_slot_on_exit:
                 await concurrency_manager.release_slot()
 

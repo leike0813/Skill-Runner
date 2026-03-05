@@ -17,10 +17,12 @@ class RunAuditContractService:
             run_id=run_dir.name,
             attempt_number=attempt_number,
             request_input_path=str(audit_dir / "request_input.json"),
+            run_service_log_path=str(audit_dir / "service.run.log"),
             meta_path=str(audit_dir / f"meta.{attempt_number}.json"),
             orchestrator_events_path=str(audit_dir / f"orchestrator_events.{attempt_number}.jsonl"),
             events_path=str(audit_dir / f"events.{attempt_number}.jsonl"),
             fcmp_events_path=str(audit_dir / f"fcmp_events.{attempt_number}.jsonl"),
+            service_log_path=str(audit_dir / f"service.{attempt_number}.log"),
             stdin_path=str(audit_dir / f"stdin.{attempt_number}.log"),
             stdout_path=str(audit_dir / f"stdout.{attempt_number}.log"),
             stderr_path=str(audit_dir / f"stderr.{attempt_number}.log"),
@@ -46,6 +48,17 @@ class RunAuditContractService:
             encoding="utf-8",
         )
         return path
+
+    def initialize_run_audit(
+        self,
+        *,
+        run_dir: Path,
+    ) -> None:
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        run_service_log_path = audit_dir / "service.run.log"
+        if not run_service_log_path.exists():
+            run_service_log_path.write_text("", encoding="utf-8")
 
     def initialize_attempt_audit(
         self,
@@ -74,10 +87,12 @@ class RunAuditContractService:
         if not meta_path.exists():
             meta_path.write_text(json.dumps(meta.model_dump(mode="json"), ensure_ascii=False, indent=2), encoding="utf-8")
 
-        for file_path in (
+        attempt_paths = [
+            contract.run_service_log_path,
             contract.orchestrator_events_path,
             contract.events_path,
             contract.fcmp_events_path,
+            contract.service_log_path,
             contract.stdin_path,
             contract.stdout_path,
             contract.stderr_path,
@@ -86,7 +101,10 @@ class RunAuditContractService:
             contract.fs_after_path,
             contract.fs_diff_path,
             contract.parser_diagnostics_path,
-        ):
+        ]
+        for file_path in attempt_paths:
+            if not file_path:
+                continue
             path = Path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():

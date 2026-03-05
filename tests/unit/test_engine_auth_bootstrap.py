@@ -31,6 +31,12 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path) -> None:
         engine="iflow",
         auth_method="auth_code_or_url",
     )
+    assert bundle.driver_registry.supports(
+        transport="oauth_proxy",
+        engine="opencode",
+        auth_method="api_key",
+        provider_id="deepseek",
+    )
     assert hasattr(manager, "_codex_oauth_proxy_flow")
     assert hasattr(manager, "_gemini_oauth_proxy_flow")
     assert hasattr(manager, "_openai_device_proxy_flow")

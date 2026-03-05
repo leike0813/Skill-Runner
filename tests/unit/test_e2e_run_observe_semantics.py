@@ -144,6 +144,9 @@ def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():
     assert "/runs/{{ request_id }}/result" not in content
     assert "file-tree-layout" in content
     assert "preview-panel" in content
+    assert "collapsedDirs" in content
+    assert "updateTreeVisibility()" in content
+    assert "tree-toggle-btn" in content
 
 
 def test_run_observe_template_uses_canonical_chat_replay_routes() -> None:

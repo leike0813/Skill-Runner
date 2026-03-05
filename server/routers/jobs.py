@@ -8,6 +8,7 @@ Exposes endpoints for:
 """
 
 import logging
+import contextlib
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
@@ -52,6 +53,7 @@ from ..services.platform.async_compat import maybe_await
 from ..services.orchestration.run_store import run_store
 from ..services.orchestration.run_cleanup_manager import run_cleanup_manager
 from ..services.orchestration.run_audit_contract_service import run_audit_contract_service
+from ..services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from ..services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from ..services.orchestration.run_state_service import run_state_service
 from ..services.platform.concurrency_manager import concurrency_manager
@@ -70,6 +72,7 @@ from ..services.orchestration.run_execution_core import (
 from ..services.orchestration.run_interaction_service import run_interaction_service
 from ..runtime.observability.run_read_facade import run_read_facade
 from ..runtime.observability.run_source_adapter import RunSourceCapabilities
+from ..runtime.logging.run_context import bind_run_logging_context
 import uuid
 import json
 
@@ -225,42 +228,69 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             run_dir = workspace_manager.get_run_dir(run_status.run_id)
             if run_dir is None:
                 raise HTTPException(status_code=500, detail="Run directory not found")
-            run_audit_contract_service.write_request_input_snapshot(
-                run_dir=run_dir,
-                request_payload=request_payload,
-            )
-            run_folder_bootstrapper.materialize_skill(
-                skill=skill,
-                run_dir=run_dir,
-                engine_name=request.engine,
-                execution_mode=_execution_mode_value(policy.effective_execution_mode),
-                source=RunLocalSkillSource.INSTALLED,
-            )
-            await run_state_service.initialize_queued_state(
-                run_dir=run_dir,
-                request_id=request_id,
-                run_id=run_status.run_id,
-                request_record=request_record,
-                run_store_backend=run_store,
-            )
-            merged_options = {**engine_opts, **effective_runtime_opts}
-            admitted = await concurrency_manager.admit_or_reject()
-            if not admitted:
-                raise HTTPException(status_code=429, detail="Job queue is full")
-            await run_state_service.advance_dispatch_phase(
-                run_dir=run_dir,
-                request_id=request_id,
-                run_id=run_status.run_id,
-                phase=DispatchPhase.ADMITTED,
-                run_store_backend=run_store,
-            )
-            await run_state_service.advance_dispatch_phase(
-                run_dir=run_dir,
-                request_id=request_id,
-                run_id=run_status.run_id,
-                phase=DispatchPhase.DISPATCH_SCHEDULED,
-                run_store_backend=run_store,
-            )
+            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+            with contextlib.ExitStack() as run_log_stack:
+                run_log_stack.enter_context(
+                    bind_run_logging_context(
+                        run_id=run_status.run_id,
+                        request_id=request_id,
+                        attempt_number=None,
+                    )
+                )
+                run_log_stack.enter_context(
+                    RunServiceLogMirrorSession.open_run_scope(
+                        run_dir=run_dir,
+                        run_id=run_status.run_id,
+                    )
+                )
+                logger.info(
+                    "run_create_orchestration_begin run_id=%s request_id=%s engine=%s",
+                    run_status.run_id,
+                    request_id,
+                    request.engine,
+                )
+                run_audit_contract_service.write_request_input_snapshot(
+                    run_dir=run_dir,
+                    request_payload=request_payload,
+                )
+                run_folder_bootstrapper.materialize_skill(
+                    skill=skill,
+                    run_dir=run_dir,
+                    engine_name=request.engine,
+                    execution_mode=_execution_mode_value(policy.effective_execution_mode),
+                    source=RunLocalSkillSource.INSTALLED,
+                )
+                await run_state_service.initialize_queued_state(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    request_record=request_record,
+                    run_store_backend=run_store,
+                )
+                merged_options = {**engine_opts, **effective_runtime_opts}
+                admitted = await concurrency_manager.admit_or_reject()
+                if not admitted:
+                    raise HTTPException(status_code=429, detail="Job queue is full")
+                await run_state_service.advance_dispatch_phase(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    phase=DispatchPhase.ADMITTED,
+                    run_store_backend=run_store,
+                )
+                await run_state_service.advance_dispatch_phase(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_id=run_status.run_id,
+                    phase=DispatchPhase.DISPATCH_SCHEDULED,
+                    run_store_backend=run_store,
+                )
+                logger.info(
+                    "run_create_orchestration_ready run_id=%s request_id=%s engine=%s",
+                    run_status.run_id,
+                    request_id,
+                    request.engine,
+                )
             background_tasks.add_task(
                 job_orchestrator.run_job,
                 run_id=run_status.run_id,
@@ -342,7 +372,26 @@ async def get_run_status(request_id: str):
             run_auth_orchestration_service,
         )
 
-        await run_auth_orchestration_service.reconcile_waiting_auth(request_id=request_id)
+        with contextlib.ExitStack() as run_log_stack:
+            run_log_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=str(run_id),
+                    request_id=request_id,
+                    attempt_number=None,
+                )
+            )
+            run_log_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=str(run_id),
+                )
+            )
+            logger.info(
+                "run_status_waiting_auth_reconcile run_id=%s request_id=%s",
+                run_id,
+                request_id,
+            )
+            await run_auth_orchestration_service.reconcile_waiting_auth(request_id=request_id)
         projection_payload = await maybe_await(run_store.get_current_projection(request_id))
         state_payload = await maybe_await(run_store.get_run_state(request_id))
         dispatch_payload = await maybe_await(run_store.get_dispatch_state(request_id))
@@ -733,10 +782,7 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
         run_dir = workspace_manager.get_run_dir(run_status.run_id)
         if run_dir is None:
             raise HTTPException(status_code=500, detail="Run directory not found")
-        run_audit_contract_service.write_request_input_snapshot(
-            run_dir=run_dir,
-            request_payload=request_record,
-        )
+        run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
         effective_runtime_options = request_record.get(
             "effective_runtime_options",
             request_record.get("runtime_options", {}),
@@ -750,38 +796,68 @@ async def upload_file(request_id: str, file: UploadFile = File(...), background_
             if isinstance(effective_execution_mode_obj, str)
             else ExecutionMode.AUTO.value
         )
-        run_folder_bootstrapper.materialize_skill(
-            skill=skill,
-            run_dir=run_dir,
-            engine_name=request_record["engine"],
-            execution_mode=execution_mode,
-            source=RunLocalSkillSource.INSTALLED,
-        )
-        await run_state_service.initialize_queued_state(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            request_record=request_record,
-            run_store_backend=run_store,
-        )
-        merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
-        admitted = await concurrency_manager.admit_or_reject()
-        if not admitted:
-            raise HTTPException(status_code=429, detail="Job queue is full")
-        await run_state_service.advance_dispatch_phase(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            phase=DispatchPhase.ADMITTED,
-            run_store_backend=run_store,
-        )
-        await run_state_service.advance_dispatch_phase(
-            run_dir=run_dir,
-            request_id=request_id,
-            run_id=run_status.run_id,
-            phase=DispatchPhase.DISPATCH_SCHEDULED,
-            run_store_backend=run_store,
-        )
+        with contextlib.ExitStack() as run_log_stack:
+            run_log_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=run_status.run_id,
+                    request_id=request_id,
+                    attempt_number=None,
+                )
+            )
+            run_log_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=run_status.run_id,
+                )
+            )
+            logger.info(
+                "run_upload_orchestration_begin run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                request_record["engine"],
+            )
+            run_audit_contract_service.write_request_input_snapshot(
+                run_dir=run_dir,
+                request_payload=request_record,
+            )
+            run_folder_bootstrapper.materialize_skill(
+                skill=skill,
+                run_dir=run_dir,
+                engine_name=request_record["engine"],
+                execution_mode=execution_mode,
+                source=RunLocalSkillSource.INSTALLED,
+            )
+            await run_state_service.initialize_queued_state(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                request_record=request_record,
+                run_store_backend=run_store,
+            )
+            merged_options = {**request_record["engine_options"], **request_record["runtime_options"]}
+            admitted = await concurrency_manager.admit_or_reject()
+            if not admitted:
+                raise HTTPException(status_code=429, detail="Job queue is full")
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.ADMITTED,
+                run_store_backend=run_store,
+            )
+            await run_state_service.advance_dispatch_phase(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_status.run_id,
+                phase=DispatchPhase.DISPATCH_SCHEDULED,
+                run_store_backend=run_store,
+            )
+            logger.info(
+                "run_upload_orchestration_ready run_id=%s request_id=%s engine=%s",
+                run_status.run_id,
+                request_id,
+                request_record["engine"],
+            )
         background_tasks.add_task(
             job_orchestrator.run_job,
             run_id=run_status.run_id,

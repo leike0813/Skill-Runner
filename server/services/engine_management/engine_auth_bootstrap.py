@@ -25,10 +25,7 @@ from server.engines.opencode.auth.callbacks.antigravity_local_callback_server im
 from server.engines.opencode.auth.runtime_handler import OpencodeAuthRuntimeHandler
 from server.runtime.auth.callbacks import CallbackListenerRegistry
 from server.runtime.auth.driver_registry import AuthDriverRegistry
-
-_AUTH_METHOD_CALLBACK = "callback"
-_AUTH_METHOD_AUTH_CODE_OR_URL = "auth_code_or_url"
-_AUTH_METHOD_API_KEY = "api_key"
+from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
 
 
 @dataclass(frozen=True)
@@ -62,149 +59,16 @@ def _register_auth_driver(
 
 def _build_driver_registry() -> AuthDriverRegistry:
     registry = AuthDriverRegistry()
-    # oauth_proxy
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="codex",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="codex",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="gemini",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="gemini",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="iflow",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="iflow",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        provider_id="openai",
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        provider_id="openai",
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        provider_id="google",
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        provider_id="google",
-        execution_mode="protocol_proxy",
-    )
-    _register_auth_driver(
-        registry,
-        transport="oauth_proxy",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_API_KEY,
-        execution_mode="protocol_proxy",
-    )
-    # cli_delegate
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="codex",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="codex",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        provider_id="openai",
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_CALLBACK,
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        provider_id="openai",
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="gemini",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        start_method="iflow-cli-oauth",
-        execution_mode="cli_delegate",
-    )
-    _register_auth_driver(
-        registry,
-        transport="cli_delegate",
-        engine="opencode",
-        auth_method=_AUTH_METHOD_AUTH_CODE_OR_URL,
-        provider_id="google",
-        execution_mode="cli_delegate",
-    )
+    for entry in engine_auth_strategy_service.iter_driver_entries():
+        _register_auth_driver(
+            registry,
+            transport=entry.transport,
+            engine=entry.engine,
+            auth_method=entry.auth_method,
+            provider_id=entry.provider_id,
+            start_method=entry.start_method,
+            execution_mode=entry.execution_mode,
+        )
     return registry
 
 

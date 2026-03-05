@@ -281,6 +281,12 @@
         padding: 0;
         font: inherit;
     }
+    .file-entry .tree-toggle-btn {
+        display: inline-block;
+        width: 14px;
+        margin-right: 4px;
+        text-align: center;
+    }
     .file-tree-layout {
         display: grid;
         grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
@@ -1207,14 +1213,67 @@
                 fileTreePanelEl.textContent = "No files.";
                 return;
             }
+            const collapsedDirs = new Set(
+                entries
+                    .filter((entry) => Boolean(entry && entry.is_dir))
+                    .map((entry) => safeText(entry.path))
+                    .filter(Boolean)
+            );
+            const rows = [];
+
+            function parentPath(path) {
+                const idx = path.lastIndexOf("/");
+                return idx >= 0 ? path.slice(0, idx) : "";
+            }
+
+            function hasCollapsedAncestor(path) {
+                let parent = parentPath(path);
+                while (parent) {
+                    if (collapsedDirs.has(parent)) {
+                        return true;
+                    }
+                    parent = parentPath(parent);
+                }
+                return false;
+            }
+
+            function updateTreeVisibility() {
+                for (const item of rows) {
+                    item.row.style.display = hasCollapsedAncestor(item.path) ? "none" : "";
+                    if (item.isDir && item.toggleEl) {
+                        const expanded = !collapsedDirs.has(item.path);
+                        item.toggleEl.textContent = expanded ? "▼" : "▶";
+                    }
+                }
+            }
+
             for (const entry of entries) {
                 const row = document.createElement("div");
                 row.className = "file-entry";
                 const depth = Number(entry.depth || 0);
                 row.style.paddingLeft = `${Math.max(0, depth) * 14}px`;
                 const name = safeText(entry.name || entry.path);
+                const pathValue = safeText(entry.path);
+                let toggleEl = null;
                 if (entry.is_dir) {
-                    row.textContent = `📁 ${name}/`;
+                    toggleEl = document.createElement("button");
+                    toggleEl.type = "button";
+                    toggleEl.textContent = "▶";
+                    toggleEl.className = "tree-toggle-btn";
+                    toggleEl.addEventListener("click", (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (collapsedDirs.has(pathValue)) {
+                            collapsedDirs.delete(pathValue);
+                        } else {
+                            collapsedDirs.add(pathValue);
+                        }
+                        updateTreeVisibility();
+                    });
+                    row.appendChild(toggleEl);
+                    const label = document.createElement("span");
+                    label.textContent = `📁 ${name}/`;
+                    row.appendChild(label);
                 } else {
                     const btn = document.createElement("button");
                     btn.type = "button";
@@ -1232,7 +1291,9 @@
                     row.appendChild(btn);
                 }
                 fileTreePanelEl.appendChild(row);
+                rows.push({ row, path: pathValue, isDir: Boolean(entry.is_dir), toggleEl });
             }
+            updateTreeVisibility();
         } catch (_err) {
             fileTreePanelEl.textContent = "File tree unavailable.";
         }

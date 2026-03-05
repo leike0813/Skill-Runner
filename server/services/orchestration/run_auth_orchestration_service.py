@@ -10,7 +10,6 @@ from typing import Any, Callable, Iterable, Optional
 
 from fastapi import BackgroundTasks, HTTPException  # type: ignore[import-not-found]
 
-from server.engines.opencode.auth.provider_registry import opencode_auth_provider_registry
 from server.models import (
     AuthChallengeKind,
     AuthMethod,
@@ -29,6 +28,7 @@ from server.models import (
     RunStatus,
 )
 from server.runtime.auth_detection.types import AuthDetectionResult
+from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
 from server.services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_store import run_store
@@ -39,6 +39,13 @@ from server.services.platform.concurrency_manager import concurrency_manager
 from server.services.skill.temp_skill_run_store import temp_skill_run_store
 
 logger = logging.getLogger(__name__)
+
+_CONVERSATION_METHOD_MAP: dict[str, AuthMethod] = {
+    "callback": AuthMethod.CALLBACK,
+    "device_auth": AuthMethod.DEVICE_AUTH,
+    "authorization_code": AuthMethod.AUTHORIZATION_CODE,
+    "api_key": AuthMethod.API_KEY,
+}
 
 
 def _utc_now() -> datetime:
@@ -1068,23 +1075,19 @@ class RunAuthOrchestrationService:
             logger.warning("engine auth callback reconciliation failed", exc_info=True)
 
     def _available_methods_for(self, engine: str, provider_id: str | None) -> list[AuthMethod]:
-        normalized_engine = engine.strip().lower()
-        if normalized_engine == "codex":
-            return [AuthMethod.CALLBACK, AuthMethod.DEVICE_AUTH]
-        if normalized_engine in {"gemini", "iflow"}:
-            return [AuthMethod.CALLBACK, AuthMethod.AUTHORIZATION_CODE]
-        if normalized_engine != "opencode":
-            return []
-        if provider_id is None:
-            return []
-        provider = opencode_auth_provider_registry.get(provider_id)
-        if provider.auth_mode == "api_key":
-            return [AuthMethod.API_KEY]
-        if provider.provider_id == "openai":
-            return [AuthMethod.CALLBACK, AuthMethod.DEVICE_AUTH]
-        if provider.provider_id == "google":
-            return [AuthMethod.CALLBACK]
-        return [AuthMethod.CALLBACK]
+        strategy_methods = engine_auth_strategy_service.methods_for_conversation(
+            engine=engine,
+            provider_id=provider_id,
+        )
+        resolved: list[AuthMethod] = []
+        for item in strategy_methods:
+            method = _CONVERSATION_METHOD_MAP.get(item.strip().lower())
+            if method is None:
+                continue
+            if method in resolved:
+                continue
+            resolved.append(method)
+        return resolved
 
     def _build_method_selection(
         self,

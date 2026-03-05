@@ -15,6 +15,15 @@
         .tree-line { font-size: 13px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .dir { color: #1d4ed8; }
         .file { color: #111827; }
+        .tree-toggle-btn {
+            border: 0;
+            background: transparent;
+            color: #1d4ed8;
+            cursor: pointer;
+            padding: 0 4px 0 0;
+            font-size: 12px;
+            line-height: 1;
+        }
         a { color: #0f766e; text-decoration: none; }
         a:hover { text-decoration: underline; }
         pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
@@ -73,8 +82,15 @@
             <h3 style="margin:0 0 8px;">Run File Tree (Read-only)</h3>
             <div class="pane-scroll" id="run-file-tree-scroll">
                 {% for entry in detail.entries %}
-                <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
+                <div
+                    class="tree-line"
+                    data-rel-path="{{ entry.rel_path }}"
+                    data-depth="{{ entry.depth }}"
+                    data-is-dir="{{ '1' if entry.is_dir else '0' }}"
+                    style="padding-left: {{ entry.depth * 16 }}px;"
+                >
                     {% if entry.is_dir %}
+                    <button type="button" class="tree-toggle-btn" data-tree-toggle aria-expanded="false">▶</button>
                     <span class="dir">📁 {{ entry.name }}/</span>
                     {% else %}
                     <span class="file">📄</span>
@@ -318,6 +334,61 @@
             source.close();
             source = null;
         }
+    }
+
+    function initRunFileTreeCollapse() {
+        const treeScrollEl = document.getElementById("run-file-tree-scroll");
+        if (!treeScrollEl) return;
+        const rows = Array.from(treeScrollEl.querySelectorAll(".tree-line[data-rel-path]"));
+        if (!rows.length) return;
+        const collapsed = new Set();
+
+        function parentPath(path) {
+            const idx = path.lastIndexOf("/");
+            return idx >= 0 ? path.slice(0, idx) : "";
+        }
+
+        function hasCollapsedAncestor(path) {
+            let parent = parentPath(path);
+            while (parent) {
+                if (collapsed.has(parent)) return true;
+                parent = parentPath(parent);
+            }
+            return false;
+        }
+
+        function updateTreeVisibility() {
+            for (const row of rows) {
+                const path = row.dataset.relPath || "";
+                const isDir = row.dataset.isDir === "1";
+                const toggle = row.querySelector("[data-tree-toggle]");
+                row.style.display = hasCollapsedAncestor(path) ? "none" : "";
+                if (isDir && toggle) {
+                    const expanded = !collapsed.has(path);
+                    toggle.textContent = expanded ? "▼" : "▶";
+                    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+                }
+            }
+        }
+
+        for (const row of rows) {
+            if (row.dataset.isDir !== "1") continue;
+            const path = row.dataset.relPath || "";
+            collapsed.add(path);
+            const toggle = row.querySelector("[data-tree-toggle]");
+            if (!toggle) continue;
+            toggle.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (collapsed.has(path)) {
+                    collapsed.delete(path);
+                } else {
+                    collapsed.add(path);
+                }
+                updateTreeVisibility();
+            });
+        }
+        updateTreeVisibility();
     }
 
     function clearWaitingUserWatchdog() {
@@ -745,6 +816,7 @@
         refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});
     }, 3000);
 
+    initRunFileTreeCollapse();
     bootstrapAttemptsAndPanels().catch(() => {});
 
     if (!terminal) {

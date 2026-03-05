@@ -4,7 +4,7 @@ import logging
 import re
 import time
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from server.config import config
@@ -36,8 +36,10 @@ from server.runtime.observability.contracts import (
 from server.services.platform.async_compat import maybe_await
 from server.services.skill.skill_browser import (
     build_preview_payload,
-    list_skill_entries,
-    resolve_skill_file_path,
+)
+from server.services.orchestration.run_file_filter_service import (
+    normalize_relative_path,
+    run_file_filter_service,
 )
 
 
@@ -1546,7 +1548,7 @@ class RunObservabilityService:
         status_payload = self._read_status_payload(run_dir_path) if run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
         file_state = self._build_file_state(run_dir_path)
-        entries = list_skill_entries(run_dir_path) if run_dir_path.exists() else []
+        entries = self._list_run_entries(run_dir_path) if run_dir_path.exists() else []
         runtime_options = record.get("runtime_options", {})
         effective_runtime_options = record.get("effective_runtime_options", runtime_options)
         requested_execution_mode = None
@@ -1600,7 +1602,24 @@ class RunObservabilityService:
     async def resolve_run_file_path(self, request_id: str, relative_path: str) -> Path:
         detail = await self.get_run_detail(request_id)
         run_dir = Path(detail["run_dir"])
-        return resolve_skill_file_path(run_dir, relative_path)
+        normalized = normalize_relative_path(relative_path)
+        if not run_file_filter_service.path_allowed_for_run_explorer(normalized):
+            raise ValueError("path is filtered")
+        requested = PurePosixPath(normalized)
+        candidate = (run_dir / requested).resolve(strict=False)
+        root_resolved = run_dir.resolve(strict=True)
+        try:
+            candidate.relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError("path escapes run root") from exc
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError("file not found")
+        candidate_resolved = candidate.resolve(strict=True)
+        try:
+            candidate_resolved.relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError("path escapes run root") from exc
+        return candidate_resolved
 
     async def build_run_file_preview(self, request_id: str, relative_path: str) -> Dict[str, Any]:
         file_path = await self.resolve_run_file_path(request_id, relative_path)
@@ -1670,6 +1689,30 @@ class RunObservabilityService:
                 item["is_dir"] = path.is_dir()
             state[name] = item
         return state
+
+    def _list_run_entries(self, run_dir: Path) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+
+        def _walk(current: Path, depth: int) -> None:
+            children = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            for child in children:
+                rel = child.relative_to(run_dir).as_posix()
+                is_dir = child.is_dir() and not child.is_symlink()
+                if not run_file_filter_service.include_in_run_explorer(rel, is_dir=is_dir):
+                    continue
+                entries.append(
+                    {
+                        "rel_path": rel,
+                        "name": child.name,
+                        "is_dir": is_dir,
+                        "depth": depth,
+                    }
+                )
+                if is_dir:
+                    _walk(child, depth + 1)
+
+        _walk(run_dir, 0)
+        return entries
 
     def _derive_updated_at(self, run_dir: Path | None, record: Dict[str, Any]) -> str | None:
         if run_dir and run_dir.exists():

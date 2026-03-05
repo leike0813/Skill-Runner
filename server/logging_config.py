@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from .config import config
+from .runtime.logging.run_context import install_log_record_factory_once
 from .services.platform.system_settings_service import system_settings_service
 
 _LOGGING_CONFIGURED_ATTR = "_skill_runner_logging_configured"
@@ -293,6 +294,7 @@ def _remove_managed_handlers(root_logger: logging.Logger) -> None:
 
 
 def _configure_logging(*, force: bool) -> None:
+    install_log_record_factory_once()
     settings = _resolve_logging_settings()
 
     root_logger = logging.getLogger()

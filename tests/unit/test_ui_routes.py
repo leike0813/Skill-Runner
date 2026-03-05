@@ -10,7 +10,6 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
-from server.routers.ui import _build_auth_ui_capabilities
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
 
@@ -390,19 +389,43 @@ async def test_ui_engines_page(monkeypatch):
     assert "ttyd" in response.text
 
 
-def test_ui_auth_capabilities_opencode_api_key_scoped_to_oauth_proxy():
-    capabilities = _build_auth_ui_capabilities(
-        {
-            "openai": "oauth",
-            "google": "oauth",
-            "deepseek": "api_key",
-        }
+@pytest.mark.asyncio
+async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.profile",
+        SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(engines=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_auth_flow_manager.get_active_session_snapshot",
+        lambda: {"active": False},
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_auth_strategy_service.list_ui_capabilities",
+        lambda: {
+            "oauth_proxy": {
+                "codex": ["callback"],
+                "gemini": ["callback"],
+                "iflow": ["callback"],
+                "opencode": {"deepseek": ["api_key"]},
+            },
+            "cli_delegate": {
+                "codex": ["auth_code_or_url"],
+                "gemini": ["auth_code_or_url"],
+                "iflow": ["auth_code_or_url"],
+                "opencode": {},
+            },
+        },
     )
 
-    oauth_opencode = capabilities["oauth_proxy"]["opencode"]
-    cli_opencode = capabilities["cli_delegate"]["opencode"]
-    assert oauth_opencode["deepseek"] == ["api_key"]
-    assert "deepseek" not in cli_opencode
+    response = await _request("GET", "/ui/engines")
+    assert response.status_code == 200
+    assert '"deepseek": ["api_key"]' in response.text
 
 
 @pytest.mark.asyncio
@@ -1076,6 +1099,8 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/chat/history" in detail_res.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
+    assert "initRunFileTreeCollapse()" in detail_res.text
+    assert "data-tree-toggle" in detail_res.text
     assert "connectEvents()" in detail_res.text
     assert "executeWaitingAuthWatchdogTick" in detail_res.text
     assert "maybeStartWaitingAuthWatchdog" in detail_res.text

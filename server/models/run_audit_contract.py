@@ -23,10 +23,12 @@ class RunAuditContract(BaseModel):
     run_id: str
     attempt_number: int = Field(ge=1)
     request_input_path: str | None = None
+    run_service_log_path: str | None = None
     meta_path: str
     orchestrator_events_path: str
     events_path: str
     fcmp_events_path: str
+    service_log_path: str | None = None
     stdin_path: str | None = None
     stdout_path: str
     stderr_path: str

@@ -5,6 +5,7 @@ from logging.handlers import TimedRotatingFileHandler
 import pytest
 
 from server import logging_config
+from server.runtime.logging.run_context import bind_run_logging_context
 from server.services.platform.system_settings_service import EditableLoggingSettings
 
 
@@ -91,6 +92,19 @@ def test_setup_logging_is_idempotent(monkeypatch, tmp_path):
     second_ids = [id(handler) for handler in logging.getLogger().handlers]
 
     assert first_ids == second_ids
+
+
+def test_setup_logging_keeps_record_factory_idempotent(monkeypatch, tmp_path):
+    _stub_logging_settings(monkeypatch)
+    monkeypatch.setenv("LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("LOG_FILE_BASENAME", "skill_runner.log")
+
+    logging_config.setup_logging()
+    first_factory = logging.getLogRecordFactory()
+    logging_config.setup_logging()
+    second_factory = logging.getLogRecordFactory()
+
+    assert first_factory is second_factory
 
 
 def test_setup_logging_json_format_writes_expected_fields(monkeypatch, tmp_path):
@@ -191,3 +205,31 @@ def test_logging_settings_payload_uses_settings_file_for_editable_and_env_for_re
     assert payload["read_only"]["file_basename"] == "custom.log"
     assert payload["read_only"]["rotation_when"] == "H"
     assert payload["read_only"]["rotation_interval"] == 2
+
+
+def test_setup_logging_installs_run_context_record_factory(monkeypatch, tmp_path):
+    _stub_logging_settings(monkeypatch)
+    monkeypatch.setenv("LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("LOG_FILE_BASENAME", "skill_runner.log")
+
+    captured: list[logging.LogRecord] = []
+
+    class _CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record)
+
+    logging_config.setup_logging()
+    root = logging.getLogger()
+    capture_handler = _CaptureHandler()
+    root.addHandler(capture_handler)
+    try:
+        with bind_run_logging_context(run_id="run-1", request_id="req-1", attempt_number=2):
+            logging.getLogger("test").info("hello")
+    finally:
+        root.removeHandler(capture_handler)
+
+    assert captured
+    record = captured[-1]
+    assert getattr(record, "run_id", None) == "run-1"
+    assert getattr(record, "request_id", None) == "req-1"
+    assert getattr(record, "attempt_number", None) == 2

@@ -15,6 +15,8 @@ data/runs/<run_id>/
 │   ├── orchestrator_events.<attempt>.jsonl
 │   ├── events.<attempt>.jsonl
 │   ├── fcmp_events.<attempt>.jsonl
+│   ├── service.run.log
+│   ├── service.<attempt>.log
 │   ├── stdin.<attempt>.log
 │   ├── stdout.<attempt>.log
 │   ├── stderr.<attempt>.log
@@ -126,7 +128,27 @@ RASP/raw runtime 事件历史。
 
 attempt 级原始执行输出。
 
-### 3.6 `parser_diagnostics.<attempt>.jsonl`
+### 3.6 `service.run.log`（及轮转分片）
+
+run 级服务日志全集镜像文件，覆盖该 run 的全生命周期编排日志（含 attempt 内外）。
+
+- 主文件：`service.run.log`
+- 轮转分片：`service.run.log.1`、`.2`、`.3`
+- 默认轮转参数：`8MB` 主文件 + `3` 个备份分片
+
+### 3.7 `service.<attempt>.log`（及轮转分片）
+
+attempt 级服务日志镜像文件，是 `service.run.log` 的 attempt 视角子集。仅包含服务进程 Python logging 中具备当前 `run_id` 且匹配 `attempt_number` 的记录。
+
+- 主文件：`service.<attempt>.log`
+- 轮转分片：`service.<attempt>.log.1`、`.2`、`.3`
+- 默认轮转参数：`8MB` 主文件 + `3` 个备份分片
+
+说明：
+- 这是 run 级审计镜像，不替代全局日志 `data/logs/skill_runner.log`
+- 缺失 `run_id` 上下文的日志不会写入该文件
+
+### 3.8 `parser_diagnostics.<attempt>.jsonl`
 
 parser/materialization diagnostics。
 
@@ -135,7 +157,7 @@ parser/materialization diagnostics。
 - diagnostics 只用于排查和观测
 - diagnostics 不是当前状态权威
 
-### 3.7 `protocol_metrics.<attempt>.json`
+### 3.9 `protocol_metrics.<attempt>.json`
 
 协议物化统计，例如：
 

@@ -102,7 +102,7 @@ class OpencodeAuthRuntimeHandler:
                     raise ValueError(
                         "Unsupported auth_method for OpenCode OAuth provider: use callback or auth_code_or_url"
                     )
-        registry_provider_id = None if provider.auth_mode == "api_key" else provider.provider_id
+        registry_provider_id = provider.provider_id
         if not driver_registry.supports(
             transport=transport,
             engine="opencode",
