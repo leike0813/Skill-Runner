@@ -1,0 +1,23 @@
+{% set current_lang = lang() %}
+{% set lang_labels = {
+  'zh': t('nav.language_zh', default='中文'),
+  'en': t('nav.language_en', default='EN'),
+  'fr': t('nav.language_fr', default='FR'),
+  'ja': t('nav.language_ja', default='日本語')
+} %}
+<details class="lang-menu">
+  <summary class="lang-trigger" aria-label="{{ t('nav.language', default='Language') }}">
+    <span class="lang-trigger-icon" aria-hidden="true">🌐</span>
+    <span class="lang-trigger-label">{{ lang_labels.get(current_lang, current_lang | upper) }}</span>
+  </summary>
+  <div class="lang-dropdown" role="menu">
+    {% for code in ['zh', 'en', 'fr', 'ja'] %}
+      {% set label = lang_labels[code] %}
+      {% if code == current_lang %}
+        <span class="lang-option is-active" aria-current="true">{{ label }}</span>
+      {% else %}
+        <a class="lang-option" href="{{ request.url.path }}?lang={{ code }}">{{ label }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+</details>

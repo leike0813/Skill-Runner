@@ -1,14 +1,14 @@
 <div id="run-logs-panel">
     <div style="margin-bottom:8px; font-size:13px; color:#374151;">
-        request_id={{ payload.request_id }} | run_id={{ payload.run_id }} | status={{ payload.status }}
+        {{ t("ui.run_logs.meta_request_id", default="request_id=") }}{{ payload.request_id }} | {{ t("ui.run_logs.meta_run_id", default="run_id=") }}{{ payload.run_id }} | {{ t("ui.run_logs.meta_status", default="status=") }}{{ payload.status }}
     </div>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
         <div>
-            <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stdout (tail)</div>
+            <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">{{ t("ui.run_logs.stdout_tail", default="stdout (tail)") }}</div>
             <pre style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;">{{ payload.stdout or "" }}</pre>
         </div>
         <div>
-            <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">stderr (tail)</div>
+            <div style="font-size:12px; margin-bottom:4px; color:#4b5563;">{{ t("ui.run_logs.stderr_tail", default="stderr (tail)") }}</div>
             <pre style="max-height:360px; overflow:auto; background:#f9fafb; border:1px solid #e5e7eb; padding:8px;">{{ payload.stderr or "" }}</pre>
         </div>
     </div>
@@ -21,4 +21,3 @@
     ></div>
     {% endif %}
 </div>
-

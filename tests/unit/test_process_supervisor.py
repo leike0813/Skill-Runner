@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -38,7 +37,7 @@ def _restore_supervisor(_enable_supervisor: bool):
 
 
 def test_process_supervisor_register_release_is_idempotent(tmp_path: Path) -> None:
-    store = ProcessLeaseStore(tmp_path / "leases")
+    store = ProcessLeaseStore(tmp_path / "runs.db")
     supervisor = RuntimeProcessSupervisor(lease_store=store)
     proc = _FakePopenProcess(12345)
 
@@ -67,7 +66,7 @@ def test_process_supervisor_register_release_is_idempotent(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_reap_orphan_leases_on_startup_only_processes_active(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    store = ProcessLeaseStore(tmp_path / "leases")
+    store = ProcessLeaseStore(tmp_path / "runs.db")
     supervisor = RuntimeProcessSupervisor(lease_store=store)
 
     active = {
@@ -85,8 +84,8 @@ async def test_reap_orphan_leases_on_startup_only_processes_active(monkeypatch: 
         "status": "closed",
     }
     store.upsert_active(active)
-    closed_path = store.ensure_dir() / "closed-1.json"
-    closed_path.write_text(json.dumps(closed, ensure_ascii=False), encoding="utf-8")
+    store.upsert_active(closed)
+    store.close("closed-1", reason="already_closed")
 
     monkeypatch.setattr(
         "server.services.platform.process_supervisor.terminate_pid_tree",
@@ -107,7 +106,7 @@ async def test_reap_orphan_leases_on_startup_only_processes_active(monkeypatch: 
 
 @pytest.mark.asyncio
 async def test_terminate_lease_async_falls_back_to_pid_when_process_ref_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    store = ProcessLeaseStore(tmp_path / "leases")
+    store = ProcessLeaseStore(tmp_path / "runs.db")
     supervisor = RuntimeProcessSupervisor(lease_store=store)
     store.upsert_active(
         {
@@ -130,7 +129,7 @@ async def test_terminate_lease_async_falls_back_to_pid_when_process_ref_missing(
 
 
 def test_terminate_lease_sync_with_missing_lease_returns_already_exited(tmp_path: Path) -> None:
-    store = ProcessLeaseStore(tmp_path / "leases")
+    store = ProcessLeaseStore(tmp_path / "runs.db")
     supervisor = RuntimeProcessSupervisor(lease_store=store)
     result = supervisor.terminate_lease_sync("missing", reason="test")
     assert result.outcome == "already_exited"

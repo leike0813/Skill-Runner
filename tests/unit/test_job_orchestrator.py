@@ -2216,10 +2216,6 @@ async def test_run_job_temp_resume_loads_skill_from_run_dir_when_registry_misses
         _seed_run_dir_skill(run_dir, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
-        monkeypatch.setattr(
-            "server.services.skill.temp_skill_run_manager.temp_skill_run_manager.on_terminal",
-            AsyncMock(return_value=None),
-        )
 
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None):
             await orchestrator.run_job(

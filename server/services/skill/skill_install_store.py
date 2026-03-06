@@ -12,7 +12,7 @@ class SkillInstallStore:
     """SQLite-backed store for skill package install request lifecycle."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or Path(config.SYSTEM.SKILL_INSTALLS_DB)
+        self.db_path = db_path or Path(config.SYSTEM.RUNS_DB)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -21,9 +21,13 @@ class SkillInstallStore:
         return aiosqlite.connect(str(self.db_path))
 
     async def _ensure_initialized(self) -> None:
+        if self._initialized and not self.db_path.exists():
+            self._initialized = False
         if self._initialized:
             return
         async with self._init_lock:
+            if self._initialized and not self.db_path.exists():
+                self._initialized = False
             if self._initialized:
                 return
             await self._init_db()
@@ -47,6 +51,59 @@ class SkillInstallStore:
                 """
             )
             await conn.commit()
+        await self._migrate_legacy_skill_installs_if_needed()
+
+    async def _migrate_legacy_skill_installs_if_needed(self) -> None:
+        legacy_path = Path(config.SYSTEM.SKILL_INSTALLS_DB)
+        if legacy_path.resolve() == self.db_path.resolve():
+            return
+        if not legacy_path.exists():
+            return
+        if not legacy_path.is_file():
+            return
+        try:
+            async with aiosqlite.connect(str(legacy_path)) as legacy_conn:
+                legacy_conn.row_factory = aiosqlite.Row
+                cur = await legacy_conn.execute("SELECT * FROM skill_installs")
+                rows = await cur.fetchall()
+        except (OSError, RuntimeError, ValueError):
+            return
+        if not rows:
+            return
+        async with self._connect() as target_conn:
+            await target_conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_installs (
+                    request_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    skill_id TEXT,
+                    version TEXT,
+                    action TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            for row in rows:
+                await target_conn.execute(
+                    """
+                    INSERT OR IGNORE INTO skill_installs (
+                        request_id, status, skill_id, version, action, error, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["request_id"],
+                        row["status"],
+                        row["skill_id"],
+                        row["version"],
+                        row["action"],
+                        row["error"],
+                        row["created_at"],
+                        row["updated_at"],
+                    ),
+                )
+            await target_conn.commit()
 
     async def _execute(self, sql: str, params: tuple[Any, ...]) -> None:
         async with self._connect() as conn:

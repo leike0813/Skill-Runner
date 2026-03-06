@@ -479,9 +479,9 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
 
         run_form = await _request(app, "GET", "/skills/demo-skill/run")
         assert run_form.status_code == 200
-        assert "Inline Input" in run_form.text
-        assert "Execution Mode" in run_form.text
-        assert "Model" in run_form.text
+        assert "内联输入" in run_form.text
+        assert "执行模式" in run_form.text
+        assert "模型" in run_form.text
 
         create = await _request(
             app,
@@ -511,13 +511,13 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
 
         runs = await _request(app, "GET", "/runs")
         assert runs.status_code == 200
-        assert "Details" in runs.text
+        assert "详情" in runs.text
         assert "/runs/req-e2e-1" in runs.text
 
         observe_page = await _request(app, "GET", "/runs/req-e2e-1")
         assert observe_page.status_code == 200
-        assert "Pending Input Request" in observe_page.text
-        assert "Ctrl+Enter / Cmd+Enter to send" in observe_page.text
+        assert "待处理输入请求" in observe_page.text
+        assert "Ctrl+Enter / Cmd+Enter 发送" in observe_page.text
         assert "Event Relations" not in observe_page.text
         assert "Raw Ref Preview" not in observe_page.text
 
@@ -605,12 +605,12 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
     try:
         home = await _request(app, "GET", "/")
         assert home.status_code == 200
-        assert "Fixture Skills (Temp Upload)" in home.text
+        assert "样例 Skill（临时上传）" in home.text
         assert "demo-prime-number" in home.text
 
         run_form = await _request(app, "GET", "/fixtures/demo-prime-number/run")
         assert run_form.status_code == 200
-        assert "Run Source:</strong> temp" in run_form.text
+        assert "Run 来源：</strong> temp" in run_form.text
 
         create = await _request(
             app,

@@ -1,20 +1,20 @@
 <div class="card danger-card">
-    <h2 class="danger-title">Danger Zone：重置项目数据</h2>
+    <h2 class="danger-title">{{ t("ui.settings.reset.title", default="Danger Zone：重置项目数据") }}</h2>
     <div class="danger-text">
-        该操作会删除数据库与运行数据目录，属于不可逆高危操作。请仅在维护窗口执行。
+        {{ t("ui.settings.reset.subtitle", default="This operation removes database and run data directories. It is irreversible and should only be used during maintenance windows.") }}
     </div>
     <div class="danger-options">
-        <label><input id="reset-include-logs" type="checkbox"> 同时清理应用日志（data/logs）</label>
-        <label><input id="reset-include-engine-catalog" type="checkbox"> 同时清理引擎模型缓存</label>
-        <label><input id="reset-include-agent-status" type="checkbox"> 同时清理 agent 状态文件</label>
+        <label><input id="reset-include-logs" type="checkbox"> {{ t("ui.settings.reset.include_logs", default="Also clean application logs (data/logs)") }}</label>
+        <label><input id="reset-include-engine-catalog" type="checkbox"> {{ t("ui.settings.reset.include_engine_catalog", default="Also clean engine model cache") }}</label>
+        <label><input id="reset-include-agent-status" type="checkbox"> {{ t("ui.settings.reset.include_agent_status", default="Also clean agent status file") }}</label>
         {% if engine_auth_session_log_persistence_enabled %}
-        <label><input id="reset-include-engine-auth-sessions" type="checkbox"> 同时清理引擎鉴权会话日志</label>
+        <label><input id="reset-include-engine-auth-sessions" type="checkbox"> {{ t("ui.settings.reset.include_engine_auth_sessions", default="Also clean engine auth session logs") }}</label>
         {% endif %}
     </div>
     <div class="row" style="margin-top:10px;">
-        <button id="danger-reset-open-btn" type="button" class="danger-btn">重置项目数据</button>
+        <button id="danger-reset-open-btn" type="button" class="danger-btn">{{ t("ui.settings.reset.action", default="重置项目数据") }}</button>
         <label style="font-size:13px; color:#374151;">
-            <input id="reset-dry-run" type="checkbox"> 仅预览（dry-run，不执行删除）
+            <input id="reset-dry-run" type="checkbox"> {{ t("ui.settings.reset.dry_run", default="Preview only (dry-run, no delete)") }}
         </label>
     </div>
     <div id="danger-reset-result" class="danger-result"></div>

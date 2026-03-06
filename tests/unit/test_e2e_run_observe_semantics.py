@@ -45,7 +45,7 @@ def test_run_observe_template_consumes_backend_ask_user_hints():
     assert "applyPendingPrompt({" in content
     assert 'id="prompt-card-hint"' in content
     assert "ui_hints" in content
-    assert "replyTextEl.placeholder = hint || \"Reply to agent...\";" in content
+    assert "replyTextEl.placeholder = hint || I18N.replyPlaceholder;" in content
 
 
 def test_run_observe_template_maps_user_input_required_to_agent_semantics():
@@ -100,9 +100,9 @@ def test_run_observe_template_appends_final_artifact_summary():
     assert "payload.result_status" in content
     assert "buildFinalSummaryText(" in content
     assert "if (normalizedStatus === \"failed\")" in content
-    assert "任务失败。" in content
+    assert "I18N.taskFailedPrefix" in content
     assert "if (normalizedStatus === \"canceled\")" in content
-    assert "任务已取消。" in content
+    assert "I18N.taskCanceledPrefix" in content
     assert "finalSummaryTextEl.textContent" in content
     assert "finalSummaryCardEl.classList.remove(\"hidden\")" in content
     assert "const hasResult = payload.has_result === true;" in content

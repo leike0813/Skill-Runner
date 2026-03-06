@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-    <h2 style="margin-top: 0;">Runs</h2>
-    <p class="muted">All runs created from this client can be reopened from this table.</p>
-    <table>
+    <h2 style="margin-top: 0;">{{ t("client.runs_title", default="Runs") }}</h2>
+    <p class="muted">{{ t("client.runs_subtitle", default="All runs created from this client can be reopened from this table.") }}</p>
+    <table class="table table-striped">
         <thead>
             <tr>
-                <th>Request ID</th>
-                <th>Status</th>
-                <th>Skill</th>
-                <th>Engine</th>
-                <th>Updated At</th>
-                <th>Steps</th>
+                <th>{{ t("client.runs_table_request_id", default="Request ID") }}</th>
+                <th>{{ t("client.runs_table_status", default="Status") }}</th>
+                <th>{{ t("client.runs_table_skill", default="Skill") }}</th>
+                <th>{{ t("client.runs_table_engine", default="Engine") }}</th>
+                <th>{{ t("client.runs_table_updated_at", default="Updated At") }}</th>
+                <th>{{ t("client.runs_table_steps", default="Steps") }}</th>
                 <th></th>
             </tr>
         </thead>
@@ -30,12 +30,12 @@
                 <td>{{ row.updated_at or "-" }}</td>
                 <td>{{ row.step_count }}</td>
                 <td>
-                    <a class="btn secondary" href="/runs/{{ row.request_id }}">Details</a>
+                    <a class="btn btn-secondary" href="/runs/{{ row.request_id }}">{{ t("client.btn_details", default="Details") }}</a>
                 </td>
             </tr>
         {% endfor %}
         {% if not rows %}
-            <tr><td colspan="7" class="muted">No runs created from this client yet.</td></tr>
+            <tr><td colspan="7" class="muted">{{ t("client.runs_no_runs", default="No runs created from this client yet.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>

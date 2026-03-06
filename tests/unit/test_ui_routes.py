@@ -92,7 +92,7 @@ async def test_ui_settings_contains_logging_and_reset_controls(monkeypatch):
 
     response = await _request("GET", "/ui/settings")
     assert response.status_code == 200
-    assert "Logging Settings" in response.text
+    assert "日志设置" in response.text
     assert "Danger Zone：重置项目数据" in response.text
     assert 'id="danger-reset-open-btn"' in response.text
     assert "/v1/management/system/reset-data" in response.text
@@ -320,7 +320,7 @@ async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
 
     detail_res = await _request("GET", "/ui/skills/demo-ui-skill")
     assert detail_res.status_code == 200
-    assert "Package Structure" in detail_res.text
+    assert "包结构（只读）" in detail_res.text
     assert "SKILL.md" in detail_res.text
 
     preview_res = await _request("GET", "/ui/skills/demo-ui-skill/view?path=SKILL.md")
@@ -382,10 +382,10 @@ async def test_ui_engines_page(monkeypatch):
     assert 'hx-get="/ui/management/engines/table"' not in response.text
     assert "<table>" in response.text
     assert "内嵌终端（ttyd）" in response.text
-    assert "Engine Auth" in response.text
+    assert "引擎鉴权" in response.text
     assert 'id="auth-transport-select"' in response.text
-    assert "OAuth 代理（oauth_proxy）" in response.text
-    assert "CLI 委托（cli_delegate）" in response.text
+    assert "OAuth Proxy (oauth_proxy)" in response.text
+    assert "CLI Delegate (cli_delegate)" in response.text
     assert "const authUiCapabilities = " in response.text
     assert "Codex OAuth代理（Callback）" not in response.text
     assert "ttyd" in response.text
@@ -548,8 +548,8 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-entry="codex"' in response.text
     assert 'data-engine-auth-entry="iflow"' in response.text
-    assert "鉴权(Codex)" in response.text
-    assert "鉴权(iFlow)" in response.text
+    assert "Auth (Codex)" in response.text
+    assert "Auth (iFlow)" in response.text
     assert "启动TUI" in response.text
     assert "升级" in response.text
     assert 'data-engine-auth-start=' not in response.text
@@ -872,7 +872,7 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
 
     response = await _request("GET", "/ui/engines/upgrades/req-1/status")
     assert response.status_code == 200
-    assert "Request ID:" in response.text
+    assert "请求 ID：" in response.text
     assert "gemini" in response.text
     assert "stdout" in response.text
 
@@ -900,7 +900,7 @@ async def test_ui_engine_models_page(monkeypatch):
     assert "gpt-5.2-codex" in response.text
     assert "GPT-5.2 Codex" in response.text
     assert "<th>display_name</th>" not in response.text
-    assert "<th>model</th>" in response.text
+    assert "<th>模型</th>" in response.text
 
 
 @pytest.mark.asyncio
@@ -1083,14 +1083,15 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
 
     detail_res = await _request("GET", "/ui/runs/req-1")
     assert detail_res.status_code == 200
-    assert "Request: req-1" in detail_res.text
-    assert "Run File Tree (Read-only)" in detail_res.text
+    assert "请求：" in detail_res.text
+    assert "req-1" in detail_res.text
+    assert "Run 文件树（只读）" in detail_res.text
     assert "对话区（Canonical Chat）" in detail_res.text
-    assert "Raw stderr" in detail_res.text
+    assert "原始 stderr" in detail_res.text
     assert "raw_ref 回跳预览" in detail_res.text
-    assert "FCMP Audit Stream" in detail_res.text
-    assert "RASP Audit Stream" in detail_res.text
-    assert "Orchestrator Audit Stream" in detail_res.text
+    assert "FCMP 审计流" in detail_res.text
+    assert "RASP 审计流" in detail_res.text
+    assert "Orchestrator 审计流" in detail_res.text
     assert 'id="run-file-tree-scroll"' in detail_res.text
     assert 'id="run-file-preview-scroll"' in detail_res.text
     assert 'id="fcmp-audit-log"' in detail_res.text
@@ -1107,10 +1108,10 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "executeWaitingAuthWatchdogTick" in detail_res.text
     assert "maybeStartWaitingAuthWatchdog" in detail_res.text
     assert "clearWaitingAuthWatchdog" in detail_res.text
-    assert detail_res.text.index("raw_ref 回跳预览") < detail_res.text.index("Attempt:")
-    assert detail_res.text.index("对话区（Canonical Chat）") < detail_res.text.index("Attempt:")
-    assert detail_res.text.index("Attempt:") < detail_res.text.index("FCMP Audit Stream")
-    assert detail_res.text.rindex("Raw stderr") > detail_res.text.index("FCMP Audit Stream")
+    assert detail_res.text.index("raw_ref 回跳预览") < detail_res.text.index("Attempt：")
+    assert detail_res.text.index("对话区（Canonical Chat）") < detail_res.text.index("Attempt：")
+    assert detail_res.text.index("Attempt：") < detail_res.text.index("FCMP 审计流")
+    assert detail_res.text.rindex("原始 stderr") > detail_res.text.index("FCMP 审计流")
 
     preview_res = await _request("GET", "/ui/runs/req-1/view?path=logs/stdout.txt")
     assert preview_res.status_code == 200

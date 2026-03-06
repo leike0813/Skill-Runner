@@ -1,15 +1,15 @@
-<table>
+<table class="table table-striped">
     <thead>
         <tr>
-            <th>Request ID</th>
-            <th>Run ID</th>
-            <th>Skill</th>
-            <th>Engine</th>
-            <th>Status</th>
-            <th>Pending</th>
-            <th>Interactions</th>
-            <th>Updated At</th>
-            <th>Actions</th>
+            <th>{{ t("ui.runs.table.request_id", default="Request ID") }}</th>
+            <th>{{ t("ui.runs.table.run_id", default="Run ID") }}</th>
+            <th>{{ t("ui.runs.table.skill", default="Skill") }}</th>
+            <th>{{ t("ui.runs.table.engine", default="Engine") }}</th>
+            <th>{{ t("ui.runs.table.status", default="Status") }}</th>
+            <th>{{ t("ui.runs.table.pending", default="Pending") }}</th>
+            <th>{{ t("ui.runs.table.interactions", default="Interactions") }}</th>
+            <th>{{ t("ui.runs.table.updated_at", default="Updated At") }}</th>
+            <th>{{ t("ui.runs.table.actions", default="Actions") }}</th>
         </tr>
     </thead>
     <tbody>
@@ -23,12 +23,12 @@
             <td>{{ row.pending_interaction_id if row.pending_interaction_id is not none else "-" }}</td>
             <td>{{ row.interaction_count }}</td>
             <td>{{ row.updated_at or "-" }}</td>
-            <td><a href="/ui/runs/{{ row.request_id }}">查看详情</a></td>
+            <td><a href="/ui/runs/{{ row.request_id }}">{{ t("ui.runs.table.details", default="查看详情") }}</a></td>
         </tr>
     {% endfor %}
     {% if not runs %}
         <tr>
-            <td colspan="9" style="color:#6b7280;">暂无可观测 runs</td>
+            <td colspan="9" style="color:#6b7280;">{{ t("ui.runs.table.empty", default="暂无可观测 runs") }}</td>
         </tr>
     {% endif %}
     </tbody>

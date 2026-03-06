@@ -1,9 +1,9 @@
 <div id="engine-models-panel">
     <div class="card">
-        <a href="/ui/engines">← Back to Engines</a>
-        <h1>模型管理：{{ engine }}</h1>
-        <div class="muted">Detected Version: {{ view.cli_version_detected or "-" }}</div>
-        <div class="muted">Resolved Snapshot: {{ view.resolved_snapshot_version }} ({{ view.resolved_snapshot_file }})</div>
+        <a href="/ui/engines">{{ t("ui.common.back_engines", default="← Back to Engines") }}</a>
+        <h1>{{ t("ui.engine_models.title", default="模型管理：{engine}", engine=engine) }}</h1>
+        <div class="muted">{{ t("ui.engine_models.detected_version", default="Detected Version:") }} {{ view.cli_version_detected or "-" }}</div>
+        <div class="muted">{{ t("ui.engine_models.resolved_snapshot", default="Resolved Snapshot:") }} {{ view.resolved_snapshot_version }} ({{ view.resolved_snapshot_file }})</div>
         {% if engine == "opencode" %}
         <div class="row" style="margin-top: 10px;">
             <form
@@ -11,15 +11,15 @@
                 hx-target="#engine-models-panel"
                 hx-swap="outerHTML"
             >
-                <button type="submit">手动刷新模型列表</button>
+                <button class="btn btn-primary" type="submit">{{ t("ui.engine_models.refresh_opencode", default="手动刷新模型列表") }}</button>
             </form>
         </div>
         {% endif %}
         {% if view.fallback_reason %}
-        <div class="muted">Fallback: {{ view.fallback_reason }}</div>
+        <div class="muted">{{ t("ui.engine_models.fallback", default="Fallback:") }} {{ view.fallback_reason }}</div>
         {% endif %}
         {% if not snapshots_supported %}
-        <div class="muted">Snapshots: not supported for {{ engine }} (runtime probe cache only).</div>
+        <div class="muted">{{ t("ui.engine_models.snapshots_not_supported", default="Snapshots: not supported for {engine} (runtime probe cache only).", engine=engine) }}</div>
         {% endif %}
         {% if error %}
         <div class="error" style="margin-top:8px;">{{ error }}</div>
@@ -30,21 +30,21 @@
     </div>
 
     <div class="card">
-        <h2>当前 Model Manifest（原始）</h2>
+        <h2>{{ t("ui.engine_models.manifest_raw", default="当前 Model Manifest（原始）") }}</h2>
         <pre>{{ view.manifest | tojson(indent=2) }}</pre>
     </div>
 
     <div class="card">
-        <h2>当前模型列表</h2>
+        <h2>{{ t("ui.engine_models.model_list", default="当前模型列表") }}</h2>
         <table>
             <thead>
                 <tr>
-                    <th>id</th>
-                    <th>provider</th>
-                    <th>model</th>
-                    <th>deprecated</th>
-                    <th>notes</th>
-                    <th>supported_effort</th>
+                    <th>{{ t("ui.engine_models.col_id", default="id") }}</th>
+                    <th>{{ t("ui.engine_models.col_provider", default="provider") }}</th>
+                    <th>{{ t("ui.engine_models.col_model", default="model") }}</th>
+                    <th>{{ t("ui.engine_models.col_deprecated", default="deprecated") }}</th>
+                    <th>{{ t("ui.engine_models.col_notes", default="notes") }}</th>
+                    <th>{{ t("ui.engine_models.col_supported_effort", default="supported_effort") }}</th>
                 </tr>
             </thead>
             <tbody>
@@ -64,32 +64,32 @@
 
     {% if snapshots_supported %}
     <div class="card">
-        <h2>新增当前版本快照（add-only）</h2>
+        <h2>{{ t("ui.engine_models.add_snapshot", default="新增当前版本快照（add-only）") }}</h2>
         <form method="post" action="/ui/engines/{{ engine }}/models/snapshots">
-            <div class="grid grid-head">
-                <div>id *</div>
-                <div>model</div>
-                <div>deprecated</div>
-                <div>notes</div>
-                <div>supported_effort</div>
+                <div class="grid grid-head">
+                <div>{{ t("ui.engine_models.col_id_required", default="id *") }}</div>
+                <div>{{ t("ui.engine_models.col_model", default="model") }}</div>
+                <div>{{ t("ui.engine_models.col_deprecated", default="deprecated") }}</div>
+                <div>{{ t("ui.engine_models.col_notes", default="notes") }}</div>
+                <div>{{ t("ui.engine_models.col_supported_effort", default="supported_effort") }}</div>
                 <div></div>
             </div>
             <div id="models-form-rows">
                 <div class="grid">
-                    <input class="inline-input" name="id" placeholder="id" required />
-                    <input class="inline-input" name="model" placeholder="model" />
+                    <input class="inline-input" name="id" placeholder="{{ t("ui.engine_models.col_id", default="id") }}" required />
+                    <input class="inline-input" name="model" placeholder="{{ t("ui.engine_models.col_model", default="model") }}" />
                     <select class="inline-input" name="deprecated">
-                        <option value="false">false</option>
-                        <option value="true">true</option>
+                        <option value="false">{{ t("ui.common.false", default="false") }}</option>
+                        <option value="true">{{ t("ui.common.true", default="true") }}</option>
                     </select>
-                    <input class="inline-input" name="notes" placeholder="notes" />
-                    <input class="inline-input" name="supported_effort" placeholder="low,medium,high" />
-                    <button type="button" onclick="this.parentElement.remove()">删除</button>
+                    <input class="inline-input" name="notes" placeholder="{{ t("ui.engine_models.col_notes", default="notes") }}" />
+                    <input class="inline-input" name="supported_effort" placeholder="{{ t("ui.engine_models.supported_effort_placeholder", default="low,medium,high") }}" />
+                    <button type="button" onclick="this.parentElement.remove()">{{ t("ui.common.delete", default="删除") }}</button>
                 </div>
             </div>
             <div class="row" style="margin-top: 10px;">
-                <button type="button" onclick="addModelRow()">新增一行</button>
-                <button type="submit">提交新增快照</button>
+                <button class="btn btn-secondary" type="button" onclick="addModelRow()">{{ t("ui.engine_models.add_row", default="新增一行") }}</button>
+                <button class="btn btn-primary" type="submit">{{ t("ui.engine_models.submit_snapshot", default="提交新增快照") }}</button>
             </div>
         </form>
     </div>

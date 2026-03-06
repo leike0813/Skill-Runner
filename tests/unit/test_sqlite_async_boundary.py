@@ -9,7 +9,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 STORE_FILES = [
     REPO_ROOT / "server/services/orchestration/run_store.py",
     REPO_ROOT / "server/services/skill/skill_install_store.py",
-    REPO_ROOT / "server/services/skill/temp_skill_run_store.py",
     REPO_ROOT / "server/services/engine_management/engine_upgrade_store.py",
 ]
 

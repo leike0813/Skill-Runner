@@ -27,11 +27,13 @@ def _load_local_env_file() -> None:
 
 _load_local_env_file()
 
-from fastapi import FastAPI, APIRouter  # type: ignore[import-not-found]
+from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[import-not-found]
+from fastapi.responses import JSONResponse  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, ui
 from .services.engine_management.runtime_profile import get_runtime_profile
+from .i18n import get_language, get_translator
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,11 @@ async def lifespan(_app: FastAPI):
 
     runtime_profile = get_runtime_profile()
     runtime_profile.ensure_directories()
+    tmp_uploads_dir = getattr(config.SYSTEM, "TMP_UPLOADS_DIR", None)
+    if not isinstance(tmp_uploads_dir, str) or not tmp_uploads_dir:
+        data_dir = getattr(config.SYSTEM, "DATA_DIR", "data")
+        tmp_uploads_dir = str(Path(data_dir) / "tmp_uploads")
+    Path(tmp_uploads_dir).mkdir(parents=True, exist_ok=True)
     auth_detection_service.preload()
     cli_manager = AgentCliManager(runtime_profile)
     cli_manager.ensure_layout()
@@ -115,6 +122,55 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
+@app.middleware("http")
+async def i18n_middleware(request: Request, call_next):
+    request.state.lang = get_language(request)
+    request.state.t = get_translator(request)
+    response = await call_next(request)
+    return response
+
+
+def _prefers_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    if not accept:
+        return False
+    return "text/html" in accept.lower()
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if request.url.path.startswith("/ui") and _prefers_html(request):
+        message = str(exc.detail) if exc.detail is not None else "Request failed."
+        return ui.templates.TemplateResponse(
+            request=request,
+            name="ui/error.html",
+            status_code=exc.status_code,
+            context={
+                "status_code": exc.status_code,
+                "message": message,
+                "back_href": "/ui",
+            },
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled application error", exc_info=exc)
+    if request.url.path.startswith("/ui") and _prefers_html(request):
+        return ui.templates.TemplateResponse(
+            request=request,
+            name="ui/error.html",
+            status_code=500,
+            context={
+                "status_code": 500,
+                "message": "Internal Server Error",
+                "back_href": "/ui",
+            },
+        )
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
 runtime_profile = get_runtime_profile()
 
 v1_router = APIRouter(prefix="/v1")
@@ -126,6 +182,7 @@ v1_router.include_router(skill_packages.router)
 app.include_router(v1_router)
 app.include_router(ui.router)
 app.include_router(oauth_callback.router)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 @app.get("/")
 async def root():

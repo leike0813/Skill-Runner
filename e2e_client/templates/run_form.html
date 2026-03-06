@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-    <h2 style="margin-top: 0;">Run Skill: {{ skill.name or skill.id }}</h2>
-    <p class="muted"><code>{{ skill.id }}</code> • engines: {{ ", ".join(engines) }}</p>
-    <p class="muted"><strong>Run Source:</strong> {{ run_source }}</p>
+    <h2 style="margin-top: 0;">{{ t("client.run_form_title", default="Run Skill:") }} {{ skill.name or skill.id }}</h2>
+    <p class="muted"><code>{{ skill.id }}</code> • {{ t("client.run_form_engines", default="engines:") }} {{ ", ".join(engines) }}</p>
+    <p class="muted"><strong>{{ t("client.run_form_source", default="Run Source:") }}</strong> {{ run_source }}</p>
 
     {% for error in errors %}
         <div class="error">{{ error }}</div>
@@ -11,77 +11,77 @@
 
     <form method="post" enctype="multipart/form-data" action="{{ form_action }}">
         <div style="margin-bottom: 14px;">
-            <label for="engine"><strong>Engine</strong></label><br>
-            <select id="engine" name="engine" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+            <label for="engine"><strong>{{ t("client.run_form_engine", default="Engine") }}</strong></label><br>
+            <select id="engine" name="engine" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
                 {% for engine in engines %}
                     <option value="{{ engine }}" {% if selected_engine == engine %}selected{% endif %}>{{ engine }}</option>
                 {% endfor %}
             </select>
         </div>
         <div style="margin-bottom: 14px;">
-            <label for="execution_mode"><strong>Execution Mode</strong></label><br>
-            <select id="execution_mode" name="execution_mode" style="padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+            <label for="execution_mode"><strong>{{ t("client.run_form_execution_mode", default="Execution Mode") }}</strong></label><br>
+            <select id="execution_mode" name="execution_mode" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
                 {% for mode in execution_modes %}
                     <option value="{{ mode }}" {% if selected_execution_mode == mode %}selected{% endif %}>{{ mode }}</option>
                 {% endfor %}
             </select>
-            <div class="muted">Loaded from backend skill detail.</div>
+            <div class="muted">{{ t("client.run_form_execution_mode_hint", default="Loaded from backend skill detail.") }}</div>
         </div>
         <div style="margin-bottom: 14px;">
-            <label for="provider"><strong>Provider</strong></label><br>
-            <select id="provider" name="provider" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 200px;">
+            <label for="provider"><strong>{{ t("client.run_form_provider", default="Provider") }}</strong></label><br>
+            <select id="provider" name="provider" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 200px; background:#fff;">
             </select>
-            <div class="muted">For non-opencode engines this is a fixed display value.</div>
+            <div class="muted">{{ t("client.run_form_provider_hint", default="For non-opencode engines this is a fixed display value.") }}</div>
         </div>
         <div style="margin-bottom: 14px;">
-            <label for="model_value"><strong>Model</strong></label><br>
-            <select id="model_value" name="model_value" style="padding:8px; border-radius:8px; border:1px solid #c9ddce; min-width: 280px;">
-                <option value="">(Backend default)</option>
+            <label for="model_value"><strong>{{ t("client.run_form_model", default="Model") }}</strong></label><br>
+            <select id="model_value" name="model_value" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 280px; background:#fff;">
+                <option value="">{{ t("client.run_form_backend_default", default="(Backend default)") }}</option>
             </select>
             <input type="hidden" id="model" name="model" value="{{ selected_model }}">
-            <div class="muted">Models are loaded from management engine detail for selected engine.</div>
+            <div class="muted">{{ t("client.run_form_model_hint", default="Models are loaded from management engine detail for selected engine.") }}</div>
         </div>
 
         <div class="row">
             <div class="card" style="flex: 1 1 320px;">
-                <h3 style="margin-top: 0;">Inline Input</h3>
+                <h3 style="margin-top: 0;">{{ t("client.run_form_inline_input", default="Inline Input") }}</h3>
                 {% if inline_fields %}
                     {% for field in inline_fields %}
                         <div style="margin-bottom: 12px;">
                             <label for="input__{{ field.name }}"><strong>{{ field.name }}</strong>{% if field.required %} *{% endif %}</label><br>
                             <input id="input__{{ field.name }}" name="input__{{ field.name }}" value="{{ submitted_input.get(field.name, '') }}"
-                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
                             <div class="muted">{{ field.type }}{% if field.description %} • {{ field.description }}{% endif %}</div>
                         </div>
                     {% endfor %}
                 {% else %}
-                    <div class="muted">No inline input field.</div>
+                    <div class="muted">{{ t("client.run_form_no_inline_input", default="No inline input field.") }}</div>
                 {% endif %}
             </div>
 
             <div class="card" style="flex: 1 1 320px;">
-                <h3 style="margin-top: 0;">Parameters</h3>
+                <h3 style="margin-top: 0;">{{ t("client.run_form_parameters", default="Parameters") }}</h3>
                 {% if parameter_fields %}
                     {% for field in parameter_fields %}
                         <div style="margin-bottom: 12px;">
                             <label for="parameter__{{ field.name }}"><strong>{{ field.name }}</strong>{% if field.required %} *{% endif %}</label><br>
                             <input id="parameter__{{ field.name }}" name="parameter__{{ field.name }}" value="{{ submitted_parameter.get(field.name, '') }}"
-                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                                   style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
                             <div class="muted">{{ field.type }}{% if field.description %} • {{ field.description }}{% endif %}</div>
                         </div>
                     {% endfor %}
                 {% else %}
-                    <div class="muted">No parameter field.</div>
+                    <div class="muted">{{ t("client.run_form_no_parameter", default="No parameter field.") }}</div>
                 {% endif %}
             </div>
         </div>
 
         <div class="card" style="margin-top: 16px;">
-            <h3 style="margin-top: 0;">File Upload</h3>
+            <h3 style="margin-top: 0;">{{ t("client.run_form_file_upload", default="File Upload") }}</h3>
             {% if run_source == "temp" %}
-                <p class="muted">The selected fixture skill is dynamically packaged and uploaded via <code>/v1/jobs/{request_id}/upload</code>. Input files are zipped with schema keys as entry names.</p>
+                <p class="muted">{{ t("client.run_form_file_temp_hint", default="The selected fixture skill is dynamically packaged and uploaded via") }} <code>/v1/jobs/{request_id}/upload</code>. {{ t("client.run_form_file_temp_hint_2", default="Input files are zipped with schema keys as entry names.") }}</p>
             {% else %}
-                <p class="muted">Each selected file is zipped with its field name as file name before calling <code>/v1/jobs/{request_id}/upload</code>.</p>
+                <p class="muted">{{ t("client.run_form_file_hint", default="Each selected file is zipped with its field name as file name before calling") }} <code>/v1/jobs/{request_id}/upload</code>.</p>
             {% endif %}
             {% if file_fields %}
                 {% for field in file_fields %}
@@ -92,38 +92,42 @@
                     </div>
                 {% endfor %}
             {% else %}
-                <div class="muted">No file input field.</div>
+                    <div class="muted">{{ t("client.run_form_no_file", default="No file input field.") }}</div>
             {% endif %}
         </div>
 
         <div class="card" style="margin-top: 16px;">
-            <h3 style="margin-top: 0;">Runtime Options</h3>
+            <h3 style="margin-top: 0;">{{ t("client.run_form_runtime_options", default="Runtime Options") }}</h3>
             <div class="row">
                 <div style="flex: 1 1 260px;">
-                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> 禁用缓存机制</label><br>
-                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> Debug模式</label><br>
+                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> {{ t("client.run_form_no_cache", default="Disable cache") }}</label><br>
+                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> {{ t("client.run_form_debug", default="Debug mode") }}</label><br>
                 </div>
             </div>
             <div id="runtime_interactive_section" class="row" style="margin-top: 12px;">
                 <div style="flex: 1 1 260px;">
-                    <label><input id="runtime__interactive_auto_reply" type="checkbox" name="runtime__interactive_auto_reply" {% if submitted_runtime_options.get("interactive_auto_reply") %}checked{% endif %}> 超时自动回复</label>
+                    <label><input id="runtime__interactive_auto_reply" type="checkbox" name="runtime__interactive_auto_reply" {% if submitted_runtime_options.get("interactive_auto_reply") %}checked{% endif %}> {{ t("client.run_form_auto_reply", default="Auto-reply on timeout") }}</label>
                 </div>
                 <div id="runtime_timeout_group" style="flex: 1 1 260px;">
-                    <label for="runtime__interactive_reply_timeout_sec"><strong>回复超时阈值（秒）</strong></label><br>
+                    <label for="runtime__interactive_reply_timeout_sec"><strong>{{ t("client.run_form_reply_timeout", default="Reply timeout (seconds)") }}</strong></label><br>
                     <input id="runtime__interactive_reply_timeout_sec" name="runtime__interactive_reply_timeout_sec" value="{{ submitted_runtime_options.get('interactive_reply_timeout_sec', '') }}"
-                           style="width:100%; padding:8px; border-radius:8px; border:1px solid #c9ddce;">
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
                 </div>
             </div>
         </div>
 
         <div style="margin-top: 16px;">
-            <button type="submit" class="btn">Create Run</button>
-            <a class="btn secondary" href="/">Back</a>
+            <button type="submit" class="btn btn-primary">{{ t("client.run_form_create", default="Create Run") }}</button>
+            <a class="btn btn-secondary" href="/">{{ t("client.run_form_back", default="Back") }}</a>
         </div>
     </form>
 </section>
 <script>
 (() => {
+    const I18N = {
+        backendDefault: {{ t("client.run_form_backend_default", default="(Backend default)") | tojson }},
+        notApplicable: {{ t("client.run_form_not_applicable", default="(N/A)") | tojson }},
+    };
     const engineModels = {{ engine_models_by_engine | tojson }};
     const selectedProvider = {{ selected_provider | tojson }};
     const selectedModel = {{ selected_model | tojson }};
@@ -196,7 +200,7 @@
         if (!providers.length) {
             const option = document.createElement("option");
             option.value = "";
-            option.textContent = "(N/A)";
+            option.textContent = I18N.notApplicable;
             providerSelect.appendChild(option);
             return;
         }
@@ -222,7 +226,7 @@
         modelSelect.innerHTML = "";
         const defaultOption = document.createElement("option");
         defaultOption.value = "";
-        defaultOption.textContent = "(Backend default)";
+        defaultOption.textContent = I18N.backendDefault;
         modelSelect.appendChild(defaultOption);
         for (const row of rows) {
             const rowProvider = providerFromRow(row);

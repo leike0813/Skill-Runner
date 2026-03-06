@@ -6,9 +6,7 @@ from typing import Any, Dict, Optional, Protocol
 
 from fastapi import HTTPException  # type: ignore[import-not-found]
 
-from server.models import RunStatus
 from server.services.platform.async_compat import maybe_await
-from server.services.skill.temp_skill_run_store import temp_skill_run_store
 from server.runtime.observability.contracts import RunStorePort, WorkspacePort
 
 class _UnconfiguredRunStore:
@@ -128,55 +126,7 @@ class InstalledRunSourceAdapter:
     def build_cancel_kwargs(self, request_id: str) -> Dict[str, str]:
         return {"request_id": request_id}
 
-
-@dataclass(frozen=True)
-class TempRunSourceAdapter:
-    source: str = "temp"
-    cache_namespace: str = "temp_cache_entries"
-    capabilities: RunSourceCapabilities = RunSourceCapabilities(
-        supports_pending_reply=True,
-        supports_event_history=True,
-        supports_log_range=True,
-        supports_inline_input_create=False,
-    )
-
-    async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
-        return await maybe_await(temp_skill_run_store.get_request(request_id))
-
-    async def get_cached_run(self, cache_key: str) -> Optional[str]:
-        return await maybe_await(_require_run_store().get_temp_cached_run(cache_key))
-
-    async def bind_cached_run(self, request_id: str, run_id: str) -> None:
-        await maybe_await(temp_skill_run_store.bind_cached_run(request_id, run_id))
-        store = _require_run_store()
-        if await maybe_await(store.get_request(request_id)):
-            await maybe_await(store.update_request_run_id(request_id, run_id))
-
-    async def mark_run_started(self, request_id: str, run_id: str) -> None:
-        await maybe_await(temp_skill_run_store.update_run_started(request_id, run_id))
-        store = _require_run_store()
-        if await maybe_await(store.get_request(request_id)):
-            await maybe_await(store.update_request_run_id(request_id, run_id))
-
-    async def mark_failed(self, request_id: str, error_message: str) -> None:
-        await maybe_await(temp_skill_run_store.update_status(
-            request_id,
-            status=RunStatus.FAILED,
-            error=error_message,
-        ))
-
-    def get_run_job_temp_request_id(self, request_id: str) -> str | None:
-        return request_id
-
-    def build_cancel_kwargs(self, request_id: str) -> Dict[str, str]:
-        # Keep both identifiers for shared cancellation flow:
-        # - request_id: run_store interactive runtime/state
-        # - temp_request_id: temp lifecycle store
-        return {"request_id": request_id, "temp_request_id": request_id}
-
-
 installed_run_source_adapter = InstalledRunSourceAdapter()
-temp_run_source_adapter = TempRunSourceAdapter()
 
 
 def require_capability(

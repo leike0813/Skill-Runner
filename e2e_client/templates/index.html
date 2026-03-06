@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-    <h2 style="margin-top: 0;">Available Skills</h2>
-    <p class="muted">This client reads capabilities from <code>/v1/management/skills</code> and opens a schema-driven run form.</p>
-    <table>
+    <h2 style="margin-top: 0;">{{ t("client.index_title", default="Available Skills") }}</h2>
+    <p class="muted">{{ t("client.index_subtitle", default="This client reads capabilities from") }} <code>/v1/management/skills</code> {{ t("client.index_subtitle_suffix", default="and opens a schema-driven run form.") }}</p>
+    <table class="table table-striped">
         <thead>
             <tr>
-                <th>Skill</th>
-                <th>Version</th>
-                <th>Engines</th>
-                <th>Health</th>
+                <th>{{ t("client.index_table_skill", default="Skill") }}</th>
+                <th>{{ t("client.index_table_version", default="Version") }}</th>
+                <th>{{ t("client.index_table_engines", default="Engines") }}</th>
+                <th>{{ t("client.index_table_health", default="Health") }}</th>
                 <th></th>
             </tr>
         </thead>
@@ -20,30 +20,30 @@
                     <div><strong>{{ skill.name or skill.id }}</strong></div>
                     <div class="muted"><code>{{ skill.id }}</code></div>
                 </td>
-                <td>{{ skill.version }}</td>
+                <td><span class="badge badge-info">{{ skill.version }}</span></td>
                 <td>{{ ", ".join(skill.effective_engines or skill.engines or []) }}</td>
                 <td>{{ skill.health }}</td>
-                <td><a class="btn secondary" href="/skills/{{ skill.id }}/run">Run</a></td>
+                <td><a class="btn btn-secondary" href="/skills/{{ skill.id }}/run">{{ t("client.btn_run", default="Run") }}</a></td>
             </tr>
         {% endfor %}
         {% if not skills %}
-            <tr><td colspan="5" class="muted">No skills returned by backend.</td></tr>
+            <tr><td colspan="5" class="muted">{{ t("client.index_no_skills", default="No skills returned by backend.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>
 </section>
 
 <section class="card" style="margin-top: 16px;">
-    <h2 style="margin-top: 0;">Fixture Skills (Temp Upload)</h2>
-    <p class="muted">Skills discovered from <code>tests/fixtures/skills</code>. On submit, the selected fixture skill is packaged on-the-fly and sent through <code>/v1/jobs</code> (temp_upload).</p>
-    <table>
+    <h2 style="margin-top: 0;">{{ t("client.index_fixtures_title", default="Fixture Skills (Temp Upload)") }}</h2>
+    <p class="muted">{{ t("client.index_fixtures_subtitle", default="Skills discovered from") }} <code>tests/fixtures/skills</code>. {{ t("client.index_fixtures_subtitle_suffix", default="On submit, the selected fixture skill is packaged on-the-fly and sent through") }} <code>/v1/jobs</code> {{ t("client.index_fixtures_mode", default="(temp_upload).") }}</p>
+    <table class="table table-striped">
         <thead>
             <tr>
-                <th>Fixture</th>
-                <th>Skill ID</th>
-                <th>Version</th>
-                <th>Engines</th>
-                <th>Execution Modes</th>
+                <th>{{ t("client.index_fixture", default="Fixture") }}</th>
+                <th>{{ t("client.index_table_skill", default="Skill ID") }}</th>
+                <th>{{ t("client.index_table_version", default="Version") }}</th>
+                <th>{{ t("client.index_table_engines", default="Engines") }}</th>
+                <th>{{ t("client.index_execution_modes", default="Execution Modes") }}</th>
                 <th></th>
             </tr>
         </thead>
@@ -52,14 +52,14 @@
             <tr>
                 <td><code>{{ skill.fixture_skill_id }}</code></td>
                 <td>{{ skill.id }}</td>
-                <td>{{ skill.version }}</td>
+                <td><span class="badge badge-info">{{ skill.version }}</span></td>
                 <td>{{ ", ".join(skill.engines or []) }}</td>
                 <td>{{ ", ".join(skill.execution_modes or []) }}</td>
-                <td><a class="btn secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">Run (Temp)</a></td>
+                <td><a class="btn btn-secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">{{ t("client.btn_run_temp", default="Run (Temp)") }}</a></td>
             </tr>
         {% endfor %}
         {% if not fixture_skills %}
-            <tr><td colspan="6" class="muted">No fixture skills found.</td></tr>
+            <tr><td colspan="6" class="muted">{{ t("client.index_no_fixtures", default="No fixture skills found.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>

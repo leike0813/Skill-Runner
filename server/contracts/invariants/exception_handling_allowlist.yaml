@@ -9,11 +9,11 @@ policy:
     - observability_non_blocking
     - third_party_boundary
   baseline_totals:
-    total: 19
+    total: 17
     pass: 0
     loop_control: 0
     return: 0
-    log: 19
+    log: 17
     other: 0
 baseline:
   server/engines/common/callbacks/server_base.py:
@@ -50,13 +50,6 @@ baseline:
     loop_control: 0
     return: 0
     log: 1
-    other: 0
-  server/routers/temp_skill_runs.py:
-    total: 2
-    pass: 0
-    loop_control: 0
-    return: 0
-    log: 2
     other: 0
   server/services/orchestration/run_audit_service.py:
     total: 1
@@ -113,7 +106,6 @@ retained_contexts:
   server/routers/management.py: boundary_mapping
   server/routers/oauth_callback.py: boundary_mapping
   server/routers/skill_packages.py: boundary_mapping
-  server/routers/temp_skill_runs.py: boundary_mapping
   server/services/orchestration/run_audit_service.py: observability_non_blocking
   server/services/orchestration/run_interaction_lifecycle_service.py: third_party_boundary
   server/services/orchestration/run_auth_orchestration_service.py: observability_non_blocking

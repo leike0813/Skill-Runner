@@ -10,13 +10,14 @@ Exposes endpoints for:
 import logging
 import contextlib
 import io
-import tempfile
+import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
 from typing import Any
+from ..config import config
 from ..models import (
     AuthSessionStatusResponse,
     CancelResponse,
@@ -796,10 +797,12 @@ async def upload_file(
                 skill_source=source,
                 skill_id=skill.id if skill is not None else None,
             )
-
-            with tempfile.TemporaryDirectory(prefix=f"run-upload-{request_id}-", dir="/tmp") as tmp_dir_str:
-                uploads_dir = Path(tmp_dir_str) / "uploads"
-                uploads_dir.mkdir(parents=True, exist_ok=True)
+            stage_root = Path(config.SYSTEM.TMP_UPLOADS_DIR) / request_id
+            uploads_dir = stage_root / "uploads"
+            if stage_root.exists():
+                shutil.rmtree(stage_root, ignore_errors=True)
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            try:
                 log_event(
                     logger,
                     event="upload.temp_staged",
@@ -944,6 +947,8 @@ async def upload_file(
                     request_id=request_id,
                     run_id=run_status.run_id,
                 )
+            finally:
+                shutil.rmtree(stage_root, ignore_errors=True)
             run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
             effective_execution_mode_obj = effective_runtime_options.get(
                 "execution_mode",

@@ -8,6 +8,7 @@ from server.config import config
 from server.services.orchestration.run_cleanup_manager import RunCleanupManager
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
+from server.services.platform.process_lease_store import process_lease_store
 from server.models import RunCreateRequest, RunStatus, SkillManifest
 
 
@@ -69,7 +70,6 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
 
     for idx, run_id in enumerate([run_old.run_id, run_failed.run_id, run_running.run_id], start=1):
         request_id = f"request-{idx}"
-        workspace_manager.create_request(request_id, {"skill_id": "s"})
         await store.create_request(
             request_id=request_id,
             skill_id="s",
@@ -240,7 +240,6 @@ async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs
     await store.create_run(run_response.run_id, cache_key="k1", status=RunStatus.SUCCEEDED)
 
     request_id = "request-clear"
-    workspace_manager.create_request(request_id, {"skill_id": "s"})
     await store.create_request(
         request_id=request_id,
         skill_id="s",
@@ -288,3 +287,57 @@ async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, t
 
     assert recorder.active is not None
     assert any(run_response.run_id in path for path in recorder.active)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_auxiliary_storage_prunes_tmp_uploads_and_closed_leases(temp_config_dirs):
+    manager = RunCleanupManager()
+    root = Path(config.SYSTEM.TMP_UPLOADS_DIR)
+    old_dir = root / "old-request"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    (old_dir / "uploads").mkdir(exist_ok=True)
+    old_ts = datetime.utcnow() - timedelta(days=5)
+    os.utime(old_dir, (old_ts.timestamp(), old_ts.timestamp()))
+
+    process_lease_store.upsert_active(
+        {
+            "lease_id": "lease-cleanup-1",
+            "owner_kind": "run_attempt",
+            "owner_id": "run-x:1",
+            "pid": 1234,
+        }
+    )
+    process_lease_store.close(
+        "lease-cleanup-1",
+        reason="test",
+        closed_at=(datetime.utcnow() - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+    await manager.cleanup_auxiliary_storage(retention_days=1)
+
+    assert not old_dir.exists()
+    assert process_lease_store.get("lease-cleanup-1") is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_auxiliary_storage_keeps_active_ui_shell_session_dir(temp_config_dirs):
+    manager = RunCleanupManager()
+    sessions_root = Path(config.SYSTEM.DATA_DIR) / "ui_shell_sessions"
+    active_session_dir = sessions_root / "session-active"
+    active_session_dir.mkdir(parents=True, exist_ok=True)
+    old_ts = datetime.utcnow() - timedelta(days=5)
+    os.utime(active_session_dir, (old_ts.timestamp(), old_ts.timestamp()))
+
+    process_lease_store.upsert_active(
+        {
+            "lease_id": "lease-ui-active",
+            "owner_kind": "ui_shell",
+            "owner_id": "session-active",
+            "pid": 4321,
+            "metadata": {"session_dir": str(active_session_dir)},
+        }
+    )
+
+    await manager.cleanup_auxiliary_storage(retention_days=1)
+    assert active_session_dir.exists()
+    process_lease_store.close("lease-ui-active", reason="test_done")

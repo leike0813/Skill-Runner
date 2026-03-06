@@ -39,7 +39,7 @@ class ResetTargets:
 @dataclass(frozen=True)
 class ResetPathResult:
     path: Path
-    deleted: bool
+    status: str
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ class DataResetResult:
             "path_results": [
                 {
                     "path": str(item.path),
-                    "status": "deleted" if item.deleted else "missing",
+                    "status": item.status,
                 }
                 for item in self.path_results
             ],
@@ -108,16 +108,12 @@ class DataResetService:
         db_files = self._ordered_unique(
             [
                 Path(self._cfg.SYSTEM.RUNS_DB),
-                Path(self._cfg.SYSTEM.SKILL_INSTALLS_DB),
-                Path(self._cfg.SYSTEM.TEMP_SKILL_RUNS_DB),
                 Path(self._cfg.SYSTEM.ENGINE_UPGRADES_DB),
             ]
         )
         data_dirs = self._ordered_unique(
             [
                 Path(self._cfg.SYSTEM.RUNS_DIR),
-                Path(self._cfg.SYSTEM.REQUESTS_DIR),
-                Path(self._cfg.SYSTEM.TEMP_SKILL_REQUESTS_DIR).parent,
                 Path(self._cfg.SYSTEM.SKILL_INSTALLS_DIR),
             ]
         )
@@ -129,20 +125,23 @@ class DataResetService:
             optional_paths.extend(Path(path) for path in self._model_catalog_lifecycle.cache_paths())
         if options.include_agent_status:
             optional_paths.append(data_dir / "agent_status.json")
-        if getattr(self._cfg.SYSTEM, "SETTINGS_FILE", None):
-            optional_paths.append(Path(self._cfg.SYSTEM.SETTINGS_FILE))
         if include_engine_auth_sessions:
             optional_paths.append(data_dir / "engine_auth_sessions")
         optional_paths.append(data_dir / "ui_shell_sessions")
+        optional_paths.append(Path(self._cfg.SYSTEM.TMP_UPLOADS_DIR))
+        # Legacy persistence artifacts cleanup (best-effort).
+        optional_paths.append(data_dir / "skill_installs.db")
+        optional_paths.append(data_dir / "temp_skill_runs.db")
+        optional_paths.append(data_dir / "temp_skill_runs")
+        optional_paths.append(data_dir / "runtime_process_leases")
 
         recreate_dirs = self._ordered_unique(
             [
                 data_dir,
                 Path(self._cfg.SYSTEM.RUNS_DIR),
-                Path(self._cfg.SYSTEM.REQUESTS_DIR),
-                Path(self._cfg.SYSTEM.TEMP_SKILL_REQUESTS_DIR),
                 Path(self._cfg.SYSTEM.SKILL_INSTALLS_DIR),
                 Path(self._cfg.SYSTEM.LOGGING.DIR),
+                Path(self._cfg.SYSTEM.TMP_UPLOADS_DIR),
             ]
         )
 
@@ -167,13 +166,24 @@ class DataResetService:
     def execute_reset(self, options: DataResetOptions) -> DataResetResult:
         targets = self.build_targets(options)
         if options.dry_run:
+            preview_results: list[ResetPathResult] = []
+            deleted_count = 0
+            missing_count = 0
+            for path in targets.all_paths():
+                exists = path.exists()
+                status = "would_delete" if exists else "missing"
+                preview_results.append(ResetPathResult(path=path, status=status))
+                if exists:
+                    deleted_count += 1
+                else:
+                    missing_count += 1
             return DataResetResult(
                 dry_run=True,
                 targets=targets,
-                path_results=(),
-                deleted_count=0,
-                missing_count=0,
-                recreated_count=0,
+                path_results=tuple(preview_results),
+                deleted_count=deleted_count,
+                missing_count=missing_count,
+                recreated_count=len(targets.recreate_dirs),
             )
 
         if not self._execution_lock.acquire(blocking=False):
@@ -185,7 +195,8 @@ class DataResetService:
             missing_count = 0
             for path in targets.all_paths():
                 deleted = self._remove_path(path)
-                path_results.append(ResetPathResult(path=path, deleted=deleted))
+                status = "deleted" if deleted else "missing"
+                path_results.append(ResetPathResult(path=path, status=status))
                 if deleted:
                     deleted_count += 1
                 else:

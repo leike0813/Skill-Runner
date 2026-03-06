@@ -1,30 +1,30 @@
 {% if skills %}
-<table style="width:100%; border-collapse: collapse; font-size: 14px;">
+<table class="table table-striped">
     <thead>
-        <tr style="background:#f3f4f6;">
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">ID</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Name</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Version</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Engines</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Health</th>
-            <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Actions</th>
+        <tr>
+            <th>{{ t("ui.skills.table.id", default="ID") }}</th>
+            <th>{{ t("ui.skills.table.name", default="Name") }}</th>
+            <th>{{ t("ui.skills.table.version", default="Version") }}</th>
+            <th>{{ t("ui.skills.table.engines", default="Engines") }}</th>
+            <th>{{ t("ui.skills.table.health", default="Health") }}</th>
+            <th>{{ t("ui.skills.table.actions", default="Actions") }}</th>
         </tr>
     </thead>
     <tbody>
     {% for skill in skills %}
         <tr style="{% if highlight_skill_id and skill.id == highlight_skill_id %}background:#ecfdf5;{% endif %}">
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.id }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.name or "-" }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.version or "-" }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ ", ".join(skill.engines or []) }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">{{ skill.health or "-" }}</td>
-            <td style="padding:8px; border-bottom:1px solid #f1f5f9;">
-                <a href="/ui/skills/{{ skill.id }}">Browse</a>
+            <td>{{ skill.id }}</td>
+            <td>{{ skill.name or "-" }}</td>
+            <td>{{ skill.version or "-" }}</td>
+            <td>{{ ", ".join(skill.engines or []) }}</td>
+            <td>{{ skill.health or "-" }}</td>
+            <td>
+                <a href="/ui/skills/{{ skill.id }}">{{ t("ui.skills.table.browse", default="Browse") }}</a>
             </td>
         </tr>
     {% endfor %}
     </tbody>
 </table>
 {% else %}
-<div style="color:#6b7280;">暂无已安装 Skill。</div>
+<div style="color:#6b7280;">{{ t("ui.skills.table.empty", default="暂无已安装 Skill。") }}</div>
 {% endif %}

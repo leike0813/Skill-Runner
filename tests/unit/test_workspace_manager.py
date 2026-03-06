@@ -2,6 +2,12 @@ import json
 import pytest
 from pathlib import Path
 from server.services.orchestration.workspace_manager import workspace_manager
+from server.services.orchestration.request_upload_staging import (
+    ensure_request_root,
+    handle_upload as stage_request_upload,
+    promote_request_uploads as promote_staged_uploads,
+    write_input_manifest as write_staged_input_manifest,
+)
 from server.models import RunCreateRequest, SkillManifest
 
 
@@ -102,14 +108,14 @@ def test_handle_upload(tmp_path):
     
     try:
         request_id = "req-1"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
         
         # Create a dummy zip
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as z:
             z.writestr("test.txt", "content")
             
-        workspace_manager.handle_upload(request_id, b.getvalue())
+        stage_request_upload(config.SYSTEM.REQUESTS_DIR, request_id, b.getvalue())
         
         request_dir = Path(config.SYSTEM.REQUESTS_DIR) / request_id
         assert (request_dir / "uploads" / "test.txt").exists()
@@ -135,13 +141,13 @@ def test_handle_upload_nested_paths(tmp_path):
 
     try:
         request_id = "req-2"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
 
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as z:
             z.writestr("nested/inner.txt", "content")
 
-        result = workspace_manager.handle_upload(request_id, b.getvalue())
+        result = stage_request_upload(config.SYSTEM.REQUESTS_DIR, request_id, b.getvalue())
 
         request_dir = Path(config.SYSTEM.REQUESTS_DIR) / request_id
         assert (request_dir / "uploads" / "nested" / "inner.txt").exists()
@@ -164,10 +170,10 @@ def test_handle_upload_bad_zip(tmp_path):
 
     try:
         request_id = "req-3"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
 
         with pytest.raises(ValueError, match="Invalid zip file"):
-            workspace_manager.handle_upload(request_id, b"not-a-zip")
+            stage_request_upload(config.SYSTEM.REQUESTS_DIR, request_id, b"not-a-zip")
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -187,8 +193,8 @@ def test_write_input_manifest_empty_uploads(tmp_path):
 
     try:
         request_id = "req-4"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
-        manifest_path = workspace_manager.write_input_manifest(request_id)
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
+        manifest_path = write_staged_input_manifest(config.SYSTEM.REQUESTS_DIR, request_id)
         assert manifest_path.exists()
         assert json.loads(manifest_path.read_text()) == {"files": []}
     finally:
@@ -210,12 +216,13 @@ def test_promote_request_uploads_moves_files(tmp_path):
 
     try:
         request_id = "req-5"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
         request_uploads = Path(config.SYSTEM.REQUESTS_DIR) / request_id / "uploads"
         (request_uploads / "input.txt").write_text("content")
 
         run_response = workspace_manager.create_run(RunCreateRequest(skill_id="test-skill", parameter={}))
-        workspace_manager.promote_request_uploads(request_id, run_response.run_id)
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
+        promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, run_dir)
 
         run_uploads = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id / "uploads"
         assert (run_uploads / "input.txt").exists()
@@ -239,14 +246,14 @@ def test_promote_request_uploads_existing_target_raises(tmp_path):
 
     try:
         request_id = "req-6"
-        workspace_manager.create_request(request_id, {"skill_id": "test-skill"})
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
 
         run_response = workspace_manager.create_run(RunCreateRequest(skill_id="test-skill", parameter={}))
         run_uploads = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id / "uploads"
         run_uploads.mkdir()
 
         with pytest.raises(ValueError, match="Run uploads already exist"):
-            workspace_manager.promote_request_uploads(request_id, run_response.run_id)
+            promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, Path(config.SYSTEM.RUNS_DIR) / run_response.run_id)
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

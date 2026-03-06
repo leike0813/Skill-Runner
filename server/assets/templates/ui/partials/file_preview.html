@@ -5,9 +5,9 @@
 <div style="margin-bottom:8px; color:#6b7280; font-size:12px;">{{ preview.meta }}</div>
 <pre>{{ preview.content }}</pre>
 {% elif preview.mode == "too_large" %}
-<div style="color:#b45309; font-size:13px;">文件过大不可预览</div>
-<div style="margin-top:6px; color:#6b7280; font-size:12px;">{{ preview.size }} bytes</div>
+<div style="color:#b45309; font-size:13px;">{{ t("ui.file_preview.too_large", default="文件过大不可预览") }}</div>
+<div style="margin-top:6px; color:#6b7280; font-size:12px;">{{ preview.size }} {{ t("ui.file_preview.bytes", default="bytes") }}</div>
 {% else %}
-<div style="color:#991b1b; font-size:13px;">不可预览</div>
-<div style="margin-top:6px; color:#6b7280; font-size:12px;">无信息</div>
+<div style="color:#991b1b; font-size:13px;">{{ t("ui.file_preview.unavailable", default="不可预览") }}</div>
+<div style="margin-top:6px; color:#6b7280; font-size:12px;">{{ t("ui.file_preview.no_info", default="无信息") }}</div>
 {% endif %}

@@ -7,10 +7,10 @@
     hx-swap="outerHTML"
     {% endif %}
 >
-    <div><strong>Request ID:</strong> {{ request_id }}</div>
-    <div><strong>Status:</strong> {{ status }}</div>
+    <div><strong>{{ t("ui.engine_upgrade.request_id", default="Request ID:") }}</strong> {{ request_id }}</div>
+    <div><strong>{{ t("ui.engine_upgrade.status", default="Status:") }}</strong> {{ status }}</div>
     {% if error %}
-    <div style="margin-top:8px; color:#b91c1c;"><strong>Error:</strong> {{ error }}</div>
+    <div style="margin-top:8px; color:#b91c1c;"><strong>{{ t("ui.engine_upgrade.error", default="Error:") }}</strong> {{ error }}</div>
     {% endif %}
 
     {% if results %}
@@ -19,14 +19,14 @@
         <div style="border-top:1px solid #e5e7eb; padding-top:8px; margin-top:8px;">
             <div><strong>{{ engine }}</strong> — {{ result.status }}</div>
             {% if result.error %}
-            <div style="color:#b91c1c; margin-top:4px;"><strong>error:</strong> {{ result.error }}</div>
+            <div style="color:#b91c1c; margin-top:4px;"><strong>{{ t("ui.engine_upgrade.error_lower", default="error:") }}</strong> {{ result.error }}</div>
             {% endif %}
             <div style="margin-top:6px;">
-                <div><strong>stdout</strong></div>
+                <div><strong>{{ t("ui.engine_upgrade.stdout", default="stdout") }}</strong></div>
                 <pre style="white-space: pre-wrap; background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:8px;">{{ result.stdout or "" }}</pre>
             </div>
             <div style="margin-top:6px;">
-                <div><strong>stderr</strong></div>
+                <div><strong>{{ t("ui.engine_upgrade.stderr", default="stderr") }}</strong></div>
                 <pre style="white-space: pre-wrap; background:#fff; border:1px solid #e5e7eb; border-radius:6px; padding:8px;">{{ result.stderr or "" }}</pre>
             </div>
         </div>

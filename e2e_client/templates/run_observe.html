@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-    <h2 style="margin-top: 0;">Run Observation: <code>{{ request_id }}</code></h2>
+    <h2 style="margin-top: 0;">{{ t("client.observe_title", default="Run Observation:") }} <code>{{ request_id }}</code></h2>
     <div class="row">
-        <div style="flex: 1 1 200px;"><strong>Status:</strong> <span id="run-status">loading</span></div>
-        <div style="flex: 1 1 200px;"><strong>Pending ID:</strong> <span id="pending-id">-</span></div>
-        <div style="flex: 1 1 200px;"><strong>Cursor:</strong> <span id="run-cursor">0</span></div>
+        <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_status", default="Status:") }}</strong> <span id="run-status">{{ t("client.observe_loading", default="loading") }}</span></div>
+        <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_pending_id", default="Pending ID:") }}</strong> <span id="pending-id">-</span></div>
+        <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_cursor", default="Cursor:") }}</strong> <span id="run-cursor">0</span></div>
         <div style="flex: 1 1 220px;">
-            <a class="btn secondary" href="/runs">Runs</a>
+            <a class="btn btn-secondary" href="/runs">{{ t("client.nav_runs", default="Runs") }}</a>
         </div>
     </div>
 </section>
 
 <section class="card" style="margin-top: 16px;">
-    <h3 style="margin-top: 0;">Conversation</h3>
+    <h3 style="margin-top: 0;">{{ t("client.observe_conversation", default="Conversation") }}</h3>
     <div id="chat-panel" class="chat-panel"></div>
 
     <div id="thinking-card" class="thinking-card hidden" role="status" aria-live="polite">
@@ -21,36 +21,36 @@
             <span></span><span></span><span></span>
         </div>
         <div>
-            <div class="thinking-title">Agent is thinking</div>
-            <div class="thinking-desc">Running inference and preparing the next response...</div>
+            <div class="thinking-title">{{ t("client.observe_thinking", default="Agent is thinking") }}</div>
+            <div class="thinking-desc">{{ t("client.observe_thinking_desc", default="Running inference and preparing the next response...") }}</div>
         </div>
     </div>
 
     <div id="final-summary-card" class="prompt-card hidden" role="status" aria-live="polite">
-        <div style="font-weight: 700; margin-bottom: 6px;">Final Summary</div>
+        <div style="font-weight: 700; margin-bottom: 6px;">{{ t("client.observe_final_summary", default="Final Summary") }}</div>
         <div id="final-summary-text"></div>
     </div>
 
     <div id="prompt-card" class="prompt-card hidden">
-        <div style="font-weight: 700; margin-bottom: 6px;">Pending Input Request</div>
+        <div style="font-weight: 700; margin-bottom: 6px;">{{ t("client.observe_pending_input", default="Pending Input Request") }}</div>
         <div id="prompt-card-text"></div>
         <div id="prompt-card-hint" class="prompt-list hidden"></div>
         <div class="prompt-meta">
-            <span>interaction_id: <code id="prompt-card-id">-</code></span>
-            <span>kind: <code id="prompt-card-kind">-</code></span>
+            <span>{{ t("client.observe_interaction_id", default="interaction_id:") }} <code id="prompt-card-id">-</code></span>
+            <span>{{ t("client.observe_kind", default="kind:") }} <code id="prompt-card-kind">-</code></span>
         </div>
         <div id="prompt-card-required" class="prompt-list hidden"></div>
         <div id="prompt-card-actions" class="action-button-group hidden"></div>
     </div>
 
     <div id="auth-card" class="prompt-card hidden">
-        <div style="font-weight: 700; margin-bottom: 6px;">Authentication Required</div>
+        <div style="font-weight: 700; margin-bottom: 6px;">{{ t("client.observe_auth_required", default="Authentication Required") }}</div>
         <div id="auth-card-text"></div>
         <div id="auth-card-hint" class="prompt-list hidden"></div>
         <div class="prompt-meta">
-            <span>auth_session_id: <code id="auth-card-id">-</code></span>
-            <span>engine: <code id="auth-card-engine">-</code></span>
-            <span>provider: <code id="auth-card-provider">-</code></span>
+            <span>{{ t("client.observe_auth_session_id", default="auth_session_id:") }} <code id="auth-card-id">-</code></span>
+            <span>{{ t("client.observe_auth_engine", default="engine:") }} <code id="auth-card-engine">-</code></span>
+            <span>{{ t("client.observe_auth_provider", default="provider:") }} <code id="auth-card-provider">-</code></span>
         </div>
         <div id="auth-card-actions" class="action-button-group hidden"></div>
         <div id="auth-card-link" class="prompt-list hidden"></div>
@@ -64,10 +64,10 @@
         <input type="hidden" id="auth-reply-mode" value="">
         <input type="hidden" id="auth-input-kind" value="">
         <div id="reply-composer">
-            <textarea id="reply-text" rows="3" placeholder="Reply to agent..." disabled></textarea>
+            <textarea id="reply-text" rows="3" placeholder="{{ t('client.observe_reply_placeholder', default='Reply to agent...') }}" disabled></textarea>
             <div class="reply-actions">
-                <button class="btn" id="reply-submit" type="submit" disabled>Send Reply</button>
-                <span class="muted" id="reply-shortcut-hint">Ctrl+Enter / Cmd+Enter to send</span>
+                <button class="btn btn-primary" id="reply-submit" type="submit" disabled>{{ t("client.observe_send_reply", default="Send Reply") }}</button>
+                <span class="muted" id="reply-shortcut-hint">{{ t("client.observe_reply_shortcut", default="Ctrl+Enter / Cmd+Enter to send") }}</span>
             </div>
         </div>
         <div id="reply-error" class="prompt-list hidden"></div>
@@ -76,8 +76,8 @@
 
 <section class="card" style="margin-top: 16px;">
     <div class="reply-actions" style="justify-content: space-between;">
-        <h3 style="margin: 0;">Run File Tree</h3>
-        <button class="btn secondary" id="file-tree-toggle" type="button">Show Files</button>
+        <h3 style="margin: 0;">{{ t("client.observe_run_file_tree", default="Run File Tree") }}</h3>
+        <button class="btn btn-secondary" id="file-tree-toggle" type="button">{{ t("client.observe_show_files", default="Show Files") }}</button>
     </div>
     <div id="file-tree-section" class="hidden" style="margin-top: 10px;">
         <div class="file-tree-layout">
@@ -91,7 +91,7 @@
     .chat-panel {
         height: 420px;
         overflow: auto;
-        border: 1px solid var(--line);
+        border: 1px solid var(--neutral-200);
         border-radius: 12px;
         padding: 14px;
         background: linear-gradient(180deg, #f9fbfa 0%, #f4f8f6 100%);
@@ -115,12 +115,12 @@
         padding: 10px 12px;
         white-space: pre-wrap;
         line-height: 1.5;
-        border: 1px solid var(--line);
+        border: 1px solid var(--neutral-200);
         box-shadow: 0 4px 14px rgba(20, 100, 59, 0.08);
     }
     .chat-bubble.agent {
         background: #ffffff;
-        color: var(--fg);
+        color: var(--neutral-900);
     }
     .chat-bubble.user {
         background: #dff4e8;
@@ -207,25 +207,25 @@
         gap: 16px;
         flex-wrap: wrap;
         font-size: 12px;
-        color: var(--muted);
+        color: var(--neutral-500);
     }
     .prompt-list {
         margin-top: 8px;
         font-size: 13px;
-        color: var(--muted);
+        color: var(--neutral-500);
     }
     .prompt-list.hidden {
         display: none;
     }
     .reply-box {
         margin-top: 12px;
-        border-top: 1px solid var(--line);
+        border-top: 1px solid var(--neutral-200);
         padding-top: 12px;
     }
     .reply-box textarea {
         width: 100%;
         border-radius: 10px;
-        border: 1px solid var(--line);
+        border: 1px solid var(--neutral-200);
         padding: 10px;
         background: #fff;
         font: inherit;
@@ -274,7 +274,7 @@
     .file-entry button {
         border: 0;
         background: none;
-        color: var(--accent);
+        color: var(--primary-600);
         text-align: left;
         cursor: pointer;
         padding: 0;
@@ -311,7 +311,7 @@
     }
     .preview-meta {
         margin-bottom: 8px;
-        color: var(--muted);
+        color: var(--neutral-500);
         font-size: 12px;
     }
     .preview-content {
@@ -323,7 +323,7 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
     .preview-empty {
-        color: var(--muted);
+        color: var(--neutral-500);
         font-size: 13px;
     }
     @media (max-width: 960px) {
@@ -335,6 +335,47 @@
 
 <script>
 (() => {
+    const I18N = {
+        defaultInteractionPrompt: {{ t("client.observe_default_prompt", default="Please reply to continue.") | tojson }},
+        replyPlaceholder: {{ t("client.observe_reply_placeholder", default="Reply to agent...") | tojson }},
+        sendReply: {{ t("client.observe_send_reply", default="Send Reply") | tojson }},
+        roleUser: {{ t("client.observe_role_user", default="You") | tojson }},
+        roleAssistant: {{ t("client.observe_role_assistant", default="Agent") | tojson }},
+        roleSystem: {{ t("client.observe_role_system", default="System") | tojson }},
+        submitFailedHttpPrefix: {{ t("client.observe_submit_failed_http", default="Submit failed: HTTP") | tojson }},
+        submitFailedNetwork: {{ t("client.observe_submit_failed_network", default="Backend unreachable.") | tojson }},
+        authRequiredPrompt: {{ t("client.observe_auth_required_prompt", default="Authentication is required to continue.") | tojson }},
+        authPasteApiKey: {{ t("client.observe_auth_paste_api_key", default="Paste API key here...") | tojson }},
+        authPasteCode: {{ t("client.observe_auth_paste_code", default="Paste authorization code here...") | tojson }},
+        authSubmitApiKey: {{ t("client.observe_auth_submit_api_key", default="Submit API Key") | tojson }},
+        authSubmitCode: {{ t("client.observe_auth_submit_code", default="Submit Code") | tojson }},
+        authInProgress: {{ t("client.observe_auth_in_progress", default="Authentication is in progress...") | tojson }},
+        authAwaiting: {{ t("client.observe_auth_awaiting", default="Awaiting Auth") | tojson }},
+        requiredFieldsPrefix: {{ t("client.observe_required_fields_prefix", default="required_fields:") | tojson }},
+        pendingMethodSelection: {{ t("client.observe_pending_method_selection", default="method-selection") | tojson }},
+        authUrlPrefix: {{ t("client.observe_auth_url_prefix", default="auth_url:") | tojson }},
+        userCodePrefix: {{ t("client.observe_user_code_prefix", default="user_code:") | tojson }},
+        lastErrorPrefix: {{ t("client.observe_last_error_prefix", default="last_error:") | tojson }},
+        unknownError: {{ t("client.observe_unknown_error", default="Unknown error") | tojson }},
+        canceledError: {{ t("client.observe_canceled_error", default="Canceled by user") | tojson }},
+        taskFailedPrefix: {{ t("client.observe_task_failed", default="Task failed.") | tojson }},
+        taskCanceledPrefix: {{ t("client.observe_task_canceled", default="Task canceled.") | tojson }},
+        taskCompletedPrefix: {{ t("client.observe_task_completed", default="Task completed.") | tojson }},
+        taskCompletedStructuredHint: {{ t("client.observe_task_completed_structured", default="Structured result generated.") | tojson }},
+        resultErrorLabel: {{ t("client.observe_result_error_label", default="error_message") | tojson }},
+        artifactsLabel: {{ t("client.observe_artifacts_label", default="artifacts") | tojson }},
+        resultPreviewLabel: {{ t("client.observe_result_preview_label", default="result_preview") | tojson }},
+        fileTreeLoading: {{ t("client.observe_file_tree_loading", default="Loading...") | tojson }},
+        fileTreeSelectHint: {{ t("client.observe_file_tree_select_hint", default="Select a file from the left panel to preview.") | tojson }},
+        fileTooLarge: {{ t("client.file_too_large", default="File too large to preview") | tojson }},
+        fileNotPreviewable: {{ t("client.file_not_previewable", default="Not previewable") | tojson }},
+        fileNoInfo: {{ t("client.file_no_info", default="No information") | tojson }},
+        fileTreeUnavailable: {{ t("client.observe_file_tree_unavailable", default="File tree unavailable.") | tojson }},
+        fileTreeNoFiles: {{ t("client.observe_file_tree_no_files", default="No files.") | tojson }},
+        fileReadFailedHttpPrefix: {{ t("client.observe_file_read_failed_http", default="Read failed: HTTP") | tojson }},
+        showFiles: {{ t("client.observe_show_files", default="Show Files") | tojson }},
+        hideFiles: {{ t("client.observe_hide_files", default="Hide Files") | tojson }},
+    };
     const requestId = "{{ request_id }}";
     const statusEl = document.getElementById("run-status");
     const pendingIdEl = document.getElementById("pending-id");
@@ -389,7 +430,7 @@
     const renderedPromptKeys = new Set();
     let lastPromptRenderSignature = "";
     let lastAuthRenderSignature = "";
-    const DEFAULT_INTERACTION_PROMPT = "Please reply to continue.";
+    const DEFAULT_INTERACTION_PROMPT = I18N.defaultInteractionPrompt;
     const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
     const WATCHDOG_RETRY_INTERVAL_MS = 2000;
     const WATCHDOG_RETRY_WINDOW_MS = 30000;
@@ -650,9 +691,9 @@
 
     function resetReplyComposer() {
         clearReplyError();
-        replyTextEl.placeholder = "Reply to agent...";
+        replyTextEl.placeholder = I18N.replyPlaceholder;
         replyTextEl.value = "";
-        replySubmitEl.textContent = "Send Reply";
+        replySubmitEl.textContent = I18N.sendReply;
         setReplyComposerVisible(true);
         authReplyModeEl.value = "";
     }
@@ -676,7 +717,7 @@
 
         const roleEl = document.createElement("span");
         roleEl.className = "chat-role";
-        roleEl.textContent = role === "user" ? "You" : role === "assistant" ? "Agent" : "System";
+        roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
         bubble.appendChild(roleEl);
 
         const content = document.createElement("div");
@@ -763,7 +804,7 @@
         });
 
         if (!res.ok) {
-            let errorMessage = `提交失败: HTTP ${res.status}`;
+            let errorMessage = `${I18N.submitFailedHttpPrefix} ${res.status}`;
             try {
                 const errorPayload = await res.json();
                 const detailObj = errorPayload?.detail;
@@ -887,7 +928,7 @@
         } else {
             promptActionsEl.classList.add("hidden");
             promptActionsEl.textContent = "";
-            replyTextEl.placeholder = hint || "Reply to agent...";
+            replyTextEl.placeholder = hint || I18N.replyPlaceholder;
             setReplyComposerVisible(true);
             setReplyEnabled(interactionId > 0);
         }
@@ -895,7 +936,7 @@
         const requiredFields = normalizeList(payload.required_fields);
         if (requiredFields.length) {
             promptRequiredEl.classList.remove("hidden");
-            promptRequiredEl.textContent = `required_fields: ${requiredFields.join(", ")}`;
+            promptRequiredEl.textContent = `${I18N.requiredFieldsPrefix} ${requiredFields.join(", ")}`;
         } else {
             promptRequiredEl.classList.add("hidden");
             promptRequiredEl.textContent = "";
@@ -925,7 +966,7 @@
             : "";
         const hint = askHint || directHint;
         const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim()
-            || "Authentication is required to continue.";
+            || I18N.authRequiredPrompt;
         const signature = stableSerialize({
             auth_session_id: safeText(payload.auth_session_id).trim(),
             engine: safeText(payload.engine).trim(),
@@ -966,7 +1007,7 @@
         authSessionIdEl.value = authSessionId;
         authInputKindEl.value = inputKind;
         authReplyModeEl.value = isMethodSelection ? "selection" : "submission";
-        pendingIdEl.textContent = authSessionId || (isMethodSelection ? "method-selection" : "-");
+        pendingIdEl.textContent = authSessionId || (isMethodSelection ? I18N.pendingMethodSelection : "-");
 
         if (isMethodSelection && selectionOptions.length) {
             if (hint) {
@@ -1003,7 +1044,7 @@
         if (authUrl) {
             authLinkEl.innerHTML = "";
             const label = document.createElement("span");
-            label.textContent = "auth_url: ";
+            label.textContent = `${I18N.authUrlPrefix} `;
             const link = document.createElement("a");
             link.href = authUrl;
             link.target = "_blank";
@@ -1018,7 +1059,7 @@
         }
 
         if (userCode) {
-            authCodeEl.textContent = `user_code: ${userCode}`;
+            authCodeEl.textContent = `${I18N.userCodePrefix} ${userCode}`;
             authCodeEl.classList.remove("hidden");
         } else {
             authCodeEl.classList.add("hidden");
@@ -1026,7 +1067,7 @@
         }
 
         if (lastError) {
-            authErrorEl.textContent = `last_error: ${lastError}`;
+            authErrorEl.textContent = `${I18N.lastErrorPrefix} ${lastError}`;
             authErrorEl.classList.remove("hidden");
         } else {
             authErrorEl.classList.add("hidden");
@@ -1039,14 +1080,14 @@
         } else if (acceptsChatInput && inputKind) {
             setReplyComposerVisible(true);
             replyTextEl.placeholder = hint || (inputKind === "api_key"
-                ? "Paste API key here..."
-                : "Paste authorization code here...");
-            replySubmitEl.textContent = inputKind === "api_key" ? "Submit API Key" : "Submit Code";
+                ? I18N.authPasteApiKey
+                : I18N.authPasteCode);
+            replySubmitEl.textContent = inputKind === "api_key" ? I18N.authSubmitApiKey : I18N.authSubmitCode;
             setReplyEnabled(true);
         } else {
             setReplyComposerVisible(false);
-            replyTextEl.placeholder = "Authentication is in progress...";
-            replySubmitEl.textContent = "Awaiting Auth";
+            replyTextEl.placeholder = I18N.authInProgress;
+            replySubmitEl.textContent = I18N.authAwaiting;
             setReplyEnabled(false);
         }
     }
@@ -1066,19 +1107,19 @@
     function buildFinalSummaryText(payload, resultStatus, preview, artifacts) {
         const normalizedStatus = safeText(resultStatus).trim().toLowerCase();
         if (normalizedStatus === "failed") {
-            const message = safeText(payload.result_error_message).trim() || "未知错误";
-            return `任务失败。\nerror_message: ${message}`;
+            const message = safeText(payload.result_error_message).trim() || I18N.unknownError;
+            return `${I18N.taskFailedPrefix}\n${I18N.resultErrorLabel}: ${message}`;
         }
         if (normalizedStatus === "canceled") {
-            const message = safeText(payload.result_error_message).trim() || "用户取消";
-            return `任务已取消。\nerror_message: ${message}`;
+            const message = safeText(payload.result_error_message).trim() || I18N.canceledError;
+            return `${I18N.taskCanceledPrefix}\n${I18N.resultErrorLabel}: ${message}`;
         }
         const hasResult = payload.has_result === true;
         const artifactLine = artifacts.length
-            ? `\nartifacts: ${artifacts.slice(0, 8).join(", ")}`
+            ? `\n${I18N.artifactsLabel}: ${artifacts.slice(0, 8).join(", ")}`
             : "";
-        const previewLine = preview ? `\nresult_preview: ${preview}` : "";
-        return `任务完成。${hasResult ? "\n已生成结构化结果。" : ""}${artifactLine}${previewLine}`;
+        const previewLine = preview ? `\n${I18N.resultPreviewLabel}: ${preview}` : "";
+        return `${I18N.taskCompletedPrefix}${hasResult ? `\n${I18N.taskCompletedStructuredHint}` : ""}${artifactLine}${previewLine}`;
     }
 
     function applyPendingPrompt(payload) {
@@ -1154,8 +1195,8 @@
     async function loadFileTree() {
         if (fileTreeLoaded) return;
         fileTreeLoaded = true;
-        fileTreePanelEl.textContent = "Loading...";
-        filePreviewPanelEl.innerHTML = '<div class="preview-empty">选择左侧文件查看内容。</div>';
+        fileTreePanelEl.textContent = I18N.fileTreeLoading;
+        filePreviewPanelEl.innerHTML = `<div class="preview-empty">${I18N.fileTreeSelectHint}</div>`;
 
         function renderFilePreview(relativePath, preview) {
             filePreviewPanelEl.textContent = "";
@@ -1179,7 +1220,7 @@
             if (mode === "too_large") {
                 const warn = document.createElement("div");
                 warn.className = "preview-empty";
-                warn.textContent = "文件过大不可预览";
+                warn.textContent = I18N.fileTooLarge;
                 filePreviewPanelEl.appendChild(warn);
                 const metaEl = document.createElement("div");
                 metaEl.className = "preview-meta";
@@ -1189,25 +1230,25 @@
             }
             const unsupported = document.createElement("div");
             unsupported.className = "preview-empty";
-            unsupported.textContent = "不可预览";
+            unsupported.textContent = I18N.fileNotPreviewable;
             filePreviewPanelEl.appendChild(unsupported);
             const metaEl = document.createElement("div");
             metaEl.className = "preview-meta";
-            metaEl.textContent = safeText(preview?.meta || "无信息");
+            metaEl.textContent = safeText(preview?.meta || I18N.fileNoInfo);
             filePreviewPanelEl.appendChild(metaEl);
         }
 
         try {
             const res = await fetch(apiUrl(`/api/runs/${requestId}/bundle/entries`));
             if (!res.ok) {
-                fileTreePanelEl.textContent = "File tree unavailable.";
+                fileTreePanelEl.textContent = I18N.fileTreeUnavailable;
                 return;
             }
             const payload = await res.json();
             const entries = Array.isArray(payload.entries) ? payload.entries : [];
             fileTreePanelEl.textContent = "";
             if (!entries.length) {
-                fileTreePanelEl.textContent = "No files.";
+                fileTreePanelEl.textContent = I18N.fileTreeNoFiles;
                 return;
             }
             const collapsedDirs = new Set(
@@ -1279,7 +1320,7 @@
                         const path = encodeURIComponent(safeText(entry.path));
                         const previewRes = await fetch(apiUrl(`/api/runs/${requestId}/bundle/file?path=${path}`));
                         if (!previewRes.ok) {
-                            filePreviewPanelEl.innerHTML = `<div class="preview-empty">读取失败: HTTP ${previewRes.status}</div>`;
+                            filePreviewPanelEl.innerHTML = `<div class="preview-empty">${I18N.fileReadFailedHttpPrefix} ${previewRes.status}</div>`;
                             return;
                         }
                         const previewPayload = await previewRes.json();
@@ -1292,7 +1333,7 @@
             }
             updateTreeVisibility();
         } catch (_err) {
-            fileTreePanelEl.textContent = "File tree unavailable.";
+            fileTreePanelEl.textContent = I18N.fileTreeUnavailable;
         }
     }
 
@@ -1350,7 +1391,7 @@
             const res = await fetch(apiUrl(`/api/runs/${requestId}`));
             if (!res.ok) {
                 if (res.status === 503) {
-                    showReplyError("Backend unreachable.");
+                    showReplyError(I18N.submitFailedNetwork);
                 }
                 return false;
             }
@@ -1400,7 +1441,7 @@
             }
             return true;
         } catch (_err) {
-            showReplyError("Backend unreachable.");
+            showReplyError(I18N.submitFailedNetwork);
             return false;
         }
     }
@@ -1511,7 +1552,7 @@
                 stream = null;
             }
             if (shouldShowBackendUnreachable(evt)) {
-                showReplyError("Backend unreachable.");
+                showReplyError(I18N.submitFailedNetwork);
             }
             catchUpHistory()
                 .catch(() => {})
@@ -1577,7 +1618,7 @@
     fileTreeToggleEl.addEventListener("click", async () => {
         fileTreeExpanded = !fileTreeExpanded;
         fileTreeSectionEl.classList.toggle("hidden", !fileTreeExpanded);
-        fileTreeToggleEl.textContent = fileTreeExpanded ? "Hide Files" : "Show Files";
+        fileTreeToggleEl.textContent = fileTreeExpanded ? I18N.hideFiles : I18N.showFiles;
         if (fileTreeExpanded) {
             await maybeLoadFileTreeOnTerminal();
         }
@@ -1589,7 +1630,7 @@
             await startStream();
             await refreshState();
         } catch (_err) {
-            showReplyError("Backend unreachable.");
+            showReplyError(I18N.submitFailedNetwork);
         }
     })();
 

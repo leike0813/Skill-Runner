@@ -48,7 +48,6 @@ async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
     monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", Mock())
     monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", Mock())
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", Mock())
-    monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", Mock())
     monkeypatch.setattr(
         "server.services.orchestration.job_orchestrator.job_orchestrator.recover_incomplete_runs_on_startup",
         AsyncMock(),

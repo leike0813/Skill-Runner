@@ -22,9 +22,13 @@ class EngineUpgradeStore:
         return aiosqlite.connect(str(self.db_path))
 
     async def _ensure_initialized(self) -> None:
+        if self._initialized and not self.db_path.exists():
+            self._initialized = False
         if self._initialized:
             return
         async with self._init_lock:
+            if self._initialized and not self.db_path.exists():
+                self._initialized = False
             if self._initialized:
                 return
             await self._init_db()

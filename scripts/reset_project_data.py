@@ -63,7 +63,7 @@ def main() -> int:
     parser.add_argument(
         "--include-engine-catalog",
         action="store_true",
-        help="Also remove opencode model cache file.",
+        help="Also remove engine model catalog cache files.",
     )
     parser.add_argument(
         "--include-agent-status",

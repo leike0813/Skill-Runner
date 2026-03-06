@@ -1,10 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Engine Management</title>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{% extends "ui/base.html" %}
+
+{% block title %}{{ t("ui.engines.page_title", default="Engine Management") }}{% endblock %}
+
+{% block extra_head %}
     <style>
         body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
         .layout { max-width: 1180px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
@@ -77,128 +75,195 @@
         .auth-actions { display: flex; gap: 8px; margin-top: 10px; }
         .engine-auth-entry-btn { width: 136px; text-align: center; }
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
 <div class="layout">
     <div class="card">
-        <a href="/ui">← Back to UI</a>
-        <h1>Engine 管理</h1>
-        <div>查看缓存化的 Engine 版本、触发升级、管理 Model Manifest。</div>
+        <a href="/ui">{{ t("ui.common.back_home", default="← Back to UI") }}</a>
+        <h1>{{ t("ui.engines.title", default="Engine 管理") }}</h1>
+        <div>{{ t("ui.engines.subtitle", default="查看缓存化的 Engine 版本、触发升级、管理 Model Manifest。") }}</div>
     </div>
 
     <div class="card">
-        <h2>升级全部引擎</h2>
+        <h2>{{ t("ui.engines.upgrade_all_title", default="升级全部引擎") }}</h2>
         <form
             hx-post="/ui/engines/upgrades"
             hx-target="#upgrade-status-container"
             hx-swap="innerHTML"
         >
             <input type="hidden" name="mode" value="all">
-            <button type="submit">升级全部</button>
+            <button class="btn btn-primary" type="submit">{{ t("ui.engines.upgrade_all_action", default="升级全部") }}</button>
         </form>
         <div id="upgrade-status-container" style="margin-top: 12px;"></div>
     </div>
 
     <div class="card">
-        <h2>Engine 状态</h2>
+        <h2>{{ t("ui.engines.status_title", default="Engine 状态") }}</h2>
         <div id="engines-table-container">
             {% include "ui/partials/engines_table.html" %}
         </div>
     </div>
 
     <div class="card">
-        <h2>Engine Auth</h2>
+        <h2>{{ t("ui.engines.auth_title", default="Engine Auth") }}</h2>
         <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
-            鉴权会话与内嵌 TUI 全局互斥。先选择全局鉴权后台，再在引擎表格中点击“连接”入口选择具体方式。
+            {{ t("ui.engines.auth_hint", default="鉴权会话与内嵌 TUI 全局互斥。先选择全局鉴权后台，再在引擎表格中点击“连接”入口选择具体方式。") }}
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-            <label for="auth-transport-select" style="font-size:13px; color:#374151;">鉴权后台</label>
+            <label for="auth-transport-select" style="font-size:13px; color:#374151;">{{ t("ui.engines.auth_transport_label", default="鉴权后台") }}</label>
             <select id="auth-transport-select" style="padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-                <option value="oauth_proxy" selected>OAuth 代理（oauth_proxy）</option>
-                <option value="cli_delegate">CLI 委托（cli_delegate）</option>
+                <option value="oauth_proxy" selected>{{ t("ui.engines.transport_oauth_proxy", default="OAuth 代理（oauth_proxy）") }}</option>
+                <option value="cli_delegate">{{ t("ui.engines.transport_cli_delegate", default="CLI 委托（cli_delegate）") }}</option>
             </select>
-            <button id="auth-cancel-btn" class="secondary" type="button" disabled>取消</button>
+            <button id="auth-cancel-btn" class="btn btn-secondary" type="button" disabled>{{ t("ui.common.cancel", default="取消") }}</button>
         </div>
         <div class="auth-meta">
-            <div id="auth-engine-row">引擎：-</div>
-            <div id="auth-transport-row">链路：-</div>
-            <div id="auth-method-row">鉴权方式：-</div>
-            <div id="auth-state">状态：idle</div>
+            <div id="auth-engine-row">{{ t("ui.engines.auth_engine_prefix", default="引擎：") }}-</div>
+            <div id="auth-transport-row">{{ t("ui.engines.auth_transport_prefix", default="链路：") }}-</div>
+            <div id="auth-method-row">{{ t("ui.engines.auth_method_prefix", default="鉴权方式：") }}-</div>
+            <div id="auth-state">{{ t("ui.engines.auth_state_prefix", default="状态：") }}idle</div>
             <div id="auth-url-row" style="display:none;">
-                授权地址：
+                {{ t("ui.engines.auth_url_label", default="授权地址：") }}
                 <a id="auth-url" class="auth-url" href="#" target="_blank" rel="noopener noreferrer"></a>
             </div>
             <div id="auth-code-row" style="display:none;">
-                用户代码：
+                {{ t("ui.engines.auth_code_label", default="用户代码：") }}
                 <span id="auth-code" class="auth-code"></span>
-                <button id="auth-code-copy-btn" class="secondary" type="button" style="margin-left:8px; padding:4px 8px;">复制</button>
+                <button id="auth-code-copy-btn" class="btn btn-secondary" type="button" style="margin-left:8px; padding:4px 8px;">{{ t("ui.engines.copy", default="复制") }}</button>
                 <span id="auth-code-copy-result" style="margin-left:8px; font-size:12px; color:#6b7280;"></span>
             </div>
             <div id="auth-expire-row" style="display:none;"></div>
         </div>
         <div id="auth-input-row" style="display:none; margin-top:10px;">
-            <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">输入</label>
+            <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.input", default="输入") }}</label>
             <input id="auth-input-value" type="text" autocomplete="off" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;" />
             <div style="margin-top:8px;">
-                <button id="auth-input-btn" type="button">提交</button>
+                <button id="auth-input-btn" class="btn btn-primary" type="button">{{ t("ui.common.submit", default="提交") }}</button>
             </div>
         </div>
         <div id="auth-error" class="error"></div>
         <div id="auth-menu-popover" style="display:none; position:fixed; z-index:80; min-width:220px; background:#ffffff; border:1px solid #d1d5db; box-shadow:0 12px 24px rgba(15,23,42,0.16); border-radius:10px; padding:8px;">
-            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">请选择</div>
+            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.choose", default="请选择") }}</div>
             <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
         </div>
     </div>
 
     <div class="card">
-        <h2>内嵌终端（ttyd）</h2>
+        <h2>{{ t("ui.engines.terminal_title", default="内嵌终端（ttyd）") }}</h2>
         <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
-            通过 ttyd 网关启动引擎 TUI。当前仍采用单会话互斥策略（同一时间仅一个引擎会话）。
+            {{ t("ui.engines.terminal_hint", default="通过 ttyd 网关启动引擎 TUI。当前仍采用单会话互斥策略（同一时间仅一个引擎会话）。") }}
         </div>
         {% if not ttyd_available %}
             <div class="error" style="display:block;">
-                当前环境未检测到 ttyd。请先安装 ttyd 后再刷新本页。
+                {{ t("ui.engines.terminal_ttyd_missing", default="当前环境未检测到 ttyd。请先安装 ttyd 后再刷新本页。") }}
             </div>
         {% endif %}
         <div class="terminal-wrap">
             <div class="terminal-meta">
-                <div id="terminal-state">状态：idle</div>
-                <div id="terminal-sandbox">sandbox: unknown</div>
+                <div id="terminal-state">{{ t("ui.engines.auth_state_prefix", default="状态：") }}idle</div>
+                <div id="terminal-sandbox">{{ t("ui.engines.terminal_sandbox_unknown", default="sandbox: unknown") }}</div>
                 <div class="terminal-actions">
-                    <button id="terminal-reload-btn" class="secondary" type="button">刷新终端</button>
-                    <button id="terminal-stop-btn" class="secondary" type="button" disabled>结束终端</button>
+                    <button id="terminal-reload-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.terminal_reload", default="刷新终端") }}</button>
+                    <button id="terminal-stop-btn" class="btn btn-secondary" type="button" disabled>{{ t("ui.engines.terminal_stop", default="结束终端") }}</button>
                 </div>
             </div>
             <div class="terminal-body">
-                <iframe id="terminal-iframe" src="about:blank" title="Engine TUI Terminal"></iframe>
+                <iframe id="terminal-iframe" src="about:blank" title="{{ t("ui.engines.terminal_iframe_title", default="Engine TUI Terminal") }}"></iframe>
             </div>
         </div>
         <div id="terminal-error" class="error"></div>
         <div id="terminal-warning" class="warning"></div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_scripts %}
 <script>
 (function () {
+    const I18N = {
+        transportOauthProxy: {{ t("ui.engines.transport_oauth_proxy", default="OAuth 代理（oauth_proxy）") | tojson }},
+        transportCliDelegate: {{ t("ui.engines.transport_cli_delegate", default="CLI 委托（cli_delegate）") | tojson }},
+        methodCallback: {{ t("ui.engines.method_callback", default="回调模式") | tojson }},
+        methodAuthCode: {{ t("ui.engines.method_auth_code", default="授权码模式") | tojson }},
+        methodApiKey: {{ t("ui.engines.method_api_key", default="API Key") | tojson }},
+        engineCodex: {{ t("ui.engines.engine_codex", default="Codex") | tojson }},
+        engineGemini: {{ t("ui.engines.engine_gemini", default="Gemini") | tojson }},
+        engineIflow: {{ t("ui.engines.engine_iflow", default="iFlow") | tojson }},
+        engineOpencode: {{ t("ui.engines.engine_opencode", default="OpenCode") | tojson }},
+        statusIdle: {{ t("ui.engines.status_idle", default="空闲") | tojson }},
+        statusRunning: {{ t("ui.engines.status_running", default="运行中") | tojson }},
+        statusStarting: {{ t("ui.engines.status_starting", default="启动中") | tojson }},
+        statusWaitingUser: {{ t("ui.engines.status_waiting_user", default="等待用户操作") | tojson }},
+        statusWaitingOrchestrator: {{ t("ui.engines.status_waiting_orchestrator", default="后台编排中") | tojson }},
+        statusCodeSubmitted: {{ t("ui.engines.status_code_submitted", default="已提交授权码，等待结果") | tojson }},
+        statusPolling: {{ t("ui.engines.status_polling", default="轮询结果中") | tojson }},
+        statusSucceeded: {{ t("ui.engines.status_succeeded", default="成功") | tojson }},
+        statusFailed: {{ t("ui.engines.status_failed", default="失败") | tojson }},
+        statusCanceled: {{ t("ui.engines.status_canceled", default="已取消") | tojson }},
+        statusExpired: {{ t("ui.engines.status_expired", default="已过期") | tojson }},
+        statusTerminated: {{ t("ui.engines.status_terminated", default="已终止") | tojson }},
+        statusUnknown: {{ t("ui.engines.status_unknown", default="未知") | tojson }},
+        inputLabelCallback: {{ t("ui.engines.input_label_callback", default="优先等待自动回调；若服务非本地部署，可粘贴登录后的回调 URL 并提交。") | tojson }},
+        inputLabelGemini: {{ t("ui.engines.input_label_gemini", default="请将授权码粘贴至下方并提交") | tojson }},
+        inputLabelIflow: {{ t("ui.engines.input_label_iflow", default="请将授权码或回调 URL 粘贴至下方并提交") | tojson }},
+        inputLabelCode: {{ t("ui.engines.input_label_code", default="授权码") | tojson }},
+        inputLabelOpencodeGoogle: {{ t("ui.engines.input_label_opencode_google", default="请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交") | tojson }},
+        inputLabelOpencodeOpenai: {{ t("ui.engines.input_label_opencode_openai", default="请将授权码或回调 URL 粘贴至下方并提交") | tojson }},
+        inputLabelDefault: {{ t("ui.engines.input", default="输入") | tojson }},
+        choose: {{ t("ui.engines.choose", default="请选择") | tojson }},
+        chooseMethod: {{ t("ui.engines.choose_method", default="选择鉴权方式") | tojson }},
+        chooseProvider: {{ t("ui.engines.choose_provider", default="选择 Provider") | tojson }},
+        errorBusy: {{ t("ui.engines.error_busy", default="当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。") | tojson }},
+        errorNoMethodForEngine: {{ t("ui.engines.error_no_method_for_engine", default="当前鉴权后台下，该引擎暂无可用鉴权方式。") | tojson }},
+        errorNoProvider: {{ t("ui.engines.error_no_provider", default="当前鉴权后台下，OpenCode 没有可用 Provider。") | tojson }},
+        errorProviderNoMethod: {{ t("ui.engines.error_provider_no_method", default="该 Provider 在当前鉴权后台下没有可用鉴权方式。") | tojson }},
+        backProviderList: {{ t("ui.engines.back_provider_list", default="← 返回 Provider 列表") | tojson }},
+        authEnginePrefix: {{ t("ui.engines.auth_engine_prefix", default="引擎：") | tojson }},
+        authTransportPrefix: {{ t("ui.engines.auth_transport_prefix", default="链路：") | tojson }},
+        authMethodPrefix: {{ t("ui.engines.auth_method_prefix", default="鉴权方式：") | tojson }},
+        authStatePrefix: {{ t("ui.engines.auth_state_prefix", default="状态：") | tojson }},
+        authExpiresPrefix: {{ t("ui.engines.auth_expires_prefix", default="过期时间：") | tojson }},
+        terminalStatePrefix: {{ t("ui.engines.terminal_state_prefix", default="状态：") | tojson }},
+        terminalSandboxPrefix: {{ t("ui.engines.terminal_sandbox_prefix", default="sandbox:") | tojson }},
+        terminalSandboxUnknown: {{ t("ui.engines.terminal_sandbox_unknown_short", default="unknown") | tojson }},
+        terminalRunning: {{ t("ui.engines.terminal_running", default="running") | tojson }},
+        chooseMethodSuffix: {{ t("ui.engines.choose_method", default="选择鉴权方式") | tojson }},
+        chooseProviderSuffix: {{ t("ui.engines.choose_provider", default="选择 Provider") | tojson }},
+        fetchSessionFailed: {{ t("ui.engines.error_fetch_session", default="读取会话状态失败（HTTP {status}）") | tojson }},
+        fetchAuthStatusFailed: {{ t("ui.engines.error_fetch_auth_status", default="读取鉴权状态失败（HTTP {status}）") | tojson }},
+        fetchActiveAuthFailed: {{ t("ui.engines.error_fetch_active_auth", default="读取当前鉴权会话失败（HTTP {status}）") | tojson }},
+        errorAuthMethodMissing: {{ t("ui.engines.error_auth_method_missing", default="未选择鉴权方式") | tojson }},
+        errorProviderRequired: {{ t("ui.engines.error_provider_required", default="请先选择 OpenCode Provider") | tojson }},
+        errorStartAuthFailed: {{ t("ui.engines.error_start_auth_failed", default="启动鉴权会话失败（HTTP {status}）") | tojson }},
+        errorInputRequired: {{ t("ui.engines.error_input_required", default="请输入内容") | tojson }},
+        errorSubmitInputFailed: {{ t("ui.engines.error_submit_input_failed", default="提交输入失败（HTTP {status}）") | tojson }},
+        errorCancelAuthFailed: {{ t("ui.engines.error_cancel_auth_failed", default="取消鉴权会话失败（HTTP {status}）") | tojson }},
+        errorTtydUnavailable: {{ t("ui.engines.error_ttyd_unavailable", default="ttyd 不可用，无法启动内嵌终端。") | tojson }},
+        errorStartTuiFailed: {{ t("ui.engines.error_start_tui_failed", default="启动失败（HTTP {status}）") | tojson }},
+        errorStopTuiFailed: {{ t("ui.engines.error_stop_tui_failed", default="停止失败（HTTP {status}）") | tojson }},
+        copyOk: {{ t("ui.engines.copy_ok", default="已复制") | tojson }},
+        copyFailed: {{ t("ui.engines.copy_failed", default="复制失败") | tojson }},
+    };
     const ttydAvailable = {{ "true" if ttyd_available else "false" }};
     const initialSession = {{ session | tojson }};
     const initialAuthSession = {{ auth_session | tojson }};
     const opencodeAuthProviders = {{ opencode_auth_providers | tojson }};
     const authUiCapabilities = {{ auth_ui_capabilities | tojson }};
     const transportLabels = {
-        oauth_proxy: "OAuth 代理（oauth_proxy）",
-        cli_delegate: "CLI 委托（cli_delegate）",
+        oauth_proxy: I18N.transportOauthProxy,
+        cli_delegate: I18N.transportCliDelegate,
     };
     const authMethodLabels = {
-        callback: "回调模式",
-        auth_code_or_url: "授权码模式",
-        api_key: "API Key",
+        callback: I18N.methodCallback,
+        auth_code_or_url: I18N.methodAuthCode,
+        api_key: I18N.methodApiKey,
     };
     const engineLabels = {
-        codex: "Codex",
-        gemini: "Gemini",
-        iflow: "iFlow",
-        opencode: "OpenCode",
+        codex: I18N.engineCodex,
+        gemini: I18N.engineGemini,
+        iflow: I18N.engineIflow,
+        opencode: I18N.engineOpencode,
     };
     const terminalStatuses = new Set(["succeeded", "failed", "canceled", "expired"]);
 
@@ -271,19 +336,19 @@
 
     function mapStatusLabel(status) {
         const labels = {
-            idle: "空闲",
-            running: "运行中",
-            starting: "启动中",
-            waiting_user: "等待用户操作",
-            waiting_orchestrator: "后台编排中",
-            code_submitted_waiting_result: "已提交授权码，等待结果",
-            polling_result: "轮询结果中",
-            succeeded: "成功",
-            failed: "失败",
-            canceled: "已取消",
-            expired: "已过期",
-            terminated: "已终止",
-            unknown: "未知",
+            idle: I18N.statusIdle,
+            running: I18N.statusRunning,
+            starting: I18N.statusStarting,
+            waiting_user: I18N.statusWaitingUser,
+            waiting_orchestrator: I18N.statusWaitingOrchestrator,
+            code_submitted_waiting_result: I18N.statusCodeSubmitted,
+            polling_result: I18N.statusPolling,
+            succeeded: I18N.statusSucceeded,
+            failed: I18N.statusFailed,
+            canceled: I18N.statusCanceled,
+            expired: I18N.statusExpired,
+            terminated: I18N.statusTerminated,
+            unknown: I18N.statusUnknown,
         };
         return labels[status] || status;
     }
@@ -322,24 +387,24 @@
         const providerId = String(session.provider_id || "").trim().toLowerCase();
         const authMethod = String(session.auth_method || "").trim().toLowerCase();
         if (authMethod === "callback") {
-            return "优先等待自动回调；若服务非本地部署，可粘贴登录后的回调 URL 并提交。";
+            return I18N.inputLabelCallback;
         }
         if (engine === "gemini") {
-            return "请将授权码粘贴至下方并提交";
+            return I18N.inputLabelGemini;
         }
         if (engine === "iflow") {
-            return "请将授权码或回调 URL 粘贴至下方并提交";
+            return I18N.inputLabelIflow;
         }
         const kind = resolveInputKind(session);
-        if (kind === "api_key") return "API Key";
-        if (kind === "code") return "授权码";
+        if (kind === "api_key") return I18N.methodApiKey;
+        if (kind === "code") return I18N.inputLabelCode;
         if (engine === "opencode" && providerId === "google") {
-            return "请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交";
+            return I18N.inputLabelOpencodeGoogle;
         }
         if (engine === "opencode" && providerId === "openai") {
-            return "请将授权码或回调 URL 粘贴至下方并提交";
+            return I18N.inputLabelOpencodeOpenai;
         }
-        return "输入";
+        return I18N.inputLabelDefault;
     }
 
     function isAuthSessionActive(session) {
@@ -398,7 +463,7 @@
         authMenuState = null;
         if (authMenuPopoverEl) authMenuPopoverEl.style.display = "none";
         if (authMenuItemsEl) authMenuItemsEl.innerHTML = "";
-        if (authMenuTitleEl) authMenuTitleEl.textContent = "请选择";
+        if (authMenuTitleEl) authMenuTitleEl.textContent = I18N.choose;
     }
 
     function positionAuthMenu(anchor) {
@@ -416,7 +481,7 @@
         items.forEach((item) => {
             const btn = document.createElement("button");
             btn.type = "button";
-            btn.className = item.secondary ? "secondary" : "";
+            btn.className = item.secondary ? "btn btn-secondary" : "btn btn-primary";
             btn.style.textAlign = "left";
             btn.style.width = "100%";
             btn.textContent = item.label;
@@ -431,7 +496,7 @@
 
     function openEngineAuthMenu(anchor, engine) {
         if (!anchor || isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
-            showAuthError("当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。");
+            showAuthError(I18N.errorBusy);
             return;
         }
         clearAuthError();
@@ -441,7 +506,7 @@
         if (normalizedEngine !== "opencode") {
             const methods = methodsForEngine(transport, normalizedEngine, "");
             if (methods.length === 0) {
-                showAuthError("当前鉴权后台下，该引擎暂无可用鉴权方式。");
+                showAuthError(I18N.errorNoMethodForEngine);
                 return;
             }
             renderAuthMenuItems(
@@ -452,7 +517,7 @@
                         startAuth(normalizedEngine, transport, method, "");
                     },
                 })),
-                `${engineLabels[normalizedEngine] || normalizedEngine} · 选择鉴权方式`
+                `${engineLabels[normalizedEngine] || normalizedEngine} · ${I18N.chooseMethod}`
             );
             authMenuState = { level: "method", engine: normalizedEngine, anchor };
             positionAuthMenu(anchor);
@@ -461,7 +526,7 @@
 
         const providers = availableOpencodeProviders(transport);
         if (providers.length === 0) {
-            showAuthError("当前鉴权后台下，OpenCode 没有可用 Provider。");
+            showAuthError(I18N.errorNoProvider);
             return;
         }
         renderAuthMenuItems(
@@ -469,7 +534,7 @@
                 label: provider.display_name,
                 onClick: () => openOpencodeMethodMenu(anchor, transport, provider),
             })),
-            "OpenCode · 选择 Provider"
+            `OpenCode · ${I18N.chooseProvider}`
         );
         authMenuState = { level: "provider", engine: "opencode", anchor };
         positionAuthMenu(anchor);
@@ -495,12 +560,12 @@
             }
         }
         if (methods.length === 0) {
-            showAuthError(`该 Provider 在当前鉴权后台下没有可用鉴权方式。provider=${providerId}, transport=${transport}`);
+            showAuthError(`${I18N.errorProviderNoMethod} provider=${providerId}, transport=${transport}`);
             return;
         }
         const items = [
             {
-                label: "← 返回 Provider 列表",
+                label: I18N.backProviderList,
                 secondary: true,
                 onClick: () => openEngineAuthMenu(anchor, "opencode"),
             },
@@ -512,7 +577,7 @@
                 },
             })),
         ];
-        renderAuthMenuItems(items, `OpenCode / ${provider.display_name} · 选择鉴权方式`);
+        renderAuthMenuItems(items, `OpenCode / ${provider.display_name} · ${I18N.chooseMethodSuffix}`);
         authMenuState = { level: "method", engine: "opencode", providerId, anchor };
         positionAuthMenu(anchor);
     }
@@ -584,10 +649,10 @@
         const transport = resolveTransportLabel(currentAuthSession.transport || "-");
         const authMethodText = resolveAuthMethodLabel(currentAuthSession.auth_method || "-");
         const authMethodRaw = String(currentAuthSession.auth_method || "-");
-        authEngineRowEl.textContent = `引擎：${engine}`;
-        authTransportRowEl.textContent = `链路：${transport}`;
-        authMethodRowEl.textContent = `鉴权方式：${authMethodText}${authMethodRaw !== "-" ? ` (${authMethodRaw})` : ""}`;
-        authStateEl.textContent = `状态：${statusLabel}${terminalSuffix}`;
+        authEngineRowEl.textContent = `${I18N.authEnginePrefix}${engine}`;
+        authTransportRowEl.textContent = `${I18N.authTransportPrefix}${transport}`;
+        authMethodRowEl.textContent = `${I18N.authMethodPrefix}${authMethodText}${authMethodRaw !== "-" ? ` (${authMethodRaw})` : ""}`;
+        authStateEl.textContent = `${I18N.authStatePrefix}${statusLabel}${terminalSuffix}`;
 
         const shouldShowAuthUrl = !!currentAuthSession.auth_url && status === "waiting_user" && !authSubmitLocked;
         if (shouldShowAuthUrl) {
@@ -614,7 +679,7 @@
 
         if (currentAuthSession.expires_at) {
             authExpireRowEl.style.display = "block";
-            authExpireRowEl.textContent = `过期时间：${currentAuthSession.expires_at}`;
+            authExpireRowEl.textContent = `${I18N.authExpiresPrefix}${currentAuthSession.expires_at}`;
         } else {
             authExpireRowEl.style.display = "none";
             authExpireRowEl.textContent = "";
@@ -654,9 +719,9 @@
 
     function applyState(payload) {
         currentSession = payload || { active: false };
-        const sandboxStatus = currentSession.sandbox_status || "unknown";
+        const sandboxStatus = currentSession.sandbox_status || I18N.terminalSandboxUnknown;
         const sandboxMessage = currentSession.sandbox_message || "";
-        sandboxEl.textContent = `sandbox: ${sandboxStatus}`;
+        sandboxEl.textContent = `${I18N.terminalSandboxPrefix} ${sandboxStatus}`;
         if (sandboxStatus !== "supported" && sandboxMessage) {
             showWarning(sandboxMessage);
         } else {
@@ -667,7 +732,7 @@
         stopBtn.disabled = !running;
         stateEl.className = running ? "terminal-status-running" : "terminal-status-terminal";
         if (running) {
-            stateEl.textContent = `状态：${currentSession.engine || "-"} running (pid ${currentSession.pid || "-"})`;
+            stateEl.textContent = `${I18N.terminalStatePrefix}${currentSession.engine || "-"} ${I18N.terminalRunning} (pid ${currentSession.pid || "-"})`;
             if (currentSession.ttyd_port) {
                 const next = buildTtydUrl(currentSession.ttyd_port);
                 if (frame.src !== next) {
@@ -678,7 +743,7 @@
         } else {
             const status = currentSession.status || "idle";
             const extra = currentSession.error ? `: ${currentSession.error}` : "";
-            stateEl.textContent = `状态：${mapStatusLabel(status)}${extra}`;
+            stateEl.textContent = `${I18N.terminalStatePrefix}${mapStatusLabel(status)}${extra}`;
             frame.src = "about:blank";
         }
         updateInteractiveActionLocks();
@@ -687,7 +752,7 @@
     async function fetchSessionState() {
         const res = await fetch("/ui/engines/tui/session");
         if (!res.ok) {
-            showError(`读取会话状态失败（HTTP ${res.status}）`);
+            showError(I18N.fetchSessionFailed.replace("{status}", String(res.status)));
             return;
         }
         const payload = await res.json();
@@ -707,7 +772,7 @@
                 return;
             }
             if (res.status !== 404) {
-                let detail = `读取鉴权状态失败（HTTP ${res.status}）`;
+                let detail = I18N.fetchAuthStatusFailed.replace("{status}", String(res.status));
                 try {
                     const payload = await res.json();
                     if (typeof payload.detail === "string") detail = payload.detail;
@@ -719,7 +784,7 @@
         }
         const activeRes = await fetch("/ui/engines/auth/session/active");
         if (!activeRes.ok) {
-            let detail = `读取当前鉴权会话失败（HTTP ${activeRes.status}）`;
+            let detail = I18N.fetchActiveAuthFailed.replace("{status}", String(activeRes.status));
             try {
                 const payload = await activeRes.json();
                 if (typeof payload.detail === "string") detail = payload.detail;
@@ -734,7 +799,7 @@
 
     async function startAuth(engine, transport, authMethod, authProvider) {
         if (isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
-            showAuthError("当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。");
+            showAuthError(I18N.errorBusy);
             return;
         }
         clearAuthError();
@@ -743,7 +808,7 @@
         const normalizedTransport = (transport || "oauth_proxy");
         const normalizedAuthMethod = String(authMethod || "").trim().toLowerCase();
         if (!normalizedAuthMethod) {
-            showAuthError("未选择鉴权方式");
+            showAuthError(I18N.errorAuthMethodMissing);
             return;
         }
         const requestBody = {
@@ -754,7 +819,7 @@
         if (engine === "opencode") {
             requestBody.provider_id = String(authProvider || "").trim().toLowerCase();
             if (!requestBody.provider_id) {
-                showAuthError("请先选择 OpenCode Provider");
+                showAuthError(I18N.errorProviderRequired);
                 return;
             }
         }
@@ -768,7 +833,7 @@
                 body: JSON.stringify(requestBody)
             });
             if (!res.ok) {
-                let detail = `启动鉴权会话失败（HTTP ${res.status}）`;
+                let detail = I18N.errorStartAuthFailed.replace("{status}", String(res.status));
                 try {
                     const errorPayload = await res.json();
                     if (typeof errorPayload.detail === "string") detail = errorPayload.detail;
@@ -789,7 +854,7 @@
         if (!currentAuthSession.session_id) return;
         const value = String(authInputValueEl.value || "").trim();
         if (!value) {
-            showAuthError("请输入内容");
+            showAuthError(I18N.errorInputRequired);
             return;
         }
         clearAuthError();
@@ -801,7 +866,7 @@
             body: JSON.stringify({ kind: kind, value: value }),
         });
         if (!res.ok) {
-            let detail = `提交输入失败（HTTP ${res.status}）`;
+            let detail = I18N.errorSubmitInputFailed.replace("{status}", String(res.status));
             try {
                 const payload = await res.json();
                 if (typeof payload.detail === "string") detail = payload.detail;
@@ -823,7 +888,7 @@
             method: "POST"
         });
         if (!res.ok) {
-            let detail = `取消鉴权会话失败（HTTP ${res.status}）`;
+            let detail = I18N.errorCancelAuthFailed.replace("{status}", String(res.status));
             try {
                 const payload = await res.json();
                 if (typeof payload.detail === "string") detail = payload.detail;
@@ -837,11 +902,11 @@
 
     async function startTui(engine) {
         if (!ttydAvailable) {
-            showError("ttyd 不可用，无法启动内嵌终端。");
+            showError(I18N.errorTtydUnavailable);
             return;
         }
         if (isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
-            showError("当前已有进行中的鉴权会话或内嵌终端会话，请先完成或结束后再启动。");
+            showError(I18N.errorBusy);
             return;
         }
         clearError();
@@ -856,7 +921,7 @@
                 body: form.toString()
             });
             if (!res.ok) {
-                let detail = `启动失败（HTTP ${res.status}）`;
+                let detail = I18N.errorStartTuiFailed.replace("{status}", String(res.status));
                 try {
                     const payload = await res.json();
                     if (typeof payload.detail === "string") detail = payload.detail;
@@ -877,7 +942,7 @@
         clearError();
         const res = await fetch("/ui/engines/tui/session/stop", { method: "POST" });
         if (!res.ok) {
-            showError(`停止失败（HTTP ${res.status}）`);
+            showError(I18N.errorStopTuiFailed.replace("{status}", String(res.status)));
             return;
         }
         const payload = await res.json();
@@ -914,10 +979,10 @@
             try {
                 const ok = await copyText(code);
                 if (authCodeCopyResultEl) {
-                    authCodeCopyResultEl.textContent = ok ? "已复制" : "复制失败";
+                    authCodeCopyResultEl.textContent = ok ? I18N.copyOk : I18N.copyFailed;
                 }
             } catch (_err) {
-                if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = "复制失败";
+                if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = I18N.copyFailed;
             }
         });
     }
@@ -982,5 +1047,4 @@
     updateInteractiveActionLocks();
 })();
 </script>
-</body>
-</html>
+{% endblock %}

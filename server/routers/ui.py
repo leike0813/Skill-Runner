@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import quote_plus
+from jinja2 import pass_context
 
 from fastapi import (  # type: ignore[import-not-found]
     APIRouter,
@@ -21,6 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # ty
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from ..config import config
+from ..i18n import get_language, get_translator
 from ..logging_config import get_logging_settings_payload
 from ..models import (
     AuthSessionInputRequestV2,
@@ -71,6 +73,30 @@ from . import management as management_router
 
 TEMPLATE_ROOT = Path(__file__).parent.parent / "assets" / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_ROOT))
+
+
+@pass_context
+def _template_translate(context, key: str, default: str | None = None, **kwargs):
+    request = context.get("request")
+    if request is not None and hasattr(request.state, "t"):
+        return request.state.t(key, default=default, **kwargs)
+    # Fallback for tests or edge paths without middleware context.
+    if request is not None:
+        translator = get_translator(request)
+        return translator(key, default=default, **kwargs)
+    return default if default is not None else key
+
+
+@pass_context
+def _template_lang(context):
+    request = context.get("request")
+    if request is None:
+        return "zh"
+    return getattr(request.state, "lang", get_language(request))
+
+
+templates.env.globals["t"] = _template_translate
+templates.env.globals["lang"] = _template_lang
 
 
 router = APIRouter(

@@ -482,3 +482,28 @@ async def test_get_pending_interaction_ignores_invalid_legacy_payload(tmp_path):
         )
         conn.commit()
     assert await store.get_pending_interaction("req-legacy") is None
+
+
+@pytest.mark.asyncio
+async def test_run_store_reinitializes_after_db_file_deleted(tmp_path):
+    db_path = tmp_path / "runs.db"
+    store = RunStore(db_path=db_path)
+    await store.create_request(
+        request_id="req-1",
+        skill_id="skill",
+        engine="gemini",
+        parameter={},
+        engine_options={},
+        runtime_options={},
+    )
+    assert db_path.exists()
+    db_path.unlink()
+
+    request = await store.get_request("req-1")
+    assert request is None
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='requests'"
+        ).fetchone()
+    assert row is not None

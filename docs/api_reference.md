@@ -712,7 +712,6 @@
 配置：
 - `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `8011`；无效值回退到 `8011`。
 - `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:8000`。
-- `SKILL_RUNNER_E2E_CLIENT_RECORDINGS_DIR`：录制回放文件目录，默认 `e2e_client/recordings`。
 
 主要页面与接口：
 - `GET /`：读取并展示 Skill 列表。
@@ -720,11 +719,8 @@
 - `POST /skills/{skill_id}/run`：提交执行（创建 run + 可选上传 zip）。
 - `GET /runs/{request_id}`：运行观测页（stdout 主对话区、stderr 独立窗口、pending/reply 交互）。
 - `GET /runs/{request_id}/result`：结果与产物展示页。
-- `GET /recordings`：录制会话列表。
-- `GET /recordings/{request_id}`：单步回放页。
 - `GET /api/runs/{request_id}/events`：按 `run_source` 代理后端 SSE（installed:`/v1/jobs/*`，temp:`/v1/temp-skill-runs/*`）。
-- `POST /api/runs/{request_id}/reply`：代理后端 reply 并写入录制。
-- `GET /api/recordings/{request_id}`：读取录制 JSON。
+- `POST /api/runs/{request_id}/reply`：代理后端 reply。
 
 ### 页面上传安装 Skill 包
 `POST /ui/skill-packages/install`

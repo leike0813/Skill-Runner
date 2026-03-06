@@ -25,8 +25,6 @@ Primary routes:
 - `/fixtures/{fixture_skill_id}/run`: temp-skill execution form (fixture package uploaded at runtime).
 - `/runs/{request_id}`: run observation page.
 - `/runs/{request_id}/result`: result and artifact view.
-- `/recordings`: recording list.
-- `/recordings/{request_id}`: single-step replay view.
 
 ## 4. Page Layouts
 
@@ -59,7 +57,7 @@ Primary routes:
     3. Optional input zip (`file`) uploaded in the same request
 
 ### 4.3 Run Observation
-- Header: status + pending interaction id + shortcuts (result/replay).
+- Header: status + pending interaction id + shortcut (result).
 - Main area:
   - Left: FCMP-first conversation panel (scrollable, fixed height).
   - Right: stderr panel (separate scrollable window).
@@ -87,38 +85,7 @@ Primary routes:
   - file tree (scrollable, fixed-height)
   - file preview panel (text preview with binary/large-file fallback)
 
-### 4.5 Replay View (Single-step)
-- Step counter and `Prev/Next` controls.
-- Current step panel shows:
-  - timestamp
-  - action
-  - request/response summary payload
-
-## 5. Recording Model (MVP)
-
-Stored in `e2e_client/recordings/{request_id}.json`.
-
-Each step stores:
-- `ts`
-- `action`
-- `status`
-- `request` summary
-- `response` summary
-- `run_source` (`installed` or `temp`)
-
-Top-level optional observation summary:
-- `observation_summary.cursor`
-- `observation_summary.last_chat_event`
-- `observation_summary.key_events[]` (seq/type/correlation/confidence)
-- `observation_summary.raw_refs[]` (stream/byte_from/byte_to)
-
-Tracked actions in MVP:
-- `create_run`
-- `upload`
-- `reply`
-- `result_read`
-
-## 6. Interaction Rules
+## 5. Interaction Rules
 
 - Reply submit is enabled only when `pending` exists.
 - File inputs are zipped using schema key names as zip entry names.
@@ -128,14 +95,13 @@ Tracked actions in MVP:
 - Invalid input blocks submission and keeps user-entered values.
 - Invalid execution mode selection is rejected before request submission.
 
-## 7. Testability Requirements
+## 6. Testability Requirements
 
 - All key user actions must be reachable with plain HTTP + HTML forms.
-- Replay payload is accessible via `GET /api/recordings/{request_id}`.
 - Observation stream is accessible via `GET /api/runs/{request_id}/events`.
 - Observation summary sync endpoint is accessible via `POST /api/runs/{request_id}/observe-summary`.
 
-## 8. Auth Matrix Boundary
+## 7. Auth Matrix Boundary
 
 - The built-in E2E client (`e2e_client/`) does not expose engine auth session controls.
 - Engine auth matrix testing (e.g., `oauth_proxy|cli_delegate` × `callback|auth_code_or_url`) is handled in management UI (`/ui/engines`) and corresponding backend tests.

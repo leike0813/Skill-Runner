@@ -107,6 +107,7 @@ def isolated_skill_install_env(monkeypatch, tmp_path):
     old_archive_dir = config.SYSTEM.SKILLS_ARCHIVE_DIR
     old_staging_dir = config.SYSTEM.SKILLS_STAGING_DIR
     old_install_dir = config.SYSTEM.SKILL_INSTALLS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
     old_install_db = config.SYSTEM.SKILL_INSTALLS_DB
 
     config.defrost()
@@ -114,10 +115,11 @@ def isolated_skill_install_env(monkeypatch, tmp_path):
     config.SYSTEM.SKILLS_ARCHIVE_DIR = str(tmp_path / "skills" / ".archive")
     config.SYSTEM.SKILLS_STAGING_DIR = str(tmp_path / "skills" / ".staging")
     config.SYSTEM.SKILL_INSTALLS_DIR = str(tmp_path / "skill_installs")
-    config.SYSTEM.SKILL_INSTALLS_DB = str(tmp_path / "skill_installs.db")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.SYSTEM.SKILL_INSTALLS_DB = config.SYSTEM.RUNS_DB
     config.freeze()
 
-    store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
+    store = SkillInstallStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr("server.routers.skill_packages.skill_install_store", store)
     monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
     try:
@@ -128,6 +130,7 @@ def isolated_skill_install_env(monkeypatch, tmp_path):
         config.SYSTEM.SKILLS_ARCHIVE_DIR = old_archive_dir
         config.SYSTEM.SKILLS_STAGING_DIR = old_staging_dir
         config.SYSTEM.SKILL_INSTALLS_DIR = old_install_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
         config.SYSTEM.SKILL_INSTALLS_DB = old_install_db
         config.freeze()
 
@@ -137,7 +140,6 @@ def disable_lifespan_schedulers(monkeypatch):
     monkeypatch.setattr("server.services.platform.cache_manager.cache_manager.start", lambda: None)
     monkeypatch.setattr("server.services.platform.concurrency_manager.concurrency_manager.start", lambda: None)
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_cleanup_manager.start", lambda: None)
-    monkeypatch.setattr("server.services.skill.temp_skill_cleanup_manager.temp_skill_cleanup_manager.start", lambda: None)
     monkeypatch.setattr(
         "server.services.engine_management.engine_status_cache_service.engine_status_cache_service.refresh_all",
         AsyncMock(return_value=None),

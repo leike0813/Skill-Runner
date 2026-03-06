@@ -1,60 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Skill Runner UI</title>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <style>
-        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
-        .layout { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
-        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; }
-        h1 { margin: 0 0 12px; font-size: 24px; }
-        h2 { margin: 0 0 10px; font-size: 18px; }
-        .muted { color: #6b7280; font-size: 14px; }
-        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        input[type="file"] { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; background: #fff; }
-        button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 9px 14px; cursor: pointer; }
-        button:hover { background: #0b5f58; }
-        #install-status-container { margin-top: 12px; }
-        .nav-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
-        .nav-card {
-            border: 1px solid #d1fae5;
-            border-radius: 10px;
-            padding: 14px;
-            background: linear-gradient(180deg, #f0fdfa 0%, #ecfeff 100%);
-            text-decoration: none;
-            color: inherit;
-            display: block;
-        }
-        .nav-card:hover { border-color: #5eead4; box-shadow: 0 1px 8px rgba(15, 118, 110, 0.08); }
-        .nav-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
-        .nav-desc { color: #6b7280; font-size: 13px; }
-    </style>
-</head>
-<body>
+{% extends "ui/base.html" %}
+{% block title %}{{ t("ui.index.page_title", default="Skill Runner UI") }}{% endblock %}
+{% block content %}
 <div class="layout">
     <div class="card">
-        <h1>Skill Runner 管理界面</h1>
-        <div class="muted">用于查看已安装 Skill，并通过网页上传 Skill 包进行安装。</div>
+        <h1>{{ t("ui.index.title", default="Skill Runner 管理界面") }}</h1>
+        <div class="muted">{{ t("ui.index.subtitle", default="用于查看已安装 Skill，并通过网页上传 Skill 包进行安装。") }}</div>
         <div class="nav-grid">
             <a class="nav-card" href="/ui/engines">
-                <div class="nav-title">Engine 管理</div>
-                <div class="nav-desc">查看引擎状态、鉴权状态、升级与模型快照管理。</div>
+                <div class="nav-title">{{ t("ui.index.nav_engines_title", default="Engine 管理") }}</div>
+                <div class="nav-desc">{{ t("ui.index.nav_engines_desc", default="查看引擎状态、鉴权状态、升级与模型快照管理。") }}</div>
             </a>
             <a class="nav-card" href="/ui/runs">
-                <div class="nav-title">Run 观测</div>
-                <div class="nav-desc">按 request_id 查看 run 文件树、状态与日志输出。</div>
+                <div class="nav-title">{{ t("ui.index.nav_runs_title", default="Run 观测") }}</div>
+                <div class="nav-desc">{{ t("ui.index.nav_runs_desc", default="按 request_id 查看 run 文件树、状态与日志输出。") }}</div>
             </a>
             <a class="nav-card" href="/ui/settings">
-                <div class="nav-title">设置</div>
-                <div class="nav-desc">调整运行时日志设置，并进入危险操作维护区。</div>
+                <div class="nav-title">{{ t("ui.index.nav_settings_title", default="设置") }}</div>
+                <div class="nav-desc">{{ t("ui.index.nav_settings_desc", default="调整运行时日志设置，并进入危险操作维护区。") }}</div>
             </a>
         </div>
     </div>
 
     <div class="card">
-        <h2>安装 Skill 包</h2>
+        <h2>{{ t("ui.index.install_title", default="安装 Skill 包") }}</h2>
         <form
             hx-post="/ui/skill-packages/install"
             hx-target="#install-status-container"
@@ -63,14 +31,14 @@
         >
             <div class="row">
                 <input type="file" name="file" accept=".zip" required>
-                <button type="submit">上传并安装</button>
+                <button class="btn btn-primary" type="submit">{{ t("ui.index.install_action", default="上传并安装") }}</button>
             </div>
         </form>
         <div id="install-status-container"></div>
     </div>
 
     <div class="card">
-        <h2>已安装 Skills</h2>
+        <h2>{{ t("ui.index.installed_skills", default="已安装 Skills") }}</h2>
         <div
             id="skills-table"
             hx-get="/ui/management/skills/table"
@@ -79,5 +47,4 @@
         ></div>
     </div>
 </div>
-</body>
-</html>
+{% endblock %}

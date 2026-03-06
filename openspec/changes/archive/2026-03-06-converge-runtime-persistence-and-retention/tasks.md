@@ -1,0 +1,8 @@
+- [x] 将 `runtime_process_leases` 文件存储迁移到 `runs.db.process_leases`
+- [x] 将 `skill_installs` 默认存储迁移到 `runs.db.skill_installs`
+- [x] 删除 `temp_skill_runs` 旧路由与旧 store（避免 `temp_skill_runs.db` 触发）
+- [x] 将 jobs upload staging 路径迁移到 `data/tmp_uploads` 并增加即时清理
+- [x] 在 run cleanup 周期中加入 `tmp_uploads`、`ui_shell_sessions`、closed leases 清理
+- [x] 同步 `data reset` 服务与脚本到新的持久化真相源
+- [x] 测试环境默认强制隔离到 `tmp_path` 数据根
+- [x] 运行并修复本 change 相关单测与静态检查

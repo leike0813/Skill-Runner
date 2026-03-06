@@ -1,156 +1,140 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Skill Runner Settings</title>
-    <style>
-        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
-        .layout { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
-        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px; }
-        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .stack { display: grid; gap: 10px; }
-        .field-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-        label { display: grid; gap: 6px; font-size: 13px; color: #374151; }
-        input[type="text"], input[type="number"], select {
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 8px;
-            background: #fff;
-            font-size: 14px;
-        }
-        button { border: 0; border-radius: 8px; background: #0f766e; color: #fff; padding: 9px 14px; cursor: pointer; }
-        button:hover { background: #0b5f58; }
-        .btn-secondary {
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            background: #fff;
-            color: #374151;
-            padding: 9px 14px;
-            cursor: pointer;
-            text-decoration: none;
-        }
-        .btn-secondary:hover { background: #f9fafb; }
-        .muted { color: #6b7280; font-size: 13px; }
-        .readonly-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 10px; }
-        .readonly-item {
-            border: 1px solid #e5e7eb;
-            border-radius: 10px;
-            background: #f9fafb;
-            padding: 12px;
-        }
-        .readonly-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
-        .readonly-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
-        .status-box {
-            display: none;
-            border-radius: 8px;
-            padding: 10px;
-            font-size: 13px;
-            white-space: pre-wrap;
-        }
-        .status-box.success {
-            display: block;
-            border: 1px solid #a7f3d0;
-            background: #ecfdf5;
-            color: #065f46;
-        }
-        .status-box.error {
-            display: block;
-            border: 1px solid #fecaca;
-            background: #fef2f2;
-            color: #991b1b;
-        }
-        .danger-card {
-            border: 1px solid #fecaca;
-            background: linear-gradient(180deg, #fff7ed 0%, #fff1f2 100%);
-        }
-        .danger-title { color: #9f1239; font-weight: 700; }
-        .danger-text { color: #7f1d1d; font-size: 13px; margin-top: 6px; }
-        .danger-options { display: grid; gap: 8px; margin-top: 10px; font-size: 13px; color: #374151; }
-        .danger-btn {
-            border: 0;
-            border-radius: 8px;
-            background: #b91c1c;
-            color: #fff;
-            padding: 9px 14px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .danger-btn:hover { background: #991b1b; }
-        .danger-result {
-            margin-top: 12px;
-            border: 1px solid #fecaca;
-            border-radius: 8px;
-            background: #fff;
-            padding: 10px;
-            font-size: 13px;
-            color: #111827;
-            display: none;
-            white-space: pre-wrap;
-        }
-        .danger-result.error {
-            border-color: #fca5a5;
-            background: #fef2f2;
-            color: #991b1b;
-        }
-        .modal-mask {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.55);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            padding: 16px;
-        }
-        .modal {
-            width: min(560px, 100%);
-            background: #fff;
-            border-radius: 12px;
-            border: 1px solid #fecaca;
-            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
-            padding: 16px;
-        }
-        .modal h3 { margin: 0 0 8px; color: #991b1b; }
-        .modal p { margin: 0 0 10px; color: #374151; font-size: 13px; }
-        .modal-confirm {
-            margin: 8px 0;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #991b1b;
-            border-radius: 6px;
-            padding: 8px;
-            font-size: 12px;
-        }
-        .modal input[type="text"] {
-            width: 100%;
-            box-sizing: border-box;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 8px;
-            font-size: 14px;
-        }
-        .modal-actions {
-            margin-top: 12px;
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-        }
-        .danger-btn[disabled],
-        .btn-secondary[disabled],
-        button[disabled] { opacity: 0.55; cursor: not-allowed; }
-    </style>
-</head>
-<body>
+{% extends "ui/base.html" %}
+
+{% block title %}{{ t("ui.settings.page_title", default="Skill Runner Settings") }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .layout { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+    .stack { display: grid; gap: 10px; }
+    .field-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    label { display: grid; gap: 6px; font-size: 13px; color: #374151; }
+    input[type="text"], input[type="number"], select {
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px;
+        background: #fff;
+        font-size: 14px;
+    }
+    .readonly-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 10px; }
+    .readonly-item {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #f9fafb;
+        padding: 12px;
+    }
+    .readonly-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+    .readonly-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
+    .status-box {
+        display: none;
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 13px;
+        white-space: pre-wrap;
+    }
+    .status-box.success {
+        display: block;
+        border: 1px solid #a7f3d0;
+        background: #ecfdf5;
+        color: #065f46;
+    }
+    .status-box.error {
+        display: block;
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        color: #991b1b;
+    }
+    .danger-card {
+        border: 1px solid #fecaca;
+        background: linear-gradient(180deg, #fff7ed 0%, #fff1f2 100%);
+    }
+    .danger-title { color: #9f1239; font-weight: 700; }
+    .danger-text { color: #7f1d1d; font-size: 13px; margin-top: 6px; }
+    .danger-options { display: grid; gap: 8px; margin-top: 10px; font-size: 13px; color: #374151; }
+    .danger-btn {
+        border: 0;
+        border-radius: 8px;
+        background: #b91c1c;
+        color: #fff;
+        padding: 9px 14px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .danger-btn:hover { background: #991b1b; }
+    .danger-result {
+        margin-top: 12px;
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+        font-size: 13px;
+        color: #111827;
+        display: none;
+        white-space: pre-wrap;
+    }
+    .danger-result.error {
+        border-color: #fca5a5;
+        background: #fef2f2;
+        color: #991b1b;
+    }
+    .modal-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        padding: 16px;
+    }
+    .modal {
+        width: min(560px, 100%);
+        background: #fff;
+        border-radius: 12px;
+        border: 1px solid #fecaca;
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+        padding: 16px;
+    }
+    .modal h3 { margin: 0 0 8px; color: #991b1b; }
+    .modal p { margin: 0 0 10px; color: #374151; font-size: 13px; }
+    .modal-confirm {
+        margin: 8px 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 12px;
+    }
+    .modal input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 14px;
+    }
+    .modal-actions {
+        margin-top: 12px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+    .danger-btn[disabled],
+    .btn-secondary[disabled],
+    button[disabled] { opacity: 0.55; cursor: not-allowed; }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="layout">
     <div class="card">
         <div class="row" style="justify-content:space-between;">
             <div>
-                <h1 style="margin:0 0 8px;">设置</h1>
-                <div class="muted">管理运行时日志设置，并在受保护的危险操作区执行项目数据重置。</div>
+                <h1 style="margin:0 0 8px;">{{ t("ui.settings.title", default="设置") }}</h1>
+                <div class="muted">{{ t("ui.settings.subtitle", default="Manage logging settings and execute protected data reset operations.") }}</div>
             </div>
-            <a class="btn-secondary" href="/ui">返回首页</a>
+            <a class="btn btn-secondary" href="/ui">{{ t("ui.common.back_home", default="返回首页") }}</a>
         </div>
     </div>
 
@@ -160,19 +144,37 @@
 
 <div id="danger-reset-modal" class="modal-mask" aria-hidden="true">
     <div class="modal">
-        <h3>确认执行危险操作</h3>
-        <p>请输入下方确认文本后才能执行。该操作可能导致正在进行的任务状态丢失。</p>
+        <h3>{{ t("ui.settings.reset.confirm_title", default="确认执行危险操作") }}</h3>
+        <p>{{ t("ui.settings.reset.confirm_desc", default="Input the confirmation text below to continue. This may remove active runtime state.") }}</p>
         <div class="modal-confirm" id="danger-reset-confirmation-text">{{ reset_confirmation_text }}</div>
-        <input id="danger-reset-confirm-input" type="text" placeholder="输入确认文本以继续">
+        <input id="danger-reset-confirm-input" type="text" placeholder="{{ t("ui.settings.reset.confirm_placeholder", default="输入确认文本以继续") }}">
         <div class="modal-actions">
-            <button id="danger-reset-cancel-btn" type="button" class="btn-secondary">取消</button>
-            <button id="danger-reset-execute-btn" type="button" class="danger-btn" disabled>确认并执行</button>
+            <button id="danger-reset-cancel-btn" type="button" class="btn btn-secondary">{{ t("ui.common.cancel", default="取消") }}</button>
+            <button id="danger-reset-execute-btn" type="button" class="danger-btn" disabled>{{ t("ui.settings.reset.confirm_execute", default="确认并执行") }}</button>
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_scripts %}
 <script>
 (function () {
+    const I18N = {
+        saveFailed: {{ t("ui.settings.logging.save_failed", default="保存失败") | tojson }},
+        saveFailedNetwork: {{ t("ui.settings.logging.save_failed_network", default="保存失败: 网络或服务异常") | tojson }},
+        saveSuccess: {{ t("ui.settings.logging.save_success", default="日志设置已更新并热应用。") | tojson }},
+        resetFailed: {{ t("ui.settings.reset.failed", default="重置失败") | tojson }},
+        executeFailed: {{ t("ui.settings.reset.execute_failed", default="执行失败") | tojson }},
+        executeFailedNetwork: {{ t("ui.settings.reset.execute_failed_network", default="执行失败: 网络或服务异常") | tojson }},
+        executeSuccess: {{ t("ui.settings.reset.execute_success", default="执行成功") | tojson }},
+        deleted: {{ t("ui.settings.reset.deleted", default="deleted") | tojson }},
+        missing: {{ t("ui.settings.reset.missing", default="missing") | tojson }},
+        recreated: {{ t("ui.settings.reset.recreated", default="recreated") | tojson }},
+        wouldDelete: {{ t("ui.settings.reset.would_delete", default="would_delete") | tojson }},
+        dryRunPrefix: {{ t("ui.settings.reset.dry_run_prefix", default="Dry-run preview") | tojson }},
+        deletePlanTitle: {{ t("ui.settings.reset.delete_plan_title", default="Delete targets") | tojson }},
+        recreatePlanTitle: {{ t("ui.settings.reset.recreate_plan_title", default="Recreate dirs") | tojson }},
+    };
     const settingsEndpoint = "/v1/management/system/settings";
     const resetEndpoint = "/v1/management/system/reset-data";
     const loggingForm = document.getElementById("logging-settings-form");
@@ -209,8 +211,8 @@
                 });
                 const data = await response.json();
                 if (!response.ok) {
-                    const message = typeof data.detail === "string" ? data.detail : "保存失败";
-                    setStatus(loggingResult, "保存失败: " + message, "error");
+                    const message = typeof data.detail === "string" ? data.detail : I18N.saveFailed;
+                    setStatus(loggingResult, `${I18N.saveFailed}: ${message}`, "error");
                     return;
                 }
                 const editable = data.logging.editable;
@@ -218,9 +220,9 @@
                 document.getElementById("logging-format").value = editable.format;
                 document.getElementById("logging-retention-days").value = editable.retention_days;
                 document.getElementById("logging-dir-max-bytes").value = editable.dir_max_bytes;
-                setStatus(loggingResult, "日志设置已更新并热应用。", "success");
-            } catch (error) {
-                setStatus(loggingResult, "保存失败: 网络或服务异常", "error");
+                setStatus(loggingResult, I18N.saveSuccess, "success");
+            } catch (_error) {
+                setStatus(loggingResult, I18N.saveFailedNetwork, "error");
             }
         });
     }
@@ -236,6 +238,32 @@
         resultBox.style.display = "block";
         resultBox.classList.toggle("error", Boolean(isError));
         resultBox.textContent = text;
+    }
+
+    function formatResetPreview(data) {
+        const summary = `${I18N.deleted}=${data.deleted_count}, ${I18N.missing}=${data.missing_count}, ${I18N.recreated}=${data.recreated_count}`;
+        if (!data || typeof data !== "object") {
+            return summary;
+        }
+        const pathResults = Array.isArray(data.path_results) ? data.path_results : [];
+        const deleteTargets = pathResults
+            .filter(item => item && item.status === "would_delete")
+            .map(item => String(item.path || ""));
+        const recreateDirs = Array.isArray(data.recreate_dirs) ? data.recreate_dirs.map(String) : [];
+        const lines = [`${I18N.dryRunPrefix}: ${summary}`];
+        if (deleteTargets.length > 0) {
+            lines.push(`${I18N.deletePlanTitle}:`);
+            for (const target of deleteTargets) {
+                lines.push(`- ${target}`);
+            }
+        }
+        if (recreateDirs.length > 0) {
+            lines.push(`${I18N.recreatePlanTitle}:`);
+            for (const dirPath of recreateDirs) {
+                lines.push(`- ${dirPath}`);
+            }
+        }
+        return lines.join("\n");
     }
 
     openBtn.addEventListener("click", function () {
@@ -273,24 +301,22 @@
             });
             const data = await response.json();
             if (!response.ok) {
-                const message = typeof data.detail === "string" ? data.detail : "重置失败";
-                showResetResult("执行失败: " + message, true);
+                const message = typeof data.detail === "string" ? data.detail : I18N.resetFailed;
+                showResetResult(`${I18N.executeFailed}: ${message}`, true);
                 return;
             }
-            showResetResult(
-                "执行成功\\n" +
-                "deleted=" + data.deleted_count +
-                ", missing=" + data.missing_count +
-                ", recreated=" + data.recreated_count,
-                false
-            );
-        } catch (error) {
-            showResetResult("执行失败: 网络或服务异常", true);
+            const summary = `${I18N.executeSuccess}\n${I18N.deleted}=${data.deleted_count}, ${I18N.missing}=${data.missing_count}, ${I18N.recreated}=${data.recreated_count}`;
+            if (payload.dry_run) {
+                showResetResult(formatResetPreview(data), false);
+            } else {
+                showResetResult(summary, false);
+            }
+        } catch (_error) {
+            showResetResult(I18N.executeFailedNetwork, true);
         } finally {
             closeModal();
         }
     });
 })();
 </script>
-</body>
-</html>
+{% endblock %}

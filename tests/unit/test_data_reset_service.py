@@ -14,13 +14,10 @@ def _build_fake_config(tmp_path: Path) -> SimpleNamespace:
         SYSTEM=SimpleNamespace(
             DATA_DIR=str(data_dir),
             RUNS_DB=str(data_dir / "runs.db"),
-            SKILL_INSTALLS_DB=str(data_dir / "skill_installs.db"),
-            TEMP_SKILL_RUNS_DB=str(data_dir / "temp_skill_runs.db"),
             ENGINE_UPGRADES_DB=str(data_dir / "engine_upgrades.db"),
             RUNS_DIR=str(data_dir / "runs"),
-            REQUESTS_DIR=str(data_dir / "requests"),
-            TEMP_SKILL_REQUESTS_DIR=str(data_dir / "temp_skill_runs" / "requests"),
             SKILL_INSTALLS_DIR=str(data_dir / "skill_installs"),
+            TMP_UPLOADS_DIR=str(data_dir / "tmp_uploads"),
             SETTINGS_FILE=str(data_dir / "system_settings.json"),
             ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=True,
             LOGGING=SimpleNamespace(DIR=str(data_dir / "logs")),
@@ -48,11 +45,18 @@ def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_p
     data_dir = (tmp_path / "data").resolve()
 
     assert (data_dir / "ui_shell_sessions") in targets.optional_paths
-    assert (data_dir / "system_settings.json") in targets.optional_paths
+    assert (data_dir / "system_settings.json") not in targets.optional_paths
     assert (data_dir / "agent_status.json") in targets.optional_paths
     assert (data_dir / "engine_auth_sessions") in targets.optional_paths
     assert (data_dir / "logs") in targets.optional_paths
+    assert (data_dir / "tmp_uploads") in targets.optional_paths
     assert (data_dir / "engine_catalog" / "opencode_models_cache.json") in targets.optional_paths
+    assert (data_dir / "runs") in targets.data_dirs
+    assert (data_dir / "skill_installs") in targets.data_dirs
+    assert (data_dir / "requests") not in targets.data_dirs
+    assert (data_dir / "temp_skill_runs").resolve() not in targets.data_dirs
+    assert (data_dir / "temp_skill_runs.db") not in targets.db_files
+    assert (data_dir / "skill_installs.db") not in targets.db_files
 
 
 def test_data_reset_service_hides_engine_auth_targets_when_feature_disabled(tmp_path: Path):
@@ -102,6 +106,36 @@ def test_data_reset_service_execute_reset_deletes_targets_and_recreates_dirs(tmp
     assert result.recreated_count == len(targets.recreate_dirs)
     for recreate_path in targets.recreate_dirs:
         assert recreate_path.exists()
+
+
+def test_data_reset_service_dry_run_returns_preview_details(tmp_path: Path):
+    service = DataResetService(
+        cfg=_build_fake_config(tmp_path),
+        model_catalog_lifecycle=_build_fake_catalog_lifecycle(tmp_path),
+    )
+    options = DataResetOptions(
+        include_logs=True,
+        include_engine_catalog=True,
+        include_agent_status=True,
+        include_engine_auth_sessions=True,
+        dry_run=True,
+    )
+    targets = service.build_targets(options)
+
+    # Create only part of targets to verify mixed would_delete/missing preview statuses.
+    existing_target = targets.db_files[0]
+    existing_target.parent.mkdir(parents=True, exist_ok=True)
+    existing_target.write_text("db", encoding="utf-8")
+
+    result = service.execute_reset(options)
+    statuses = {item.status for item in result.path_results}
+    status_map = {str(item.path): item.status for item in result.path_results}
+
+    assert result.dry_run is True
+    assert "would_delete" in statuses
+    assert "missing" in statuses
+    assert status_map[str(existing_target.resolve())] == "would_delete"
+    assert result.recreated_count == len(targets.recreate_dirs)
 
 
 def test_reset_script_delegates_to_shared_data_reset_service(monkeypatch):

@@ -40,9 +40,13 @@ class RunStore:
         return aiosqlite.connect(str(self.db_path))
 
     async def _ensure_initialized(self) -> None:
+        if self._initialized and not self.db_path.exists():
+            self._initialized = False
         if self._initialized:
             return
         async with self._init_lock:
+            if self._initialized and not self.db_path.exists():
+                self._initialized = False
             if self._initialized:
                 return
             await self._init_db()
@@ -157,6 +161,47 @@ class RunStore:
                     created_at TEXT NOT NULL
                 )
                 """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_installs (
+                    request_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    skill_id TEXT,
+                    version TEXT,
+                    action TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS process_leases (
+                    lease_id TEXT PRIMARY KEY,
+                    owner_kind TEXT,
+                    owner_id TEXT,
+                    pid INTEGER,
+                    request_id TEXT,
+                    run_id TEXT,
+                    attempt_number INTEGER,
+                    engine TEXT,
+                    transport TEXT,
+                    metadata_json TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    close_reason TEXT
+                )
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_leases_status ON process_leases(status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_leases_updated_at ON process_leases(updated_at)"
             )
             await conn.execute(
                 """

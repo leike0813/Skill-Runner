@@ -1,38 +1,23 @@
 import json
-import logging
-import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
 
 from server.config import config
-from server.models import RunStatus, SkillManifest
+from server.models import SkillManifest
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from .skill_package_validator import SkillPackageValidator
-from .temp_skill_run_store import temp_skill_run_store
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
-
-logger = logging.getLogger(__name__)
 
 
 class TempSkillRunManager:
-    """Validates uploads and maintains import-only temp request metadata."""
+    """Validates uploaded temporary skill packages."""
 
     def __init__(self) -> None:
         self.validator = SkillPackageValidator()
 
-    def create_request_dirs(self, request_id: str) -> Path:
-        request_root = self.request_root(request_id)
-        request_root.mkdir(parents=True, exist_ok=True)
-        return request_root
-
-    def request_root(self, request_id: str) -> Path:
-        return Path(config.SYSTEM.TEMP_SKILL_REQUESTS_DIR) / request_id
-
     async def inspect_skill_package(
         self,
         package_bytes: bytes,
-        request_id: str | None = None,
     ) -> SkillManifest:
         max_bytes = int(config.SYSTEM.TEMP_SKILL_PACKAGE_MAX_BYTES)
         if max_bytes > 0 and len(package_bytes) > max_bytes:
@@ -40,10 +25,7 @@ class TempSkillRunManager:
         if not package_bytes:
             raise ValueError("Uploaded skill package is empty")
 
-        tmp_root: str | None = None
-        if request_id:
-            tmp_root = str(self.create_request_dirs(request_id))
-        with tempfile.TemporaryDirectory(dir=tmp_root) as tmp_dir_str:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
             package_path = tmp_dir / "skill_package.zip"
             package_path.write_bytes(package_bytes)
@@ -65,50 +47,7 @@ class TempSkillRunManager:
             if manifest.id != skill_id:
                 raise ValueError("Skill identity mismatch after manifest load")
 
-        if request_id:
-            await temp_skill_run_store.update_skill_identity(
-                request_id,
-                skill_id=skill_id,
-            )
         return manifest
-
-    async def cleanup_temp_assets(self, request_id: str) -> None:
-        rec = await temp_skill_run_store.get_request(request_id)
-        if not rec:
-            return
-        package_path = rec.get("skill_package_path")
-        staged_dir = rec.get("staged_skill_dir")
-        if package_path:
-            path = Path(package_path)
-            if path.exists():
-                path.unlink(missing_ok=True)
-        if staged_dir:
-            root = Path(staged_dir).parent
-            if root.exists():
-                shutil.rmtree(root, ignore_errors=True)
-        await temp_skill_run_store.clear_temp_paths(request_id)
-
-    async def on_terminal(
-        self,
-        request_id: str,
-        status: RunStatus,
-        *,
-        error: str | None = None,
-    ) -> None:
-        await temp_skill_run_store.update_status(request_id, status=status, error=error)
-
-    async def cleanup_orphans(self) -> Dict[str, int]:
-        retention_hours = int(config.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS)
-        removed = 0
-        candidates = await temp_skill_run_store.list_orphan_candidates(retention_hours)
-        for row in candidates:
-            request_id = row["request_id"]
-            try:
-                await self.cleanup_temp_assets(request_id)
-                removed += 1
-            except (OSError, RuntimeError, ValueError):
-                logger.warning("Failed orphan cleanup for temp request %s", request_id, exc_info=True)
-        return {"removed": removed}
 
     def _load_manifest(self, skill_dir: Path) -> SkillManifest:
         runner_path = skill_dir / "assets" / "runner.json"

@@ -1,12 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Run Detail - {{ detail.request_id }}</title>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{% extends "ui/base.html" %}
+
+{% block title %}{{ t("ui.run_detail.page_title", default="Run Detail") }} - {{ detail.request_id }}{% endblock %}
+
+{% block extra_head %}
     <style>
-        body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f7f9fc; color: #1f2937; }
         .layout { max-width: 1280px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
         .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
         .row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -62,24 +59,25 @@
             .row, .row.three { grid-template-columns: 1fr; }
         }
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
 <div class="layout">
     <div class="card">
-        <div><a href="/ui/runs">← Back to Runs</a></div>
-        <h2 style="margin:8px 0 4px;">Request: {{ detail.request_id }}</h2>
-        <div class="meta">run_id: {{ detail.run_id }}</div>
-        <div class="meta">skill: {{ detail.skill_id or "-" }}</div>
-        <div class="meta">engine: {{ detail.engine or "-" }}</div>
-        <div class="meta">status: <span id="run-status">{{ detail.status }}</span></div>
-        <div class="meta">updated_at: <span id="run-updated-at">{{ detail.updated_at or "-" }}</span></div>
-        <div class="meta">pending_interaction_id: <span id="run-pending-id">{{ detail.pending_interaction_id if detail.pending_interaction_id is not none else "-" }}</span></div>
-        <div class="meta">interaction_count: <span id="run-interaction-count">{{ detail.interaction_count }}</span></div>
+        <div><a href="/ui/runs">{{ t("ui.run_detail.back_runs", default="← Back to Runs") }}</a></div>
+        <h2 style="margin:8px 0 4px;">{{ t("ui.run_detail.request_label", default="Request:") }} {{ detail.request_id }}</h2>
+        <div class="meta">{{ t("ui.run_detail.meta_run_id", default="run_id:") }} {{ detail.run_id }}</div>
+        <div class="meta">{{ t("ui.run_detail.meta_skill", default="skill:") }} {{ detail.skill_id or "-" }}</div>
+        <div class="meta">{{ t("ui.run_detail.meta_engine", default="engine:") }} {{ detail.engine or "-" }}</div>
+        <div class="meta">{{ t("ui.run_detail.meta_status", default="status:") }} <span id="run-status">{{ detail.status }}</span></div>
+        <div class="meta">{{ t("ui.run_detail.meta_updated_at", default="updated_at:") }} <span id="run-updated-at">{{ detail.updated_at or "-" }}</span></div>
+        <div class="meta">{{ t("ui.run_detail.meta_pending_interaction_id", default="pending_interaction_id:") }} <span id="run-pending-id">{{ detail.pending_interaction_id if detail.pending_interaction_id is not none else "-" }}</span></div>
+        <div class="meta">{{ t("ui.run_detail.meta_interaction_count", default="interaction_count:") }} <span id="run-interaction-count">{{ detail.interaction_count }}</span></div>
     </div>
 
     <div class="row">
         <div class="card">
-            <h3 style="margin:0 0 8px;">Run File Tree (Read-only)</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.file_tree_title", default="Run File Tree (Read-only)") }}</h3>
             <div class="pane-scroll" id="run-file-tree-scroll">
                 {% for entry in detail.entries %}
                 <div
@@ -106,27 +104,27 @@
             </div>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">File Preview</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.file_preview_title", default="File Preview") }}</h3>
             <div class="pane-scroll" id="run-file-preview-scroll">
-                <div id="run-file-preview" class="meta">从左侧选择文件。</div>
+                <div id="run-file-preview" class="meta">{{ t("ui.run_detail.preview_hint", default="从左侧选择文件。") }}</div>
             </div>
         </div>
     </div>
 
     <div class="row">
         <div class="card">
-            <h3 style="margin:0 0 8px;">对话区（Canonical Chat）</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.chat_title", default="对话区（Canonical Chat）") }}</h3>
             <div id="stdout-log" class="conversation-window"></div>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">raw_ref 回跳预览</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.raw_ref_preview", default="raw_ref 回跳预览") }}</h3>
             <pre id="raw-ref-preview" class="raw-ref-window"></pre>
         </div>
     </div>
 
     <div class="card">
         <div class="meta" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            <strong>Attempt:</strong>
+            <strong>{{ t("ui.run_detail.attempt", default="Attempt:") }}</strong>
             <button id="attempt-prev-btn" type="button">←</button>
             <span id="attempt-label">-</span>
             <button id="attempt-next-btn" type="button">→</button>
@@ -135,33 +133,52 @@
 
     <div class="row three">
         <div class="card">
-            <h3 style="margin:0 0 8px;">FCMP Audit Stream</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.fcmp_stream", default="FCMP Audit Stream") }}</h3>
             <pre id="fcmp-audit-log" class="protocol-window"></pre>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">RASP Audit Stream</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.rasp_stream", default="RASP Audit Stream") }}</h3>
             <pre id="rasp-audit-log" class="protocol-window"></pre>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">Orchestrator Audit Stream</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.orchestrator_stream", default="Orchestrator Audit Stream") }}</h3>
             <pre id="orchestrator-audit-log" class="protocol-window"></pre>
         </div>
     </div>
 
     <div class="row">
         <div class="card">
-            <h3 style="margin:0 0 8px;">Raw stderr</h3>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.raw_stderr", default="Raw stderr") }}</h3>
             <pre id="stderr-log" class="stderr-window"></pre>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">Run Actions</h3>
-            <button id="cancel-run-btn" class="danger" type="button">Cancel Run</button>
+            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.run_actions", default="Run Actions") }}</h3>
+            <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_scripts %}
 <script>
 (function () {
+    const I18N = {
+        terminalSucceeded: {{ t("ui.run_detail.terminal_succeeded", default="任务已成功。") | tojson }},
+        terminalCanceled: {{ t("ui.run_detail.terminal_canceled", default="任务已取消。") | tojson }},
+        terminalFailedPrefix: {{ t("ui.run_detail.terminal_failed_prefix", default="任务失败：") | tojson }},
+        terminalFailedCodePrefix: {{ t("ui.run_detail.terminal_failed_code_prefix", default="任务失败（") | tojson }},
+        terminalFailedCodeSuffix: {{ t("ui.run_detail.terminal_failed_code_suffix", default="）。") | tojson }},
+        terminalFailed: {{ t("ui.run_detail.terminal_failed", default="任务失败。") | tojson }},
+        terminalUpdated: {{ t("ui.run_detail.terminal_updated", default="任务状态已更新。") | tojson }},
+        rawRefLoading: {{ t("ui.run_detail.raw_ref_loading", default="loading") | tojson }},
+        rawRefPreviewUnavailablePrefix: {{ t("ui.run_detail.raw_ref_preview_unavailable_prefix", default="raw_ref preview unavailable: HTTP") | tojson }},
+        roleAgent: {{ t("ui.run_detail.role_agent", default="Agent") | tojson }},
+        roleUser: {{ t("ui.run_detail.role_user", default="User") | tojson }},
+        roleSystem: {{ t("ui.run_detail.role_system", default="System") | tojson }},
+        metaAttemptPrefix: {{ t("ui.run_detail.meta_attempt_prefix", default="attempt") | tojson }},
+        metaSeqPrefix: {{ t("ui.run_detail.meta_seq_prefix", default="seq") | tojson }},
+        rawRefLabel: {{ t("ui.run_detail.raw_ref_label", default="raw_ref") | tojson }},
+    };
     const requestId = {{ detail.request_id | tojson }};
     const statusEl = document.getElementById("run-status");
     const updatedAtEl = document.getElementById("run-updated-at");
@@ -249,10 +266,10 @@
             byte_to: String(rawRef.byte_to),
             attempt: String(rawRef.attempt_number || currentAttempt),
         });
-        rawRefPreviewEl.textContent = `loading ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}] ...`;
+        rawRefPreviewEl.textContent = `${I18N.rawRefLoading} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}] ...`;
         const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
         if (!res.ok) {
-            rawRefPreviewEl.textContent = `raw_ref preview unavailable: HTTP ${res.status}`;
+            rawRefPreviewEl.textContent = `${I18N.rawRefPreviewUnavailablePrefix} ${res.status}`;
             return;
         }
         const payload = await res.json();
@@ -278,7 +295,7 @@
         item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
         const header = document.createElement("div");
         const title = document.createElement("strong");
-        title.textContent = role === "assistant" ? "Agent" : role === "user" ? "User" : "System";
+        title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
         header.appendChild(title);
         item.appendChild(header);
 
@@ -287,7 +304,7 @@
         item.appendChild(pre);
         const meta = document.createElement("div");
         meta.className = "meta";
-        meta.textContent = `attempt ${attempt}${displaySeq ? ` · seq ${displaySeq}` : ""}`;
+        meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
         item.appendChild(meta);
 
         if (rawRef) {
@@ -296,7 +313,7 @@
             const btn = document.createElement("button");
             btn.className = "link-btn";
             btn.type = "button";
-            btn.textContent = `raw_ref a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+            btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
             btn.addEventListener("click", () => previewRawRef(rawRef));
             refMeta.appendChild(btn);
             item.appendChild(refMeta);
@@ -310,10 +327,10 @@
             ? eventData.terminal
             : eventData;
         if (status === "succeeded") {
-            return "任务已成功。";
+            return I18N.terminalSucceeded;
         }
         if (status === "canceled") {
-            return "任务已取消。";
+            return I18N.terminalCanceled;
         }
         if (status === "failed") {
             const error = terminalPayload && typeof terminalPayload === "object" ? terminalPayload.error : null;
@@ -322,14 +339,14 @@
                 : lastTerminalErrorMessage.trim();
             const code = error && typeof error.code === "string" ? error.code.trim() : "";
             if (message) {
-                return `任务失败：${message}`;
+                return `${I18N.terminalFailedPrefix}${message}`;
             }
             if (code) {
-                return `任务失败（${code}）。`;
+                return `${I18N.terminalFailedCodePrefix}${code}${I18N.terminalFailedCodeSuffix}`;
             }
-            return "任务失败。";
+            return I18N.terminalFailed;
         }
-        return "任务状态已更新。";
+        return I18N.terminalUpdated;
     }
 
     function closeStream() {
@@ -833,5 +850,4 @@
     });
 })();
 </script>
-</body>
-</html>
+{% endblock %}

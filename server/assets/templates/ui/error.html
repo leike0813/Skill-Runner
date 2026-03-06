@@ -1,0 +1,42 @@
+{% extends "ui/base.html" %}
+
+{% block title %}{{ t("ui.error.page_title", default="Error") }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .layout { max-width: 920px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+    .error-card {
+        border: 1px solid #fecaca;
+        background: linear-gradient(180deg, #fff7ed 0%, #fff1f2 100%);
+    }
+    .error-code {
+        display: inline-flex;
+        padding: 2px 10px;
+        border-radius: 999px;
+        background: #fee2e2;
+        color: #b91c1c;
+        font-weight: 700;
+        font-size: 12px;
+        margin-bottom: 10px;
+    }
+    .error-message {
+        margin-top: 8px;
+        color: #7f1d1d;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="layout">
+    <div class="card error-card">
+        <span class="error-code">{{ t("ui.error.http_prefix", default="HTTP") }} {{ status_code }}</span>
+        <h1 style="margin:0;">{{ t("ui.error.title", default="Request failed") }}</h1>
+        <p class="error-message">{{ message }}</p>
+        <div style="margin-top:14px;">
+            <a class="btn btn-secondary" href="{{ back_href }}">{{ t("ui.error.back", default="Back") }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

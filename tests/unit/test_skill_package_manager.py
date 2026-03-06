@@ -79,6 +79,7 @@ def isolated_skill_paths(tmp_path):
     old_archive_dir = config.SYSTEM.SKILLS_ARCHIVE_DIR
     old_staging_dir = config.SYSTEM.SKILLS_STAGING_DIR
     old_install_dir = config.SYSTEM.SKILL_INSTALLS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
     old_install_db = config.SYSTEM.SKILL_INSTALLS_DB
     old_invalid_dir = config.SYSTEM.SKILLS_INVALID_DIR
 
@@ -88,7 +89,8 @@ def isolated_skill_paths(tmp_path):
     config.SYSTEM.SKILLS_STAGING_DIR = str(tmp_path / "skills" / ".staging")
     config.SYSTEM.SKILLS_INVALID_DIR = str(tmp_path / "skills" / ".invalid")
     config.SYSTEM.SKILL_INSTALLS_DIR = str(tmp_path / "skill_installs")
-    config.SYSTEM.SKILL_INSTALLS_DB = str(tmp_path / "skill_installs.db")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.SYSTEM.SKILL_INSTALLS_DB = config.SYSTEM.RUNS_DB
     config.freeze()
     try:
         yield tmp_path
@@ -98,6 +100,7 @@ def isolated_skill_paths(tmp_path):
         config.SYSTEM.SKILLS_ARCHIVE_DIR = old_archive_dir
         config.SYSTEM.SKILLS_STAGING_DIR = old_staging_dir
         config.SYSTEM.SKILLS_INVALID_DIR = old_invalid_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
         config.SYSTEM.SKILL_INSTALLS_DIR = old_install_dir
         config.SYSTEM.SKILL_INSTALLS_DB = old_install_db
         config.freeze()

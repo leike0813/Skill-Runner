@@ -1,10 +1,10 @@
 <div class="card">
-    <h2>Logging Settings</h2>
-    <div class="muted">仅以下字段可由 Settings 页面修改；只读项继续由系统配置或环境变量控制。</div>
+    <h2>{{ t("ui.settings.logging.title", default="Logging Settings") }}</h2>
+    <div class="muted">{{ t("ui.settings.logging.subtitle", default="Only fields below are editable from UI settings; read-only inputs are still controlled by system config/env.") }}</div>
     <form id="logging-settings-form" class="stack" style="margin-top:12px;">
         <div class="field-grid">
             <label>
-                Level
+                {{ t("ui.settings.logging.level", default="Level") }}
                 <select id="logging-level" name="level">
                     {% for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "NOTSET"] %}
                     <option value="{{ level }}" {% if logging_settings.editable.level == level %}selected{% endif %}>{{ level }}</option>
@@ -12,44 +12,44 @@
                 </select>
             </label>
             <label>
-                Format
+                {{ t("ui.settings.logging.format", default="Format") }}
                 <select id="logging-format" name="format">
-                    <option value="text" {% if logging_settings.editable.format == "text" %}selected{% endif %}>text</option>
-                    <option value="json" {% if logging_settings.editable.format == "json" %}selected{% endif %}>json</option>
+                    <option value="text" {% if logging_settings.editable.format == "text" %}selected{% endif %}>{{ t("ui.settings.logging.format_text", default="text") }}</option>
+                    <option value="json" {% if logging_settings.editable.format == "json" %}selected{% endif %}>{{ t("ui.settings.logging.format_json", default="json") }}</option>
                 </select>
             </label>
             <label>
-                Retention Days
+                {{ t("ui.settings.logging.retention_days", default="Retention Days") }}
                 <input id="logging-retention-days" type="number" min="1" value="{{ logging_settings.editable.retention_days }}">
             </label>
             <label>
-                Directory Max Bytes
+                {{ t("ui.settings.logging.dir_max_bytes", default="Directory Max Bytes") }}
                 <input id="logging-dir-max-bytes" type="number" min="0" value="{{ logging_settings.editable.dir_max_bytes }}">
             </label>
         </div>
         <div class="row">
-            <button type="submit">保存日志设置</button>
-            <div class="muted">保存后会立即重载应用日志配置。</div>
+            <button class="btn btn-primary" type="submit">{{ t("ui.settings.logging.save", default="Save Logging Settings") }}</button>
+            <div class="muted">{{ t("ui.settings.logging.save_hint", default="Changes are applied immediately.") }}</div>
         </div>
         <div id="logging-settings-result" class="status-box"></div>
     </form>
 
-    <h3 style="margin:18px 0 6px;">Read-only Runtime Inputs</h3>
+    <h3 style="margin:18px 0 6px;">{{ t("ui.settings.logging.read_only_title", default="Read-only Runtime Inputs") }}</h3>
     <div class="readonly-grid">
         <div class="readonly-item">
-            <div class="readonly-label">Log Directory</div>
+            <div class="readonly-label">{{ t("ui.settings.logging.log_directory", default="Log Directory") }}</div>
             <div class="readonly-value">{{ logging_settings.read_only.dir }}</div>
         </div>
         <div class="readonly-item">
-            <div class="readonly-label">File Basename</div>
+            <div class="readonly-label">{{ t("ui.settings.logging.file_basename", default="File Basename") }}</div>
             <div class="readonly-value">{{ logging_settings.read_only.file_basename }}</div>
         </div>
         <div class="readonly-item">
-            <div class="readonly-label">Rotation When</div>
+            <div class="readonly-label">{{ t("ui.settings.logging.rotation_when", default="Rotation When") }}</div>
             <div class="readonly-value">{{ logging_settings.read_only.rotation_when }}</div>
         </div>
         <div class="readonly-item">
-            <div class="readonly-label">Rotation Interval</div>
+            <div class="readonly-label">{{ t("ui.settings.logging.rotation_interval", default="Rotation Interval") }}</div>
             <div class="readonly-value">{{ logging_settings.read_only.rotation_interval }}</div>
         </div>
     </div>

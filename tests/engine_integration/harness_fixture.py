@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict
 
+from server.config import config
 from server.models import RunCreateRequest, RunStatus
 from server.services.platform.cache_key_builder import (
     compute_cache_key,
@@ -17,10 +18,16 @@ from server.services.platform.cache_key_builder import (
 from server.services.orchestration.job_orchestrator import job_orchestrator
 from server.services.engine_management.model_registry import model_registry
 from server.services.platform.options_policy import options_policy
+from server.services.orchestration.request_upload_staging import (
+    delete_request_root,
+    ensure_request_root,
+    handle_upload as stage_request_upload,
+    promote_request_uploads as promote_staged_uploads,
+    write_input_manifest as write_staged_input_manifest,
+)
 from server.services.orchestration.run_store import run_store
 from server.services.skill.skill_registry import skill_registry
 from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
-from server.services.skill.temp_skill_run_store import temp_skill_run_store
 from server.services.orchestration.workspace_manager import workspace_manager
 from tests.common.skill_fixture_loader import (
     build_fixture_skill_zip,
@@ -133,7 +140,7 @@ class EngineIntegrationHarnessFixture:
         request_payload = req.model_dump()
         request_payload["engine_options"] = engine_opts
         request_payload["runtime_options"] = runtime_opts
-        workspace_manager.create_request(request_id, request_payload)
+        ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, request_payload)
         input_map = case.get("inputs", {})
         run_id = None
 
@@ -142,16 +149,8 @@ class EngineIntegrationHarnessFixture:
             fixture_engines = fixture_skill_engines(self.project_root, fixture_id)
             engine_allowed = bool(fixture_engines) and engine in fixture_engines
 
-            temp_skill_run_store.create_request(
-                request_id=request_id,
-                engine=req.engine,
-                parameter=req.parameter,
-                model=req.model,
-                engine_options=engine_opts,
-                runtime_options=runtime_opts,
-            )
             skill_package_bytes = build_fixture_skill_zip(self.project_root, fixture_id)
-            skill = temp_skill_run_manager.stage_skill_package(request_id, skill_package_bytes)
+            skill = await temp_skill_run_manager.inspect_skill_package(skill_package_bytes)
             req.skill_id = skill.id
 
             if not engine_allowed:
@@ -165,7 +164,12 @@ class EngineIntegrationHarnessFixture:
 
             if input_map:
                 try:
-                    workspace_manager.handle_upload(request_id, self._build_input_zip(input_map))
+                    ensure_request_root(config.SYSTEM.TMP_UPLOADS_DIR, request_id, request_payload)
+                    stage_request_upload(
+                        config.SYSTEM.TMP_UPLOADS_DIR,
+                        request_id,
+                        self._build_input_zip(input_map),
+                    )
                 except FileNotFoundError as exc:
                     logger.error("  [Error] Fixture not found: %s", str(exc))
                     return False
@@ -173,7 +177,11 @@ class EngineIntegrationHarnessFixture:
 
             run_status = workspace_manager.create_run_for_skill(req, skill)
             run_id = run_status.run_id
-            workspace_manager.promote_request_uploads(request_id, run_id)
+            run_dir = workspace_manager.get_run_dir(run_id)
+            if run_dir is None:
+                logger.error("Run dir not found for %s", run_id)
+                return False
+            promote_staged_uploads(config.SYSTEM.TMP_UPLOADS_DIR, request_id, run_dir)
             merged_options = {**engine_opts, **runtime_opts}
             logger.info("  [Exec] Starting Job (temp skill)...")
             await job_orchestrator.run_job(
@@ -183,10 +191,9 @@ class EngineIntegrationHarnessFixture:
                 options=merged_options,
                 cache_key=None,
                 skill_override=skill,
-                temp_request_id=request_id,
             )
         else:
-            run_store.create_request(
+            await run_store.create_request(
                 request_id=request_id,
                 skill_id=req.skill_id,
                 engine=req.engine,
@@ -211,13 +218,17 @@ class EngineIntegrationHarnessFixture:
             has_input_schema = bool(installed_skill.schemas and "input" in installed_skill.schemas)
             if input_map:
                 try:
-                    workspace_manager.handle_upload(request_id, self._build_input_zip(input_map))
+                    stage_request_upload(
+                        config.SYSTEM.REQUESTS_DIR,
+                        request_id,
+                        self._build_input_zip(input_map),
+                    )
                 except FileNotFoundError as exc:
                     logger.error("  [Error] Fixture not found: %s", str(exc))
                     return False
                 logger.info("  [Upload] Uploaded %s files", len(input_map))
 
-            manifest_path = workspace_manager.write_input_manifest(request_id)
+            manifest_path = write_staged_input_manifest(config.SYSTEM.REQUESTS_DIR, request_id)
             manifest_hash = compute_input_manifest_hash(json.loads(manifest_path.read_text()))
             skill_fingerprint = compute_skill_fingerprint(installed_skill, req.engine)
             cache_key = compute_cache_key(
@@ -239,7 +250,11 @@ class EngineIntegrationHarnessFixture:
                 run_status = workspace_manager.create_run(req)
                 run_id = run_status.run_id
                 if input_map or has_input_schema:
-                    workspace_manager.promote_request_uploads(request_id, run_id)
+                    run_dir = workspace_manager.get_run_dir(run_id)
+                    if run_dir is None:
+                        logger.error("Run dir not found for %s", run_id)
+                        return False
+                    promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, run_dir)
                 run_store.create_run(run_id, cache_key, RunStatus.QUEUED)
                 merged_options = {**engine_opts, **runtime_opts}
                 logger.info("  [Exec] Starting Job...")
@@ -352,6 +367,6 @@ class EngineIntegrationHarnessFixture:
                 logger.warning(stderr.read_text(encoding="utf-8"))
 
         if skill_source == "temp":
-            temp_skill_run_manager.cleanup_temp_assets(request_id)
+            delete_request_root(config.SYSTEM.TMP_UPLOADS_DIR, request_id)
 
         return success

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import logging
-import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,44 +16,100 @@ def _utc_now_iso() -> str:
 
 
 class ProcessLeaseStore:
-    def __init__(self, lease_dir: Path | None = None) -> None:
-        base = lease_dir or (Path(config.SYSTEM.DATA_DIR) / "runtime_process_leases")
-        self._lease_dir = base
+    def __init__(self, db_path: Path | None = None) -> None:
+        self._db_path = db_path or Path(config.SYSTEM.RUNS_DB)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialized = False
 
     @property
-    def lease_dir(self) -> Path:
-        return self._lease_dir
+    def db_path(self) -> Path:
+        return self._db_path
 
-    def ensure_dir(self) -> Path:
-        self._lease_dir.mkdir(parents=True, exist_ok=True)
-        return self._lease_dir
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self._db_path))
+        conn.row_factory = sqlite3.Row
+        return conn
 
-    def _lease_path(self, lease_id: str) -> Path:
-        safe = lease_id.strip()
-        if not safe:
-            raise ValueError("lease_id is required")
-        return self.ensure_dir() / f"{safe}.json"
+    def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS process_leases (
+                    lease_id TEXT PRIMARY KEY,
+                    owner_kind TEXT,
+                    owner_id TEXT,
+                    pid INTEGER,
+                    request_id TEXT,
+                    run_id TEXT,
+                    attempt_number INTEGER,
+                    engine TEXT,
+                    transport TEXT,
+                    metadata_json TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    close_reason TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_leases_status ON process_leases(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_leases_updated_at ON process_leases(updated_at)"
+            )
+            conn.commit()
+        self._initialized = True
 
-    def _read_payload(self, path: Path) -> dict[str, Any] | None:
+    @staticmethod
+    def _metadata_to_json(payload: dict[str, Any]) -> str | None:
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
+            import json
+            return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            logger.warning("Process lease metadata serialization failed", exc_info=True)
             return None
-        except (OSError, ValueError, json.JSONDecodeError):
-            logger.warning("Process lease read failed: %s", path, exc_info=True)
-            return None
-        if not isinstance(payload, dict):
-            logger.warning("Process lease payload is not an object: %s", path)
-            return None
+
+    @staticmethod
+    def _row_to_payload(row: sqlite3.Row) -> dict[str, Any]:
+        import json
+
+        payload: dict[str, Any] = {
+            "lease_id": row["lease_id"],
+            "owner_kind": row["owner_kind"],
+            "owner_id": row["owner_id"],
+            "pid": row["pid"],
+            "request_id": row["request_id"],
+            "run_id": row["run_id"],
+            "attempt_number": row["attempt_number"],
+            "engine": row["engine"],
+            "transport": row["transport"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        if row["closed_at"] is not None:
+            payload["closed_at"] = row["closed_at"]
+        if row["close_reason"] is not None:
+            payload["close_reason"] = row["close_reason"]
+        metadata_raw = row["metadata_json"]
+        if isinstance(metadata_raw, str) and metadata_raw.strip():
+            try:
+                metadata = json.loads(metadata_raw)
+            except json.JSONDecodeError:
+                metadata = None
+            if isinstance(metadata, dict):
+                payload["metadata"] = metadata
         return payload
 
-    def _write_payload(self, path: Path, payload: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp_path, path)
-
     def upsert_active(self, lease_payload: dict[str, Any]) -> None:
+        self._ensure_initialized()
         lease_id_raw = lease_payload.get("lease_id")
         if not isinstance(lease_id_raw, str) or not lease_id_raw.strip():
             raise ValueError("lease_payload.lease_id is required")
@@ -62,34 +117,109 @@ class ProcessLeaseStore:
         payload["status"] = "active"
         payload.setdefault("updated_at", _utc_now_iso())
         payload.setdefault("created_at", payload["updated_at"])
-        self._write_payload(self._lease_path(lease_id_raw), payload)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO process_leases (
+                    lease_id, owner_kind, owner_id, pid, request_id, run_id,
+                    attempt_number, engine, transport, metadata_json,
+                    status, created_at, updated_at, closed_at, close_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                ON CONFLICT(lease_id) DO UPDATE SET
+                    owner_kind=excluded.owner_kind,
+                    owner_id=excluded.owner_id,
+                    pid=excluded.pid,
+                    request_id=excluded.request_id,
+                    run_id=excluded.run_id,
+                    attempt_number=excluded.attempt_number,
+                    engine=excluded.engine,
+                    transport=excluded.transport,
+                    metadata_json=excluded.metadata_json,
+                    status='active',
+                    updated_at=excluded.updated_at,
+                    closed_at=NULL,
+                    close_reason=NULL
+                """,
+                (
+                    lease_id_raw,
+                    payload.get("owner_kind"),
+                    payload.get("owner_id"),
+                    payload.get("pid"),
+                    payload.get("request_id"),
+                    payload.get("run_id"),
+                    payload.get("attempt_number"),
+                    payload.get("engine"),
+                    payload.get("transport"),
+                    self._metadata_to_json(payload),
+                    "active",
+                    payload["created_at"],
+                    payload["updated_at"],
+                ),
+            )
+            conn.commit()
 
     def get(self, lease_id: str) -> dict[str, Any] | None:
-        return self._read_payload(self._lease_path(lease_id))
+        self._ensure_initialized()
+        safe = lease_id.strip()
+        if not safe:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM process_leases WHERE lease_id = ?",
+                (safe,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_payload(row)
 
     def close(self, lease_id: str, *, reason: str, closed_at: str | None = None) -> None:
-        path = self._lease_path(lease_id)
-        payload = self._read_payload(path)
+        self._ensure_initialized()
+        safe = lease_id.strip()
+        if not safe:
+            return
+        payload = self.get(safe)
         if payload is None:
             return
-        payload["status"] = "closed"
-        payload["close_reason"] = reason
-        payload["closed_at"] = closed_at or _utc_now_iso()
-        payload["updated_at"] = payload["closed_at"]
-        self._write_payload(path, payload)
+        closed_ts = closed_at or _utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE process_leases
+                SET status = 'closed',
+                    close_reason = ?,
+                    closed_at = ?,
+                    updated_at = ?
+                WHERE lease_id = ?
+                """,
+                (reason, closed_ts, closed_ts, safe),
+            )
+            conn.commit()
 
     def list_active(self) -> list[dict[str, Any]]:
-        if not self._lease_dir.exists():
-            return []
-        active: list[dict[str, Any]] = []
-        for path in sorted(self._lease_dir.glob("*.json")):
-            payload = self._read_payload(path)
-            if payload is None:
-                continue
-            if str(payload.get("status") or "").strip().lower() != "active":
-                continue
-            active.append(payload)
-        return active
+        self._ensure_initialized()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM process_leases
+                WHERE status = 'active'
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+        return [self._row_to_payload(row) for row in rows]
+
+    def prune_closed_before(self, *, cutoff_iso: str) -> int:
+        self._ensure_initialized()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                DELETE FROM process_leases
+                WHERE status = 'closed'
+                  AND COALESCE(closed_at, updated_at) < ?
+                """,
+                (cutoff_iso,),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
 
 
 process_lease_store = ProcessLeaseStore()
