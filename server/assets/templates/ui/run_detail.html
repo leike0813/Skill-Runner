@@ -8,6 +8,7 @@
         :root {
             --file-pane-height: 340px;
             --protocol-pane-height: 320px;
+            --timeline-pane-height: 360px;
         }
         .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
         .row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -223,8 +224,136 @@
         #stderr-panel.hidden {
             display: none;
         }
+        .timeline-toggle {
+            width: 100%;
+            border-radius: 8px;
+            background: #eff6ff;
+            color: #0f172a;
+            border: 1px solid #bfdbfe;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .timeline-toggle:hover {
+            background: #dbeafe;
+        }
+        #timeline-panel.hidden {
+            display: none;
+        }
+        .timeline-window {
+            height: var(--timeline-pane-height);
+            min-height: var(--timeline-pane-height);
+            max-height: var(--timeline-pane-height);
+            overflow: auto;
+            background: #f8fafc;
+            border: 1px solid #dbeafe;
+            border-radius: 8px;
+            padding: 8px;
+        }
+        .timeline-lane-header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            display: grid;
+            grid-template-columns: 92px repeat(5, minmax(0, 1fr));
+            gap: 8px;
+            align-items: center;
+            background: #f8fafc;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #d1d5db;
+            margin-bottom: 8px;
+        }
+        .timeline-lane-label {
+            font-size: 11px;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: center;
+        }
+        .timeline-time-label {
+            font-size: 11px;
+            color: #64748b;
+            text-align: left;
+        }
+        .timeline-event-row {
+            display: grid;
+            grid-template-columns: 92px repeat(5, minmax(0, 1fr));
+            gap: 8px;
+            align-items: start;
+            margin-bottom: 8px;
+        }
+        .timeline-time {
+            font-size: 11px;
+            color: #64748b;
+            padding-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .timeline-cell {
+            min-height: 10px;
+        }
+        .timeline-bubble {
+            width: 100%;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid #e2e8f0;
+            text-align: left;
+            padding: 8px;
+        }
+        .timeline-bubble:hover {
+            background: #f8fafc;
+        }
+        .timeline-bubble.open {
+            background: #ecfeff;
+            border-color: #67e8f9;
+        }
+        .timeline-bubble-meta {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        .timeline-bubble-summary {
+            font-size: 12px;
+            color: #0f172a;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .timeline-detail {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .timeline-detail-json {
+            margin: 6px 0 0;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .timeline-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+        .timeline-load-more {
+            background: #e2e8f0;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        .timeline-load-more:hover {
+            background: #cbd5e1;
+        }
         @media (max-width: 960px) {
             .row, .row.three { grid-template-columns: 1fr; }
+            .timeline-lane-header,
+            .timeline-event-row {
+                grid-template-columns: 72px repeat(5, minmax(0, 1fr));
+            }
         }
     </style>
 {% endblock %}
@@ -327,6 +456,32 @@
         </div>
     </div>
 
+    <div class="card">
+        <button id="timeline-toggle-btn" class="timeline-toggle" type="button">
+            <span>{{ t("ui.run_detail.timeline_title", default="Run Timeline") }}</span>
+            <span>
+                <span id="timeline-count" class="meta" style="margin:0 6px 0 0;">0</span>
+                <span id="timeline-toggle-icon">▶</span>
+            </span>
+        </button>
+        <div id="timeline-panel" class="hidden" style="margin-top: 8px;">
+            <div id="timeline-window" class="timeline-window">
+                <div class="timeline-lane-header">
+                    <div class="timeline-time-label">{{ t("ui.run_detail.timeline_time", default="Time") }}</div>
+                    <div class="timeline-lane-label">{{ t("ui.run_detail.timeline_lane_orchestrator", default="Orchestrator") }}</div>
+                    <div class="timeline-lane-label">{{ t("ui.run_detail.timeline_lane_rasp", default="Parser/RASP") }}</div>
+                    <div class="timeline-lane-label">{{ t("ui.run_detail.timeline_lane_fcmp", default="Protocol/FCMP") }}</div>
+                    <div class="timeline-lane-label">{{ t("ui.run_detail.timeline_lane_chat", default="Chat history") }}</div>
+                    <div class="timeline-lane-label">{{ t("ui.run_detail.timeline_lane_client", default="Client") }}</div>
+                </div>
+                <div id="timeline-events" class="meta">{{ t("ui.run_detail.timeline_loading", default="Loading timeline...") }}</div>
+            </div>
+            <div class="timeline-actions">
+                <button id="timeline-load-more-btn" type="button" class="timeline-load-more">{{ t("ui.run_detail.timeline_load_more", default="Load earlier") }}</button>
+            </div>
+        </div>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -376,6 +531,18 @@
         fileFormatPython: {{ t("client.file_format_python", default="Python") | tojson }},
         fileFormatJavascript: {{ t("client.file_format_javascript", default="JavaScript") | tojson }},
         fileFormatText: {{ t("client.file_format_text", default="Text") | tojson }},
+        timelineTitle: {{ t("ui.run_detail.timeline_title", default="Run Timeline") | tojson }},
+        timelineTime: {{ t("ui.run_detail.timeline_time", default="Time") | tojson }},
+        timelineLaneOrchestrator: {{ t("ui.run_detail.timeline_lane_orchestrator", default="Orchestrator") | tojson }},
+        timelineLaneRasp: {{ t("ui.run_detail.timeline_lane_rasp", default="Parser/RASP") | tojson }},
+        timelineLaneFcmp: {{ t("ui.run_detail.timeline_lane_fcmp", default="Protocol/FCMP") | tojson }},
+        timelineLaneChat: {{ t("ui.run_detail.timeline_lane_chat", default="Chat history") | tojson }},
+        timelineLaneClient: {{ t("ui.run_detail.timeline_lane_client", default="Client") | tojson }},
+        timelineLoading: {{ t("ui.run_detail.timeline_loading", default="Loading timeline...") | tojson }},
+        timelineEmpty: {{ t("ui.run_detail.timeline_empty", default="No timeline events") | tojson }},
+        timelineLoadMore: {{ t("ui.run_detail.timeline_load_more", default="Load earlier") | tojson }},
+        timelineDetailTitle: {{ t("ui.run_detail.timeline_detail_title", default="Details") | tojson }},
+        timelineReadFailed: {{ t("ui.run_detail.timeline_read_failed", default="Timeline refresh failed") | tojson }},
     };
     const requestId = {{ detail.request_id | tojson }};
     const runFileEntries = {{ detail.entries | tojson }};
@@ -389,6 +556,13 @@
     const stderrToggleBtn = document.getElementById("stderr-toggle-btn");
     const stderrToggleIconEl = document.getElementById("stderr-toggle-icon");
     const stderrAlertDotEl = document.getElementById("stderr-alert-dot");
+    const timelineToggleBtn = document.getElementById("timeline-toggle-btn");
+    const timelineToggleIconEl = document.getElementById("timeline-toggle-icon");
+    const timelinePanelEl = document.getElementById("timeline-panel");
+    const timelineWindowEl = document.getElementById("timeline-window");
+    const timelineEventsEl = document.getElementById("timeline-events");
+    const timelineLoadMoreBtn = document.getElementById("timeline-load-more-btn");
+    const timelineCountEl = document.getElementById("timeline-count");
     const rawRefPreviewEl = document.getElementById("raw-ref-preview");
     const runFileTreePanelEl = document.getElementById("run-file-tree-panel");
     const runFilePreviewEl = document.getElementById("run-file-preview");
@@ -429,6 +603,13 @@
     let waitingAuthWatchdogTimer = null;
     let waitingAuthWatchdogInFlight = false;
     let stderrCollapsed = true;
+    let timelineCollapsed = true;
+    let timelineCursor = 0;
+    let timelineCeiling = 0;
+    let timelineRenderLimit = 100;
+    let timelineExpandedKey = null;
+    const timelineRows = [];
+    const timelineBySeq = new Map();
     let lastTerminalErrorMessage = {{ (
         detail.result.error.message
         if detail.result and detail.result.error and detail.result.error.message
@@ -584,6 +765,252 @@
         }
         const suffix = summaryParts.length ? ` · ${summaryParts.join(" · ")}` : "";
         return `${streamName.toUpperCase()} · ${type}${suffix}`;
+    }
+
+    function timelineLaneLabel(lane) {
+        switch (lane) {
+            case "orchestrator":
+                return I18N.timelineLaneOrchestrator;
+            case "parser_rasp":
+                return I18N.timelineLaneRasp;
+            case "protocol_fcmp":
+                return I18N.timelineLaneFcmp;
+            case "chat_history":
+                return I18N.timelineLaneChat;
+            case "client":
+                return I18N.timelineLaneClient;
+            default:
+                return lane || "event";
+        }
+    }
+
+    function timelineRowKey(event, fallbackIndex) {
+        const seq = Number(event && event.timeline_seq);
+        if (Number.isFinite(seq) && seq > 0) {
+            return `timeline:${Math.floor(seq)}`;
+        }
+        const lane = safeText(event && event.lane);
+        const kind = safeText(event && event.kind);
+        const ts = safeText(event && event.ts);
+        return `timeline:${fallbackIndex}:${lane}:${kind}:${ts}`;
+    }
+
+    function formatTimelineTs(ts) {
+        if (typeof ts !== "string" || !ts.trim()) return "-";
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) return ts;
+        return date.toLocaleTimeString([], { hour12: false });
+    }
+
+    function updateTimelineHeader() {
+        if (!timelineCountEl) return;
+        timelineCountEl.textContent = `${timelineRows.length}/${timelineCeiling}`;
+    }
+
+    function setTimelineCollapsed(collapsed) {
+        timelineCollapsed = Boolean(collapsed);
+        if (timelinePanelEl) {
+            timelinePanelEl.classList.toggle("hidden", timelineCollapsed);
+        }
+        if (timelineToggleIconEl) {
+            timelineToggleIconEl.textContent = timelineCollapsed ? "▶" : "▼";
+        }
+    }
+
+    function renderTimeline() {
+        if (!timelineEventsEl) return;
+        if (!timelineRows.length) {
+            timelineEventsEl.textContent = I18N.timelineEmpty;
+            updateTimelineHeader();
+            return;
+        }
+        timelineEventsEl.textContent = "";
+        const fragment = document.createDocumentFragment();
+        const laneOrder = [
+            "orchestrator",
+            "parser_rasp",
+            "protocol_fcmp",
+            "chat_history",
+            "client",
+        ];
+        for (let idx = 0; idx < timelineRows.length; idx += 1) {
+            const event = timelineRows[idx];
+            const rowKey = timelineRowKey(event, idx);
+            const rowEl = document.createElement("div");
+            rowEl.className = "timeline-event-row";
+
+            const timeEl = document.createElement("div");
+            timeEl.className = "timeline-time";
+            timeEl.textContent = formatTimelineTs(event.ts);
+            rowEl.appendChild(timeEl);
+
+            for (const lane of laneOrder) {
+                const cell = document.createElement("div");
+                cell.className = "timeline-cell";
+                if (lane !== event.lane) {
+                    rowEl.appendChild(cell);
+                    continue;
+                }
+                const expanded = timelineExpandedKey === rowKey;
+                const bubble = document.createElement("button");
+                bubble.type = "button";
+                bubble.className = `timeline-bubble${expanded ? " open" : ""}`;
+                const meta = document.createElement("div");
+                meta.className = "timeline-bubble-meta";
+                const seq = Number(event.timeline_seq);
+                const seqText = Number.isFinite(seq) && seq > 0 ? `#${Math.floor(seq)} · ` : "";
+                meta.textContent = `${seqText}${timelineLaneLabel(event.lane)} · ${safeText(event.kind)}`;
+                const summary = document.createElement("div");
+                summary.className = "timeline-bubble-summary";
+                summary.textContent = safeText(event.summary) || safeText(event.kind);
+                bubble.appendChild(meta);
+                bubble.appendChild(summary);
+                bubble.addEventListener("click", () => {
+                    timelineExpandedKey = expanded ? null : rowKey;
+                    renderTimeline();
+                });
+
+                if (expanded) {
+                    const detail = document.createElement("div");
+                    detail.className = "timeline-detail";
+                    const detailTitle = document.createElement("div");
+                    detailTitle.className = "protocol-detail-title";
+                    detailTitle.textContent = I18N.timelineDetailTitle;
+                    detail.appendChild(detailTitle);
+                    const attempt = Number(event.attempt);
+                    const attemptText = Number.isFinite(attempt) && attempt > 0 ? String(Math.floor(attempt)) : "-";
+                    const detailMeta = document.createElement("div");
+                    detailMeta.className = "protocol-detail-kv";
+                    detailMeta.textContent = `attempt=${attemptText} | source=${safeText(event.source_stream)}`;
+                    detail.appendChild(detailMeta);
+                    const rawRef = extractRawRef(event);
+                    if (rawRef) {
+                        const refLine = document.createElement("div");
+                        refLine.className = "meta";
+                        const btn = document.createElement("button");
+                        btn.className = "link-btn";
+                        btn.type = "button";
+                        btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+                        btn.addEventListener("click", (domEvent) => {
+                            domEvent.preventDefault();
+                            domEvent.stopPropagation();
+                            previewRawRef(rawRef);
+                        });
+                        refLine.appendChild(btn);
+                        detail.appendChild(refLine);
+                    }
+                    const detailJson = document.createElement("pre");
+                    detailJson.className = "timeline-detail-json";
+                    detailJson.textContent = JSON.stringify(event.details || {}, null, 2);
+                    detail.appendChild(detailJson);
+                    bubble.appendChild(detail);
+                }
+
+                cell.appendChild(bubble);
+                rowEl.appendChild(cell);
+            }
+            fragment.appendChild(rowEl);
+        }
+        timelineEventsEl.appendChild(fragment);
+        updateTimelineHeader();
+    }
+
+    function mergeTimelineEvents(events) {
+        if (!Array.isArray(events) || !events.length) return;
+        for (const event of events) {
+            if (!event || typeof event !== "object") continue;
+            const seq = Number(event.timeline_seq);
+            const hasSeq = Number.isFinite(seq) && seq > 0;
+            const key = hasSeq ? `seq:${Math.floor(seq)}` : timelineRowKey(event, timelineRows.length + 1);
+            if (timelineBySeq.has(key)) {
+                const existingIndex = timelineRows.findIndex((row) => {
+                    const rowSeq = Number(row && row.timeline_seq);
+                    if (hasSeq && Number.isFinite(rowSeq) && rowSeq > 0) {
+                        return `seq:${Math.floor(rowSeq)}` === key;
+                    }
+                    return timelineRowKey(row, -1) === key;
+                });
+                if (existingIndex >= 0) {
+                    timelineRows[existingIndex] = event;
+                }
+                timelineBySeq.set(key, true);
+                continue;
+            }
+            timelineBySeq.set(key, true);
+            timelineRows.push(event);
+        }
+        timelineRows.sort((left, right) => {
+            const lSeq = Number(left && left.timeline_seq);
+            const rSeq = Number(right && right.timeline_seq);
+            if (Number.isFinite(lSeq) && Number.isFinite(rSeq)) return lSeq - rSeq;
+            if (Number.isFinite(lSeq)) return -1;
+            if (Number.isFinite(rSeq)) return 1;
+            return 0;
+        });
+        if (timelineRows.length > timelineRenderLimit) {
+            const dropped = timelineRows.length - timelineRenderLimit;
+            const removed = timelineRows.splice(0, dropped);
+            for (const event of removed) {
+                const seq = Number(event && event.timeline_seq);
+                const key = Number.isFinite(seq) && seq > 0 ? `seq:${Math.floor(seq)}` : timelineRowKey(event, -1);
+                timelineBySeq.delete(key);
+            }
+        }
+    }
+
+    async function fetchTimelineHistory(cursor = 0, limit = 100) {
+        const query = new URLSearchParams({
+            cursor: String(Math.max(0, Number(cursor) || 0)),
+            limit: String(Math.min(500, Math.max(1, Number(limit) || 100))),
+        });
+        const res = await fetch(`/v1/management/runs/${requestId}/timeline/history?${query.toString()}`);
+        if (!res.ok) return null;
+        return await res.json();
+    }
+
+    async function refreshTimelineHistory() {
+        const payload = await fetchTimelineHistory(timelineCursor, 100);
+        if (!payload) return;
+        timelineCeiling = Number(payload.cursor_ceiling || timelineCeiling || 0);
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        mergeTimelineEvents(events);
+        if (timelineCeiling <= 0) {
+            const maxSeq = timelineRows.reduce((maxValue, event) => {
+                const seq = Number(event && event.timeline_seq);
+                return Number.isFinite(seq) ? Math.max(maxValue, seq) : maxValue;
+            }, 0);
+            timelineCeiling = maxSeq;
+        }
+        if (timelineCeiling > timelineCursor) {
+            timelineCursor = timelineCeiling;
+        }
+        if (!timelineCollapsed) {
+            renderTimeline();
+            if (timelineWindowEl && isNearBottom(timelineWindowEl)) {
+                timelineWindowEl.scrollTop = timelineWindowEl.scrollHeight;
+            }
+        } else {
+            updateTimelineHeader();
+        }
+    }
+
+    async function bootstrapTimelineHistory() {
+        const payload = await fetchTimelineHistory(0, timelineRenderLimit);
+        if (!payload) {
+            if (timelineEventsEl) timelineEventsEl.textContent = I18N.timelineReadFailed;
+            return;
+        }
+        timelineRows.length = 0;
+        timelineBySeq.clear();
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        mergeTimelineEvents(events);
+        timelineCeiling = Number(payload.cursor_ceiling || 0);
+        timelineCursor = timelineCeiling;
+        if (!timelineCollapsed) {
+            renderTimeline();
+        } else {
+            updateTimelineHeader();
+        }
     }
 
     function buildProtocolDetailKv(row) {
@@ -1386,6 +1813,34 @@
         });
     }
     setStderrCollapsed(true);
+    setTimelineCollapsed(true);
+
+    if (timelineToggleBtn) {
+        timelineToggleBtn.addEventListener("click", async () => {
+            const willCollapse = !timelineCollapsed;
+            setTimelineCollapsed(willCollapse);
+            if (!timelineCollapsed && timelineRows.length === 0) {
+                await bootstrapTimelineHistory();
+                renderTimeline();
+            } else if (!timelineCollapsed) {
+                renderTimeline();
+            }
+        });
+    }
+    if (timelineLoadMoreBtn) {
+        timelineLoadMoreBtn.addEventListener("click", async () => {
+            timelineRenderLimit = Math.min(500, timelineRenderLimit + 100);
+            const payload = await fetchTimelineHistory(0, timelineRenderLimit);
+            if (!payload) return;
+            timelineRows.length = 0;
+            timelineBySeq.clear();
+            const events = Array.isArray(payload.events) ? payload.events : [];
+            mergeTimelineEvents(events);
+            timelineCeiling = Number(payload.cursor_ceiling || timelineCeiling || 0);
+            timelineCursor = timelineCeiling;
+            renderTimeline();
+        });
+    }
 
     setInterval(() => {
         loadStderrForAttempt().catch(() => {});
@@ -1393,10 +1848,12 @@
         refreshProtocolHistory("fcmp", fcmpAuditEl).catch(() => {});
         refreshProtocolHistory("rasp", raspAuditEl).catch(() => {});
         refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});
+        refreshTimelineHistory().catch(() => {});
     }, 3000);
 
     initRunFileExplorer().catch(() => {});
     bootstrapAttemptsAndPanels().catch(() => {});
+    bootstrapTimelineHistory().catch(() => {});
 
     if (!terminal) {
         connectEvents();

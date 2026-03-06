@@ -43,6 +43,7 @@
 - `GET /v1/management/runs/{request_id}/chat`：SSE 对话事件流（复用 jobs chat 语义）
 - `GET /v1/management/runs/{request_id}/chat/history`：结构化对话历史（支持 `from_seq/to_seq/from_ts/to_ts`）
 - `GET /v1/management/runs/{request_id}/protocol/history`：协议级事件历史（FCMP/RASP/Orchestrator，支持 `attempt`）
+- `GET /v1/management/runs/{request_id}/timeline/history`：Run 级时序历史（五泳道聚合，支持 `cursor/limit`）
 - `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳，支持 `attempt`）
 - `GET /v1/management/runs/{request_id}/pending`：查询待决交互
 - `POST /v1/management/runs/{request_id}/reply`：提交交互回复
@@ -176,6 +177,50 @@
 - `404`: `request_id` 或 run 不存在。
 
 说明：该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
+
+### Run 级时序历史
+`GET /v1/management/runs/{request_id}/timeline/history`
+
+返回跨流聚合后的 Run Scope 时间线（Orchestrator / Parser-RASP / Protocol-FCMP / Chat / Client）。
+
+**Query 参数**:
+- `cursor`（可选，默认 `0`）：按 `timeline_seq` 增量拉取游标
+- `limit`（可选，默认 `100`，最大 `500`）：本次返回窗口大小
+
+**Response**:
+```json
+{
+  "request_id": "d290f1ee-...",
+  "count": 2,
+  "events": [
+    {
+      "timeline_seq": 101,
+      "ts": "2026-03-06T10:00:01Z",
+      "lane": "protocol_fcmp",
+      "kind": "conversation.state.changed",
+      "summary": "state: queued -> running",
+      "attempt": 2,
+      "source_stream": "fcmp",
+      "raw_ref": {
+        "attempt_number": 2,
+        "stream": "stdout",
+        "byte_from": 0,
+        "byte_to": 64
+      },
+      "details": {
+        "stream": "fcmp",
+        "event": {}
+      }
+    }
+  ],
+  "cursor_floor": 101,
+  "cursor_ceiling": 132,
+  "source": "mixed"
+}
+```
+
+**错误码**:
+- `404`: `request_id` 或 run 不存在。
 
 ---
 

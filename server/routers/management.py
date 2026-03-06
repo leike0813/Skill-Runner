@@ -463,6 +463,40 @@ async def list_management_run_protocol_history(
     }
 
 
+@router.get("/runs/{request_id}/timeline/history")
+async def list_management_run_timeline_history(
+    request_id: str,
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    request_record = await run_store.get_request(request_id)
+    if not request_record:
+        raise HTTPException(status_code=404, detail="Request not found")
+    run_id_obj = request_record.get("run_id")
+    if not isinstance(run_id_obj, str) or not run_id_obj:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    if not run_dir or not run_dir.exists():
+        raise HTTPException(status_code=404, detail="Run directory not found")
+
+    payload = await run_observability_service.list_timeline_history(
+        run_dir=run_dir,
+        request_id=request_id,
+        cursor=cursor,
+        limit=limit,
+    )
+    events_obj = payload.get("events")
+    events = events_obj if isinstance(events_obj, list) else []
+    return {
+        "request_id": request_id,
+        "count": len(events),
+        "events": events,
+        "cursor_floor": int(payload.get("cursor_floor") or 0),
+        "cursor_ceiling": int(payload.get("cursor_ceiling") or 0),
+        "source": payload.get("source") or "mixed",
+    }
+
+
 @router.get("/runs/{request_id}/logs/range")
 async def get_management_run_log_range(
     request_id: str,

@@ -84,6 +84,9 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
     assert 'id="rasp-raw-toggle"' in run_detail.text
     assert 'id="orchestrator-raw-toggle"' in run_detail.text
     assert 'id="attempt-label"' in run_detail.text
+    assert 'id="timeline-toggle-btn"' in run_detail.text
+    assert 'id="timeline-events"' in run_detail.text
+    assert "/v1/management/runs/${requestId}/timeline/history?" in run_detail.text
     assert run_detail.text.index("Canonical Chat") < run_detail.text.index('id="attempt-label"')
     assert run_detail.text.rindex("stderr-log") > run_detail.text.rindex("FCMP")
 

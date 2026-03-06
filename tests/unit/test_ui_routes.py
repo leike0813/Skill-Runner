@@ -1121,12 +1121,18 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/chat" in detail_res.text
     assert "/v1/management/runs/${requestId}/chat/history" in detail_res.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
+    assert "/v1/management/runs/${requestId}/timeline/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "SkillRunnerFileExplorer" in detail_res.text
     assert "initRunFileExplorer()" in detail_res.text
     assert 'id="run-file-tree-panel"' in detail_res.text
     assert 'id="stderr-toggle-btn"' in detail_res.text
     assert 'id="stderr-alert-dot"' in detail_res.text
+    assert 'id="timeline-toggle-btn"' in detail_res.text
+    assert 'id="timeline-events"' in detail_res.text
+    assert 'id="timeline-load-more-btn"' in detail_res.text
+    assert "bootstrapTimelineHistory()" in detail_res.text
+    assert "refreshTimelineHistory()" in detail_res.text
     assert "connectEvents()" in detail_res.text
     assert "executeWaitingAuthWatchdogTick" in detail_res.text
     assert "maybeStartWaitingAuthWatchdog" in detail_res.text
@@ -1135,6 +1141,7 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert detail_res.text.index("对话区（Canonical Chat）") < detail_res.text.index("Attempt：")
     assert detail_res.text.index("Attempt：") < detail_res.text.index("FCMP 审计流")
     assert detail_res.text.rindex("原始 stderr") > detail_res.text.index("FCMP 审计流")
+    assert detail_res.text.rindex("Run 时序图") > detail_res.text.rindex("原始 stderr")
 
     preview_res = await _request("GET", "/ui/runs/req-1/view?path=logs/stdout.txt")
     assert preview_res.status_code == 200
@@ -1178,6 +1185,7 @@ async def test_ui_run_detail_conversation_states(monkeypatch, status: str):
     assert "/v1/management/runs/${requestId}/chat" in response.text
     assert "/v1/management/runs/${requestId}/chat/history" in response.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in response.text
+    assert "/v1/management/runs/${requestId}/timeline/history?" in response.text
     assert "/v1/management/runs/${requestId}/cancel" in response.text
     assert "/v1/management/runs/${requestId}/logs/range" in response.text
     assert "cursor=${cursor}" in response.text

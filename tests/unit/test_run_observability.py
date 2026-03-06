@@ -1077,3 +1077,100 @@ async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeyp
         "user.input.required",
         "conversation.state.changed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_timeline_history_merges_protocol_chat_and_client(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-timeline"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    service = RunObservabilityService()
+
+    async def _resolve_attempt_number(**_kwargs):
+        return 2
+
+    async def _list_protocol_history(**kwargs):
+        stream = kwargs["stream"]
+        attempt = kwargs["attempt"]
+        if stream == "orchestrator" and attempt == 1:
+            return {
+                "attempt": 1,
+                "available_attempts": [1, 2],
+                "events": [{"seq": 1, "ts": "2026-03-06T10:00:00Z", "type": "attempt.started", "payload": {}}],
+            }
+        if stream == "rasp" and attempt == 1:
+            return {
+                "attempt": 1,
+                "available_attempts": [1, 2],
+                "events": [{"seq": 1, "type": "raw.stdout", "source": {"engine": "opencode", "parser": "stream"}}],
+            }
+        if stream == "fcmp" and attempt == 2:
+            return {
+                "attempt": 2,
+                "available_attempts": [1, 2],
+                "events": [
+                    {
+                        "seq": 5,
+                        "ts": "2026-03-06T10:00:01Z",
+                        "type": "interaction.reply.accepted",
+                        "payload": {"response": {"text": "hello timeline"}},
+                        "raw_ref": {"attempt_number": 2, "stream": "stdout", "byte_from": 0, "byte_to": 10},
+                    }
+                ],
+            }
+        return {"attempt": attempt, "available_attempts": [1, 2], "events": []}
+
+    async def _get_chat_history_payload(**_kwargs):
+        return {
+            "events": [
+                {
+                    "seq": 7,
+                    "created_at": "2026-03-06T10:00:02Z",
+                    "role": "assistant",
+                    "kind": "assistant_final",
+                    "text": "assistant final",
+                    "attempt": 2,
+                },
+                {
+                    "seq": 8,
+                    "created_at": "2026-03-06T10:00:03Z",
+                    "role": "user",
+                    "kind": "interaction_reply",
+                    "text": "user reply",
+                    "attempt": 2,
+                },
+            ],
+            "cursor_floor": 1,
+            "cursor_ceiling": 8,
+            "source": "mixed",
+        }
+
+    monkeypatch.setattr(service, "_list_available_attempts", lambda _run_dir: [1, 2])
+    monkeypatch.setattr(service, "_resolve_attempt_number", _resolve_attempt_number)
+    monkeypatch.setattr(service, "list_protocol_history", _list_protocol_history)
+    monkeypatch.setattr(service, "get_chat_history_payload", _get_chat_history_payload)
+
+    payload = await service.list_timeline_history(
+        run_dir=run_dir,
+        request_id="req-timeline",
+        cursor=0,
+        limit=100,
+    )
+    events = payload["events"]
+    lanes = [event["lane"] for event in events]
+    assert lanes[0] == "orchestrator"
+    assert "parser_rasp" in lanes
+    assert "protocol_fcmp" in lanes
+    assert "chat_history" in lanes
+    assert "client" in lanes
+    assert any(event["kind"] == "interaction.reply.accepted" and event["lane"] == "client" for event in events)
+    assert payload["cursor_ceiling"] >= len(events)
+
+    last_cursor = payload["cursor_ceiling"]
+    incremental = await service.list_timeline_history(
+        run_dir=run_dir,
+        request_id="req-timeline",
+        cursor=last_cursor,
+        limit=100,
+    )
+    assert incremental["events"] == []

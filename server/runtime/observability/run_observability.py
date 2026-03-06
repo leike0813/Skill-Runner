@@ -60,6 +60,20 @@ ATTEMPT_FILE_PATTERNS = (
     re.compile(r"^stderr\.(\d+)\.log$"),
     re.compile(r"^pty-output\.(\d+)\.log$"),
 )
+TIMELINE_STREAM_PRIORITY: Dict[str, int] = {
+    "orchestrator": 0,
+    "rasp": 1,
+    "fcmp": 2,
+    "chat": 3,
+    "client": 4,
+}
+TIMELINE_LANE_BY_STREAM: Dict[str, str] = {
+    "orchestrator": "orchestrator",
+    "rasp": "parser_rasp",
+    "fcmp": "protocol_fcmp",
+    "chat": "chat_history",
+    "client": "client",
+}
 
 class _UnconfiguredRunStore:
     def get_request(self, request_id: str):
@@ -913,6 +927,368 @@ class RunObservabilityService:
             "cursor_floor": int(live_payload.get("cursor_floor") or 0),
             "cursor_ceiling": int(live_payload.get("cursor_ceiling") or 0),
         }
+
+    async def list_timeline_history(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        cursor: int = 0,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        safe_cursor = max(0, int(cursor))
+        safe_limit = max(1, min(500, int(limit)))
+        status_payload = self._read_status_payload(run_dir)
+        status_obj = status_payload.get("status")
+        status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
+        runtime_attempt = await self._resolve_attempt_number(
+            request_id=request_id,
+            status=status,
+            run_dir=run_dir,
+            requested_attempt=None,
+        )
+        attempts = self._list_available_attempts(run_dir)
+        if runtime_attempt > 0 and runtime_attempt not in attempts:
+            attempts.append(runtime_attempt)
+            attempts.sort()
+        if not attempts:
+            attempts = [runtime_attempt] if runtime_attempt > 0 else [1]
+
+        protocol_rows: Dict[str, Dict[int, List[Dict[str, Any]]]] = {
+            "orchestrator": {},
+            "rasp": {},
+            "fcmp": {},
+        }
+        for stream in ("orchestrator", "rasp", "fcmp"):
+            for attempt in attempts:
+                payload = await self.list_protocol_history(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    stream=stream,
+                    from_seq=None,
+                    to_seq=None,
+                    from_ts=None,
+                    to_ts=None,
+                    attempt=attempt,
+                )
+                rows_obj = payload.get("events")
+                protocol_rows[stream][attempt] = rows_obj if isinstance(rows_obj, list) else []
+
+        chat_payload = await self.get_chat_history_payload(
+            run_dir=run_dir,
+            request_id=request_id,
+            from_seq=None,
+            to_seq=None,
+            from_ts=None,
+            to_ts=None,
+        )
+        chat_rows_obj = chat_payload.get("events")
+        chat_rows = chat_rows_obj if isinstance(chat_rows_obj, list) else []
+
+        timeline_index = 0
+        collected: List[Dict[str, Any]] = []
+
+        def _collect(
+            *,
+            lane: str,
+            kind: str,
+            summary: str,
+            attempt_number: int,
+            source_stream: str,
+            ts: str,
+            seq_like: int,
+            details: Dict[str, Any],
+            raw_ref: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            nonlocal timeline_index
+            timeline_index += 1
+            event: Dict[str, Any] = {
+                "timeline_seq": 0,
+                "ts": ts,
+                "lane": lane,
+                "kind": kind,
+                "summary": summary,
+                "attempt": attempt_number,
+                "source_stream": source_stream,
+                "details": details,
+            }
+            if raw_ref is not None:
+                event["raw_ref"] = raw_ref
+            collected.append(
+                {
+                    "event": event,
+                    "ts_value": self._timeline_ts_value(ts),
+                    "attempt": attempt_number if attempt_number > 0 else 0,
+                    "stream_priority": TIMELINE_STREAM_PRIORITY.get(source_stream, 9),
+                    "seq_like": max(0, int(seq_like)),
+                    "ingest_index": timeline_index,
+                }
+            )
+
+        for stream in ("orchestrator", "rasp", "fcmp"):
+            for attempt in attempts:
+                for row in protocol_rows[stream].get(attempt, []):
+                    if not isinstance(row, dict):
+                        continue
+                    ts = self._timeline_ts_text(row.get("ts"))
+                    kind = self._timeline_kind_from_row(row)
+                    summary = self._timeline_protocol_summary(stream, row)
+                    seq_like = self._timeline_seq_like(row)
+                    raw_ref = self._timeline_extract_raw_ref(row, fallback_attempt=attempt)
+                    _collect(
+                        lane=TIMELINE_LANE_BY_STREAM[stream],
+                        kind=kind,
+                        summary=summary,
+                        attempt_number=attempt,
+                        source_stream=stream,
+                        ts=ts,
+                        seq_like=seq_like,
+                        details={"stream": stream, "event": row},
+                        raw_ref=raw_ref,
+                    )
+                    if stream == "fcmp" and kind in {"interaction.reply.accepted", "auth.input.accepted"}:
+                        _collect(
+                            lane=TIMELINE_LANE_BY_STREAM["client"],
+                            kind=kind,
+                            summary=self._timeline_client_summary_from_fcmp(row),
+                            attempt_number=attempt,
+                            source_stream="client",
+                            ts=ts,
+                            seq_like=seq_like,
+                            details={"source": "fcmp", "event": row},
+                            raw_ref=raw_ref,
+                        )
+
+        for row in chat_rows:
+            if not isinstance(row, dict):
+                continue
+            ts = self._timeline_ts_text(row.get("created_at"))
+            attempt_number = self._timeline_attempt_number(
+                row.get("attempt"),
+                fallback=self._timeline_attempt_number(
+                    (row.get("correlation") or {}).get("source_attempt"),
+                    fallback=runtime_attempt,
+                ),
+            )
+            seq_like = self._timeline_seq_like(row)
+            kind_obj = row.get("kind")
+            kind = kind_obj if isinstance(kind_obj, str) and kind_obj else "chat.message"
+            summary = self._timeline_chat_summary(row)
+            raw_ref = self._timeline_extract_raw_ref(row, fallback_attempt=attempt_number)
+            _collect(
+                lane=TIMELINE_LANE_BY_STREAM["chat"],
+                kind=kind,
+                summary=summary,
+                attempt_number=attempt_number,
+                source_stream="chat",
+                ts=ts,
+                seq_like=seq_like,
+                details={"stream": "chat", "event": row},
+                raw_ref=raw_ref,
+            )
+            if row.get("role") == "user":
+                _collect(
+                    lane=TIMELINE_LANE_BY_STREAM["client"],
+                    kind="client.user_message",
+                    summary=self._timeline_client_summary_from_chat(row),
+                    attempt_number=attempt_number,
+                    source_stream="client",
+                    ts=ts,
+                    seq_like=seq_like,
+                    details={"source": "chat", "event": row},
+                    raw_ref=raw_ref,
+                )
+
+        collected.sort(
+            key=lambda item: (
+                0 if item["ts_value"] is not None else 1,
+                item["ts_value"] if item["ts_value"] is not None else float("inf"),
+                item["attempt"],
+                item["stream_priority"],
+                item["seq_like"],
+                item["ingest_index"],
+            )
+        )
+        for index, item in enumerate(collected, start=1):
+            item["event"]["timeline_seq"] = index
+
+        all_events = [item["event"] for item in collected]
+        if safe_cursor <= 0:
+            events = all_events[-safe_limit:]
+        else:
+            events = [event for event in all_events if int(event.get("timeline_seq") or 0) > safe_cursor][:safe_limit]
+        cursor_ceiling = int(all_events[-1]["timeline_seq"]) if all_events else 0
+        cursor_floor = int(events[0]["timeline_seq"]) if events else 0
+        return {
+            "events": events,
+            "cursor_floor": cursor_floor,
+            "cursor_ceiling": cursor_ceiling,
+            "source": "mixed",
+        }
+
+    def _timeline_ts_text(self, value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return ""
+
+    def _timeline_ts_value(self, value: str) -> Optional[float]:
+        if not value:
+            return None
+        normalized = value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        return parsed.timestamp()
+
+    def _timeline_attempt_number(self, value: Any, *, fallback: int = 0) -> int:
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = int(value.strip())
+            except ValueError:
+                parsed = 0
+            if parsed > 0:
+                return parsed
+        return max(0, int(fallback))
+
+    def _timeline_seq_like(self, row: Dict[str, Any]) -> int:
+        seq_obj = row.get("seq")
+        if isinstance(seq_obj, int):
+            return max(0, seq_obj)
+        local_seq_obj = ((row.get("meta") or {}).get("local_seq"))
+        if isinstance(local_seq_obj, int):
+            return max(0, local_seq_obj)
+        return 0
+
+    def _timeline_kind_from_row(self, row: Dict[str, Any]) -> str:
+        for key in ("type", "event_type", "event", "kind"):
+            value = row.get(key)
+            if isinstance(value, str) and value:
+                return value
+            if key == "event" and isinstance(value, dict):
+                nested_type = value.get("type")
+                if isinstance(nested_type, str) and nested_type:
+                    return nested_type
+        return "event"
+
+    def _timeline_protocol_summary(self, stream: str, row: Dict[str, Any]) -> str:
+        kind = self._timeline_kind_from_row(row)
+        payload_obj = row.get("payload")
+        payload: Dict[str, Any] = {}
+        if isinstance(payload_obj, dict):
+            payload = payload_obj
+        else:
+            data_obj = row.get("data")
+            if isinstance(data_obj, dict):
+                payload = data_obj
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            normalized = " ".join(message.split())
+            return normalized[:220] + ("..." if len(normalized) > 220 else "")
+        if stream == "rasp":
+            source_obj = row.get("source")
+            source = source_obj if isinstance(source_obj, dict) else {}
+            engine = source.get("engine") if isinstance(source.get("engine"), str) else "unknown"
+            parser = source.get("parser") if isinstance(source.get("parser"), str) else "unknown"
+            code = payload.get("code") if isinstance(payload.get("code"), str) else ""
+            status = payload.get("status") if isinstance(payload.get("status"), str) else ""
+            parts = [f"{kind}", f"{engine}/{parser}"]
+            if code:
+                parts.append(f"code={code}")
+            if status:
+                parts.append(f"status={status}")
+            return " · ".join(parts)
+        if kind == "conversation.state.changed":
+            from_state = payload.get("from")
+            to_state = payload.get("to")
+            from_text = from_state if isinstance(from_state, str) and from_state else "?"
+            to_text = to_state if isinstance(to_state, str) and to_state else "?"
+            return f"state: {from_text} -> {to_text}"
+        status = payload.get("status")
+        if isinstance(status, str) and status:
+            return f"{kind} ({status})"
+        return kind
+
+    def _timeline_chat_summary(self, row: Dict[str, Any]) -> str:
+        role = row.get("role") if isinstance(row.get("role"), str) else "chat"
+        text_obj = row.get("text")
+        if isinstance(text_obj, str) and text_obj.strip():
+            normalized = " ".join(text_obj.split())
+            preview = normalized[:180] + ("..." if len(normalized) > 180 else "")
+            return f"{role}: {preview}"
+        kind_obj = row.get("kind")
+        kind = kind_obj if isinstance(kind_obj, str) and kind_obj else "chat.message"
+        return f"{role}: {kind}"
+
+    def _timeline_client_summary_from_chat(self, row: Dict[str, Any]) -> str:
+        text_obj = row.get("text")
+        if isinstance(text_obj, str) and text_obj.strip():
+            normalized = " ".join(text_obj.split())
+            return normalized[:180] + ("..." if len(normalized) > 180 else "")
+        return "Client message submitted"
+
+    def _timeline_client_summary_from_fcmp(self, row: Dict[str, Any]) -> str:
+        kind = self._timeline_kind_from_row(row)
+        payload_obj = row.get("payload")
+        payload = payload_obj if isinstance(payload_obj, dict) else {}
+        if kind == "interaction.reply.accepted":
+            response = payload.get("response")
+            if isinstance(response, dict):
+                text_obj = response.get("text")
+                if isinstance(text_obj, str) and text_obj.strip():
+                    normalized = " ".join(text_obj.split())
+                    return f"Reply accepted: {normalized[:140]}{'...' if len(normalized) > 140 else ''}"
+            return "Interaction reply accepted"
+        if kind == "auth.input.accepted":
+            submission_kind = payload.get("submission_kind")
+            if isinstance(submission_kind, str) and submission_kind:
+                return f"Auth input accepted: {submission_kind}"
+            return "Auth input accepted"
+        return kind
+
+    def _timeline_extract_raw_ref(
+        self,
+        row: Dict[str, Any],
+        *,
+        fallback_attempt: int,
+    ) -> Optional[Dict[str, Any]]:
+        candidates: List[Any] = []
+        candidates.append(row.get("raw_ref"))
+        meta_obj = row.get("meta")
+        if isinstance(meta_obj, dict):
+            candidates.append(meta_obj.get("raw_ref"))
+        correlation_obj = row.get("correlation")
+        if isinstance(correlation_obj, dict):
+            candidates.append(correlation_obj.get("raw_ref"))
+            candidates.append(correlation_obj)
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            stream_obj = candidate.get("stream")
+            byte_from_obj = candidate.get("byte_from")
+            byte_to_obj = candidate.get("byte_to")
+            if not isinstance(stream_obj, str) or not stream_obj:
+                continue
+            if not isinstance(byte_from_obj, (int, float, str)) or not isinstance(byte_to_obj, (int, float, str)):
+                continue
+            try:
+                byte_from = int(byte_from_obj)
+                byte_to = int(byte_to_obj)
+            except (TypeError, ValueError):
+                continue
+            attempt_number = self._timeline_attempt_number(
+                candidate.get("attempt_number"),
+                fallback=fallback_attempt,
+            )
+            return {
+                "attempt_number": attempt_number,
+                "stream": stream_obj,
+                "byte_from": max(0, byte_from),
+                "byte_to": max(0, byte_to),
+            }
+        return None
 
     def _get_live_protocol_payload(
         self,
