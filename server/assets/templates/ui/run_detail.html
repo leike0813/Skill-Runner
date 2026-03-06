@@ -5,6 +5,10 @@
 {% block extra_head %}
     <style>
         .layout { max-width: 1280px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+        :root {
+            --file-pane-height: 340px;
+            --protocol-pane-height: 320px;
+        }
         .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
         .row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
@@ -21,6 +25,20 @@
             font-size: 12px;
             line-height: 1;
         }
+        .file-link-btn {
+            border: 0;
+            background: transparent;
+            color: #0f766e;
+            padding: 0;
+            cursor: pointer;
+            font-size: 13px;
+            line-height: 1.7;
+            border-radius: 0;
+        }
+        .file-link-btn:hover {
+            text-decoration: underline;
+            background: transparent;
+        }
         a { color: #0f766e; text-decoration: none; }
         a:hover { text-decoration: underline; }
         pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
@@ -29,12 +47,13 @@
         button:disabled { opacity: 0.6; cursor: not-allowed; }
         .danger { background: #b91c1c; }
         .danger:hover { background: #991b1b; }
-        .pane-scroll { max-height: 340px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
-        .conversation-window { min-height: 220px; max-height: 380px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .pane-scroll { height: var(--file-pane-height); max-height: var(--file-pane-height); overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .file-preview-pane { background: #ffffff; border-color: #d1d5db; }
+        .conversation-window { height: 380px; min-height: 380px; max-height: 380px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
         .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
         .chat-item.system { background: #f3f4f6; }
         .chat-item.user { background: #e8f5ec; }
-        .stderr-window, .protocol-window, .raw-ref-window {
+        .stderr-window {
             max-height: 220px;
             overflow: auto;
             background: #f9fafb;
@@ -46,6 +65,128 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        .raw-ref-window {
+            height: 380px;
+            min-height: 380px;
+            max-height: 380px;
+            overflow: auto;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .protocol-window {
+            height: var(--protocol-pane-height);
+            min-height: var(--protocol-pane-height);
+            max-height: var(--protocol-pane-height);
+            overflow: auto;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            word-break: break-word;
+        }
+        .protocol-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin: 0 0 8px;
+        }
+        .protocol-toggle {
+            font-size: 12px;
+            color: #4b5563;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .protocol-window { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; white-space: normal; }
+        .protocol-window.raw-mode {
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .protocol-bubble {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin: 0 0 8px;
+            overflow: hidden;
+        }
+        .protocol-bubble-header {
+            width: 100%;
+            border: 0;
+            border-radius: 0;
+            background: #ffffff;
+            color: #111827;
+            text-align: left;
+            padding: 8px;
+            cursor: pointer;
+        }
+        .protocol-bubble-header:hover {
+            background: #f8fafc;
+        }
+        .protocol-bubble-header.open {
+            background: #eff6ff;
+        }
+        .protocol-bubble-meta {
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        .protocol-bubble-body {
+            font-size: 13px;
+            color: #111827;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .protocol-bubble-tags {
+            margin-top: 6px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .protocol-tag {
+            display: inline-block;
+            font-size: 11px;
+            line-height: 1;
+            padding: 4px 6px;
+            border-radius: 999px;
+            background: #f1f5f9;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+        }
+        .protocol-bubble-detail {
+            padding: 8px;
+            border-top: 1px solid #e5e7eb;
+            background: #f8fafc;
+        }
+        .protocol-detail-title {
+            font-size: 12px;
+            color: #334155;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+        .protocol-detail-kv {
+            font-size: 12px;
+            color: #0f172a;
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }
+        .protocol-detail-json {
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: #0f172a;
+            margin: 0;
+        }
         .link-btn {
             border: 0;
             background: none;
@@ -54,6 +195,33 @@
             padding: 0;
             font-size: 12px;
             text-decoration: underline;
+        }
+        .stderr-toggle {
+            width: 100%;
+            border-radius: 8px;
+            background: #f3f4f6;
+            color: #111827;
+            border: 1px solid #d1d5db;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .stderr-toggle:hover {
+            background: #e5e7eb;
+        }
+        .stderr-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #dc2626;
+            display: inline-block;
+            margin-left: 8px;
+        }
+        .stderr-dot.hidden {
+            display: none;
+        }
+        #stderr-panel.hidden {
+            display: none;
         }
         @media (max-width: 960px) {
             .row, .row.three { grid-template-columns: 1fr; }
@@ -66,6 +234,9 @@
     <div class="card">
         <div><a href="/ui/runs">{{ t("ui.run_detail.back_runs", default="← Back to Runs") }}</a></div>
         <h2 style="margin:8px 0 4px;">{{ t("ui.run_detail.request_label", default="Request:") }} {{ detail.request_id }}</h2>
+        <div style="display:flex; justify-content:flex-end; margin:6px 0 0;">
+            <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
+        </div>
         <div class="meta">{{ t("ui.run_detail.meta_run_id", default="run_id:") }} {{ detail.run_id }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_skill", default="skill:") }} {{ detail.skill_id or "-" }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_engine", default="engine:") }} {{ detail.engine or "-" }}</div>
@@ -79,33 +250,12 @@
         <div class="card">
             <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.file_tree_title", default="Run File Tree (Read-only)") }}</h3>
             <div class="pane-scroll" id="run-file-tree-scroll">
-                {% for entry in detail.entries %}
-                <div
-                    class="tree-line"
-                    data-rel-path="{{ entry.rel_path }}"
-                    data-depth="{{ entry.depth }}"
-                    data-is-dir="{{ '1' if entry.is_dir else '0' }}"
-                    style="padding-left: {{ entry.depth * 16 }}px;"
-                >
-                    {% if entry.is_dir %}
-                    <button type="button" class="tree-toggle-btn" data-tree-toggle aria-expanded="false">▶</button>
-                    <span class="dir">📁 {{ entry.name }}/</span>
-                    {% else %}
-                    <span class="file">📄</span>
-                    <a
-                        href="#"
-                        hx-get="/ui/management/runs/{{ detail.request_id }}/view?path={{ entry.rel_path }}"
-                        hx-target="#run-file-preview"
-                        hx-swap="innerHTML"
-                    >{{ entry.name }}</a>
-                    {% endif %}
-                </div>
-                {% endfor %}
+                <div id="run-file-tree-panel"></div>
             </div>
         </div>
         <div class="card">
             <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.file_preview_title", default="File Preview") }}</h3>
-            <div class="pane-scroll" id="run-file-preview-scroll">
+            <div class="pane-scroll file-preview-pane" id="run-file-preview-scroll">
                 <div id="run-file-preview" class="meta">{{ t("ui.run_detail.preview_hint", default="从左侧选择文件。") }}</div>
             </div>
         </div>
@@ -133,33 +283,55 @@
 
     <div class="row three">
         <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.fcmp_stream", default="FCMP Audit Stream") }}</h3>
-            <pre id="fcmp-audit-log" class="protocol-window"></pre>
+            <div class="protocol-controls">
+                <h3 style="margin:0;">{{ t("ui.run_detail.fcmp_stream", default="FCMP Audit Stream") }}</h3>
+                <label class="protocol-toggle">
+                    <input id="fcmp-raw-toggle" type="checkbox">
+                    {{ t("ui.run_detail.view_raw_toggle", default="View raw") }}
+                </label>
+            </div>
+            <div id="fcmp-audit-log" class="protocol-window"></div>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.rasp_stream", default="RASP Audit Stream") }}</h3>
-            <pre id="rasp-audit-log" class="protocol-window"></pre>
+            <div class="protocol-controls">
+                <h3 style="margin:0;">{{ t("ui.run_detail.rasp_stream", default="RASP Audit Stream") }}</h3>
+                <label class="protocol-toggle">
+                    <input id="rasp-raw-toggle" type="checkbox">
+                    {{ t("ui.run_detail.view_raw_toggle", default="View raw") }}
+                </label>
+            </div>
+            <div id="rasp-audit-log" class="protocol-window"></div>
         </div>
         <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.orchestrator_stream", default="Orchestrator Audit Stream") }}</h3>
-            <pre id="orchestrator-audit-log" class="protocol-window"></pre>
+            <div class="protocol-controls">
+                <h3 style="margin:0;">{{ t("ui.run_detail.orchestrator_stream", default="Orchestrator Audit Stream") }}</h3>
+                <label class="protocol-toggle">
+                    <input id="orchestrator-raw-toggle" type="checkbox">
+                    {{ t("ui.run_detail.view_raw_toggle", default="View raw") }}
+                </label>
+            </div>
+            <div id="orchestrator-audit-log" class="protocol-window"></div>
         </div>
     </div>
 
-    <div class="row">
-        <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.raw_stderr", default="Raw stderr") }}</h3>
+    <div class="card">
+        <button id="stderr-toggle-btn" class="stderr-toggle" type="button">
+            <span>{{ t("ui.run_detail.raw_stderr", default="Raw stderr") }}</span>
+            <span>
+                <span id="stderr-alert-dot" class="stderr-dot hidden"></span>
+                <span id="stderr-toggle-icon">▼</span>
+            </span>
+        </button>
+        <div id="stderr-panel" class="hidden" style="margin-top: 8px;">
             <pre id="stderr-log" class="stderr-window"></pre>
         </div>
-        <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.run_actions", default="Run Actions") }}</h3>
-            <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
-        </div>
     </div>
+
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/static/js/file_explorer.js"></script>
 <script>
 (function () {
     const I18N = {
@@ -178,18 +350,54 @@
         metaAttemptPrefix: {{ t("ui.run_detail.meta_attempt_prefix", default="attempt") | tojson }},
         metaSeqPrefix: {{ t("ui.run_detail.meta_seq_prefix", default="seq") | tojson }},
         rawRefLabel: {{ t("ui.run_detail.raw_ref_label", default="raw_ref") | tojson }},
+        viewRawToggle: {{ t("ui.run_detail.view_raw_toggle", default="View raw") | tojson }},
+        protocolEmpty: {{ t("ui.run_detail.protocol_empty", default="No events") | tojson }},
+        protocolDetailTitle: {{ t("ui.run_detail.protocol_detail_title", default="Event details") | tojson }},
+        protocolTagToolOutput: {{ t("ui.run_detail.protocol_tag_tool_output", default="tool-output") | tojson }},
+        protocolTagLifecycle: {{ t("ui.run_detail.protocol_tag_lifecycle", default="lifecycle") | tojson }},
+        protocolTagInteraction: {{ t("ui.run_detail.protocol_tag_interaction", default="interaction") | tojson }},
+        protocolTagDiagnostic: {{ t("ui.run_detail.protocol_tag_diagnostic", default="diagnostic") | tojson }},
+        protocolTagAgent: {{ t("ui.run_detail.protocol_tag_agent", default="agent") | tojson }},
+        protocolTagAuth: {{ t("ui.run_detail.protocol_tag_auth", default="auth") | tojson }},
+        protocolTagOther: {{ t("ui.run_detail.protocol_tag_other", default="other") | tojson }},
+        fileTreeLoading: {{ t("ui.run_detail.file_tree_loading", default="Loading...") | tojson }},
+        fileTreeNoFiles: {{ t("ui.run_detail.file_tree_no_files", default="No files.") | tojson }},
+        fileTreeUnavailable: {{ t("ui.run_detail.file_tree_unavailable", default="File tree unavailable.") | tojson }},
+        fileTreeSelectHint: {{ t("ui.run_detail.file_tree_select_hint", default="Select a file from the left panel to preview.") | tojson }},
+        fileReadFailed: {{ t("ui.run_detail.file_read_failed", default="Read failed.") | tojson }},
+        fileTooLarge: {{ t("ui.file_preview.too_large", default="文件过大不可预览") | tojson }},
+        fileNotPreviewable: {{ t("ui.file_preview.unavailable", default="不可预览") | tojson }},
+        fileNoInfo: {{ t("ui.file_preview.no_info", default="无信息") | tojson }},
+        fileBytes: {{ t("ui.file_preview.bytes", default="bytes") | tojson }},
+        fileFormatMarkdown: {{ t("client.file_format_markdown", default="Markdown") | tojson }},
+        fileFormatJson: {{ t("client.file_format_json", default="JSON") | tojson }},
+        fileFormatYaml: {{ t("client.file_format_yaml", default="YAML") | tojson }},
+        fileFormatToml: {{ t("client.file_format_toml", default="TOML") | tojson }},
+        fileFormatPython: {{ t("client.file_format_python", default="Python") | tojson }},
+        fileFormatJavascript: {{ t("client.file_format_javascript", default="JavaScript") | tojson }},
+        fileFormatText: {{ t("client.file_format_text", default="Text") | tojson }},
     };
     const requestId = {{ detail.request_id | tojson }};
+    const runFileEntries = {{ detail.entries | tojson }};
     const statusEl = document.getElementById("run-status");
     const updatedAtEl = document.getElementById("run-updated-at");
     const pendingIdEl = document.getElementById("run-pending-id");
     const interactionCountEl = document.getElementById("run-interaction-count");
     const stdoutEl = document.getElementById("stdout-log");
     const stderrEl = document.getElementById("stderr-log");
+    const stderrPanelEl = document.getElementById("stderr-panel");
+    const stderrToggleBtn = document.getElementById("stderr-toggle-btn");
+    const stderrToggleIconEl = document.getElementById("stderr-toggle-icon");
+    const stderrAlertDotEl = document.getElementById("stderr-alert-dot");
     const rawRefPreviewEl = document.getElementById("raw-ref-preview");
+    const runFileTreePanelEl = document.getElementById("run-file-tree-panel");
+    const runFilePreviewEl = document.getElementById("run-file-preview");
     const fcmpAuditEl = document.getElementById("fcmp-audit-log");
     const raspAuditEl = document.getElementById("rasp-audit-log");
     const orchestratorAuditEl = document.getElementById("orchestrator-audit-log");
+    const fcmpRawToggleEl = document.getElementById("fcmp-raw-toggle");
+    const raspRawToggleEl = document.getElementById("rasp-raw-toggle");
+    const orchestratorRawToggleEl = document.getElementById("orchestrator-raw-toggle");
     const attemptPrevBtn = document.getElementById("attempt-prev-btn");
     const attemptNextBtn = document.getElementById("attempt-next-btn");
     const attemptLabelEl = document.getElementById("attempt-label");
@@ -198,6 +406,10 @@
     const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
     const renderedChatSeq = new Set();
     const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
+    const protocolRows = { fcmp: [], rasp: [], orchestrator: [] };
+    const protocolRawMode = { fcmp: false, rasp: false, orchestrator: false };
+    const protocolExpandedRowKey = { fcmp: null, rasp: null, orchestrator: null };
+    const protocolAutoFollow = { fcmp: true, rasp: true, orchestrator: true };
     const availableAttempts = [];
     const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
     const WATCHDOG_RETRY_INTERVAL_MS = 2000;
@@ -216,6 +428,7 @@
     let waitingUserWatchdogInFlight = false;
     let waitingAuthWatchdogTimer = null;
     let waitingAuthWatchdogInFlight = false;
+    let stderrCollapsed = true;
     let lastTerminalErrorMessage = {{ (
         detail.result.error.message
         if detail.result and detail.result.error and detail.result.error.message
@@ -224,17 +437,332 @@
         else ""
     ) | tojson }};
 
+    function safeText(value) {
+        return typeof value === "string" ? value : "";
+    }
+
+    function updateStderrIndicator() {
+        const hasOutput = safeText(stderrEl.textContent).trim().length > 0;
+        const shouldShow = stderrCollapsed && hasOutput;
+        stderrAlertDotEl.classList.toggle("hidden", !shouldShow);
+    }
+
+    function setStderrCollapsed(collapsed) {
+        stderrCollapsed = Boolean(collapsed);
+        stderrPanelEl.classList.toggle("hidden", stderrCollapsed);
+        stderrToggleIconEl.textContent = stderrCollapsed ? "▶" : "▼";
+        updateStderrIndicator();
+    }
+
     function appendLog(target, chunk) {
         if (!chunk) return;
         target.textContent += chunk;
         target.scrollTop = target.scrollHeight;
+        if (target === stderrEl) {
+            updateStderrIndicator();
+        }
     }
 
-    function appendProtocolRows(target, rows) {
-        if (!Array.isArray(rows) || !rows.length) return;
-        for (const row of rows) {
-            appendLog(target, `${JSON.stringify(row, null, 2)}\n`);
+    function protocolType(row) {
+        const type = row && (row.type || row.event_type || row.event || row.kind);
+        return typeof type === "string" && type ? type : "event";
+    }
+
+    function protocolData(row) {
+        const payload = row && row.payload;
+        if (payload && typeof payload === "object") return payload;
+        const data = row && row.data;
+        if (data && typeof data === "object") return data;
+        return {};
+    }
+
+    function protocolCategory(row) {
+        if (row && row.event && typeof row.event === "object") {
+            const category = row.event.category;
+            if (typeof category === "string" && category.trim()) {
+                return category.trim();
+            }
         }
+        const type = protocolType(row);
+        const splitAt = type.indexOf(".");
+        return splitAt > 0 ? type.slice(0, splitAt) : "event";
+    }
+
+    function protocolSource(row) {
+        const source = row && row.source;
+        if (source && typeof source === "object") {
+            return source;
+        }
+        return {};
+    }
+
+    function protocolRowKey(row, index) {
+        const seq = Number(row && row.seq);
+        if (Number.isFinite(seq)) {
+            return `seq:${Math.floor(seq)}`;
+        }
+        const type = protocolType(row);
+        const ts = typeof row?.ts === "string" ? row.ts : "";
+        return `idx:${index}:${type}:${ts}`;
+    }
+
+    function isNearBottom(targetEl, thresholdPx = 24) {
+        const distance = targetEl.scrollHeight - targetEl.scrollTop - targetEl.clientHeight;
+        return distance <= thresholdPx;
+    }
+
+    function extractRaspKindLabel(type) {
+        if (type.startsWith("raw.")) return I18N.protocolTagToolOutput;
+        if (type.startsWith("lifecycle.")) return I18N.protocolTagLifecycle;
+        if (type.startsWith("interaction.")) return I18N.protocolTagInteraction;
+        if (type.startsWith("diagnostic.")) return I18N.protocolTagDiagnostic;
+        if (type.startsWith("agent.") || type.startsWith("assistant.")) return I18N.protocolTagAgent;
+        if (type.startsWith("auth.")) return I18N.protocolTagAuth;
+        return I18N.protocolTagOther;
+    }
+
+    function toSummaryText(rawText, maxLength = 180) {
+        if (typeof rawText !== "string") return "";
+        const normalized = rawText.replace(/\s+/g, " ").trim();
+        if (!normalized) return "";
+        return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+    }
+
+    function summarizeProtocolRow(streamName, row) {
+        const type = protocolType(row);
+        const category = protocolCategory(row);
+        const data = protocolData(row);
+        const message = typeof data.message === "string" ? data.message.trim() : "";
+        if (streamName === "rasp") {
+            const source = protocolSource(row);
+            const engine = typeof source.engine === "string" && source.engine ? source.engine : "unknown";
+            const parser = typeof source.parser === "string" && source.parser ? source.parser : "unknown";
+            const toolType = extractRaspKindLabel(type);
+            const line = toSummaryText(
+                typeof data.line === "string" && data.line.trim()
+                    ? data.line
+                    : message,
+            );
+            const code = typeof data.code === "string" && data.code ? ` code=${data.code}` : "";
+            const status = typeof data.status === "string" && data.status ? ` status=${data.status}` : "";
+            const text = line ? ` · ${line}` : "";
+            return `${toolType} · ${category}/${type} · ${engine}/${parser}${code}${status}${text}`;
+        }
+        if (message) {
+            return message;
+        }
+        if (type === "conversation.state.changed") {
+            const from = typeof data.from === "string" ? data.from : "";
+            const to = typeof data.to === "string" ? data.to : "";
+            if (from || to) {
+                return `state: ${from || "?"} -> ${to || "?"}`;
+            }
+        }
+        if (type === "interaction.reply.accepted") {
+            const interactionId = data.interaction_id;
+            return Number.isFinite(Number(interactionId))
+                ? `interaction reply accepted #${Number(interactionId)}`
+                : "interaction reply accepted";
+        }
+        if (type === "assistant.message.final") {
+            const text = typeof data.text === "string" ? data.text.trim() : "";
+            if (text) return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+        }
+        if (type.startsWith("auth.")) {
+            const status = typeof data.status === "string" ? data.status : "";
+            return status ? `${type} (${status})` : type;
+        }
+        const summaryParts = [];
+        for (const key of ["status", "from", "to", "code", "stream", "phase"]) {
+            const value = data[key];
+            if (typeof value === "string" && value) {
+                summaryParts.push(`${key}=${value}`);
+            } else if ((typeof value === "number" || typeof value === "boolean") && Number.isFinite(Number(value))) {
+                summaryParts.push(`${key}=${String(value)}`);
+            }
+            if (summaryParts.length >= 3) break;
+        }
+        const suffix = summaryParts.length ? ` · ${summaryParts.join(" · ")}` : "";
+        return `${streamName.toUpperCase()} · ${type}${suffix}`;
+    }
+
+    function buildProtocolDetailKv(row) {
+        const details = [];
+        const type = protocolType(row);
+        details.push(`type: ${type}`);
+        details.push(`category: ${protocolCategory(row)}`);
+        if (typeof row?.ts === "string" && row.ts) {
+            details.push(`ts: ${row.ts}`);
+        }
+        const source = protocolSource(row);
+        if (typeof source.engine === "string" && source.engine) {
+            details.push(`source.engine: ${source.engine}`);
+        }
+        if (typeof source.parser === "string" && source.parser) {
+            details.push(`source.parser: ${source.parser}`);
+        }
+        const data = protocolData(row);
+        for (const key of ["status", "code", "from", "to", "interaction_id", "attempt_number"]) {
+            const value = data[key] ?? row?.[key];
+            if (value === null || value === undefined) continue;
+            if (typeof value === "string" && !value.trim()) continue;
+            details.push(`${key}: ${String(value)}`);
+            if (details.length >= 10) break;
+        }
+        return details;
+    }
+
+    function renderProtocolRows(streamName, targetEl) {
+        const rows = Array.isArray(protocolRows[streamName]) ? protocolRows[streamName] : [];
+        const shouldStickToBottom = protocolAutoFollow[streamName] || isNearBottom(targetEl);
+        if (!rows.length) {
+            targetEl.classList.remove("raw-mode");
+            targetEl.textContent = I18N.protocolEmpty;
+            return;
+        }
+        if (protocolRawMode[streamName]) {
+            targetEl.classList.add("raw-mode");
+            targetEl.textContent = rows.map((row) => JSON.stringify(row, null, 2)).join("\n");
+            if (shouldStickToBottom) {
+                targetEl.scrollTop = targetEl.scrollHeight;
+            }
+            return;
+        }
+        targetEl.classList.remove("raw-mode");
+        targetEl.textContent = "";
+        const fragment = document.createDocumentFragment();
+        for (let idx = 0; idx < rows.length; idx += 1) {
+            const row = rows[idx];
+            const bubble = document.createElement("div");
+            bubble.className = "protocol-bubble";
+            const rowKey = protocolRowKey(row, idx);
+            const expanded = protocolExpandedRowKey[streamName] === rowKey;
+            const header = document.createElement("button");
+            header.type = "button";
+            header.className = `protocol-bubble-header${expanded ? " open" : ""}`;
+            const meta = document.createElement("div");
+            meta.className = "protocol-bubble-meta";
+            const seq = Number(row && row.seq);
+            const seqText = Number.isFinite(seq) ? `#${Math.floor(seq)} · ` : "";
+            meta.textContent = `${seqText}${protocolType(row)}`;
+            const body = document.createElement("div");
+            body.className = "protocol-bubble-body";
+            body.textContent = summarizeProtocolRow(streamName, row);
+            header.appendChild(meta);
+            header.appendChild(body);
+            if (streamName === "rasp") {
+                const tags = document.createElement("div");
+                tags.className = "protocol-bubble-tags";
+                const tagKind = document.createElement("span");
+                tagKind.className = "protocol-tag";
+                tagKind.textContent = extractRaspKindLabel(protocolType(row));
+                tags.appendChild(tagKind);
+                const tagSource = document.createElement("span");
+                tagSource.className = "protocol-tag";
+                const source = protocolSource(row);
+                const engine = typeof source.engine === "string" && source.engine ? source.engine : "unknown";
+                const parser = typeof source.parser === "string" && source.parser ? source.parser : "unknown";
+                tagSource.textContent = `${engine}/${parser}`;
+                tags.appendChild(tagSource);
+                header.appendChild(tags);
+            }
+            header.addEventListener("click", () => {
+                protocolExpandedRowKey[streamName] = expanded ? null : rowKey;
+                renderProtocolRows(streamName, targetEl);
+            });
+            bubble.appendChild(header);
+            if (expanded) {
+                const detail = document.createElement("div");
+                detail.className = "protocol-bubble-detail";
+                const detailTitle = document.createElement("div");
+                detailTitle.className = "protocol-detail-title";
+                detailTitle.textContent = I18N.protocolDetailTitle;
+                detail.appendChild(detailTitle);
+                const kv = document.createElement("div");
+                kv.className = "protocol-detail-kv";
+                kv.textContent = buildProtocolDetailKv(row).join(" | ");
+                detail.appendChild(kv);
+                const rawRef = extractProtocolRawRef(row);
+                if (rawRef) {
+                    const refLine = document.createElement("div");
+                    refLine.className = "meta";
+                    const btn = document.createElement("button");
+                    btn.className = "link-btn";
+                    btn.type = "button";
+                    btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+                    btn.addEventListener("click", (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        previewRawRef(rawRef);
+                    });
+                    refLine.appendChild(btn);
+                    detail.appendChild(refLine);
+                }
+                const jsonPre = document.createElement("pre");
+                jsonPre.className = "protocol-detail-json";
+                jsonPre.textContent = JSON.stringify(row, null, 2);
+                detail.appendChild(jsonPre);
+                bubble.appendChild(detail);
+            }
+            fragment.appendChild(bubble);
+        }
+        targetEl.appendChild(fragment);
+        if (shouldStickToBottom) {
+            targetEl.scrollTop = targetEl.scrollHeight;
+        }
+    }
+
+    function mergeProtocolRows(streamName, rows) {
+        if (!Array.isArray(rows) || !rows.length) {
+            return;
+        }
+        const existing = Array.isArray(protocolRows[streamName]) ? protocolRows[streamName] : [];
+        const bySeq = new Map();
+        const sequenced = [];
+        const unsequenced = [];
+        for (const row of existing) {
+            const seq = Number(row && row.seq);
+            if (Number.isFinite(seq)) {
+                bySeq.set(Math.floor(seq), row);
+            } else {
+                unsequenced.push(row);
+            }
+        }
+        for (const row of rows) {
+            const seq = Number(row && row.seq);
+            if (Number.isFinite(seq)) {
+                bySeq.set(Math.floor(seq), row);
+            } else {
+                unsequenced.push(row);
+            }
+        }
+        const sortedSeq = Array.from(bySeq.keys()).sort((a, b) => a - b);
+        for (const key of sortedSeq) {
+            const row = bySeq.get(key);
+            if (row) sequenced.push(row);
+        }
+        protocolRows[streamName] = sequenced.concat(unsequenced);
+    }
+
+    function extractProtocolRawRef(row) {
+        if (!row || typeof row !== "object") return null;
+        const rawRef = row.raw_ref && typeof row.raw_ref === "object"
+            ? row.raw_ref
+            : row.correlation && typeof row.correlation === "object" && row.correlation.raw_ref && typeof row.correlation.raw_ref === "object"
+                ? row.correlation.raw_ref
+                : null;
+        if (!rawRef || typeof rawRef.stream !== "string") return null;
+        const from = Number(rawRef.byte_from || 0);
+        const to = Number(rawRef.byte_to || 0);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return null;
+        const attemptObj = Number(rawRef.attempt_number || currentAttempt);
+        const attempt = Number.isFinite(attemptObj) && attemptObj > 0 ? Math.floor(attemptObj) : currentAttempt;
+        return {
+            stream: rawRef.stream,
+            byte_from: Math.max(0, Math.floor(from)),
+            byte_to: Math.max(0, Math.floor(to)),
+            attempt_number: attempt,
+        };
     }
 
     function extractRawRef(event) {
@@ -356,59 +884,58 @@
         }
     }
 
-    function initRunFileTreeCollapse() {
-        const treeScrollEl = document.getElementById("run-file-tree-scroll");
-        if (!treeScrollEl) return;
-        const rows = Array.from(treeScrollEl.querySelectorAll(".tree-line[data-rel-path]"));
-        if (!rows.length) return;
-        const collapsed = new Set();
-
-        function parentPath(path) {
-            const idx = path.lastIndexOf("/");
-            return idx >= 0 ? path.slice(0, idx) : "";
-        }
-
-        function hasCollapsedAncestor(path) {
-            let parent = parentPath(path);
-            while (parent) {
-                if (collapsed.has(parent)) return true;
-                parent = parentPath(parent);
-            }
-            return false;
-        }
-
-        function updateTreeVisibility() {
-            for (const row of rows) {
-                const path = row.dataset.relPath || "";
-                const isDir = row.dataset.isDir === "1";
-                const toggle = row.querySelector("[data-tree-toggle]");
-                row.style.display = hasCollapsedAncestor(path) ? "none" : "";
-                if (isDir && toggle) {
-                    const expanded = !collapsed.has(path);
-                    toggle.textContent = expanded ? "▼" : "▶";
-                    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    async function initRunFileExplorer() {
+        if (!window.SkillRunnerFileExplorer || !runFileTreePanelEl || !runFilePreviewEl) return;
+        const explorer = window.SkillRunnerFileExplorer.mountFileExplorer({
+            treeEl: runFileTreePanelEl,
+            previewEl: runFilePreviewEl,
+            defaultCollapsed: true,
+            rowClass: "tree-line",
+            toggleClass: "tree-toggle-btn",
+            dirClass: "dir",
+            fileButtonClass: "file-link-btn",
+            indentPx: 16,
+            i18n: {
+                fileTreeLoading: I18N.fileTreeLoading,
+                fileTreeNoFiles: I18N.fileTreeNoFiles,
+                fileTreeUnavailable: I18N.fileTreeUnavailable,
+                fileTreeSelectHint: I18N.fileTreeSelectHint,
+                fileReadFailed: I18N.fileReadFailed,
+                fileTooLarge: I18N.fileTooLarge,
+                fileNotPreviewable: I18N.fileNotPreviewable,
+                fileNoInfo: I18N.fileNoInfo,
+                fileBytes: I18N.fileBytes,
+            },
+            formatLabels: {
+                markdown: I18N.fileFormatMarkdown,
+                json: I18N.fileFormatJson,
+                yaml: I18N.fileFormatYaml,
+                toml: I18N.fileFormatToml,
+                python: I18N.fileFormatPython,
+                javascript: I18N.fileFormatJavascript,
+                text: I18N.fileFormatText,
+            },
+            getEntries: async () => runFileEntries.map((entry) => ({
+                path: safeText(entry.rel_path),
+                name: safeText(entry.name),
+                is_dir: Boolean(entry.is_dir),
+                depth: Number(entry.depth || 0),
+            })),
+            onOpenFile: async (entry) => {
+                const path = encodeURIComponent(safeText(entry.path));
+                const res = await fetch(`/v1/management/runs/${requestId}/file?path=${path}`);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
                 }
-            }
-        }
-
-        for (const row of rows) {
-            if (row.dataset.isDir !== "1") continue;
-            const path = row.dataset.relPath || "";
-            collapsed.add(path);
-            const toggle = row.querySelector("[data-tree-toggle]");
-            if (!toggle) continue;
-            toggle.addEventListener("click", (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (collapsed.has(path)) {
-                    collapsed.delete(path);
-                } else {
-                    collapsed.add(path);
-                }
-                updateTreeVisibility();
-            });
-        }
-        updateTreeVisibility();
+                const payload = await res.json();
+                return {
+                    kind: "payload",
+                    relativePath: safeText(payload.path || entry.path),
+                    preview: payload.preview || {},
+                };
+            },
+        });
+        await explorer.load();
     }
 
     function clearWaitingUserWatchdog() {
@@ -643,11 +1170,14 @@
                 auditCursor[streamName] = Math.max(auditCursor[streamName], Math.floor(seq));
             }
         }
-        appendProtocolRows(targetEl, rows);
+        mergeProtocolRows(streamName, rows);
+        renderProtocolRows(streamName, targetEl);
     }
 
     async function loadProtocolPanel(streamName, targetEl) {
         targetEl.textContent = "";
+        protocolRows[streamName] = [];
+        protocolExpandedRowKey[streamName] = null;
         auditCursor[streamName] = 0;
         const payload = await fetchProtocolHistory(streamName, currentAttempt);
         if (!payload) return;
@@ -656,7 +1186,8 @@
             updateAttemptPager();
         }
         const rows = Array.isArray(payload.events) ? payload.events : [];
-        appendProtocolRows(targetEl, rows);
+        protocolRows[streamName] = rows;
+        renderProtocolRows(streamName, targetEl);
         for (const row of rows) {
             const seq = Number(row && row.seq);
             if (Number.isFinite(seq)) {
@@ -675,10 +1206,12 @@
         const res = await fetch(`/v1/management/runs/${requestId}/logs/range?${query.toString()}`);
         if (!res.ok) {
             stderrEl.textContent = "";
+            updateStderrIndicator();
             return;
         }
         const payload = await res.json();
         stderrEl.textContent = payload.chunk || "";
+        updateStderrIndicator();
     }
 
     async function loadConversationHistory() {
@@ -798,14 +1331,16 @@
         };
     }
 
-    cancelBtn.addEventListener("click", async () => {
-        clearWaitingUserWatchdog();
-        clearWaitingAuthWatchdog();
-        cancelBtn.disabled = true;
-        await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
-        await refreshState();
-        closeStream();
-    });
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", async () => {
+            clearWaitingUserWatchdog();
+            clearWaitingAuthWatchdog();
+            cancelBtn.disabled = true;
+            await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
+            await refreshState();
+            closeStream();
+        });
+    }
 
     attemptPrevBtn.addEventListener("click", async () => {
         const idx = availableAttempts.indexOf(currentAttempt);
@@ -829,6 +1364,29 @@
         await loadStderrForAttempt();
     });
 
+    function bindProtocolRawToggle(streamName, toggleEl, targetEl) {
+        if (!toggleEl || !targetEl) return;
+        toggleEl.checked = protocolRawMode[streamName] === true;
+        toggleEl.addEventListener("change", () => {
+            protocolRawMode[streamName] = toggleEl.checked;
+            renderProtocolRows(streamName, targetEl);
+        });
+        targetEl.addEventListener("scroll", () => {
+            protocolAutoFollow[streamName] = isNearBottom(targetEl);
+        });
+    }
+
+    bindProtocolRawToggle("fcmp", fcmpRawToggleEl, fcmpAuditEl);
+    bindProtocolRawToggle("rasp", raspRawToggleEl, raspAuditEl);
+    bindProtocolRawToggle("orchestrator", orchestratorRawToggleEl, orchestratorAuditEl);
+
+    if (stderrToggleBtn) {
+        stderrToggleBtn.addEventListener("click", () => {
+            setStderrCollapsed(!stderrCollapsed);
+        });
+    }
+    setStderrCollapsed(true);
+
     setInterval(() => {
         loadStderrForAttempt().catch(() => {});
         refreshState().catch(() => {});
@@ -837,7 +1395,7 @@
         refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});
     }, 3000);
 
-    initRunFileTreeCollapse();
+    initRunFileExplorer().catch(() => {});
     bootstrapAttemptsAndPanels().catch(() => {});
 
     if (!terminal) {

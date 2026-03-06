@@ -476,3 +476,28 @@ During `/v1/jobs/{request_id}/upload`, temporary extraction staging SHALL occur 
 - **THEN** the server SHALL stage files under `data/tmp_uploads/<request_id>`
 - **AND** after success or failure, the server SHALL perform best-effort deletion of that request staging directory
 
+### Requirement: 文件预览响应 MUST 支持格式化扩展字段
+文件预览接口 MUST 在保持现有核心字段兼容的前提下，支持更丰富的文本格式识别与渲染增强。
+
+#### Scenario: 扩展格式识别
+- **WHEN** 客户端请求文件预览
+- **THEN** 系统可识别 `json|yaml|toml|python|javascript|markdown|text`
+- **AND** 返回结果保持原有字段兼容
+
+#### Scenario: 渲染失败回退
+- **WHEN** 某格式高亮渲染失败或依赖不可用
+- **THEN** 接口返回普通文本预览
+- **AND** 客户端仍可无中断展示内容
+
+### Requirement: E2E Run 文件预览 MUST 可滚动并按格式渲染
+E2E Run 页文件预览 MUST 支持长内容滚动，并根据预览格式渲染 Markdown / JSON。
+
+#### Scenario: 长内容文件
+- **WHEN** 预览内容超出容器高度
+- **THEN** 用户可在预览面板内纵向滚动
+
+#### Scenario: Markdown / JSON 文件
+- **WHEN** 预览结果包含 `detected_format = markdown|json`
+- **THEN** 前端使用对应渲染分支展示内容
+- **AND** 非 markdown/json 保持文本分支
+

@@ -582,7 +582,8 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         )
         assert preview.status_code == 200
         assert preview.json()["preview"]["mode"] == "text"
-        assert '"answer":"ok"' in preview.json()["preview"]["content"]
+        assert preview.json()["preview"]["detected_format"] == "json"
+        assert '"answer": "ok"' in (preview.json()["preview"]["json_pretty"] or "")
 
         preview_partial = await _request(
             app,

@@ -23,6 +23,7 @@ from .backend import (
 )
 from .config import E2EClientSettings
 from server.i18n import get_language, get_translator
+from server.services.platform.file_preview_renderer import build_preview_payload_from_bytes
 
 
 TEMPLATE_ROOT = Path(__file__).parent / "templates"
@@ -55,13 +56,6 @@ router = APIRouter(tags=["e2e-client"])
 
 RUNTIME_BOOL_OPTIONS = ("no_cache", "debug", "interactive_auto_reply")
 RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec",)
-PREVIEW_MAX_BYTES = 256 * 1024
-TEXT_DECODE_CANDIDATES = (
-    "utf-8",
-    "utf-8-sig",
-    "gb18030",
-    "big5",
-)
 VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
 ENGINE_DEFAULT_PROVIDER = {
     "codex": "openai",
@@ -1451,28 +1445,12 @@ def _build_bundle_file_preview(bundle_bytes: bytes, relative_path: str) -> dict[
         if info.is_dir():
             raise IsADirectoryError("path points to a directory")
         size = int(info.file_size)
-        if size > PREVIEW_MAX_BYTES:
-            return {
-                "mode": "too_large",
-                "content": None,
-                "size": size,
-                "meta": "bundle file too large",
-            }
         data = archive.read(normalized)
-        if _is_binary_blob(data):
-            return {
-                "mode": "binary",
-                "content": None,
-                "size": size,
-                "meta": "binary file in bundle",
-            }
-        content, encoding = _decode_text_blob(data)
-        return {
-            "mode": "text",
-            "content": content,
-            "size": size,
-            "meta": f"{size} bytes, {encoding}",
-        }
+        return build_preview_payload_from_bytes(
+            data=data,
+            size=size,
+            filename=Path(normalized).name,
+        )
 
 
 def _normalize_bundle_request_path(path: str) -> str:
@@ -1503,31 +1481,3 @@ def _normalize_zip_member_name(raw_name: str) -> str | None:
     normalized = candidate.as_posix().rstrip("/")
     return normalized or None
 
-
-def _is_binary_blob(data: bytes) -> bool:
-    sample = data[:4096]
-    if not sample:
-        return False
-    if b"\x00" in sample:
-        return True
-    control_count = 0
-    for byte in sample:
-        if byte in {9, 10, 12, 13, 27}:
-            continue
-        if 32 <= byte <= 126:
-            continue
-        if byte >= 128:
-            continue
-        control_count += 1
-    if control_count / len(sample) > 0.55:
-        return True
-    return False
-
-
-def _decode_text_blob(data: bytes) -> tuple[str, str]:
-    for encoding in TEXT_DECODE_CANDIDATES:
-        try:
-            return data.decode(encoding), encoding
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace"), "utf-8-replace"

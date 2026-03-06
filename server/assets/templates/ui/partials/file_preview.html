@@ -1,9 +1,40 @@
-<div style="margin-bottom:8px; color:#374151; font-size:13px;">
+<style>
+    .preview-path { margin-bottom: 8px; color: #1f2937; font-size: 13px; }
+    .preview-meta { margin-bottom: 8px; color: #374151; font-size: 12px; }
+    .preview-rich {
+        padding: 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        background: #ffffff;
+        color: #0f172a;
+        overflow-x: auto;
+    }
+    .preview-rich pre {
+        margin: 0;
+        white-space: pre;
+        overflow-x: auto;
+        color: #0f172a;
+    }
+    .preview-plain {
+        padding: 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        background: #ffffff;
+        color: #0f172a;
+    }
+</style>
+<div class="preview-path">
     <strong>{{ relative_path }}</strong>
 </div>
 {% if preview.mode == "text" %}
-<div style="margin-bottom:8px; color:#6b7280; font-size:12px;">{{ preview.meta }}</div>
-<pre>{{ preview.content }}</pre>
+<div class="preview-meta">{{ preview.meta }}</div>
+{% if preview.rendered_html and preview.detected_format in ["markdown", "json", "yaml", "toml", "python", "javascript"] %}
+<div class="preview-rich preview-markdown">{{ preview.rendered_html | safe }}</div>
+{% elif preview.detected_format == "json" and preview.json_pretty %}
+<pre class="preview-plain">{{ preview.json_pretty }}</pre>
+{% else %}
+<pre class="preview-plain">{{ preview.content }}</pre>
+{% endif %}
 {% elif preview.mode == "too_large" %}
 <div style="color:#b45309; font-size:13px;">{{ t("ui.file_preview.too_large", default="文件过大不可预览") }}</div>
 <div style="margin-top:6px; color:#6b7280; font-size:12px;">{{ preview.size }} {{ t("ui.file_preview.bytes", default="bytes") }}</div>

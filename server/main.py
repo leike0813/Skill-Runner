@@ -182,7 +182,7 @@ v1_router.include_router(skill_packages.router)
 app.include_router(v1_router)
 app.include_router(ui.router)
 app.include_router(oauth_callback.router)
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "assets" / "static")), name="static")
 
 @app.get("/")
 async def root():

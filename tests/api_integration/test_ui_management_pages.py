@@ -75,15 +75,17 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
 
     run_detail = await _request("GET", "/ui/runs/req-ui")
     assert run_detail.status_code == 200
-    assert "/v1/management/runs/${requestId}/events" in run_detail.text
-    assert "对话区（FCMP）" in run_detail.text
-    assert "Raw stderr" in run_detail.text
-    assert "raw_ref 回跳预览" in run_detail.text
-    assert "FCMP Audit Stream" in run_detail.text
-    assert run_detail.text.index("raw_ref 回跳预览") < run_detail.text.index("Attempt:")
-    assert run_detail.text.index("对话区（FCMP）") < run_detail.text.index("Attempt:")
-    assert run_detail.text.index("Attempt:") < run_detail.text.index("FCMP Audit Stream")
-    assert run_detail.text.rindex("Raw stderr") > run_detail.text.index("FCMP Audit Stream")
+    assert "/v1/management/runs/${requestId}/chat?cursor=${cursor}" in run_detail.text
+    assert "Canonical Chat" in run_detail.text
+    assert 'id="stderr-log"' in run_detail.text
+    assert "raw_ref" in run_detail.text
+    assert "FCMP" in run_detail.text
+    assert 'id="fcmp-raw-toggle"' in run_detail.text
+    assert 'id="rasp-raw-toggle"' in run_detail.text
+    assert 'id="orchestrator-raw-toggle"' in run_detail.text
+    assert 'id="attempt-label"' in run_detail.text
+    assert run_detail.text.index("Canonical Chat") < run_detail.text.index('id="attempt-label"')
+    assert run_detail.text.rindex("stderr-log") > run_detail.text.rindex("FCMP")
 
 
 @pytest.mark.asyncio

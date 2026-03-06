@@ -1,13 +1,9 @@
 from pathlib import Path
 from typing import Any
 
-
-PREVIEW_MAX_BYTES = 256 * 1024
-TEXT_DECODE_CANDIDATES = (
-    "utf-8",
-    "utf-8-sig",
-    "gb18030",
-    "big5",
+from server.services.platform.file_preview_renderer import (
+    PREVIEW_MAX_BYTES,
+    build_preview_payload as build_file_preview_payload,
 )
 
 
@@ -63,57 +59,4 @@ def resolve_skill_file_path(skill_root: Path, relative_path: str) -> Path:
 
 
 def build_preview_payload(file_path: Path) -> dict[str, Any]:
-    size = file_path.stat().st_size
-    if size > PREVIEW_MAX_BYTES:
-        return {
-            "mode": "too_large",
-            "content": None,
-            "size": size,
-            "meta": "无信息",
-        }
-
-    raw = file_path.read_bytes()
-    if _is_binary(raw):
-        return {
-            "mode": "binary",
-            "content": None,
-            "size": size,
-            "meta": "无信息",
-        }
-    content, encoding = _decode_text(raw)
-
-    return {
-        "mode": "text",
-        "content": content,
-        "size": size,
-        "meta": f"{size} bytes, {encoding}",
-    }
-
-
-def _is_binary(data: bytes) -> bool:
-    sample = data[:4096]
-    if not sample:
-        return False
-    if b"\x00" in sample:
-        return True
-    control_count = 0
-    for byte in sample:
-        if byte in {9, 10, 12, 13, 27}:
-            continue
-        if 32 <= byte <= 126:
-            continue
-        if byte >= 128:
-            continue
-        control_count += 1
-    if control_count / len(sample) > 0.55:
-        return True
-    return False
-
-
-def _decode_text(data: bytes) -> tuple[str, str]:
-    for encoding in TEXT_DECODE_CANDIDATES:
-        try:
-            return data.decode(encoding), encoding
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace"), "utf-8-replace"
+    return build_file_preview_payload(file_path)

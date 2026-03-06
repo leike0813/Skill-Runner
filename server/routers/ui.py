@@ -337,6 +337,33 @@ async def ui_skill_view_file(request: Request, skill_id: str, path: str):
     )
 
 
+@router.get("/skills/{skill_id}/preview")
+async def ui_skill_preview_file_json(skill_id: str, path: str):
+    skill = skill_registry.get_skill(skill_id)
+    if not skill or not skill.path:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_root = Path(skill.path)
+    if not skill_root.exists() or not skill_root.is_dir():
+        raise HTTPException(status_code=404, detail="Skill path not found")
+
+    try:
+        file_path = resolve_skill_file_path(skill_root, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    preview = build_preview_payload(file_path)
+    return JSONResponse(
+        content={
+            "skill_id": skill_id,
+            "path": Path(path).as_posix(),
+            "preview": preview,
+        }
+    )
+
+
 @router.get("/runs", response_class=HTMLResponse)
 async def ui_runs(request: Request):
     return templates.TemplateResponse(

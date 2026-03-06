@@ -143,9 +143,11 @@ def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():
     assert "/runs/{{ request_id }}/result" not in content
     assert "file-tree-layout" in content
     assert "preview-panel" in content
-    assert "collapsedDirs" in content
-    assert "updateTreeVisibility()" in content
+    assert "SkillRunnerFileExplorer" in content
+    assert "mountFileExplorer" in content
     assert "tree-toggle-btn" in content
+    assert ".preview-panel" in content
+    assert "overflow: auto;" in content
 
 
 def test_run_observe_template_uses_canonical_chat_replay_routes() -> None:
@@ -161,3 +163,15 @@ def test_run_observe_template_does_not_optimistically_append_chat_bubbles() -> N
     assert "appendChatBubble(\"user\"" not in content
     assert "response_preview" not in content
     assert "interaction.reply.accepted" not in content
+
+
+def test_run_observe_template_supports_markdown_and_json_preview_modes() -> None:
+    content = _read_template()
+    assert "SkillRunnerFileExplorer" in content
+    assert "mountFileExplorer" in content
+    assert "fileFormatMarkdown" in content
+    assert "fileFormatJson" in content
+    assert "fileFormatYaml" in content
+    assert "fileFormatToml" in content
+    assert "fileFormatPython" in content
+    assert "fileFormatJavascript" in content

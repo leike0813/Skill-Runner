@@ -240,6 +240,16 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "catchUpConversationHistory()\n                .catch(() => {})" in content
     assert "appendChatEvent(role, text, event, extractRawRef(event));" in content
     assert "refreshState().catch(() => {});" in content
+    assert 'id="fcmp-raw-toggle"' in content
+    assert 'id="rasp-raw-toggle"' in content
+    assert 'id="orchestrator-raw-toggle"' in content
+    assert "bindProtocolRawToggle(\"fcmp\"" in content
+    assert "renderProtocolRows(streamName, targetEl);" in content
+    assert "protocolAutoFollow" in content
+    assert "isNearBottom(targetEl)" in content
+    assert "protocolExpandedRowKey" in content
+    assert "protocol-bubble-detail" in content
+    assert "extractProtocolRawRef(row)" in content
 
 
 @pytest.mark.asyncio
@@ -322,10 +332,20 @@ async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
     assert detail_res.status_code == 200
     assert "包结构（只读）" in detail_res.text
     assert "SKILL.md" in detail_res.text
+    assert "SkillRunnerFileExplorer" in detail_res.text
+    assert 'id="skill-file-tree-panel"' in detail_res.text
+    assert 'id="skill-file-preview-scroll"' in detail_res.text
 
     preview_res = await _request("GET", "/ui/skills/demo-ui-skill/view?path=SKILL.md")
     assert preview_res.status_code == 200
     assert "# skill" in preview_res.text
+    assert "preview-plain" in preview_res.text or "preview-rich" in preview_res.text
+
+    preview_json_res = await _request("GET", "/ui/skills/demo-ui-skill/preview?path=SKILL.md")
+    assert preview_json_res.status_code == 200
+    payload = preview_json_res.json()
+    assert payload["path"] == "SKILL.md"
+    assert payload["preview"]["mode"] == "text"
 
 
 @pytest.mark.asyncio
@@ -1102,8 +1122,11 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/chat/history" in detail_res.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
-    assert "initRunFileTreeCollapse()" in detail_res.text
-    assert "data-tree-toggle" in detail_res.text
+    assert "SkillRunnerFileExplorer" in detail_res.text
+    assert "initRunFileExplorer()" in detail_res.text
+    assert 'id="run-file-tree-panel"' in detail_res.text
+    assert 'id="stderr-toggle-btn"' in detail_res.text
+    assert 'id="stderr-alert-dot"' in detail_res.text
     assert "connectEvents()" in detail_res.text
     assert "executeWaitingAuthWatchdogTick" in detail_res.text
     assert "maybeStartWaitingAuthWatchdog" in detail_res.text

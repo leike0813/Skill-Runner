@@ -45,17 +45,22 @@ def test_build_preview_payload_text_binary_and_size(tmp_path: Path):
     text_preview = build_preview_payload(text_file)
     assert text_preview["mode"] == "text"
     assert text_preview["content"] == "hello"
+    assert text_preview["detected_format"] == "text"
+    assert text_preview["rendered_html"] is None
+    assert text_preview["json_pretty"] is None
 
     binary_file = tmp_path / "b.bin"
     binary_file.write_bytes(b"\x00\x01\x02")
     binary_preview = build_preview_payload(binary_file)
     assert binary_preview["mode"] == "binary"
     assert binary_preview["meta"] == "无信息"
+    assert binary_preview["detected_format"] == "text"
 
     large_file = tmp_path / "l.txt"
     large_file.write_text("x" * (PREVIEW_MAX_BYTES + 1), encoding="utf-8")
     large_preview = build_preview_payload(large_file)
     assert large_preview["mode"] == "too_large"
+    assert large_preview["detected_format"] == "text"
 
 
 def test_build_preview_payload_gb18030_markdown_is_text(tmp_path: Path):
@@ -64,4 +69,15 @@ def test_build_preview_payload_gb18030_markdown_is_text(tmp_path: Path):
     md_file.write_bytes(content.encode("gb18030"))
     preview = build_preview_payload(md_file)
     assert preview["mode"] == "text"
+    assert preview["detected_format"] == "markdown"
     assert "中文段落" in preview["content"]
+
+
+def test_build_preview_payload_json_pretty(tmp_path: Path):
+    json_file = tmp_path / "result.json"
+    json_file.write_text('{"a":1,"b":{"c":2}}', encoding="utf-8")
+    preview = build_preview_payload(json_file)
+    assert preview["mode"] == "text"
+    assert preview["detected_format"] == "json"
+    assert isinstance(preview["json_pretty"], str)
+    assert '"a": 1' in preview["json_pretty"]

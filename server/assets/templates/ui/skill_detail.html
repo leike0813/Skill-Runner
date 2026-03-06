@@ -4,6 +4,7 @@
 
 {% block extra_head %}
 <style>
+    :root { --file-pane-height: 340px; }
     .layout { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
     .row { display: grid; grid-template-columns: 38% 62%; gap: 16px; }
     .meta { color: #6b7280; font-size: 13px; margin-top: 6px; }
@@ -11,6 +12,41 @@
     .dir { color: #1d4ed8; }
     .file { color: #111827; }
     pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
+    .pane-scroll {
+        height: var(--file-pane-height);
+        max-height: var(--file-pane-height);
+        overflow: auto;
+        background: #ffffff;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    .tree-toggle-btn {
+        border: 0;
+        background: transparent;
+        color: #1d4ed8;
+        cursor: pointer;
+        padding: 0 4px 0 0;
+        font-size: 12px;
+        line-height: 1;
+    }
+    .file-link-btn {
+        border: 0;
+        background: transparent;
+        color: #0f766e;
+        padding: 0;
+        cursor: pointer;
+        font-size: 13px;
+        line-height: 1.7;
+        border-radius: 0;
+    }
+    .file-link-btn:hover {
+        text-decoration: underline;
+        background: transparent;
+    }
+    #file-preview {
+        color: #0f172a;
+    }
     @media (max-width: 960px) {
         .row { grid-template-columns: 1fr; }
     }
@@ -30,26 +66,79 @@
     <div class="row">
         <div class="card">
             <h3 style="margin:0 0 8px;">{{ t("ui.skill_detail.structure_title", default="Package Structure (Read-only)") }}</h3>
-            {% for entry in entries %}
-            <div class="tree-line" style="padding-left: {{ entry.depth * 16 }}px;">
-                {% if entry.is_dir %}
-                <span class="dir">📁 {{ entry.name }}/</span>
-                {% else %}
-                <span class="file">📄</span>
-                <a
-                    href="#"
-                    hx-get="/ui/skills/{{ skill.id }}/view?path={{ entry.rel_path }}"
-                    hx-target="#file-preview"
-                    hx-swap="innerHTML"
-                >{{ entry.name }}</a>
-                {% endif %}
+            <div class="pane-scroll" id="skill-file-tree-scroll">
+                <div id="skill-file-tree-panel"></div>
             </div>
-            {% endfor %}
         </div>
         <div class="card">
             <h3 style="margin:0 0 8px;">{{ t("ui.skill_detail.preview_title", default="File Preview") }}</h3>
-            <div id="file-preview" class="meta">{{ t("ui.skill_detail.preview_hint", default="Select a file from the left panel.") }}</div>
+            <div class="pane-scroll" id="skill-file-preview-scroll">
+                <div id="file-preview" class="meta">{{ t("ui.skill_detail.preview_hint", default="Select a file from the left panel.") }}</div>
+            </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/file_explorer.js"></script>
+<script>
+(function () {
+    const skillId = {{ skill.id | tojson }};
+    const entries = {{ entries | tojson }};
+    const treeEl = document.getElementById("skill-file-tree-panel");
+    const previewEl = document.getElementById("file-preview");
+    if (!window.SkillRunnerFileExplorer || !treeEl || !previewEl) return;
+
+    const explorer = window.SkillRunnerFileExplorer.mountFileExplorer({
+        treeEl,
+        previewEl,
+        defaultCollapsed: true,
+        rowClass: "tree-line",
+        toggleClass: "tree-toggle-btn",
+        dirClass: "dir",
+        fileButtonClass: "file-link-btn",
+        indentPx: 16,
+        i18n: {
+            fileTreeLoading: {{ t("ui.run_detail.file_tree_loading", default="Loading...") | tojson }},
+            fileTreeNoFiles: {{ t("ui.run_detail.file_tree_no_files", default="No files.") | tojson }},
+            fileTreeUnavailable: {{ t("ui.run_detail.file_tree_unavailable", default="File tree unavailable.") | tojson }},
+            fileTreeSelectHint: {{ t("ui.skill_detail.preview_hint", default="Select a file from the left panel.") | tojson }},
+            fileReadFailed: {{ t("ui.run_detail.file_read_failed", default="Read failed.") | tojson }},
+            fileTooLarge: {{ t("ui.file_preview.too_large", default="文件过大不可预览") | tojson }},
+            fileNotPreviewable: {{ t("ui.file_preview.unavailable", default="不可预览") | tojson }},
+            fileNoInfo: {{ t("ui.file_preview.no_info", default="无信息") | tojson }},
+            fileBytes: {{ t("ui.file_preview.bytes", default="bytes") | tojson }},
+        },
+        formatLabels: {
+            markdown: {{ t("client.file_format_markdown", default="Markdown") | tojson }},
+            json: {{ t("client.file_format_json", default="JSON") | tojson }},
+            yaml: {{ t("client.file_format_yaml", default="YAML") | tojson }},
+            toml: {{ t("client.file_format_toml", default="TOML") | tojson }},
+            python: {{ t("client.file_format_python", default="Python") | tojson }},
+            javascript: {{ t("client.file_format_javascript", default="JavaScript") | tojson }},
+            text: {{ t("client.file_format_text", default="Text") | tojson }},
+        },
+        getEntries: async () => entries.map((entry) => ({
+            path: entry.rel_path,
+            name: entry.name,
+            is_dir: Boolean(entry.is_dir),
+            depth: Number(entry.depth || 0),
+        })),
+        onOpenFile: async (entry) => {
+            const path = encodeURIComponent(entry.path || "");
+            const response = await fetch(`/ui/skills/${encodeURIComponent(skillId)}/preview?path=${path}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            return {
+                kind: "payload",
+                relativePath: payload.path || entry.path,
+                preview: payload.preview || {},
+            };
+        },
+    });
+
+    explorer.load().catch(() => {});
+})();
+</script>
 {% endblock %}

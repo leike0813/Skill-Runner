@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         return response
 
-    static_dir = Path(__file__).parent.parent / "server" / "static"
+    static_dir = Path(__file__).parent.parent / "server" / "assets" / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     def _prefers_html(request: Request) -> bool:

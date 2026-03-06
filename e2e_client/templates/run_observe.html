@@ -297,7 +297,7 @@
     }
     .preview-panel {
         background: #fff;
-        overflow: hidden;
+        overflow: auto;
         padding: 10px 12px;
     }
     .preview-title {
@@ -316,11 +316,38 @@
     }
     .preview-content {
         margin: 0;
-        white-space: pre;
-        overflow: auto;
+        white-space: pre-wrap;
+        overflow: visible;
         font-size: 12px;
         line-height: 1.45;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .preview-markdown {
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--neutral-800);
+    }
+    .preview-markdown pre {
+        margin: 8px 0;
+        padding: 10px;
+        background: #f8fafc;
+        border: 1px solid var(--neutral-200);
+        border-radius: 8px;
+        overflow: auto;
+        white-space: pre;
+    }
+    .preview-markdown code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .preview-markdown table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .preview-markdown th,
+    .preview-markdown td {
+        border: 1px solid var(--neutral-200);
+        padding: 4px 8px;
+        text-align: left;
     }
     .preview-empty {
         color: var(--neutral-500);
@@ -333,6 +360,7 @@
     }
 </style>
 
+<script src="/static/js/file_explorer.js"></script>
 <script>
 (() => {
     const I18N = {
@@ -369,6 +397,14 @@
         fileTreeSelectHint: {{ t("client.observe_file_tree_select_hint", default="Select a file from the left panel to preview.") | tojson }},
         fileTooLarge: {{ t("client.file_too_large", default="File too large to preview") | tojson }},
         fileNotPreviewable: {{ t("client.file_not_previewable", default="Not previewable") | tojson }},
+        fileFormatMarkdown: {{ t("client.file_format_markdown", default="Markdown") | tojson }},
+        fileFormatJson: {{ t("client.file_format_json", default="JSON") | tojson }},
+        fileFormatYaml: {{ t("client.file_format_yaml", default="YAML") | tojson }},
+        fileFormatToml: {{ t("client.file_format_toml", default="TOML") | tojson }},
+        fileFormatPython: {{ t("client.file_format_python", default="Python") | tojson }},
+        fileFormatJavascript: {{ t("client.file_format_javascript", default="JavaScript") | tojson }},
+        fileFormatText: {{ t("client.file_format_text", default="Text") | tojson }},
+        fileBytes: {{ t("client.file_bytes", default="bytes") | tojson }},
         fileNoInfo: {{ t("client.file_no_info", default="No information") | tojson }},
         fileTreeUnavailable: {{ t("client.observe_file_tree_unavailable", default="File tree unavailable.") | tojson }},
         fileTreeNoFiles: {{ t("client.observe_file_tree_no_files", default="No files.") | tojson }},
@@ -1195,146 +1231,61 @@
     async function loadFileTree() {
         if (fileTreeLoaded) return;
         fileTreeLoaded = true;
-        fileTreePanelEl.textContent = I18N.fileTreeLoading;
-        filePreviewPanelEl.innerHTML = `<div class="preview-empty">${I18N.fileTreeSelectHint}</div>`;
-
-        function renderFilePreview(relativePath, preview) {
-            filePreviewPanelEl.textContent = "";
-            const titleEl = document.createElement("div");
-            titleEl.className = "preview-title";
-            titleEl.textContent = relativePath;
-            filePreviewPanelEl.appendChild(titleEl);
-
-            const mode = safeText(preview?.mode);
-            if (mode === "text") {
-                const metaEl = document.createElement("div");
-                metaEl.className = "preview-meta";
-                metaEl.textContent = safeText(preview?.meta || "text");
-                filePreviewPanelEl.appendChild(metaEl);
-                const pre = document.createElement("pre");
-                pre.className = "preview-content";
-                pre.textContent = safeText(preview?.content);
-                filePreviewPanelEl.appendChild(pre);
-                return;
-            }
-            if (mode === "too_large") {
-                const warn = document.createElement("div");
-                warn.className = "preview-empty";
-                warn.textContent = I18N.fileTooLarge;
-                filePreviewPanelEl.appendChild(warn);
-                const metaEl = document.createElement("div");
-                metaEl.className = "preview-meta";
-                metaEl.textContent = `${Number(preview?.size || 0)} bytes`;
-                filePreviewPanelEl.appendChild(metaEl);
-                return;
-            }
-            const unsupported = document.createElement("div");
-            unsupported.className = "preview-empty";
-            unsupported.textContent = I18N.fileNotPreviewable;
-            filePreviewPanelEl.appendChild(unsupported);
-            const metaEl = document.createElement("div");
-            metaEl.className = "preview-meta";
-            metaEl.textContent = safeText(preview?.meta || I18N.fileNoInfo);
-            filePreviewPanelEl.appendChild(metaEl);
-        }
-
-        try {
-            const res = await fetch(apiUrl(`/api/runs/${requestId}/bundle/entries`));
-            if (!res.ok) {
-                fileTreePanelEl.textContent = I18N.fileTreeUnavailable;
-                return;
-            }
-            const payload = await res.json();
-            const entries = Array.isArray(payload.entries) ? payload.entries : [];
-            fileTreePanelEl.textContent = "";
-            if (!entries.length) {
-                fileTreePanelEl.textContent = I18N.fileTreeNoFiles;
-                return;
-            }
-            const collapsedDirs = new Set(
-                entries
-                    .filter((entry) => Boolean(entry && entry.is_dir))
-                    .map((entry) => safeText(entry.path))
-                    .filter(Boolean)
-            );
-            const rows = [];
-
-            function parentPath(path) {
-                const idx = path.lastIndexOf("/");
-                return idx >= 0 ? path.slice(0, idx) : "";
-            }
-
-            function hasCollapsedAncestor(path) {
-                let parent = parentPath(path);
-                while (parent) {
-                    if (collapsedDirs.has(parent)) {
-                        return true;
-                    }
-                    parent = parentPath(parent);
-                }
-                return false;
-            }
-
-            function updateTreeVisibility() {
-                for (const item of rows) {
-                    item.row.style.display = hasCollapsedAncestor(item.path) ? "none" : "";
-                    if (item.isDir && item.toggleEl) {
-                        const expanded = !collapsedDirs.has(item.path);
-                        item.toggleEl.textContent = expanded ? "▼" : "▶";
-                    }
-                }
-            }
-
-            for (const entry of entries) {
-                const row = document.createElement("div");
-                row.className = "file-entry";
-                const depth = Number(entry.depth || 0);
-                row.style.paddingLeft = `${Math.max(0, depth) * 14}px`;
-                const name = safeText(entry.name || entry.path);
-                const pathValue = safeText(entry.path);
-                let toggleEl = null;
-                if (entry.is_dir) {
-                    toggleEl = document.createElement("button");
-                    toggleEl.type = "button";
-                    toggleEl.textContent = "▶";
-                    toggleEl.className = "tree-toggle-btn";
-                    toggleEl.addEventListener("click", (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (collapsedDirs.has(pathValue)) {
-                            collapsedDirs.delete(pathValue);
-                        } else {
-                            collapsedDirs.add(pathValue);
-                        }
-                        updateTreeVisibility();
-                    });
-                    row.appendChild(toggleEl);
-                    const label = document.createElement("span");
-                    label.textContent = `📁 ${name}/`;
-                    row.appendChild(label);
-                } else {
-                    const btn = document.createElement("button");
-                    btn.type = "button";
-                    btn.textContent = `📄 ${name}`;
-                    btn.addEventListener("click", async () => {
-                        const path = encodeURIComponent(safeText(entry.path));
-                        const previewRes = await fetch(apiUrl(`/api/runs/${requestId}/bundle/file?path=${path}`));
-                        if (!previewRes.ok) {
-                            filePreviewPanelEl.innerHTML = `<div class="preview-empty">${I18N.fileReadFailedHttpPrefix} ${previewRes.status}</div>`;
-                            return;
-                        }
-                        const previewPayload = await previewRes.json();
-                        renderFilePreview(safeText(entry.path), previewPayload.preview || {});
-                    });
-                    row.appendChild(btn);
-                }
-                fileTreePanelEl.appendChild(row);
-                rows.push({ row, path: pathValue, isDir: Boolean(entry.is_dir), toggleEl });
-            }
-            updateTreeVisibility();
-        } catch (_err) {
+        if (!window.SkillRunnerFileExplorer) {
             fileTreePanelEl.textContent = I18N.fileTreeUnavailable;
+            return;
         }
+        const explorer = window.SkillRunnerFileExplorer.mountFileExplorer({
+            treeEl: fileTreePanelEl,
+            previewEl: filePreviewPanelEl,
+            defaultCollapsed: true,
+            rowClass: "file-entry",
+            toggleClass: "tree-toggle-btn",
+            fileButtonClass: "",
+            indentPx: 14,
+            i18n: {
+                fileTreeLoading: I18N.fileTreeLoading,
+                fileTreeNoFiles: I18N.fileTreeNoFiles,
+                fileTreeUnavailable: I18N.fileTreeUnavailable,
+                fileTreeSelectHint: I18N.fileTreeSelectHint,
+                fileReadFailed: I18N.fileReadFailedHttpPrefix,
+                fileTooLarge: I18N.fileTooLarge,
+                fileNotPreviewable: I18N.fileNotPreviewable,
+                fileNoInfo: I18N.fileNoInfo,
+                fileBytes: I18N.fileBytes,
+            },
+            formatLabels: {
+                markdown: I18N.fileFormatMarkdown,
+                json: I18N.fileFormatJson,
+                yaml: I18N.fileFormatYaml,
+                toml: I18N.fileFormatToml,
+                python: I18N.fileFormatPython,
+                javascript: I18N.fileFormatJavascript,
+                text: I18N.fileFormatText,
+            },
+            getEntries: async () => {
+                const res = await fetch(apiUrl(`/api/runs/${requestId}/bundle/entries`));
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const payload = await res.json();
+                return Array.isArray(payload.entries) ? payload.entries : [];
+            },
+            onOpenFile: async (entry) => {
+                const path = encodeURIComponent(safeText(entry.path));
+                const previewRes = await fetch(apiUrl(`/api/runs/${requestId}/bundle/file?path=${path}`));
+                if (!previewRes.ok) {
+                    throw new Error(`${I18N.fileReadFailedHttpPrefix} ${previewRes.status}`);
+                }
+                const payload = await previewRes.json();
+                return {
+                    kind: "payload",
+                    relativePath: safeText(entry.path),
+                    preview: payload.preview || {},
+                };
+            },
+        });
+        await explorer.load();
     }
 
     async function maybeLoadFileTreeOnTerminal() {
