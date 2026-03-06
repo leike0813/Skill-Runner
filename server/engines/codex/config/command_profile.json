@@ -10,5 +10,15 @@
     "--skip-git-repo-check",
     "--json",
     "--full-auto"
+  ],
+  "ui_shell": [
+    "--sandbox",
+    "workspace-write",
+    "--ask-for-approval",
+    "never",
+    "-c",
+    "features.shell_tool=false",
+    "-c",
+    "features.unified_exec=false"
   ]
 }

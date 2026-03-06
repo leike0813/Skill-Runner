@@ -97,8 +97,8 @@ def test_validate_model_opencode_requires_provider_model(monkeypatch):
         lambda _engine: None,
     )
     monkeypatch.setattr(
-        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
-        lambda: {
+        "server.services.engine_management.model_registry.engine_model_catalog_lifecycle.get_snapshot",
+        lambda _engine: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
             "last_error": None,
@@ -135,8 +135,8 @@ def test_get_models_opencode_runtime_probe_cache(monkeypatch):
         lambda _engine: "0.1.0",
     )
     monkeypatch.setattr(
-        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
-        lambda: {
+        "server.services.engine_management.model_registry.engine_model_catalog_lifecycle.get_snapshot",
+        lambda _engine: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
             "last_error": None,
@@ -167,8 +167,8 @@ def test_get_manifest_view_opencode_dynamic_compat(monkeypatch):
         lambda _engine: "0.1.0",
     )
     monkeypatch.setattr(
-        "server.services.engine_management.model_registry.opencode_model_catalog.get_snapshot",
-        lambda: {
+        "server.services.engine_management.model_registry.engine_model_catalog_lifecycle.get_snapshot",
+        lambda _engine: {
             "status": "ready",
             "updated_at": "2026-02-25T00:00:00Z",
             "last_error": None,

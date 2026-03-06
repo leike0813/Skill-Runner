@@ -1,9 +1,12 @@
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Any, List
 
+from server.config import config
 from server.models import SkillManifest
+from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 
 
 def _stable_json_dumps(data: Any) -> str:
@@ -26,6 +29,24 @@ def _hash_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+@lru_cache(maxsize=16)
+def _load_profile(engine: str) -> AdapterProfile | None:
+    profile_path = (
+        Path(config.SYSTEM.ROOT) / "server" / "engines" / engine.strip().lower() / "adapter" / "adapter_profile.json"
+    )
+    try:
+        return load_adapter_profile(engine.strip().lower(), profile_path)
+    except RuntimeError:
+        return None
+
+
+def _resolve_engine_skill_defaults_path(skill_path: Path, engine: str) -> Path | None:
+    profile = _load_profile(engine)
+    if profile is None:
+        return None
+    return profile.resolve_skill_defaults_path(skill_path)
 
 
 def build_input_manifest(uploads_dir: Path) -> Dict[str, Any]:
@@ -72,16 +93,8 @@ def compute_skill_fingerprint(skill: SkillManifest, engine: str) -> str:
             if schema_path.exists():
                 files.append(schema_path)
 
-    if engine == "gemini":
-        engine_cfg = skill.path / "assets" / "gemini_settings.json"
-    elif engine == "iflow":
-        engine_cfg = skill.path / "assets" / "iflow_settings.json"
-    elif engine == "opencode":
-        engine_cfg = skill.path / "assets" / "opencode_config.json"
-    else:
-        engine_cfg = skill.path / "assets" / "codex_config.toml"
-
-    if engine_cfg.exists():
+    engine_cfg = _resolve_engine_skill_defaults_path(skill.path, engine)
+    if engine_cfg is not None and engine_cfg.exists():
         files.append(engine_cfg)
 
     entries = []

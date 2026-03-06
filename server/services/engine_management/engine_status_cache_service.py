@@ -7,9 +7,9 @@ from typing import Dict
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
+from server.config_registry import keys
 from server.services.engine_management.agent_cli_manager import (
     AgentCliManager,
-    ENGINE_PACKAGES,
     EngineStatus,
     format_status_payload,
 )
@@ -26,7 +26,7 @@ _CACHE_PARSE_EXCEPTIONS = (
 
 
 def _supported_engines() -> tuple[str, ...]:
-    return tuple(ENGINE_PACKAGES.keys())
+    return tuple(keys.ENGINE_KEYS)
 
 
 @dataclass(frozen=True)

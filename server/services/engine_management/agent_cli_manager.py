@@ -9,63 +9,37 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from server.config_registry import keys
 from server.models import (
     EngineInteractiveProfile,
     EngineResumeCapability,
 )
-from server.runtime.adapter.common.profile_loader import load_adapter_profile
+from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.engine_management.runtime_profile import RuntimeProfile, get_runtime_profile
 
 logger = logging.getLogger(__name__)
 
-ENGINE_PACKAGES = {
-    "codex": "@openai/codex",
-    "gemini": "@google/gemini-cli",
-    "iflow": "@iflow-ai/iflow-cli",
-    "opencode": "opencode-ai",
-}
-
-ENGINE_BINARY_CANDIDATES = {
-    "codex": ["codex", "codex.cmd", "codex.exe"],
-    "gemini": ["gemini", "gemini.cmd", "gemini.exe"],
-    "iflow": ["iflow", "iflow.cmd", "iflow.exe"],
-    "opencode": ["opencode", "opencode.cmd", "opencode.exe"],
-}
 TTYD_BINARY_CANDIDATES = ["ttyd", "ttyd.exe", "ttyd.cmd"]
 
-CREDENTIAL_IMPORT_RULES = {
-    "codex": (("auth.json", ".codex/auth.json"),),
-    "gemini": (
-        ("google_accounts.json", ".gemini/google_accounts.json"),
-        ("oauth_creds.json", ".gemini/oauth_creds.json"),
-    ),
-    "iflow": (
-        ("iflow_accounts.json", ".iflow/iflow_accounts.json"),
-        ("oauth_creds.json", ".iflow/oauth_creds.json"),
-    ),
-    "opencode": (
-        ("auth.json", ".local/share/opencode/auth.json"),
-        ("antigravity-accounts.json", ".config/opencode/antigravity-accounts.json"),
-    ),
-}
-
-_DEFAULT_GEMINI_SETTINGS_FALLBACK = {
-    "security": {
-        "auth": {
-            "selectedType": "oauth-personal",
+_DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
+    "gemini": {
+        "security": {
+            "auth": {
+                "selectedType": "oauth-personal",
+            }
         }
-    }
+    },
+    "iflow": {
+        "selectedAuthType": "oauth-iflow",
+        "baseUrl": "https://apis.iflow.cn/v1",
+    },
+    "opencode": {
+        "$schema": "https://opencode.ai/config.json",
+        "plugin": ["opencode-antigravity-auth"],
+    },
 }
-
-_DEFAULT_IFLOW_SETTINGS_FALLBACK = {
-    "selectedAuthType": "oauth-iflow",
-    "baseUrl": "https://apis.iflow.cn/v1",
-}
-
-_DEFAULT_CODEX_CONFIG_FALLBACK = 'cli_auth_credentials_store = "file"\n'
-_DEFAULT_OPENCODE_CONFIG_FALLBACK = {
-    "$schema": "https://opencode.ai/config.json",
-    "plugin": ["opencode-antigravity-auth"],
+_DEFAULT_BOOTSTRAP_TEXT_FALLBACKS: dict[str, str] = {
+    "codex": 'cli_auth_credentials_store = "file"\n',
 }
 
 _BOOTSTRAP_JSON_EXCEPTIONS = (
@@ -87,6 +61,10 @@ _PATH_RESOLVE_EXCEPTIONS = (
     RuntimeError,
     ValueError,
 )
+
+
+def _supported_engines() -> tuple[str, ...]:
+    return tuple(keys.ENGINE_KEYS)
 
 
 def _load_bootstrap_json(filename: str, fallback: Mapping[str, object]) -> Dict[str, Any]:
@@ -130,46 +108,23 @@ def _load_bootstrap_text(filename: str, fallback: str) -> str:
     return fallback
 
 
-
 @lru_cache(maxsize=8)
-def _load_engine_profile(engine: str):
+def _load_engine_profile(engine: str) -> AdapterProfile:
+    normalized = engine.strip().lower()
+    if normalized not in keys.ENGINE_KEYS:
+        raise ValueError(f"Unsupported engine: {engine}")
     profile_path = (
         Path(__file__).resolve().parents[2]
         / "engines"
-        / engine
+        / normalized
         / "adapter"
         / "adapter_profile.json"
     )
-    return load_adapter_profile(engine, profile_path)
+    return load_adapter_profile(normalized, profile_path)
 
 
-def _default_gemini_settings() -> Dict[str, Any]:
-    profile = _load_engine_profile("gemini")
-    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_GEMINI_SETTINGS_FALLBACK)
-
-
-def _default_iflow_settings() -> Dict[str, Any]:
-    profile = _load_engine_profile("iflow")
-    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_IFLOW_SETTINGS_FALLBACK)
-
-
-def _default_codex_config() -> str:
-    profile = _load_engine_profile("codex")
-    return _load_bootstrap_text(str(profile.resolve_bootstrap_path()), _DEFAULT_CODEX_CONFIG_FALLBACK)
-
-
-def _default_opencode_config() -> Dict[str, Any]:
-    profile = _load_engine_profile("opencode")
-    return _load_bootstrap_json(str(profile.resolve_bootstrap_path()), _DEFAULT_OPENCODE_CONFIG_FALLBACK)
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
-
-RESUME_HELP_HINTS: Dict[str, tuple[str, ...]] = {
-    "codex": ("resume",),
-    "gemini": ("--resume",),
-    "iflow": ("--resume", "--continue"),
-    "opencode": ("--session",),
-}
 
 
 @dataclass(frozen=True)
@@ -189,42 +144,33 @@ class AgentCliManager:
     def __init__(self, profile: RuntimeProfile | None = None) -> None:
         self.profile = profile or get_runtime_profile()
 
+    def supported_engines(self) -> tuple[str, ...]:
+        return _supported_engines()
+
     def ensure_layout(self) -> None:
         profile = self.profile
-        profile.ensure_directories(
-            [
-                profile.agent_home / ".codex",
-                profile.agent_home / ".gemini",
-                profile.agent_home / ".iflow",
-                profile.agent_home / ".opencode",
-                profile.agent_home / ".config" / "opencode",
-                profile.agent_home / ".local" / "share" / "opencode",
-                profile.agent_home / ".local" / "state" / "opencode",
-                profile.agent_home / ".cache" / "opencode",
-            ]
-        )
-        self._ensure_json_file(
-            profile.agent_home / ".gemini" / "settings.json",
-            _default_gemini_settings(),
-        )
-        self._ensure_json_file(
-            profile.agent_home / ".iflow" / "settings.json",
-            _default_iflow_settings(),
-        )
-        self._normalize_iflow_settings(
-            profile.agent_home / ".iflow" / "settings.json",
-        )
-        codex_config = profile.agent_home / ".codex" / "config.toml"
-        if not codex_config.exists():
-            codex_config.write_text(_default_codex_config(), encoding="utf-8")
-        self._ensure_json_file(
-            profile.agent_home / ".config" / "opencode" / "opencode.json",
-            _default_opencode_config(),
-        )
+        directory_set: set[Path] = set()
+        for engine in self.supported_engines():
+            layout = self._engine_profile(engine).cli_management.layout
+            for relpath in layout.extra_dirs:
+                directory_set.add(profile.agent_home / relpath)
+        if directory_set:
+            profile.ensure_directories(sorted(directory_set))
+
+        for engine in self.supported_engines():
+            bootstrap_path = self._engine_bootstrap_target_path(engine)
+            bootstrap_payload = self._engine_bootstrap_payload(engine)
+            if isinstance(bootstrap_payload, str):
+                if not bootstrap_path.exists():
+                    bootstrap_path.parent.mkdir(parents=True, exist_ok=True)
+                    bootstrap_path.write_text(bootstrap_payload, encoding="utf-8")
+            else:
+                self._ensure_json_file(bootstrap_path, bootstrap_payload)
+            self._apply_layout_normalizer(engine, bootstrap_path, bootstrap_payload)
 
     def collect_status(self) -> Dict[str, EngineStatus]:
         result: Dict[str, EngineStatus] = {}
-        for engine in ENGINE_PACKAGES:
+        for engine in self.supported_engines():
             result[engine] = self.collect_engine_status(engine)
         return result
 
@@ -244,7 +190,7 @@ class AgentCliManager:
                 detail="cli_missing",
             )
 
-        dynamic_args = self._resume_dynamic_probe_args(engine)
+        dynamic_args = list(self._engine_profile(engine).cli_management.resume_probe.dynamic_args)
         if not dynamic_args:
             return static
 
@@ -304,21 +250,22 @@ class AgentCliManager:
 
     def ensure_installed(self) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
-        for engine, package in ENGINE_PACKAGES.items():
+        for engine in self.supported_engines():
             if self.resolve_managed_engine_command(engine) is None:
-                results[engine] = self.install_package(package)
+                results[engine] = self.install_package(self._engine_profile(engine).cli_management.package)
         return results
 
     def upgrade_all(self) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
-        for engine, package in ENGINE_PACKAGES.items():
-            results[engine] = self.install_package(package)
+        for engine in self.supported_engines():
+            results[engine] = self.install_package(self._engine_profile(engine).cli_management.package)
         return results
 
     def upgrade_engine(self, engine: str) -> CommandResult:
-        package = ENGINE_PACKAGES.get(engine)
-        if not package:
+        normalized = engine.strip().lower()
+        if normalized not in self.supported_engines():
             raise ValueError(f"Unsupported engine: {engine}")
+        package = self._engine_profile(normalized).cli_management.package
         return self.install_package(package)
 
     def install_package(self, package: str) -> CommandResult:
@@ -368,17 +315,18 @@ class AgentCliManager:
     def import_credentials(self, source_root: Path) -> Dict[str, list[str]]:
         source_root = source_root.resolve()
         copied: Dict[str, list[str]] = {}
-        for engine, mappings in CREDENTIAL_IMPORT_RULES.items():
+        for engine in self.supported_engines():
+            imports = self._engine_profile(engine).cli_management.credential_imports
             src_engine = source_root / engine
             copied_files: list[str] = []
-            for src_name, dst_relpath in mappings:
-                src = src_engine / src_name
+            for rule in imports:
+                src = src_engine / rule.source
                 if not src.exists():
                     continue
-                dst = self.profile.agent_home / dst_relpath
+                dst = self.profile.agent_home / rule.target_relpath
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
-                copied_files.append(src_name)
+                copied_files.append(rule.source)
             copied[engine] = copied_files
         return copied
 
@@ -389,9 +337,10 @@ class AgentCliManager:
         return self.resolve_global_engine_command(engine)
 
     def resolve_managed_engine_command(self, engine: str) -> Optional[Path]:
-        candidates = ENGINE_BINARY_CANDIDATES.get(engine)
-        if not candidates:
+        profile = self._load_engine_profile_or_none(engine)
+        if profile is None:
             return None
+        candidates = profile.cli_management.binary_candidates
         for base in self.profile.managed_bin_dirs:
             for name in candidates:
                 path = base / name
@@ -400,9 +349,10 @@ class AgentCliManager:
         return None
 
     def resolve_global_engine_command(self, engine: str) -> Optional[Path]:
-        candidates = ENGINE_BINARY_CANDIDATES.get(engine)
-        if not candidates:
+        profile = self._load_engine_profile_or_none(engine)
+        if profile is None:
             return None
+        candidates = profile.cli_management.binary_candidates
         global_path = self._build_global_only_path(os.environ.get("PATH", ""))
         for name in candidates:
             resolved = shutil.which(name, path=global_path)
@@ -430,7 +380,8 @@ class AgentCliManager:
 
     def collect_auth_status(self) -> Dict[str, Dict[str, Any]]:
         status: Dict[str, Dict[str, Any]] = {}
-        for engine in ENGINE_PACKAGES:
+        for engine in self.supported_engines():
+            profile = self._engine_profile(engine)
             managed_cmd = self.resolve_managed_engine_command(engine)
             global_cmd = self.resolve_global_engine_command(engine)
             effective_cmd = managed_cmd or global_cmd
@@ -442,13 +393,11 @@ class AgentCliManager:
 
             credential_files = self._credential_status_paths(engine)
             credential_state = "unknown"
-            credentials_present = bool(effective_cmd) and all(credential_files.values())
-            if engine == "iflow":
-                credentials_present = credentials_present and self._is_iflow_settings_valid(
-                    self.profile.agent_home / ".iflow" / "settings.json"
-                )
-            if engine == "opencode":
-                credentials_present = bool(effective_cmd) and self._has_opencode_credentials(credential_files)
+            credentials_present = self._evaluate_credentials_present(
+                profile=profile,
+                credential_files=credential_files,
+                effective_cmd=effective_cmd,
+            )
             if effective_cmd:
                 credential_state = "present" if credentials_present else "missing"
 
@@ -465,13 +414,68 @@ class AgentCliManager:
         return status
 
     def _credential_status_paths(self, engine: str) -> Dict[str, bool]:
-        return {
-            src_name: (self.profile.agent_home / dst_relpath).exists()
-            for src_name, dst_relpath in CREDENTIAL_IMPORT_RULES.get(engine, ())
-        }
+        profile = self._engine_profile(engine)
+        result: Dict[str, bool] = {}
+        for rule in profile.cli_management.credential_imports:
+            result[rule.source] = (self.profile.agent_home / rule.target_relpath).exists()
+        return result
 
-    def _has_opencode_credentials(self, credential_files: Dict[str, bool]) -> bool:
-        return bool(credential_files.get("auth.json"))
+    def _evaluate_credentials_present(
+        self,
+        *,
+        profile: AdapterProfile,
+        credential_files: Dict[str, bool],
+        effective_cmd: Path | None,
+    ) -> bool:
+        if effective_cmd is None:
+            return False
+
+        policy = profile.cli_management.credential_policy
+        if policy.mode == "all_of_sources":
+            matched = all(credential_files.get(source, False) for source in policy.sources)
+        else:
+            matched = any(credential_files.get(source, False) for source in policy.sources)
+        if not matched:
+            return False
+
+        validator = policy.settings_validator
+        if validator == "iflow_oauth_settings":
+            return self._is_iflow_settings_valid(self._engine_bootstrap_target_path(profile.engine))
+        return True
+
+    def _engine_bootstrap_payload(self, engine: str) -> Mapping[str, object] | str:
+        profile = self._engine_profile(engine)
+        bootstrap_path = str(profile.resolve_bootstrap_path())
+        bootstrap_format = profile.cli_management.layout.bootstrap_format
+        if bootstrap_format == "json":
+            fallback = _DEFAULT_BOOTSTRAP_JSON_FALLBACKS.get(engine)
+            if fallback is None:
+                raise RuntimeError(f"Missing JSON bootstrap fallback for engine: {engine}")
+            return _load_bootstrap_json(bootstrap_path, fallback)
+        fallback_text = _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS.get(engine)
+        if fallback_text is None:
+            raise RuntimeError(f"Missing text bootstrap fallback for engine: {engine}")
+        return _load_bootstrap_text(bootstrap_path, fallback_text)
+
+    def _engine_bootstrap_target_path(self, engine: str) -> Path:
+        profile = self._engine_profile(engine)
+        return self.profile.agent_home / profile.cli_management.layout.bootstrap_target_relpath
+
+    def _apply_layout_normalizer(
+        self,
+        engine: str,
+        bootstrap_path: Path,
+        bootstrap_payload: Mapping[str, object] | str,
+    ) -> None:
+        strategy = self._engine_profile(engine).cli_management.layout.normalize_strategy
+        if strategy is None:
+            return
+        if strategy == "iflow_settings_v1":
+            if not isinstance(bootstrap_payload, Mapping):
+                raise RuntimeError("iflow_settings_v1 normalizer expects JSON bootstrap payload")
+            self._normalize_iflow_settings(bootstrap_path, bootstrap_payload)
+            return
+        raise RuntimeError(f"Unknown normalize strategy: {strategy}")
 
     def _ensure_json_file(self, path: Path, payload: Mapping[str, object]) -> None:
         if path.exists():
@@ -479,8 +483,9 @@ class AgentCliManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(dict(payload), indent=2) + "\n", encoding="utf-8")
 
-    def _normalize_iflow_settings(self, path: Path) -> None:
-        defaults = _default_iflow_settings()
+    def _normalize_iflow_settings(self, path: Path, defaults: Mapping[str, object]) -> None:
+        selected_auth_default = str(defaults.get("selectedAuthType") or "oauth-iflow")
+        base_url_default = str(defaults.get("baseUrl") or "https://apis.iflow.cn/v1")
         try:
             current = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(current, dict):
@@ -503,12 +508,12 @@ class AgentCliManager:
 
         selected_auth = current.get("selectedAuthType")
         if not selected_auth or selected_auth == "iflow":
-            current["selectedAuthType"] = defaults["selectedAuthType"]
+            current["selectedAuthType"] = selected_auth_default
             changed = True
 
         base_url = current.get("baseUrl")
         if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
-            current["baseUrl"] = defaults["baseUrl"]
+            current["baseUrl"] = base_url_default
             changed = True
 
         if changed:
@@ -522,13 +527,8 @@ class AgentCliManager:
                 probe_method="command",
                 detail="cli_missing",
             )
-        hints = RESUME_HELP_HINTS.get(engine, ())
-        if not hints:
-            return EngineResumeCapability(
-                supported=False,
-                probe_method="command",
-                detail="unknown_engine",
-            )
+
+        hints = self._engine_profile(engine).cli_management.resume_probe.help_hints
         result = self._run_command([str(command), "--help"], timeout_sec=5)
         combined = f"{result.stdout}\n{result.stderr}".lower()
         if any(hint.lower() in combined for hint in hints):
@@ -542,15 +542,6 @@ class AgentCliManager:
             probe_method="command",
             detail="resume_flag_missing",
         )
-
-    def _resume_dynamic_probe_args(self, engine: str) -> list[str]:
-        if engine == "codex":
-            return ["exec", "resume", "--help"]
-        if engine == "gemini":
-            return ["--resume", "probe-session", "--help"]
-        if engine == "iflow":
-            return ["--resume", "probe-session", "--help"]
-        return []
 
     def _is_iflow_settings_valid(self, path: Path) -> bool:
         try:
@@ -628,6 +619,15 @@ class AgentCliManager:
                 if path.exists():
                     return path
         return None
+
+    def _engine_profile(self, engine: str) -> AdapterProfile:
+        return _load_engine_profile(engine)
+
+    def _load_engine_profile_or_none(self, engine: str) -> AdapterProfile | None:
+        normalized = engine.strip().lower()
+        if normalized not in self.supported_engines():
+            return None
+        return _load_engine_profile(normalized)
 
 
 def format_status_payload(status: Dict[str, EngineStatus]) -> Dict[str, Dict[str, object]]:

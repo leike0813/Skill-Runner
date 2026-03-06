@@ -7,7 +7,8 @@ from server.engines.common.config.json_layer_config_generator import ConfigGener
 
 def test_unknown_config_key_logs_warning(tmp_path, caplog):
     generator = ConfigGenerator()
-    generator.schemas_dir = tmp_path
+    generator._contract_schemas_dir = tmp_path  # type: ignore[attr-defined]
+    generator._engine_schemas_glob = tmp_path  # type: ignore[attr-defined]
 
     schema = {"known": "str"}
     (tmp_path / "schema.json").write_text(json.dumps(schema))

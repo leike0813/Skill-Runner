@@ -1,12 +1,8 @@
 import json
 import logging
-import os
-import platform
 import re
-import signal
 import subprocess
 import tempfile
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -36,6 +32,8 @@ from server.services.engine_management.engine_interaction_gate import (
     engine_interaction_gate,
 )
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
+from server.services.platform.process_supervisor import process_supervisor
+from server.services.platform.process_termination import terminate_popen_process_tree
 
 _URL_PATTERN = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 _CODE_PATTERN = re.compile(r"\b[A-Z0-9]{4}(?:-[A-Z0-9]{4,})+\b")
@@ -92,6 +90,7 @@ class _AuthSession:
     trust_path: Optional[Path] = None
     log_root: Path | None = None
     log_paths: TransportLogPaths | None = None
+    process_lease_id: Optional[str] = None
 
 
 class TrustManagerProtocol(Protocol):
@@ -316,6 +315,26 @@ class EngineAuthFlowManager:
             session.trust_engine = None
             session.trust_path = None
 
+    def _register_session_process_lease(self, session: _AuthSession) -> None:
+        if session.process is None:
+            return
+        lease_id = process_supervisor.register_popen_process(
+            owner_kind="auth_session",
+            owner_id=session.session_id,
+            process=session.process,
+            engine=session.engine,
+            transport=session.transport,
+            metadata={
+                "provider_id": session.provider_id,
+                "auth_method": session.auth_method,
+            },
+        )
+        session.process_lease_id = lease_id
+
+    def _release_session_process_lease(self, session: _AuthSession, *, reason: str) -> None:
+        process_supervisor.release(session.process_lease_id, reason=reason)
+        session.process_lease_id = None
+
     def _finalize_active_session(self, session: _AuthSession) -> None:
         self._append_session_event(
             session,
@@ -333,6 +352,7 @@ class EngineAuthFlowManager:
         if self._active_session_id == session.session_id:
             self._active_session_id = None
         self._session_store.clear_active(session.transport, session.session_id)
+        self._release_session_process_lease(session, reason="auth_session_finalized")
         self.interaction_gate.release("auth_flow", session.session_id)
         self._cleanup_trust_for_session(session)
         if session.log_paths is not None:
@@ -441,35 +461,39 @@ class EngineAuthFlowManager:
         self._session_refresher.refresh_session_locked(session)
 
     def _terminate_process(self, session: _AuthSession) -> None:
+        handler_terminated = False
         handler = self._engine_handler_for(session.engine)
         if handler is not None:
             terminate_hook = getattr(handler, "terminate_session", None)
-            if callable(terminate_hook) and bool(terminate_hook(session)):
-                return
+            if callable(terminate_hook):
+                handler_terminated = bool(terminate_hook(session))
+        if isinstance(session.process_lease_id, str) and session.process_lease_id:
+            result = process_supervisor.terminate_lease_sync(
+                session.process_lease_id,
+                reason="engine_auth_flow_manager_terminate_session",
+            )
+            session.process_lease_id = None
+            if result.outcome == "failed":
+                logger.warning(
+                    "engine auth process lease termination failed session_id=%s detail=%s",
+                    session.session_id,
+                    result.detail,
+                )
+            return
+        if handler_terminated:
+            return
         proc = session.process
         if proc is None:
             return
         if proc.poll() is not None:
             return
-        try:
-            if platform.system().lower().startswith("win"):
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            else:
-                os.killpg(proc.pid, signal.SIGTERM)
-                deadline = time.monotonic() + 2.5
-                while time.monotonic() < deadline:
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(0.05)
-                if proc.poll() is None:
-                    os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, subprocess.SubprocessError, ValueError):
-            pass
+        result = terminate_popen_process_tree(proc)
+        if result.outcome == "failed":
+            logger.warning(
+                "engine auth process termination failed session_id=%s detail=%s",
+                session.session_id,
+                result.detail,
+            )
 
     def _to_snapshot(self, session: _AuthSession) -> Dict[str, Any]:
         transport_state_machine = self._transport_state_machine(session.transport)

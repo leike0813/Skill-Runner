@@ -1,0 +1,8 @@
+- [x] 1. 新增统一进程治理模块：`process_lease_store`、`process_supervisor`、`process_termination`
+- [x] 2. 在 `server/config.py` 增加 `SYSTEM.PROCESS_*` 配置并接入默认值
+- [x] 3. run attempt 路径接入 lease register/release 与统一终止
+- [x] 4. auth session 路径接入 lease register/release 与统一终止
+- [x] 5. UI shell 路径接入 lease register/release 与统一终止
+- [x] 6. 启动期 orphan reap 接入 main lifespan，且顺序先于 run 恢复
+- [x] 7. recovery 服务接入 orphan reap 对账日志
+- [x] 8. 补齐单元测试并完成 pytest + mypy 回归

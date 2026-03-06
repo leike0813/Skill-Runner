@@ -4,5 +4,10 @@
   ],
   "resume": [
     "--yolo"
+  ],
+  "ui_shell": [
+    "--sandbox",
+    "--approval-mode",
+    "default"
   ]
 }

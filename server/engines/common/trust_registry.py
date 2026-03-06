@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
 
+from server.services.engine_management.runtime_profile import get_runtime_profile
 from server.engines.codex.adapter.trust_folder_strategy import CodexTrustFolderStrategy
 from server.engines.gemini.adapter.trust_folder_strategy import GeminiTrustFolderStrategy
 
@@ -51,15 +52,18 @@ class TrustFolderStrategyRegistry:
 
 def create_default_trust_registry(
     *,
-    codex_config_path: Path,
-    gemini_trusted_path: Path,
+    codex_config_path: Path | None = None,
+    gemini_trusted_path: Path | None = None,
     runs_root: Path,
 ) -> TrustFolderStrategyRegistry:
+    profile = get_runtime_profile()
+    codex_path = codex_config_path or (profile.agent_home / ".codex" / "config.toml")
+    gemini_path = gemini_trusted_path or (profile.agent_home / ".gemini" / "trustedFolders.json")
     runs_root_resolved = runs_root.resolve()
     return TrustFolderStrategyRegistry(
         _strategies={
-            "codex": CodexTrustFolderStrategy(codex_config_path, runs_root_resolved),
-            "gemini": GeminiTrustFolderStrategy(gemini_trusted_path, runs_root_resolved),
+            "codex": CodexTrustFolderStrategy(codex_path, runs_root_resolved),
+            "gemini": GeminiTrustFolderStrategy(gemini_path, runs_root_resolved),
         },
         _noop=_NoopTrustFolderStrategy(),
     )

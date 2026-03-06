@@ -40,5 +40,28 @@
     "manifest_path": "../models/manifest.json",
     "models_root": "../models",
     "seed_path": null
+  },
+  "cli_management": {
+    "package": "@iflow-ai/iflow-cli",
+    "binary_candidates": ["iflow", "iflow.cmd", "iflow.exe"],
+    "credential_imports": [
+      { "source": "iflow_accounts.json", "target_relpath": ".iflow/iflow_accounts.json" },
+      { "source": "oauth_creds.json", "target_relpath": ".iflow/oauth_creds.json" }
+    ],
+    "credential_policy": {
+      "mode": "all_of_sources",
+      "sources": ["iflow_accounts.json", "oauth_creds.json"],
+      "settings_validator": "iflow_oauth_settings"
+    },
+    "resume_probe": {
+      "help_hints": ["--resume", "--continue"],
+      "dynamic_args": ["--resume", "probe-session", "--help"]
+    },
+    "layout": {
+      "extra_dirs": [".iflow"],
+      "bootstrap_target_relpath": ".iflow/settings.json",
+      "bootstrap_format": "json",
+      "normalize_strategy": "iflow_settings_v1"
+    }
   }
 }

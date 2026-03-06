@@ -3,12 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from server.engines.codex.auth.detection import CodexAuthDetector
-from server.engines.gemini.auth.detection import GeminiAuthDetector
-from server.engines.iflow.auth.detection import IFlowAuthDetector
-from server.engines.opencode.auth.detection import OpencodeAuthDetector
-
-from .contracts import AuthDetector
+from .detector_registry import AuthDetectorRegistry, create_default_auth_detector_registry
 from .rule_registry import AuthDetectionRuleRegistry
 from .types import AuthDetectionEvidence, AuthDetectionResult
 
@@ -16,14 +11,7 @@ from .types import AuthDetectionEvidence, AuthDetectionResult
 @dataclass
 class AuthDetectionService:
     registry: AuthDetectionRuleRegistry = field(default_factory=AuthDetectionRuleRegistry)
-    detectors: dict[str, AuthDetector] = field(
-        default_factory=lambda: {
-            "codex": CodexAuthDetector(),
-            "gemini": GeminiAuthDetector(),
-            "iflow": IFlowAuthDetector(),
-            "opencode": OpencodeAuthDetector(),
-        }
-    )
+    detector_registry: AuthDetectorRegistry = field(default_factory=create_default_auth_detector_registry)
 
     def preload(self) -> None:
         self.registry.ensure_loaded()
@@ -37,7 +25,7 @@ class AuthDetectionService:
         pty_output: str = "",
         runtime_parse_result: dict[str, Any] | None = None,
     ) -> AuthDetectionResult:
-        detector = self.detectors.get(engine)
+        detector = self.detector_registry.resolve(engine)
         if detector is None:
             return AuthDetectionResult(
                 classification="unknown",

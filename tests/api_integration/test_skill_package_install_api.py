@@ -170,6 +170,15 @@ def disable_lifespan_schedulers(monkeypatch):
         "server.services.orchestration.job_orchestrator.job_orchestrator.recover_incomplete_runs_on_startup",
         AsyncMock(return_value=None),
     )
+    monkeypatch.setattr("server.services.platform.process_supervisor.process_supervisor.start", lambda: None)
+    monkeypatch.setattr(
+        "server.services.platform.process_supervisor.process_supervisor.reap_orphan_leases_on_startup",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.services.platform.process_supervisor.process_supervisor.stop",
+        AsyncMock(return_value=None),
+    )
 
 
 @pytest.mark.asyncio

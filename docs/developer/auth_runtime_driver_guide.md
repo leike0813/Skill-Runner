@@ -73,14 +73,48 @@ Shared protocol layer owns:
 
 ## 5. Adding a New Engine Auth Driver
 
+### 5.1 Engine-side Implementation
+
 1. Create `server/engines/<engine>/auth/runtime_handler.py`.
-2. Implement the contract methods above.
-3. Register support matrix in manager driver registry (`transport/auth_method/provider_id`).
-4. Add handler instance to manager `_engine_auth_handlers`.
-5. Add tests:
-   - driver matrix registration
-   - start/refresh/input/callback/cancel flow
-   - lock release on terminal paths
+2. Implement the contract methods from Section 3.
+3. Optionally create auth protocol helpers under `server/engines/<engine>/auth/protocol/`.
+
+### 5.2 Auth Strategy Configuration
+
+Create `server/engines/<engine>/config/auth_strategy.yaml` defining the supported auth matrix:
+
+```yaml
+# transport → auth_method → provider_id → start_method / execution_mode
+oauth_proxy:
+  oauth:
+    provider_a:
+      start_method: redirect
+      execution_mode: interactive
+cli_delegate:
+  api_key:
+    provider_a:
+      start_method: direct
+      execution_mode: auto
+```
+
+The auth driver registry reads this file automatically via `EngineAuthStrategyService`.
+
+### 5.3 Framework Registration
+
+| # | File | Action |
+|---|---|---|
+| 1 | `server/services/engine_management/engine_auth_bootstrap.py` | Import and add handler to `handlers` dict in `build_engine_auth_bootstrap()` |
+| 2 | `server/runtime/auth_detection/detector_registry.py` | Import and add detector to `create_default_auth_detector_registry()` |
+| 3 | `server/services/engine_management/engine_auth_bootstrap.py` | If using callback listeners, register channel in `_build_callback_listener_registry()` |
+
+### 5.4 Tests
+
+1. `test_engine_auth_driver_matrix_registration.py`:
+   - New engine's combinations resolve as expected.
+2. `test_engine_auth_flow_manager.py`:
+   - start/status/input/callback/cancel round-trip.
+3. `test_runtime_auth_no_engine_coupling.py`:
+   - Runtime guard still passes.
 
 ## 6. Common Failure Points
 
@@ -90,5 +124,7 @@ Shared protocol layer owns:
    - verify state resolve/consume and handler `complete_callback`.
 3. Start succeeds then instant failure:
    - verify `cleanup_start_error` and trust injection.
-4. runtime guard violations:
+4. Runtime guard violations:
    - run `tests/unit/test_runtime_auth_no_engine_coupling.py`.
+5. Auth strategy not found:
+   - verify `server/engines/<engine>/config/auth_strategy.yaml` exists and passes schema validation.

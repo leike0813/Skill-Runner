@@ -983,7 +983,7 @@ async def test_ui_engine_models_refresh_opencode_returns_partial(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
     refresh_mock = AsyncMock()
-    monkeypatch.setattr("server.routers.ui.opencode_model_catalog.refresh", refresh_mock)
+    monkeypatch.setattr("server.routers.ui.engine_model_catalog_lifecycle.refresh", refresh_mock)
     monkeypatch.setattr(
         "server.routers.ui.model_registry.get_manifest_view",
         lambda _engine: {
@@ -1002,7 +1002,7 @@ async def test_ui_engine_models_refresh_opencode_returns_partial(monkeypatch):
     assert 'id="engine-models-panel"' in response.text
     assert "Model list refreshed" in response.text
     assert "openai/gpt-5" in response.text
-    refresh_mock.assert_awaited_once_with(reason="ui_manual_refresh")
+    refresh_mock.assert_awaited_once_with("opencode", reason="ui_manual_refresh")
 
 
 @pytest.mark.asyncio

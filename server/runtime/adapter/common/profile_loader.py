@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import jsonschema  # type: ignore[import-untyped]
+from server.config_registry import keys
 from server.config_registry.registry import config_registry
 
 
-SUPPORTED_ENGINES = ("codex", "gemini", "iflow", "opencode")
 SCHEMA_PATHS = config_registry.adapter_profile_schema_paths()
 
 
@@ -20,6 +20,10 @@ SessionStrategy = Literal["first_json_line", "json_recursive_key", "json_lines_s
 SessionTextFinder = Literal["find_session_id_in_text"]
 SessionJsonLineFinder = Literal["find_session_id"]
 ModelCatalogMode = Literal["manifest", "runtime_probe"]
+CredentialPolicyMode = Literal["all_of_sources", "any_of_sources"]
+SettingsValidator = Literal["iflow_oauth_settings"]
+BootstrapFormat = Literal["json", "text"]
+NormalizeStrategy = Literal["iflow_settings_v1"]
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,43 @@ class ModelCatalogProfile:
 
 
 @dataclass(frozen=True)
+class CredentialImportProfile:
+    source: str
+    target_relpath: str
+
+
+@dataclass(frozen=True)
+class CredentialPolicyProfile:
+    mode: CredentialPolicyMode
+    sources: tuple[str, ...]
+    settings_validator: SettingsValidator | None
+
+
+@dataclass(frozen=True)
+class ResumeProbeProfile:
+    help_hints: tuple[str, ...]
+    dynamic_args: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LayoutProfile:
+    extra_dirs: tuple[str, ...]
+    bootstrap_target_relpath: str
+    bootstrap_format: BootstrapFormat
+    normalize_strategy: NormalizeStrategy | None
+
+
+@dataclass(frozen=True)
+class CliManagementProfile:
+    package: str
+    binary_candidates: tuple[str, ...]
+    credential_imports: tuple[CredentialImportProfile, ...]
+    credential_policy: CredentialPolicyProfile
+    resume_probe: ResumeProbeProfile
+    layout: LayoutProfile
+
+
+@dataclass(frozen=True)
 class AdapterProfile:
     engine: str
     profile_path: Path
@@ -82,6 +123,7 @@ class AdapterProfile:
     attempt_workspace: AttemptWorkspaceProfile
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
+    cli_management: CliManagementProfile
 
     def _resolve_profile_relative_path(self, path_value: str | None) -> Path | None:
         if not isinstance(path_value, str) or not path_value.strip():
@@ -200,6 +242,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     workspace_raw = payload["attempt_workspace"]
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
+    cli_management_raw = payload["cli_management"]
 
     _validate_resolved_path(
         profile_path=profile_path,
@@ -243,6 +286,46 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
         label="model_catalog.seed_path",
         raw_value=model_catalog_raw.get("seed_path"),
     )
+    for index, item in enumerate(cli_management_raw.get("credential_imports", [])):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}]: expected object ({profile_path})"
+            )
+        source_raw = item.get("source")
+        target_raw = item.get("target_relpath")
+        if not isinstance(source_raw, str) or not source_raw.strip():
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}].source: empty ({profile_path})"
+            )
+        if not isinstance(target_raw, str) or not target_raw.strip():
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}].target_relpath: empty ({profile_path})"
+            )
+        target_path = Path(target_raw.strip())
+        if target_path.is_absolute():
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}].target_relpath: must be relative ({profile_path})"
+            )
+
+    for index, raw_dir in enumerate(cli_management_raw.get("layout", {}).get("extra_dirs", [])):
+        if not isinstance(raw_dir, str) or not raw_dir.strip():
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.layout.extra_dirs[{index}]: empty ({profile_path})"
+            )
+        if Path(raw_dir.strip()).is_absolute():
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.layout.extra_dirs[{index}]: must be relative ({profile_path})"
+            )
+
+    bootstrap_target_raw = cli_management_raw.get("layout", {}).get("bootstrap_target_relpath")
+    if not isinstance(bootstrap_target_raw, str) or not bootstrap_target_raw.strip():
+        raise RuntimeError(
+            f"Adapter profile invalid cli_management.layout.bootstrap_target_relpath: empty ({profile_path})"
+        )
+    if Path(bootstrap_target_raw.strip()).is_absolute():
+        raise RuntimeError(
+            f"Adapter profile invalid cli_management.layout.bootstrap_target_relpath: must be relative ({profile_path})"
+        )
 
     return AdapterProfile(
         engine=engine,
@@ -308,11 +391,52 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 else None
             ),
         ),
+        cli_management=CliManagementProfile(
+            package=str(cli_management_raw["package"]),
+            binary_candidates=tuple(
+                str(item)
+                for item in cli_management_raw["binary_candidates"]
+            ),
+            credential_imports=tuple(
+                CredentialImportProfile(
+                    source=str(item["source"]),
+                    target_relpath=str(item["target_relpath"]),
+                )
+                for item in cli_management_raw["credential_imports"]
+            ),
+            credential_policy=CredentialPolicyProfile(
+                mode=cli_management_raw["credential_policy"]["mode"],
+                sources=tuple(
+                    str(item)
+                    for item in cli_management_raw["credential_policy"]["sources"]
+                ),
+                settings_validator=cli_management_raw["credential_policy"]["settings_validator"],
+            ),
+            resume_probe=ResumeProbeProfile(
+                help_hints=tuple(
+                    str(item)
+                    for item in cli_management_raw["resume_probe"]["help_hints"]
+                ),
+                dynamic_args=tuple(
+                    str(item)
+                    for item in cli_management_raw["resume_probe"]["dynamic_args"]
+                ),
+            ),
+            layout=LayoutProfile(
+                extra_dirs=tuple(
+                    str(item)
+                    for item in cli_management_raw["layout"]["extra_dirs"]
+                ),
+                bootstrap_target_relpath=str(cli_management_raw["layout"]["bootstrap_target_relpath"]),
+                bootstrap_format=cli_management_raw["layout"]["bootstrap_format"],
+                normalize_strategy=cli_management_raw["layout"]["normalize_strategy"],
+            ),
+        ),
     )
 
 
 def load_adapter_profile(engine: str, profile_path: Path) -> AdapterProfile:
-    if engine not in SUPPORTED_ENGINES:
+    if engine.strip().lower() not in keys.ENGINE_KEYS:
         raise RuntimeError(f"Unsupported adapter engine: {engine}")
     return _load_adapter_profile_cached(engine, str(profile_path.resolve()))
 

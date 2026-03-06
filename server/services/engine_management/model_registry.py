@@ -8,15 +8,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from server.config import config
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.engine_management.engine_status_cache_service import engine_status_cache_service
-from server.engines.opencode.models.catalog_service import opencode_model_catalog
+from server.services.engine_management.engine_model_catalog_lifecycle import (
+    engine_model_catalog_lifecycle,
+)
+from server.services.engine_management.engine_catalog import supported_engines as _supported_engine_catalog
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENGINES: Tuple[str, ...] = ("codex", "gemini", "iflow", "opencode")
-
-
 def supported_engines() -> List[str]:
-    return list(SUPPORTED_ENGINES)
+    return list(_supported_engine_catalog())
 
 
 @dataclass(frozen=True)
@@ -51,17 +51,23 @@ class ModelRegistry:
             for engine in self._supported_engines()
         ]
 
+    def supports_model_snapshots(self, engine: str) -> bool:
+        return not self._uses_runtime_probe_catalog(engine)
+
+    def supports_runtime_catalog_refresh(self, engine: str) -> bool:
+        return self._uses_runtime_probe_catalog(engine)
+
     def get_models(self, engine: str, refresh: bool = False) -> ModelCatalog:
-        if engine == "opencode":
-            catalog = self._get_opencode_models(refresh=refresh)
+        if engine not in self._supported_engines():
+            raise ValueError(f"Unknown engine: {engine}")
+
+        if self._uses_runtime_probe_catalog(engine):
+            catalog = self._get_runtime_probe_models(engine, refresh=refresh)
             self._cache[engine] = catalog
             return catalog
 
         if not refresh and engine in self._cache:
             return self._cache[engine]
-
-        if engine not in self._supported_engines():
-            raise ValueError(f"Unknown engine: {engine}")
 
         cli_version = engine_status_cache_service.get_engine_version(engine)
         manifest = self._load_manifest(engine)
@@ -87,18 +93,18 @@ class ModelRegistry:
     def refresh(self, engine: Optional[str] = None) -> None:
         if engine is None:
             self._cache.clear()
-            opencode_model_catalog.request_refresh_async(reason="registry_refresh_all")
+            engine_model_catalog_lifecycle.request_refresh_async_all(reason="registry_refresh_all")
             return
         self._cache.pop(engine, None)
-        if engine == "opencode":
-            opencode_model_catalog.request_refresh_async(reason="registry_refresh")
+        if engine in self._supported_engines() and self._uses_runtime_probe_catalog(engine):
+            engine_model_catalog_lifecycle.request_refresh_async(engine, reason="registry_refresh")
 
     def get_manifest_view(self, engine: str) -> Dict[str, Any]:
         if engine not in self._supported_engines():
             raise ValueError(f"Unknown engine: {engine}")
 
-        if engine == "opencode":
-            return self._build_opencode_manifest_view()
+        if self._uses_runtime_probe_catalog(engine):
+            return self._build_runtime_probe_manifest_view(engine)
 
         cli_version = engine_status_cache_service.get_engine_version(engine)
         manifest = self._load_manifest(engine)
@@ -137,8 +143,8 @@ class ModelRegistry:
     ) -> Dict[str, Any]:
         if engine not in self._supported_engines():
             raise ValueError(f"Unknown engine: {engine}")
-        if engine == "opencode":
-            raise ValueError("Engine 'opencode' does not support model snapshots")
+        if self._uses_runtime_probe_catalog(engine):
+            raise ValueError(f"Engine '{engine}' does not support model snapshots")
 
         cli_version = engine_status_cache_service.get_engine_version(engine)
         if not cli_version:
@@ -193,6 +199,13 @@ class ModelRegistry:
 
     def _supported_engines(self) -> List[str]:
         return supported_engines()
+
+    def _uses_runtime_probe_catalog(self, engine: str) -> bool:
+        profile = self._adapter_profile(engine)
+        mode = getattr(getattr(profile, "model_catalog", None), "mode", None)
+        if isinstance(mode, str):
+            return mode == "runtime_probe"
+        return False
 
     def _load_manifest(self, engine: str) -> Dict[str, object]:
         profile = self._adapter_profile(engine)
@@ -267,10 +280,11 @@ class ModelRegistry:
             )
         return models
 
-    def _get_opencode_models(self, *, refresh: bool) -> ModelCatalog:
+    def _get_runtime_probe_models(self, engine: str, *, refresh: bool) -> ModelCatalog:
         if refresh:
-            opencode_model_catalog.request_refresh_async(reason="api_refresh")
-        snapshot = opencode_model_catalog.get_snapshot()
+            engine_model_catalog_lifecycle.request_refresh_async(engine, reason="api_refresh")
+        snapshot_obj = engine_model_catalog_lifecycle.get_snapshot(engine)
+        snapshot = snapshot_obj if isinstance(snapshot_obj, dict) else {}
         rows = snapshot.get("models")
         models: List[ModelEntry] = []
         if isinstance(rows, list):
@@ -304,18 +318,19 @@ class ModelRegistry:
         else:
             snapshot_version_used = "runtime_probe_cache"
         return ModelCatalog(
-            engine="opencode",
-            cli_version_detected=engine_status_cache_service.get_engine_version("opencode"),
+            engine=engine,
+            cli_version_detected=engine_status_cache_service.get_engine_version(engine),
             snapshot_version_used=snapshot_version_used,
             fallback_reason=fallback_reason,
             models=models,
             source="runtime_probe_cache",
         )
 
-    def _build_opencode_manifest_view(self) -> Dict[str, Any]:
-        snapshot = opencode_model_catalog.get_snapshot()
-        catalog = self._get_opencode_models(refresh=False)
-        cache_path = Path(config.SYSTEM.OPENCODE_MODELS_CACHE_PATH)
+    def _build_runtime_probe_manifest_view(self, engine: str) -> Dict[str, Any]:
+        snapshot_obj = engine_model_catalog_lifecycle.get_snapshot(engine)
+        snapshot = snapshot_obj if isinstance(snapshot_obj, dict) else {}
+        catalog = self._get_runtime_probe_models(engine, refresh=False)
+        cache_path = self._runtime_probe_cache_path(engine)
         updated_at = snapshot.get("updated_at")
         resolved_snapshot_version = (
             str(updated_at).strip()
@@ -323,10 +338,10 @@ class ModelRegistry:
             else "runtime_probe_cache"
         )
         return {
-            "engine": "opencode",
+            "engine": engine,
             "cli_version_detected": catalog.cli_version_detected,
             "manifest": {
-                "engine": "opencode",
+                "engine": engine,
                 "dynamic": True,
                 "source": "runtime_probe_cache",
                 "status": snapshot.get("status"),
@@ -352,6 +367,11 @@ class ModelRegistry:
                 for entry in catalog.models
             ],
         }
+
+    def _runtime_probe_cache_path(self, engine: str) -> Path:
+        cache_dir = Path(config.SYSTEM.ENGINE_MODELS_CATALOG_CACHE_DIR)
+        template = str(config.SYSTEM.ENGINE_MODELS_CATALOG_CACHE_FILE_TEMPLATE)
+        return cache_dir / template.format(engine=engine)
 
     def _normalize_snapshot_models(self, models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not models:
@@ -435,12 +455,12 @@ class ModelRegistry:
         return parsed if parsed is not None else (0,)
 
     def _parse_model_spec(self, engine: str, model_spec: str) -> Tuple[str, Optional[str]]:
-        if engine == "opencode":
+        if self._uses_runtime_probe_catalog(engine):
             if "@" in model_spec:
                 raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
             if not re.fullmatch(r"[^/\s]+/[^/\s]+", model_spec):
                 raise ValueError(
-                    "Engine 'opencode' requires model format '<provider>/<model>'"
+                    f"Engine '{engine}' requires model format '<provider>/<model>'"
                 )
             return model_spec, None
         if engine != "codex":

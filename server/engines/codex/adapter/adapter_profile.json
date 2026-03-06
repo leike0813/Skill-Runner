@@ -40,5 +40,27 @@
     "manifest_path": "../models/manifest.json",
     "models_root": "../models",
     "seed_path": null
+  },
+  "cli_management": {
+    "package": "@openai/codex",
+    "binary_candidates": ["codex", "codex.cmd", "codex.exe"],
+    "credential_imports": [
+      { "source": "auth.json", "target_relpath": ".codex/auth.json" }
+    ],
+    "credential_policy": {
+      "mode": "all_of_sources",
+      "sources": ["auth.json"],
+      "settings_validator": null
+    },
+    "resume_probe": {
+      "help_hints": ["resume"],
+      "dynamic_args": ["exec", "resume", "--help"]
+    },
+    "layout": {
+      "extra_dirs": [".codex"],
+      "bootstrap_target_relpath": ".codex/config.toml",
+      "bootstrap_format": "text",
+      "normalize_strategy": null
+    }
   }
 }

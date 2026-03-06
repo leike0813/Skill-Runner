@@ -3,33 +3,49 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from server.config import config
+from server.config_registry import keys
+from server.runtime.adapter.common.profile_loader import load_adapter_profile
+
 from .run_bundle_service import RunBundleService
 
 
 class RunFilesystemSnapshotService:
     def __init__(self, bundle_service: RunBundleService | None = None):
         self.bundle_service = bundle_service or RunBundleService()
+        self._ignored_prefixes = self._build_ignored_prefixes()
+        self._ignored_files = self._build_ignored_files()
+
+    def _build_ignored_prefixes(self) -> tuple[str, ...]:
+        ignored = {".audit/", ".state/"}
+        for engine in keys.ENGINE_KEYS:
+            profile_path = (
+                Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
+            )
+            try:
+                workspace_subdir = load_adapter_profile(engine, profile_path).attempt_workspace.workspace_subdir
+            except RuntimeError:
+                workspace_subdir = f".{engine}"
+            normalized = workspace_subdir.strip().strip("/")
+            if normalized:
+                ignored.add(f"{normalized}/")
+        return tuple(sorted(ignored))
+
+    def _build_ignored_files(self) -> set[str]:
+        ignored_files: set[str] = set()
+        for engine in keys.ENGINE_KEYS:
+            ignored_files.add(f"{engine}.json")
+        return ignored_files
 
     def capture_filesystem_snapshot(self, run_dir: Path) -> dict[str, dict[str, Any]]:
         snapshot: dict[str, dict[str, Any]] = {}
-        ignored_prefixes = (
-            ".audit/",
-            ".state/",
-            ".codex/",
-            ".gemini/",
-            ".iflow/",
-            ".opencode/",
-        )
-        ignored_files = {
-            "opencode.json",
-        }
         for path in run_dir.rglob("*"):
             if not path.is_file():
                 continue
             rel_path = path.relative_to(run_dir).as_posix()
-            if rel_path.startswith(ignored_prefixes):
+            if rel_path.startswith(self._ignored_prefixes):
                 continue
-            if rel_path in ignored_files:
+            if rel_path in self._ignored_files:
                 continue
             snapshot[rel_path] = {
                 "size": path.stat().st_size,

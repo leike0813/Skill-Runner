@@ -21,7 +21,6 @@ def _build_fake_config(tmp_path: Path) -> SimpleNamespace:
             REQUESTS_DIR=str(data_dir / "requests"),
             TEMP_SKILL_REQUESTS_DIR=str(data_dir / "temp_skill_runs" / "requests"),
             SKILL_INSTALLS_DIR=str(data_dir / "skill_installs"),
-            OPENCODE_MODELS_CACHE_PATH=str(data_dir / "engine_catalog" / "opencode_models_cache.json"),
             SETTINGS_FILE=str(data_dir / "system_settings.json"),
             ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=True,
             LOGGING=SimpleNamespace(DIR=str(data_dir / "logs")),
@@ -29,8 +28,16 @@ def _build_fake_config(tmp_path: Path) -> SimpleNamespace:
     )
 
 
+def _build_fake_catalog_lifecycle(tmp_path: Path) -> SimpleNamespace:
+    cache_path = (tmp_path / "data" / "engine_catalog" / "opencode_models_cache.json").resolve()
+    return SimpleNamespace(cache_paths=lambda: (cache_path,))
+
+
 def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_path: Path):
-    service = DataResetService(cfg=_build_fake_config(tmp_path))
+    service = DataResetService(
+        cfg=_build_fake_config(tmp_path),
+        model_catalog_lifecycle=_build_fake_catalog_lifecycle(tmp_path),
+    )
     options = DataResetOptions(
         include_logs=True,
         include_engine_catalog=True,
@@ -51,14 +58,20 @@ def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_p
 def test_data_reset_service_hides_engine_auth_targets_when_feature_disabled(tmp_path: Path):
     cfg = _build_fake_config(tmp_path)
     cfg.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED = False
-    service = DataResetService(cfg=cfg)
+    service = DataResetService(
+        cfg=cfg,
+        model_catalog_lifecycle=_build_fake_catalog_lifecycle(tmp_path),
+    )
     targets = service.build_targets(DataResetOptions(include_engine_auth_sessions=True))
 
     assert (tmp_path / "data" / "engine_auth_sessions").resolve() not in targets.optional_paths
 
 
 def test_data_reset_service_execute_reset_deletes_targets_and_recreates_dirs(tmp_path: Path):
-    service = DataResetService(cfg=_build_fake_config(tmp_path))
+    service = DataResetService(
+        cfg=_build_fake_config(tmp_path),
+        model_catalog_lifecycle=_build_fake_catalog_lifecycle(tmp_path),
+    )
     options = DataResetOptions(
         include_logs=True,
         include_engine_catalog=True,

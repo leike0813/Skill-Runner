@@ -87,12 +87,17 @@ server/
 │   │   ├── run_bundle_service.py       # bundle 打包服务
 │   │   ├── run_filesystem_snapshot_service.py # 文件快照与差异服务
 │   │   ├── run_audit_service.py        # 审计与完成分类服务
+│   │   ├── run_audit_contract_service.py # 审计合同与骨架初始化
+│   │   ├── run_auth_orchestration_service.py # 鉴权编排服务
 │   │   ├── run_interaction_lifecycle_service.py # 交互生命周期服务
-│   │   ├── run_recovery_service.py     # 启动恢复与对账服务
-│   │   ├── orchestrator_ports.py       # 编排端口协议
-│   │   ├── run_store.py                # Run 持久化存储
-│   │   ├── run_execution_core.py       # 执行核心
 │   │   ├── run_interaction_service.py  # 交互服务（reply/pending）
+│   │   ├── run_recovery_service.py     # 启动恢复与对账服务
+│   │   ├── run_store.py                # Run 持久化存储
+│   │   ├── run_state_service.py        # Run 状态写入服务
+│   │   ├── run_execution_core.py       # 执行核心
+│   │   ├── run_projection_service.py   # 投影服务
+│   │   ├── run_service_log_mirror.py   # 服务日志镜像
+│   │   ├── run_skill_materialization_service.py # Skill 物化服务
 │   │   ├── workspace_manager.py        # 工作区管理
 │   │   ├── run_cleanup_manager.py      # 清理管理
 │   │   ├── run_folder_trust_manager.py # 信任文件夹管理
@@ -104,9 +109,13 @@ server/
 │   │   ├── engine_adapter_registry.py  # 引擎适配器注册
 │   │   ├── engine_auth_bootstrap.py    # 引擎鉴权引导
 │   │   ├── engine_auth_flow_manager.py # 鉴权流程管理
+│   │   ├── engine_auth_strategy_service.py # 鉴权策略服务
+│   │   ├── engine_catalog.py           # 引擎目录
 │   │   ├── engine_command_profile.py   # 引擎命令配置
 │   │   ├── engine_interaction_gate.py  # 引擎交互门控
+│   │   ├── engine_model_catalog_lifecycle.py # 模型目录生命周期
 │   │   ├── engine_policy.py            # 引擎策略
+│   │   ├── engine_status_cache_service.py # 引擎状态缓存
 │   │   ├── engine_upgrade_manager.py   # 引擎升级管理
 │   │   ├── engine_upgrade_store.py     # 升级状态存储
 │   │   ├── model_registry.py           # 模型注册
@@ -116,7 +125,15 @@ server/
 │   │   ├── concurrency_manager.py # 并发管理
 │   │   ├── cache_manager.py       # 缓存管理
 │   │   ├── cache_key_builder.py   # 缓存键构建
-│   │   └── options_policy.py      # 运行时选项策略
+│   │   ├── data_reset_service.py  # 数据重置服务
+│   │   ├── options_policy.py      # 运行时选项策略
+│   │   ├── process_supervisor.py  # 子进程监管
+│   │   ├── process_termination.py # 子进程终止
+│   │   ├── process_lease_store.py # 进程租约存储
+│   │   ├── run_file_filter_service.py # 文件过滤服务
+│   │   ├── system_settings_service.py # 系统设置服务
+│   │   ├── aiosqlite_compat.py    # SQLite 异步兼容层
+│   │   └── async_compat.py        # 异步兼容工具
 │   ├── skill/              # Skill 管理
 │   │   ├── skill_registry.py           # Skill 注册表
 │   │   ├── skill_package_manager.py    # 包管理
@@ -130,6 +147,9 @@ server/
 │   │   ├── temp_skill_run_store.py     # 临时运行存储
 │   │   └── temp_skill_cleanup_manager.py # 清理管理
 │   └── ui/                 # UI 服务
+│       ├── engine_shell_capability_provider.py # 引擎 Shell 能力提供
+│       ├── ui_auth.py             # UI 鉴权服务
+│       └── ui_shell_manager.py    # UI Shell 管理
 │
 ├── routers/                # API 路由层
 │   ├── management.py       # Management API（/v1/management/*）
@@ -141,18 +161,24 @@ server/
 │   ├── oauth_callback.py   # OAuth 回调
 │   └── ui.py               # 内建 UI 路由
 │
+├── config_registry/        # 引擎配置注册表
+│   ├── keys.py            # 引擎标识常量（ENGINE_KEYS）
+│   ├── loaders.py         # 配置加载器
+│   └── registry.py        # 配置注册表
+│
+├── contracts/              # 协议合同与 Schema
+│   ├── schemas/           # JSON Schema（runtime_contract 等）
+│   └── invariants/        # 不变量合同（session_fcmp_invariants 等）
+│
 └── assets/                 # 静态资源
-    ├── configs/            # 引擎默认/强制配置
-    │   ├── codex/
-    │   ├── gemini/
-    │   ├── iflow/
-    │   └── opencode/
-    ├── models/             # 引擎模型列表
-    ├── schemas/            # JSON Schema
-    │   └── protocol/       # runtime_contract.schema.json
-    └── templates/          # UI 模板
-        └── ui/
+    └── templates/          # Jinja2 模板
+        ├── gemini_default.j2    # Gemini prompt 模板
+        ├── codex_default.j2     # Codex prompt 模板
+        ├── iflow_default.j2     # iFlow prompt 模板
+        └── ui/                  # Web UI HTML 模板
 ```
+
+> **注意**: 引擎配置（`default.json`/`enforced.json`）和模型列表已迁移至 `server/engines/<engine>/config/` 和 `server/engines/<engine>/models/`。
 
 ## 其他顶层目录
 

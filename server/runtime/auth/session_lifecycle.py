@@ -209,6 +209,7 @@ class AuthSessionStarter:
 
         session.log_root = session_dir if log_paths.persisted else None
         session.log_paths = log_paths
+        self._manager._register_session_process_lease(session)  # noqa: SLF001
         self._manager._sessions[session_id] = session  # noqa: SLF001
         self._manager._session_store.upsert(  # noqa: SLF001
             SessionPointer(

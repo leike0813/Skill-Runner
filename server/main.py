@@ -45,9 +45,12 @@ async def lifespan(_app: FastAPI):
     from .services.orchestration.run_cleanup_manager import run_cleanup_manager
     from .services.orchestration.runtime_observability_ports import install_runtime_observability_ports
     from .services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
+    from .services.platform.process_supervisor import process_supervisor
     from .services.ui.ui_auth import validate_ui_basic_auth_config
     from .services.orchestration.job_orchestrator import job_orchestrator
-    from .engines.opencode.models.catalog_service import opencode_model_catalog
+    from .services.engine_management.engine_model_catalog_lifecycle import (
+        engine_model_catalog_lifecycle,
+    )
     from .runtime.auth_detection.service import auth_detection_service
 
     runtime_profile = get_runtime_profile()
@@ -68,18 +71,19 @@ async def lifespan(_app: FastAPI):
             },
             exc_info=True,
         )
-    opencode_model_catalog.start()
-    if bool(config.SYSTEM.OPENCODE_MODELS_STARTUP_PROBE):
+    engine_model_catalog_lifecycle.start()
+    if bool(config.SYSTEM.ENGINE_MODELS_CATALOG_STARTUP_PROBE):
         try:
-            await opencode_model_catalog.refresh(reason="startup")
+            for engine in engine_model_catalog_lifecycle.runtime_probe_engines():
+                await engine_model_catalog_lifecycle.refresh(engine, reason="startup")
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             logger.warning(
-                "Opencode model catalog refresh failed during startup; continuing with existing cache",
+                "Engine model catalog refresh failed during startup; continuing with existing cache",
                 extra={
                     "component": "main",
-                    "action": "startup_opencode_model_refresh",
+                    "action": "startup_engine_model_catalog_refresh",
                     "error_type": type(exc).__name__,
-                    "fallback": "keep_existing_opencode_model_cache",
+                    "fallback": "keep_existing_engine_model_catalog_cache",
                 },
                 exc_info=True,
             )
@@ -87,6 +91,11 @@ async def lifespan(_app: FastAPI):
     install_runtime_observability_ports()
 
     validate_ui_basic_auth_config()
+    process_supervisor.start()
+    try:
+        await process_supervisor.reap_orphan_leases_on_startup()
+    except (OSError, RuntimeError, ValueError):
+        logger.warning("Startup orphan process reap failed", exc_info=True)
     concurrency_manager.start()
     cache_manager.start()
     engine_status_cache_service.start()
@@ -95,8 +104,9 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await process_supervisor.stop()
         engine_status_cache_service.stop()
-        opencode_model_catalog.stop()
+        engine_model_catalog_lifecycle.stop()
 
 app = FastAPI(
     title="Agent Skill Runner",

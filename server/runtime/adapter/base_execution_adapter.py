@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +21,8 @@ from ...models import (
     SkillManifest,
 )
 from ..protocol.contracts import LiveRuntimeEmitter
+from ...services.platform.process_supervisor import process_supervisor
+from ...services.platform.process_termination import terminate_asyncio_process_tree
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
@@ -255,6 +256,26 @@ class EngineExecutionAdapter:
             setattr(self, "_active_run_processes", processes)
         return processes
 
+    def _set_active_run_process(
+        self,
+        *,
+        run_id: str,
+        process: asyncio.subprocess.Process,
+        lease_id: str | None,
+    ) -> None:
+        self._active_processes()[run_id] = {
+            "process": process,
+            "lease_id": lease_id,
+        }
+
+    def _get_active_run_process_entry(self, run_id: str) -> dict[str, Any] | None:
+        raw = self._active_processes().get(run_id)
+        if isinstance(raw, dict):
+            return raw
+        if raw is None:
+            return None
+        return {"process": raw, "lease_id": None}
+
     def build_subprocess_env(self, base_env: dict[str, str]) -> dict[str, str]:
         return base_env
 
@@ -412,8 +433,25 @@ class EngineExecutionAdapter:
 
         run_id_obj = options.get("__run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else None
+        lease_id: str | None = None
         if run_id:
-            self._active_processes()[run_id] = proc
+            request_id_obj = options.get("__request_id")
+            request_id = request_id_obj if isinstance(request_id_obj, str) and request_id_obj else None
+            attempt_obj = options.get("__attempt_number")
+            attempt_number_value = attempt_obj if isinstance(attempt_obj, int) and attempt_obj > 0 else None
+            engine_obj = options.get("__engine_name")
+            engine_name = engine_obj if isinstance(engine_obj, str) and engine_obj else None
+            lease_id = process_supervisor.register_asyncio_process(
+                owner_kind="run_attempt",
+                owner_id=f"{run_id}:{attempt_number}",
+                process=proc,
+                request_id=request_id,
+                run_id=run_id,
+                attempt_number=attempt_number_value,
+                engine=engine_name,
+                metadata={"run_dir": str(run_dir)},
+            )
+            self._set_active_run_process(run_id=run_id, process=proc, lease_id=lease_id)
 
         timeout_sec = self._resolve_hard_timeout(options)
         timed_out = False
@@ -438,6 +476,7 @@ class EngineExecutionAdapter:
             stderr_log.close()
             if run_id:
                 self._active_processes().pop(run_id, None)
+            process_supervisor.release(lease_id, reason="run_attempt_finalized")
 
         raw_stdout = "".join(stdout_chunks)
         raw_stderr = "".join(stderr_chunks)
@@ -463,8 +502,18 @@ class EngineExecutionAdapter:
         )
 
     async def cancel_run_process(self, run_id: str) -> bool:
-        proc = self._active_processes().get(run_id)
-        if proc is None:
+        entry = self._get_active_run_process_entry(run_id)
+        if entry is None:
+            return False
+        proc = entry.get("process")
+        lease_id = entry.get("lease_id")
+        if isinstance(lease_id, str) and lease_id:
+            await process_supervisor.terminate_lease_async(
+                lease_id,
+                reason=f"{self.__class__.__name__}:cancel_run_process",
+            )
+            return True
+        if not isinstance(proc, asyncio.subprocess.Process):
             return False
         await self._terminate_process_tree(proc, f"{self.__class__.__name__}Cancel")
         return True
@@ -483,88 +532,9 @@ class EngineExecutionAdapter:
         return await asyncio.create_subprocess_exec(*cmd, **kwargs)
 
     async def _terminate_process_tree(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
-        if proc.returncode is not None:
-            return
-        if os.name == "nt":
-            await self._terminate_process_tree_windows(proc, prefix)
-            return
-        await self._terminate_process_tree_posix(proc, prefix)
-
-    async def _terminate_process_tree_posix(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
-        try:
-            pgid = os.getpgid(proc.pid)
-        except OSError:
-            pgid = None
-
-        if pgid is not None and pgid == proc.pid:
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-                await asyncio.wait_for(proc.wait(), timeout=5)
-                return
-            except asyncio.TimeoutError:
-                logger.warning("[%s] process group SIGTERM timeout, escalating to SIGKILL", prefix)
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                    return
-                except (OSError, asyncio.TimeoutError):
-                    logger.warning(
-                        "[%s] process group SIGKILL failed; fallback terminate/kill path",
-                        prefix,
-                        exc_info=True,
-                    )
-            except ProcessLookupError:
-                return
-            except OSError:
-                logger.warning("[%s] process group termination failed", prefix, exc_info=True)
-        elif pgid is not None:
-            logger.warning(
-                "[%s] subprocess is not process-group leader (pgid=%s,pid=%s); fallback terminate",
-                prefix,
-                pgid,
-                proc.pid,
-            )
-
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=3)
-        except (OSError, asyncio.TimeoutError):
-            try:
-                proc.kill()
-                await asyncio.wait_for(proc.wait(), timeout=3)
-            except (OSError, asyncio.TimeoutError):
-                logger.warning("[%s] fallback terminate/kill failed", prefix, exc_info=True)
-
-    async def _terminate_process_tree_windows(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
-        ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
-        if ctrl_break is not None:
-            try:
-                proc.send_signal(ctrl_break)
-                await asyncio.wait_for(proc.wait(), timeout=3)
-                return
-            except (OSError, ValueError, RuntimeError, asyncio.TimeoutError):
-                logger.warning(
-                    "[%s] CTRL_BREAK signaling failed; fallback terminate path",
-                    prefix,
-                    exc_info=True,
-                )
-
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=3)
-            return
-        except (OSError, asyncio.TimeoutError):
-            logger.warning(
-                "[%s] windows terminate failed; fallback kill path",
-                prefix,
-                exc_info=True,
-            )
-
-        try:
-            proc.kill()
-            await asyncio.wait_for(proc.wait(), timeout=3)
-        except (OSError, asyncio.TimeoutError):
-            logger.warning("[%s] windows terminate/kill failed", prefix, exc_info=True)
+        result = await terminate_asyncio_process_tree(proc)
+        if result.outcome == "failed":
+            logger.warning("[%s] process termination failed (%s)", prefix, result.detail)
 
     def _resolve_hard_timeout(self, options: dict[str, Any]) -> int:
         default_timeout = int(config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS)

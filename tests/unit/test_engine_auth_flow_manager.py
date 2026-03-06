@@ -532,9 +532,12 @@ exit 0
         transport="cli_delegate",
         auth_method="auth_code_or_url",
     )
+    session = manager._sessions[started["session_id"]]  # noqa: SLF001
+    assert isinstance(session.process_lease_id, str) and session.process_lease_id
     canceled = manager.cancel_session(started["session_id"])
     assert canceled["status"] == "canceled"
     assert canceled["terminal"] is True
+    assert manager._sessions[started["session_id"]].process_lease_id is None  # noqa: SLF001
 
 
 def test_engine_auth_flow_manager_ttl_expired(tmp_path: Path, monkeypatch):

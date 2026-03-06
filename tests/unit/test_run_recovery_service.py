@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+import logging
 
 import pytest
 
@@ -177,3 +178,31 @@ async def test_redrive_resume_ticket_missing_run_dir_reconciles_failed():
     backend.clear_pending_auth.assert_awaited_once_with("req-1")
     backend.clear_engine_session_handle.assert_awaited_once_with("req-1")
     backend.clear_auth_resume_context.assert_awaited_once_with("req-1")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphan_runtime_bindings_logs_startup_reap(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_recovery_service.process_supervisor.consume_startup_orphan_reports",
+        lambda: [
+            {
+                "lease_id": "lease-1",
+                "owner_kind": "run_attempt",
+                "owner_id": "run-1:1",
+                "request_id": None,
+                "run_id": "run-1",
+                "attempt_number": 1,
+                "engine": "codex",
+                "pid": 12345,
+                "outcome": "terminated",
+                "detail": "killed",
+            }
+        ],
+    )
+    service = RunRecoveryService()
+    await service.cleanup_orphan_runtime_bindings(
+        records=[{"request_id": "req-1", "run_id": "run-1"}]
+    )
+    assert "event=\"recovery.orphan_process.reaped\"" in caplog.text
+    assert "request_id=\"req-1\"" in caplog.text

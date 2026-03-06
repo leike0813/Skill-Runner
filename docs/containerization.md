@@ -27,18 +27,18 @@ The default compose file mounts:
 
 - `./skills:/app/skills` (skills registry)
 - `./agent_config:/opt/config` (credential import source; optional)
-- `agent_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
-- *(optional)* `./data:/data` (runs.db, runs/, requests/, logs)
+- `skillrunner_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
+- *(optional)* `./data:/data` (runs.db, runs/, logs, settings)
 
 ## Agent CLI installation
 
 The image does not ship the agent CLIs. Install them into the mounted prefix:
 
 ```
-docker compose run --rm skill-runner sh -lc "npm install -g <cli-package>"
+docker compose run --rm api sh -lc "npm install -g <cli-package>"
 ```
 
-Install packages that provide `codex`, `gemini`, and `iflow` commands.
+Install packages that provide `codex`, `gemini`, `iflow`, and `opencode` commands.
 
 ## Upgrading agent CLIs
 
@@ -257,6 +257,6 @@ docker run --rm -p 8000:8000 \
   -e SKILL_RUNNER_DATA_DIR=/data \
   -v "$(pwd)/skills:/app/skills" \
   -v "$(pwd)/agent_config:/opt/config" \
-  -v skill-runner_cache:/opt/cache \
+  -v skillrunner_cache:/opt/cache \
   skill-runner:local
 ```

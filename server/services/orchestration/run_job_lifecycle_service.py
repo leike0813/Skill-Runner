@@ -493,6 +493,9 @@ class _RunJobLifecyclePipeline:
                 run_options = dict(options)
                 run_options["__run_id"] = run_id
                 run_options["__attempt_number"] = attempt_number
+                if request_id:
+                    run_options["__request_id"] = request_id
+                run_options["__engine_name"] = engine_name
                 if is_interactive and request_id and interactive_profile:
                     await self._inject_interactive_resume_context(
                         request_id=request_id,

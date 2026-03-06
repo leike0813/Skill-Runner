@@ -19,6 +19,11 @@
 
 `/v1/management/*` 提供前端无关的统一管理契约，适用于内置 UI 与外部前端（如插件 WebView）复用。
 
+### System 管理
+- `GET /v1/management/system/settings`：获取系统设置（日志配置、鉴权会话日志持久化开关、数据重置确认文本）
+- `PUT /v1/management/system/settings`：更新系统设置（当前支持日志级别配置）
+- `POST /v1/management/system/reset-data`：执行数据重置（**破坏性操作**，需确认文本）
+
 ### Skill 管理
 - `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupported_engines/effective_engines/health`）
 - `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files/execution_modes`）
@@ -35,7 +40,10 @@
 - `GET /v1/management/runs/{request_id}/file?path=...`：文件预览
 - `GET /v1/management/runs/{request_id}/events`：SSE 实时输出（复用 jobs 事件语义）
 - `GET /v1/management/runs/{request_id}/events/history`：结构化历史事件（支持 `from_seq/to_seq/from_ts/to_ts`）
-- `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳）
+- `GET /v1/management/runs/{request_id}/chat`：SSE 对话事件流（复用 jobs chat 语义）
+- `GET /v1/management/runs/{request_id}/chat/history`：结构化对话历史（支持 `from_seq/to_seq/from_ts/to_ts`）
+- `GET /v1/management/runs/{request_id}/protocol/history`：协议级事件历史（FCMP/RASP/Orchestrator，支持 `attempt`）
+- `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳，支持 `attempt`）
 - `GET /v1/management/runs/{request_id}/pending`：查询待决交互
 - `POST /v1/management/runs/{request_id}/reply`：提交交互回复
 - `POST /v1/management/runs/{request_id}/cancel`：取消运行
@@ -43,6 +51,131 @@
 说明：
 - 管理 API 是推荐的前端消费面。
 - 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*`、`/v1/temp-skill-runs*` 保持兼容，用于执行链路与存量调用。
+
+### 获取系统设置
+`GET /v1/management/system/settings`
+
+**Response** (`ManagementSystemSettingsResponse`):
+```json
+{
+  "logging": {
+    "server_level": "INFO",
+    "runtime_level": "DEBUG"
+  },
+  "engine_auth_session_log_persistence_enabled": true,
+  "reset_confirmation_text": "CONFIRM RESET"
+}
+```
+
+### 更新系统设置
+`PUT /v1/management/system/settings`
+
+**Request Body** (`ManagementSystemSettingsUpdateRequest`):
+```json
+{
+  "logging": {
+    "server_level": "WARNING",
+    "runtime_level": "INFO"
+  }
+}
+```
+
+**Response**: 同 `GET /v1/management/system/settings` 返回最新生效状态。
+
+**错误码**:
+- `400`: 日志级别验证失败（如非法级别名）。
+- `500`: 文件系统写入错误。
+
+### 数据重置
+`POST /v1/management/system/reset-data`
+
+**⚠️ 破坏性操作** — 将删除运行记录、缓存条目及可选的日志/引擎目录/Agent 状态数据。
+
+**Request Body** (`ManagementDataResetRequest`):
+```json
+{
+  "confirmation": "CONFIRM RESET",
+  "include_logs": true,
+  "include_engine_catalog": false,
+  "include_agent_status": false,
+  "include_engine_auth_sessions": false,
+  "dry_run": true
+}
+```
+
+**说明**:
+- `confirmation` 必须精确等于 `GET /v1/management/system/settings` 返回的 `reset_confirmation_text`。
+- `dry_run=true` 时仅返回将被删除的统计，不执行实际删除。
+- `include_engine_auth_sessions` 仅在系统已启用 `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED` 时生效。
+
+**Response** (`ManagementDataResetResponse`):
+```json
+{
+  "dry_run": true,
+  "runs_deleted": 42,
+  "requests_deleted": 42,
+  "cache_entries_deleted": 15,
+  "log_dirs_deleted": 42,
+  "engine_catalog_reset": false,
+  "agent_status_reset": false,
+  "engine_auth_sessions_deleted": 0
+}
+```
+
+**错误码**:
+- `400`: `confirmation` 文本不匹配。
+- `409`: 另一个重置操作正在进行中。
+- `500`: 文件系统错误。
+
+### 对话事件流（Chat SSE）
+`GET /v1/management/runs/{request_id}/chat`
+
+返回 `text/event-stream`，用于实时消费 FCMP 对话事件（与 `events` 流语义一致，但面向对话窗口场景）。
+
+**Query 参数**:
+- `cursor`（可选，默认 `0`）：续传游标。
+
+**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat` 和 `/v1/temp-skill-runs/{request_id}/chat` 同样可用，语义一致。
+
+### 结构化对话历史
+`GET /v1/management/runs/{request_id}/chat/history`
+
+按区间拉取对话历史（结构与 `events/history` 一致）。
+
+**Query 参数**:
+- `from_seq` / `to_seq`（可选）：按序号区间拉取
+- `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
+
+**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat/history` 和 `/v1/temp-skill-runs/{request_id}/chat/history` 同样可用。
+
+### 协议级事件历史
+`GET /v1/management/runs/{request_id}/protocol/history`
+
+返回指定协议流的原始事件序列，用于运行调试与协议复盘。
+
+**Query 参数**:
+- `stream`（必填）：`fcmp` / `rasp` / `orchestrator`
+- `from_seq` / `to_seq`（可选）：按序号区间拉取
+- `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
+- `attempt`（可选，`>=1`）：指定恢复尝试轮次
+
+**Response**:
+```json
+{
+  "request_id": "d290f1ee-...",
+  "stream": "fcmp",
+  "attempt": 1,
+  "available_attempts": [1, 2],
+  "count": 25,
+  "events": [...]
+}
+```
+
+**错误码**:
+- `400`: `stream` 值非法。
+- `404`: `request_id` 或 run 不存在。
+
+说明：该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
 
 ---
 
@@ -240,12 +373,30 @@
   "created_at": "2024-01-01T12:00:00Z",
   "updated_at": "2024-01-01T12:01:00Z",
   "pending_interaction_id": 12,
+  "pending_auth_session_id": null,
+  "pending_payload": null,
   "interaction_count": 3,
   "recovery_state": "recovered_waiting",
   "recovered_at": "2026-02-16T00:05:00Z",
   "recovery_reason": "resumable_waiting_preserved",
   "auto_decision_count": 0,
   "last_auto_decision_at": null,
+  "requested_execution_mode": "interactive",
+  "effective_execution_mode": "interactive",
+  "conversation_mode": "single_turn",
+  "interactive_auto_reply": false,
+  "interactive_reply_timeout_sec": 1200,
+  "effective_interactive_require_user_reply": true,
+  "effective_interactive_reply_timeout_sec": 1200,
+  "current_attempt": 1,
+  "pending_owner": null,
+  "dispatch_phase": "claimed",
+  "dispatch_ticket_id": null,
+  "worker_claim_id": null,
+  "resume_ticket_id": null,
+  "resume_cause": null,
+  "source_attempt": null,
+  "target_attempt": null,
   "warnings": [],
   "error": null
 }
@@ -254,9 +405,23 @@
 说明：
 - `waiting_user` 为非终态，客户端应按 pending/reply 流程推进，而不是直接结束。
 - `pending_interaction_id` 为空表示当前没有待决交互。
+- `pending_auth_session_id` 非空时，表示 run 正在等待引擎鉴权，客户端应查询 `auth/session`。
+- `pending_payload` 包含待决事项的额外结构化载荷（如鉴权 URL 等），可用于前端直接渲染。
 - `interaction_count` 为当前 request 已记录的交互轮次计数。
 - `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
 - `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
+- `requested_execution_mode`：请求时指定的执行模式。
+- `effective_execution_mode`：实际生效的执行模式。
+- `conversation_mode`：对话模式（`single_turn` / `multi_turn`）。
+- `interactive_auto_reply`：是否启用超时自动回复。
+- `interactive_reply_timeout_sec` / `effective_interactive_reply_timeout_sec`：回复超时设定/实际生效值。
+- `effective_interactive_require_user_reply`：是否强制要求用户回复。
+- `current_attempt`：当前执行尝试轮次。
+- `pending_owner`：交互待决的归属方标识。
+- `dispatch_phase`：调度阶段（`queued | dispatching | claimed | running`）。
+- `dispatch_ticket_id` / `worker_claim_id`：调度令牌/Worker 认领标识，用于调试与追踪。
+- `resume_ticket_id` / `resume_cause`：恢复令牌/恢复原因，可用于故障排查。
+- `source_attempt` / `target_attempt`：恢复调度时的源/目标尝试轮次。
 - interactive 双轨完成说明：
   - 在 assistant 回复内容中解析到 `__SKILL_DONE__` 时按强条件完成；
   - 未解析到 marker 但输出通过 schema 时按软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
@@ -442,6 +607,46 @@
 - `stream`：`stdout` / `stderr` / `pty`
 - `byte_from`：起始字节偏移（含）
 - `byte_to`：结束字节偏移（不含）
+- `attempt`（可选，`>=1`）：指定恢复尝试轮次，默认使用最新轮次
+
+### 对话事件流
+`GET /v1/jobs/{request_id}/chat`
+
+返回 `text/event-stream`，用于实时消费对话事件（与管理 API 的 `chat` 语义一致）。
+
+**Query 参数**:
+- `cursor`（可选，默认 `0`）：续传游标。
+
+### 结构化对话历史
+`GET /v1/jobs/{request_id}/chat/history`
+
+按区间拉取对话历史。
+
+**Query 参数**:
+- `from_seq` / `to_seq`（可选）：按序号区间拉取
+- `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
+
+### 鉴权会话（Auth Session）
+`GET /v1/jobs/{request_id}/auth/session`
+
+查询当前 run 关联的引擎鉴权会话状态。当 run 状态为 `waiting_auth` 时，客户端应使用此接口获取鉴权交互详情。
+
+**Response**:
+```json
+{
+  "request_id": "d290f1ee-...",
+  "auth_session": {
+    "session_id": "sess-abc-123",
+    "engine": "codex",
+    "transport": "oauth_proxy",
+    "auth_method": "callback",
+    "status": "waiting_callback",
+    "auth_url": "https://login.microsoftonline.com/..."
+  }
+}
+```
+
+无关联鉴权会话时 `auth_session` 为 `null`。
 
 ### 取消运行 (Cancel Run)
 `POST /v1/jobs/{request_id}/cancel`
@@ -550,6 +755,11 @@
 - 文本文件可预览；二进制文件显示“不可预览（无信息）”。
 - 文本文件预览大小上限为 `256KB`，超限显示“文件过大不可预览”。
 
+### 系统设置页面
+`GET /ui/settings`
+
+返回系统设置页面，提供日志级别配置、数据重置等管理操作的 GUI 入口（后端通过 `/v1/management/system/*` 实现）。
+
 ### Engine 管理页面
 `GET /ui/engines`
 
@@ -593,6 +803,30 @@
 
 兼容旧接口（已弃用）：
 - `GET /ui/engines/table`
+
+### Engine 鉴权交互 UI 接口
+
+UI 层提供的引擎鉴权前端流程接口（代理后端 V2 Auth API）：
+- `POST /ui/engines/auth/oauth-proxy/sessions`：启动 OAuth Proxy 鉴权会话
+- `GET /ui/engines/auth/oauth-proxy/sessions/{session_id}`：查询 OAuth Proxy 会话状态
+- `POST /ui/engines/auth/oauth-proxy/sessions/{session_id}/input`：提交用户输入
+- `POST /ui/engines/auth/oauth-proxy/sessions/{session_id}/cancel`：取消会话
+- `POST /ui/engines/auth/cli-delegate/sessions`：启动 CLI Delegate 鉴权会话
+- `GET /ui/engines/auth/cli-delegate/sessions/{session_id}`：查询 CLI Delegate 会话状态
+- `POST /ui/engines/auth/cli-delegate/sessions/{session_id}/input`：提交用户输入
+- `POST /ui/engines/auth/cli-delegate/sessions/{session_id}/cancel`：取消会话
+
+说明：这些 UI 接口为前端引擎鉴权提供 HTML 片段响应，内部代理 `/v1/engines/auth/*` V2 API。
+
+### OpenCode 模型刷新
+`POST /ui/engines/opencode/models/refresh`
+
+触发 OpenCode 引擎模型列表的运行时探测缓存刷新，并返回 HTML 片段展示更新后的模型列表。
+
+### Engine 模型快照管理（UI）
+`POST /ui/engines/{engine}/models/snapshots`
+
+通过 UI 表单新增当前检测版本的模型快照（代理 `POST /v1/engines/{engine}/models/snapshots`）。返回 HTML 片段用于页面局部刷新。
 
 ### Engine 升级状态轮询（HTML partial）
 `GET /ui/engines/upgrades/{request_id}/status`
@@ -734,13 +968,18 @@
 
 响应结构与 `GET /v1/jobs/{request_id}` 保持一致（`RequestStatusResponse`）。
 
-### 查询临时运行结果/产物/Bundle/日志
+### 查询临时运行结果/产物/Bundle/日志/对话/取消
 - `GET /v1/temp-skill-runs/{request_id}/result`
 - `GET /v1/temp-skill-runs/{request_id}/artifacts`
 - `GET /v1/temp-skill-runs/{request_id}/bundle`
 - `GET /v1/temp-skill-runs/{request_id}/artifacts/{artifact_path}`
 - `GET /v1/temp-skill-runs/{request_id}/logs`
+- `GET /v1/temp-skill-runs/{request_id}/logs/range`（支持 `stream`、`byte_from`、`byte_to`、`attempt` 参数）
 - `GET /v1/temp-skill-runs/{request_id}/events`
+- `GET /v1/temp-skill-runs/{request_id}/events/history`
+- `GET /v1/temp-skill-runs/{request_id}/chat`（SSE 对话事件流）
+- `GET /v1/temp-skill-runs/{request_id}/chat/history`（结构化对话历史）
+- `GET /v1/temp-skill-runs/{request_id}/auth/session`（鉴权会话状态查询）
 - `POST /v1/temp-skill-runs/{request_id}/cancel`
 
 语义与 `/v1/jobs/*` 对齐，但作用范围仅限临时 skill 的这次请求。

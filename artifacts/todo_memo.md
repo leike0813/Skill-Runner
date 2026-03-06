@@ -11,4 +11,11 @@
 - [x] e2e前端在后端不可达时 hard-fail
 - [x] 消除前端双轨制（实时 vs. run回放）
 - [x] cocurrency_policy归入config
-
+- [x] engine-specific 业务逻辑进一步解耦
+- [x] 文档对齐
+- [x] 重写 readme
+- [x] 容器化配置更新，构建新版镜像
+- [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
+- [ ] 进一步拆分 god object，重构 run store
+- [ ] 对单元测试进行全面审查、规范化、去重
+- [ ] CI/CD流水线

@@ -125,13 +125,46 @@ def test_ui_shell_manager_stop_session_sets_terminal(tmp_path: Path, patch_fake_
     started = manager.start_session("codex")
     assert started["status"] == "running"
     monkeypatch.setattr(
-        "server.services.ui.ui_shell_manager.os.killpg",
-        lambda _pid, _sig: None,
+        "server.services.ui.ui_shell_manager.terminate_popen_process_tree",
+        lambda _proc: type("Result", (), {"outcome": "terminated", "detail": "ok"})(),
     )
     stopped = manager.stop_session()
     assert stopped["active"] is True
     assert stopped["terminal"] is True
     assert stopped["status"] == "terminated"
+
+
+def test_ui_shell_manager_registers_and_releases_process_lease(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+):
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        "server.services.ui.ui_shell_manager.terminate_popen_process_tree",
+        lambda _proc: type("Result", (), {"outcome": "terminated", "detail": "ok"})(),
+    )
+    register_calls: list[tuple[str, str]] = []
+    release_calls: list[tuple[str | None, str]] = []
+
+    monkeypatch.setattr(
+        "server.services.ui.ui_shell_manager.process_supervisor.register_popen_process",
+        lambda **kwargs: (
+            register_calls.append((str(kwargs.get("owner_kind")), str(kwargs.get("owner_id")))),
+            "lease-ui-1",
+        )[1],
+    )
+    monkeypatch.setattr(
+        "server.services.ui.ui_shell_manager.process_supervisor.release",
+        lambda lease_id, *, reason: release_calls.append((lease_id, reason)),
+    )
+
+    started = manager.start_session("codex")
+    assert started["status"] == "running"
+    stopped = manager.stop_session()
+    assert stopped["status"] == "terminated"
+    assert register_calls == [("ui_shell", started["session_id"])]
+    assert release_calls == [("lease-ui-1", "ui_shell_stopped")]
 
 
 def test_ui_shell_manager_landlock_disabled_is_non_blocking(

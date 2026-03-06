@@ -1,8 +1,7 @@
 import pytest
 import os
 from pathlib import Path
-from server.core_config import get_cfg_defaults
-from server.config import config
+from server.config import config, get_cfg_defaults
 
 def test_default_config_loading():
     """Verify default values are loaded correctly."""

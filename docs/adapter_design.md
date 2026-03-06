@@ -107,20 +107,22 @@ def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: dict[st
 
 ---
 
-### Cross-Cutting: Run Folder Trust Lifecycle (Codex/Gemini)
+### Cross-Cutting: Run Folder Trust Lifecycle
 
-**Goal**: Keep Codex/Gemini execution stable while avoiding persistent trust-table growth.
+**Goal**: Keep engine execution stable while avoiding persistent trust-table growth.
 
 **Requirements**:
-1. **Register Before Execute**:
+1. **Register Before Execute** (engine-specific):
    - Codex: write `projects."<run_dir>".trust_level = "trusted"` into `~/.codex/config.toml`.
    - Gemini: write `"<run_dir>": "TRUST_FOLDER"` into `~/.gemini/trustedFolders.json`.
+   - iFlow: No trust mutation needed (current design treats iFlow as no-op for trust manager).
+   - OpenCode: No trust mutation needed (no trust table concept).
 2. **Cleanup In Finally**:
    - Always remove the per-run trust entry after adapter execution (success/failure).
 3. **Best-Effort Error Policy**:
    - Trust cleanup failure must not overwrite run terminal status; log warning and rely on periodic stale cleanup.
-4. **iFlow**:
-   - No trust mutation (current design keeps iFlow as no-op for trust manager).
+
+> **Note**: Trust 策略注册/取消注册现已由 `adapter_profile.json` 中的引擎标识驱动，由 `run_folder_trust_manager.py` 统一管理。
 
 **Interface Definition**:
 ```python

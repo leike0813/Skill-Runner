@@ -17,6 +17,8 @@ def test_load_adapter_profile_success() -> None:
     assert profile.engine == "codex"
     assert profile.prompt_builder.engine_key == "codex"
     assert profile.session_codec.strategy == "first_json_line"
+    assert profile.cli_management.package == "@openai/codex"
+    assert "codex" in profile.cli_management.binary_candidates
 
 
 def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
@@ -81,6 +83,31 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "manifest_path": str(manifest_path),
                     "models_root": str(models_root),
                     "seed_path": None
+                },
+                "cli_management": {
+                    "package": "@google/gemini-cli",
+                    "binary_candidates": ["gemini"],
+                    "credential_imports": [
+                        {
+                            "source": "oauth_creds.json",
+                            "target_relpath": ".gemini/oauth_creds.json"
+                        }
+                    ],
+                    "credential_policy": {
+                        "mode": "all_of_sources",
+                        "sources": ["oauth_creds.json"],
+                        "settings_validator": None
+                    },
+                    "resume_probe": {
+                        "help_hints": ["--resume"],
+                        "dynamic_args": ["--resume", "probe-session", "--help"]
+                    },
+                    "layout": {
+                        "extra_dirs": [".gemini"],
+                        "bootstrap_target_relpath": ".gemini/settings.json",
+                        "bootstrap_format": "json",
+                        "normalize_strategy": None
+                    }
                 }
             }
         ),
@@ -175,6 +202,31 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                     "manifest_path": str(tmp_path / "missing_manifest.json"),
                     "models_root": str(tmp_path / "missing_models"),
                     "seed_path": None
+                },
+                "cli_management": {
+                    "package": "@openai/codex",
+                    "binary_candidates": ["codex"],
+                    "credential_imports": [
+                        {
+                            "source": "auth.json",
+                            "target_relpath": ".codex/auth.json"
+                        }
+                    ],
+                    "credential_policy": {
+                        "mode": "all_of_sources",
+                        "sources": ["auth.json"],
+                        "settings_validator": None
+                    },
+                    "resume_probe": {
+                        "help_hints": ["resume"],
+                        "dynamic_args": ["exec", "resume", "--help"]
+                    },
+                    "layout": {
+                        "extra_dirs": [".codex"],
+                        "bootstrap_target_relpath": ".codex/config.toml",
+                        "bootstrap_format": "text",
+                        "normalize_strategy": None
+                    }
                 }
             }
         ),
@@ -182,4 +234,96 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
     )
 
     with pytest.raises(RuntimeError, match="path not found"):
+        load_adapter_profile("codex", profile_path)
+
+
+def test_load_adapter_profile_fails_when_credential_target_is_absolute(tmp_path: Path) -> None:
+    bootstrap_path = tmp_path / "bootstrap.toml"
+    default_path = tmp_path / "default.toml"
+    enforced_path = tmp_path / "enforced.toml"
+    manifest_path = tmp_path / "manifest.json"
+    models_root = tmp_path / "models"
+    bootstrap_path.write_text("x=1", encoding="utf-8")
+    default_path.write_text("x=1", encoding="utf-8")
+    enforced_path.write_text("x=1", encoding="utf-8")
+    manifest_path.write_text(json.dumps({"engine": "codex", "snapshots": []}), encoding="utf-8")
+    models_root.mkdir(parents=True, exist_ok=True)
+
+    profile_path = tmp_path / "adapter_profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "engine": "codex",
+                "prompt_builder": {
+                    "engine_key": "codex",
+                    "default_template_path": None,
+                    "fallback_inline": "fallback",
+                    "merge_input_if_no_parameter_schema": True,
+                    "params_json_source": "combined_input_parameter",
+                    "main_prompt_source": "none",
+                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "include_input_file_name": False,
+                    "include_skill_dir": False
+                },
+                "session_codec": {
+                    "strategy": "first_json_line",
+                    "error_message": "missing",
+                    "error_prefix": "x",
+                    "required_type": "thread.started",
+                    "id_field": "thread_id",
+                    "recursive_key": None,
+                    "fallback_text_finder": None,
+                    "json_lines_finder": None,
+                    "regex_pattern": None
+                },
+                "attempt_workspace": {
+                    "workspace_subdir": ".codex",
+                    "skills_subdir": "skills",
+                    "use_config_parent_as_workspace": False,
+                    "unknown_fallback": False
+                },
+                "config_assets": {
+                    "bootstrap_path": str(bootstrap_path),
+                    "default_path": str(default_path),
+                    "enforced_path": str(enforced_path),
+                    "settings_schema_path": None,
+                    "skill_defaults_path": "assets/codex_config.toml"
+                },
+                "model_catalog": {
+                    "mode": "manifest",
+                    "manifest_path": str(manifest_path),
+                    "models_root": str(models_root),
+                    "seed_path": None
+                },
+                "cli_management": {
+                    "package": "@openai/codex",
+                    "binary_candidates": ["codex"],
+                    "credential_imports": [
+                        {
+                            "source": "auth.json",
+                            "target_relpath": "/tmp/auth.json"
+                        }
+                    ],
+                    "credential_policy": {
+                        "mode": "all_of_sources",
+                        "sources": ["auth.json"],
+                        "settings_validator": None
+                    },
+                    "resume_probe": {
+                        "help_hints": ["resume"],
+                        "dynamic_args": ["exec", "resume", "--help"]
+                    },
+                    "layout": {
+                        "extra_dirs": [".codex"],
+                        "bootstrap_target_relpath": ".codex/config.toml",
+                        "bootstrap_format": "text",
+                        "normalize_strategy": None
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="must be relative"):
         load_adapter_profile("codex", profile_path)

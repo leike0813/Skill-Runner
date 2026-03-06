@@ -35,7 +35,12 @@ class OpencodeModelCatalog:
         self._job_added = False
 
     def _cache_path(self) -> Path:
-        return Path(config.SYSTEM.OPENCODE_MODELS_CACHE_PATH)
+        cache_dir = Path(config.SYSTEM.ENGINE_MODELS_CATALOG_CACHE_DIR)
+        template = str(config.SYSTEM.ENGINE_MODELS_CATALOG_CACHE_FILE_TEMPLATE)
+        return cache_dir / template.format(engine="opencode")
+
+    def cache_path(self) -> Path:
+        return self._cache_path()
 
     def _seed_path(self) -> Path:
         profile = load_adapter_profile(
@@ -174,7 +179,7 @@ class OpencodeModelCatalog:
             self._cache = self._load_seed_payload(last_error=None)
             self._write_cache(self._cache)
 
-        interval_minutes = int(config.SYSTEM.OPENCODE_MODELS_REFRESH_INTERVAL_MINUTES)
+        interval_minutes = int(config.SYSTEM.ENGINE_MODELS_CATALOG_REFRESH_INTERVAL_MINUTES)
         if interval_minutes > 0:
             if not self.scheduler.running:
                 try:
@@ -209,7 +214,7 @@ class OpencodeModelCatalog:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        timeout_sec = int(config.SYSTEM.OPENCODE_MODELS_PROBE_TIMEOUT_SEC)
+        timeout_sec = int(config.SYSTEM.ENGINE_MODELS_CATALOG_PROBE_TIMEOUT_SEC)
         try:
             stdout_raw, stderr_raw = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
         except asyncio.TimeoutError as exc:

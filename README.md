@@ -1,268 +1,298 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Skill-Runner Icon" width="160" />
+  <img src="assets/icon.png" alt="Skill Runner" width="140" />
 </p>
 
-# Skill Runner
+<h1 align="center">Skill Runner</h1>
 
-For the Chinese version, see [README_CN.md](README_CN.md).
+<p align="center">
+  <strong>A unified execution framework for AI agent skills</strong>
+</p>
 
-Skill Runner is a lightweight REST service that wraps Codex, Gemini CLI, and
-iFlow CLI behind a unified Skill protocol for deterministic execution and
-artifact management.
+<p align="center">
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
+  <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+</p>
 
-## Features
+<p align="center">
+  <a href="README_CN.md">中文</a> ·
+  <a href="README_FR.md">Français</a> ·
+  <a href="README_JA.md">日本語</a>
+</p>
 
-- Multi-engine execution: Codex / Gemini CLI / iFlow CLI / OpenCode
-- Skill protocol: `runner.json` + `SKILL.md` + input/parameter/output schemas
-- Isolated runs with reproducible artifacts
-- Structured results: JSON + artifacts + bundle
-- Cache reuse for identical inputs and parameters
-- Web admin UI at `/ui` for skill overview and package install
-- Skill browser at `/ui/skills/{skill_id}` for read-only package/file inspection
-- Engine management at `/ui/engines` for status, upgrades, and upgrade logs
-- Model manifest management at `/ui/engines/{engine}/models` for snapshot view/add
-- Inline TUI terminal in `/ui/engines` (single session, managed runtime)
+---
 
-## Container build & run
+Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **iFlow CLI**, and **OpenCode** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
 
-Prepare host directories to avoid permission issues:
+## ✨ Highlights
+
+<table>
+<tr>
+<td align="center" width="25%"><strong>🧩 Pluggable Skills</strong><br/>Drop-in skill packages<br/><sub>Schema-validated I/O</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>Unified adapter protocol</sub></td>
+<td align="center" width="25%"><strong>🔄 Dual Mode</strong><br/>Auto &amp; Interactive execution<br/><sub>Multi-turn conversations</sub></td>
+<td align="center" width="25%"><strong>📦 Structured Output</strong><br/>JSON + artifacts + bundle<br/><sub>Isolated, contract-driven runs</sub></td>
+</tr>
+</table>
+
+## 🧩 Pluggable Skill Design
+
+Skill Runner's core advantage is its **pluggable skill architecture** — every automation task is packaged as a self-contained, engine-agnostic skill that can be installed, shared, and executed without modification.
+
+### What is a Skill?
+
+Skill Runner skills are built on the [Open Agent Skills](https://agentskills.io) standard — the same format used by Claude Code, Codex CLI, Cursor, and more.
+Skill Runner extends this standard into an **AutoSkill** superset by adding an execution contract (`runner.json`) and schema validation files:
+
 ```
+my-skill/
+├── SKILL.md                 # Prompt instructions (Open Agent Skills standard)
+├── assets/
+│   ├── runner.json          # Execution contract (Skill Runner extension)
+│   ├── input.schema.json    # Input schema (JSON Schema)
+│   ├── parameter.schema.json
+│   └── output.schema.json   # Output schema — validated after execution
+├── references/              # Reference documents (optional)
+└── scripts/                 # Helper scripts (optional)
+```
+
+> Any standard Open Agent Skills package (a folder with `SKILL.md`) can run on Skill Runner.
+> Adding `assets/runner.json` + schemas promotes it to an **AutoSkill** — enabling automatic execution, schema validation, and reproducible results.
+
+### Why It Matters
+
+- **Standards-based**: Compatible with the Open Agent Skills ecosystem — skills are portable across platforms.
+- **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, iFlow, or OpenCode.
+- **Schema-driven I/O**: Input, parameter, and output are all defined by JSON Schema — the runner validates automatically.
+- **Isolated execution**: Each run gets its own workspace with standardized I/O contracts — no cross-run interference.
+- **Zero-integration install**: Drop a skill directory into `skills/` (or upload via API/UI) and it's immediately available.
+- **Cache reuse**: Identical inputs and parameters can reuse previous results — no redundant engine invocations.
+
+### Execution Modes
+
+Every skill declares its supported execution modes in `runner.json`:
+
+- **`auto`** — Fully autonomous. The engine runs the prompt to completion without human intervention.
+- **`interactive`** — Multi-turn conversation. The engine may pause to ask questions; the user (or an upstream system) provides replies via the interaction API.
+
+> 📖 Full specification: [AutoSkill Package Guide](docs/autoskill_package_guide.md) · [File Protocol](docs/file_protocol.md)
+
+## 🚀 Quick Start
+
+### Docker (recommended)
+
+```bash
 mkdir -p skills agent_config data
-```
-> `data` is optional and only needed when you want to persist run data or debug.
-
-Build the image:
-```
-docker build -t skill-runner:local .
-```
-
-Start with Compose:
-```
 docker compose up --build
 ```
 
-Default API base: `http://localhost:8000/v1`
-Admin UI: `http://localhost:8000/ui`
+- **API**: http://localhost:8000/v1
+- **Admin UI**: http://localhost:8000/ui
 
-See `docs/containerization.md` for details.
+Or run independently:
 
-To protect the admin/install surfaces with Basic Auth:
-- `UI_BASIC_AUTH_ENABLED=true`
-- `UI_BASIC_AUTH_USERNAME=<username>`
-- `UI_BASIC_AUTH_PASSWORD=<password>`
+```bash
+docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
+```
 
-Note:
-- These variables are runtime-only and are not baked into the image.
-- Set them in `docker-compose.yml` under `services.api.environment`, or pass with `docker run -e`.
+### Local Development
 
-Example (`docker run`):
+```bash
+# Linux / macOS
+./scripts/deploy_local.sh
+
+# Windows (PowerShell)
+.\scripts\deploy_local.ps1
+```
+
+<details>
+<summary>📋 <strong>Advanced Configuration</strong></summary>
+
+#### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SKILL_RUNNER_DATA_DIR` | Run data directory | `data/` |
+| `SKILL_RUNNER_AGENT_HOME` | Isolated agent config home | auto |
+| `SKILL_RUNNER_AGENT_CACHE_DIR` | Agent cache root | auto |
+| `SKILL_RUNNER_NPM_PREFIX` | Managed CLI install prefix | auto |
+| `SKILL_RUNNER_RUNTIME_MODE` | `local` or `container` | auto |
+
+#### UI Basic Auth
+
 ```bash
 docker run --rm -p 8000:8000 -p 7681:7681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.3.3
+  leike0813/skill-runner:v0.4.0
 ```
 
-## Local development (non-container)
+</details>
 
-Recommended one-click local bootstrap (isolated runtime):
+## 🖥️ Web Admin UI
 
-Linux/macOS:
-```
-./scripts/deploy_local.sh
-```
+Access the built-in management interface at `/ui`:
 
-Windows (PowerShell):
-```powershell
-.\scripts\deploy_local.ps1
-```
+- **Skill Browser** — View installed skills, inspect package structure and files
+- **Engine Management** — Monitor engine status, trigger upgrades, view logs
+- **Model Catalog** — Browse and manage engine model snapshots
+- **Inline TUI** — Launch engine terminals directly in the browser (single managed session)
 
-> For Windows local usage of the inline TUI terminal, ensure `pywinpty` is installed
-> (declared in project dependencies).
+## 🔑 Engine Authentication
 
-These scripts configure:
-- `SKILL_RUNNER_RUNTIME_MODE=local`
-- `SKILL_RUNNER_AGENT_CACHE_DIR` (separate from `data/`)
-- `SKILL_RUNNER_AGENT_HOME` (isolated agent config home)
-- `SKILL_RUNNER_NPM_PREFIX` (managed CLI prefix)
+Skill Runner provides multiple authentication methods, from fully managed to manual.
 
-Optional environment:
-- `SKILL_RUNNER_DATA_DIR`: run data directory (default `data/`)
-- `SKILL_RUNNER_AGENT_CACHE_DIR`: agent cache root
-- `SKILL_RUNNER_AGENT_HOME`: isolated config home
-- `SKILL_RUNNER_NPM_PREFIX`: managed CLI install prefix
+### Recommended: OAuth Proxy (via Admin UI)
 
-To quickly verify UI Basic Auth locally, use:
-```
-./scripts/start_ui_auth_server.sh
-```
+The preferred approach — authenticate engines through the built-in OAuth Proxy in the Admin UI (`/ui/engines`):
 
-Override defaults when needed:
-```
-UI_BASIC_AUTH_USERNAME=admin \
-UI_BASIC_AUTH_PASSWORD=secret \
-PORT=8011 \
-./scripts/start_ui_auth_server.sh
-```
+1. Open the engine management page.
+2. Select an engine and choose **OAuth Proxy** as the auth method.
+3. Complete the browser-based OAuth flow.
+4. Credentials are automatically stored and managed.
 
-Quick checks:
-```
-curl -i http://127.0.0.1:8000/ui
-curl -i -u admin:change-me http://127.0.0.1:8000/ui
-```
+This also works during active runs: if an engine requires authentication mid-execution, the frontend can present an **in-session auth challenge** — the run pauses, the user completes OAuth, and execution resumes automatically.
 
-Quick auth/path diagnostics for managed engines (local/container):
+### Alternative: CLI Delegate
+
+CLI Delegate orchestration launches the engine's native login flow. Compared to OAuth Proxy, it offers:
+- **Native fidelity** — uses the engine's built-in auth exactly as designed.
+- **Lower risk** — no proxy layer; credentials flow directly to the engine.
+
+Available from the same Admin UI engine management interface.
+
+### Other Methods
+
+<details>
+<summary>Click to expand legacy methods</summary>
+
+**Inline TUI** — The Admin UI embeds engine terminals (`/ui/engines`) where you can run CLI login commands directly in the browser.
+
+**Container CLI login**:
 ```bash
-./scripts/check_agent_auth.sh local
-./scripts/check_agent_auth.sh container
+docker exec -it <container_id> /bin/bash
+# Run the CLI login flow inside the container
 ```
 
-External runtime harness (no server startup required):
+**Manual credential copy** — Login on the host machine and copy credential files to `agent_config/<engine>/`:
+
+| Engine | Required Files |
+|--------|---------------|
+| Codex | `auth.json` |
+| Gemini | `google_accounts.json`, `oauth_creds.json` |
+| iFlow | `iflow_accounts.json`, `oauth_creds.json` |
+| OpenCode | `auth.json`, `antigravity-accounts.json` (optional) |
+
+> Startup imports **credentials only**; settings files are not imported (isolation by design).
+
+</details>
+
+## 📡 API & Client Design
+
 ```bash
-python -m agent_harness codex
-python -m agent_harness --auto codex
-python -m agent_harness codex exec --json --full-auto -p skill-runner-harness "hello"
-python -m agent_harness resume <handle8> "next turn"
-```
-
-Harness defaults:
-- Run root: `data/harness_runs/`
-- Override run root: `SKILL_RUNNER_HARNESS_RUN_ROOT=/path/to/runs`
-- Managed prefix/env behavior follows `scripts/deploy_local.sh` semantics
-- Start mode defaults to `interactive`; use `--auto` before `<engine>` to force auto mode
-- `--translate 0|1|2|3` controls harness rendering only and is never forwarded to engine CLI
-
-Inline TUI entry (requires UI Basic Auth when enabled):
-```
-http://127.0.0.1:8000/ui/engines
-```
-Notes:
-- Predefined engine TUI only (no arbitrary shell command execution)
-- Only one active inline terminal session is allowed globally
-- Requires `ttyd` (preinstalled in container image; install locally for non-container mode)
-- For container deployment, expose `7681:7681` (default ttyd port)
-- UI shows `sandbox_status` as observability signal; by default it does not block TUI startup
-- For inline TUI sessions, Gemini is launched with `--sandbox` when container sandbox runtime is available
-- iFlow inline TUI currently runs without sandbox; UI will show a warning because iFlow sandbox requires Docker-image execution (outside this TUI design)
-- Inline TUI enforces a minimal-permission profile: shell tools are disabled for Codex/Gemini/iFlow/OpenCode
-- Inline TUI security settings are isolated from run execution settings (`/v1/jobs`)
-
-## API examples
-
-List skills:
-```
+# List available skills
 curl -sS http://localhost:8000/v1/skills
-```
 
-List engines and models:
-```
-curl -sS http://localhost:8000/v1/engines
-curl -sS http://localhost:8000/v1/engines/gemini/models
-```
-
-View engine manifest (with Basic Auth when enabled):
-```
-curl -sS -u admin:change-me http://localhost:8000/v1/engines/codex/models/manifest
-```
-
-Create and poll an engine upgrade task (with Basic Auth when enabled):
-```
-curl -sS -u admin:change-me -X POST http://localhost:8000/v1/engines/upgrades \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"single","engine":"gemini"}'
-curl -sS -u admin:change-me http://localhost:8000/v1/engines/upgrades/<request_id>
-```
-
-Create a job:
-```
+# Create a job
 curl -sS -X POST http://localhost:8000/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
     "engine": "gemini",
     "parameter": { "language": "en" },
-    "model": "gemini-3-pro-preview",
-    "runtime_options": { "no_cache": false, "debug": false }
+    "model": "gemini-3-pro-preview"
   }'
-```
 
-Upload inputs:
-```
-curl -sS -X POST http://localhost:8000/v1/jobs/<request_id>/upload \
-  -F "file=@inputs.zip"
-```
-
-Poll status and result:
-```
-curl -sS http://localhost:8000/v1/jobs/<request_id>
+# Get results
 curl -sS http://localhost:8000/v1/jobs/<request_id>/result
 ```
 
-Artifacts and bundle:
+### Building a Frontend
+
+Skill Runner exposes **two SSE channels** for real-time run observation:
+
+| Channel | Endpoint | Purpose |
+|---------|----------|---------|
+| **Chat** | `GET /v1/jobs/{id}/chat?cursor=N` | Pre-projected chat bubbles — ideal for conversation UIs |
+| **Events** | `GET /v1/jobs/{id}/events?cursor=N` | Full FCMP protocol events — ideal for admin/debugger tools |
+
+Both channels support **cursor-based reconnection** and **history queries** (`/chat/history`, `/events/history`) for disconnect compensation.
+
+The typical frontend flow:
+
 ```
-curl -sS http://localhost:8000/v1/jobs/<request_id>/artifacts
-curl -sS -o run_bundle.zip http://localhost:8000/v1/jobs/<request_id>/bundle
+POST /v1/jobs → (optional upload) → SSE /chat → render bubbles
+                                   ↕ waiting_user → POST /interaction/reply
+                                   → terminal → GET /result + /bundle
 ```
 
-Codex model format:
-- `model_name@reasoning_effort` (example: `gpt-5.2-codex@high`)
+> 📖 Full frontend design guide: [Frontend Design Guide](docs/developer/frontend_design_guide.md)
+> 📖 API reference: [API Reference](docs/api_reference.md)
 
-Full API details: `docs/api_reference.md`.
+## 🏗️ Architecture
 
-## Architecture (brief)
+```mermaid
+graph TD
+    Client[Client / LLM] -->|HTTP| API[FastAPI]
+    
+    subgraph Core
+        API --> Orchestrator[Job Orchestrator]
+        Orchestrator --> Registry[Skill Registry]
+        Orchestrator --> Workspace[Workspace Manager]
+    end
 
-- Skill Registry scans `skills/`
-- Workspace Manager prepares run directories
-- Job Orchestrator validates inputs/outputs, executes, and bundles results
-- Engine Adapters integrate Codex / Gemini / iFlow / OpenCode CLIs
-- Runtime layer provides protocol (FCMP), state machine, observability, and adapter framework
-- Services layer handles orchestration, skill management, and platform capabilities
+    subgraph Engines
+        Orchestrator --> Codex[Codex Adapter]
+        Orchestrator --> Gemini[Gemini Adapter]
+        Orchestrator --> IFlow[iFlow Adapter]
+        Orchestrator --> OpenCode[OpenCode Adapter]
+    end
 
-Flow:
-1) POST /v1/jobs  
-2) Optional inputs.zip upload  
-3) Engine execution  
-4) Output validation + bundle  
-5) GET results and downloads
+    subgraph Storage
+        Registry --> Skills[skills/]
+        Workspace --> Runs[data/runs/]
+    end
 
-## Agent CLI login
-
-Method 1: Login inside container (TUI)
+    Codex --> CodexCLI[Codex CLI]
+    Gemini --> GeminiCLI[Gemini CLI]
+    IFlow --> IFlowCLI[iFlow CLI]
+    OpenCode --> OpenCodeCLI[OpenCode]
 ```
-docker exec -it <container_id> /bin/bash
-```
-Run the CLI login flow in the container.
 
-Method 2: Login elsewhere and copy credentials
+**Execution Flow**: `POST /v1/jobs` → input upload → engine execution → output validation → `GET /v1/jobs/{id}/result`
 
-Required files:
-- Codex: `auth.json`
-- Gemini: `google_accounts.json`, `oauth_creds.json`
-- iFlow: `iflow_accounts.json`, `oauth_creds.json`
+## 🔌 Supported Engines
 
-Copy to:
-- `agent_config/codex/`
-- `agent_config/gemini/`
-- `agent_config/iflow/`
+| Engine | Package |
+|--------|---------|
+| **Codex** | `@openai/codex` |
+| **Gemini CLI** | `@google/gemini-cli` |
+| **iFlow CLI** | `@iflow-ai/iflow-cli` |
+| **OpenCode** | `opencode-ai` |
 
-> Startup imports **credentials only** from `agent_config/*`; settings files are not imported.
+> All engines support both **Auto** and **Interactive** execution modes.
 
-## Supported engines
+## 📖 Documentation
 
-- Codex CLI (`@openai/codex`)
-- Gemini CLI (`@google/gemini-cli`)
-- iFlow CLI (`@iflow-ai/iflow-cli`)
-- OpenCode (`opencode`)
+| Document | Description |
+|----------|-------------|
+| [Architecture Overview](docs/architecture_overview.md) | System design and component map |
+| [AutoSkill Package Guide](docs/autoskill_package_guide.md) | Building skill packages |
+| [Adapter Design](docs/adapter_design.md) | Engine adapter protocol (5-phase pipeline) |
+| [Execution Flow](docs/execution_flow.md) | End-to-end run lifecycle |
+| [API Reference](docs/api_reference.md) | REST API specification |
+| [Frontend Design Guide](docs/developer/frontend_design_guide.md) | Building frontend clients |
+| [Containerization](docs/containerization.md) | Docker deployment guide |
+| [Developer Guide](docs/dev_guide.md) | Contributing and development |
 
-## Disclaimer (Fast-moving Agent CLIs)
+## ⚠️ Disclaimer
 
-Codex, Gemini CLI, iFlow CLI, and OpenCode are evolving quickly. Their config formats,
-CLI behavior, and API details can change in short cycles.
-
-If you hit mismatched config expectations or compatibility errors with newer
-CLI versions, please open an issue directly.
+Codex, Gemini CLI, iFlow CLI, and OpenCode are fast-evolving tools. Their config formats, CLI behavior, and API details may change in short cycles. If you encounter compatibility issues with newer CLI versions, please [open an issue](https://github.com/leike0813/Skill-Runner/issues).
 
 ---
 
-See `docs/` for more details.
+<p align="center">
+  <sub>Made with ❤️ by <a href="https://github.com/leike0813">Joshua Reed</a></sub>
+</p>

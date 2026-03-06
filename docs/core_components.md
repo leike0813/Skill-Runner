@@ -36,14 +36,26 @@
 ### 1.4 Auth — 鉴权编排
 
 | 文件 | 职责 |
-|------|------|
+|------|──────|
 | `server/runtime/auth/session_lifecycle.py` | 鉴权会话生命周期管理 |
 | `server/runtime/auth/session_store.py` | 鉴权会话存储 |
 | `server/runtime/auth/driver_registry.py` | 鉴权驱动注册表 |
 | `server/runtime/auth/callbacks.py` | OAuth 回调处理 |
-| `server/runtime/auth/orchestrators/` | 鉴权编排器（各引擎鉴权流程） |
+| `server/runtime/auth/log_writer.py` | 鉴权日志写入 |
+| `server/runtime/auth/contracts.py` | 鉴权合同接口 |
 
-### 1.5 Observability — 可观测性
+### 1.5 Auth Detection — 鉴权检测
+
+| 文件 | 职责 |
+|------|──────|
+| `server/runtime/auth_detection/detector_registry.py` | 鉴权检测器注册表 |
+| `server/runtime/auth_detection/rule_loader.py` | 检测规则加载 |
+| `server/runtime/auth_detection/rule_registry.py` | 规则注册表 |
+| `server/runtime/auth_detection/service.py` | 检测服务 |
+| `server/runtime/auth_detection/types.py` | 检测类型定义 |
+| `server/runtime/auth_detection/contracts.py` | 检测合同接口 |
+
+### 1.6 Observability — 可观测性
 
 | 文件 | 职责 |
 |------|------|
@@ -60,44 +72,67 @@
 ### 2.1 Orchestration — 编排与执行
 
 | 文件 | 职责 |
-|------|------|
+|------|──────|
 | `server/services/orchestration/job_orchestrator.py` | **编排门面**: 暴露稳定入口（run/cancel/recovery），委托生命周期服务执行主流程 |
 | `server/services/orchestration/run_job_lifecycle_service.py` | run_job 生命周期主流程（preflight/execute/normalize/finalize） |
 | `server/services/orchestration/run_bundle_service.py` | Run bundle 打包与 manifest 生成 |
 | `server/services/orchestration/run_filesystem_snapshot_service.py` | 文件系统快照采集与差异计算 |
 | `server/services/orchestration/run_audit_service.py` | 审计事件写入、done-marker 分类与 attempt 元数据落盘 |
+| `server/services/orchestration/run_audit_contract_service.py` | 审计合同与 attempt 骨架初始化 |
+| `server/services/orchestration/run_auth_orchestration_service.py` | 鉴权编排服务（会话内鉴权流程编排） |
 | `server/services/orchestration/run_interaction_lifecycle_service.py` | 交互式会话生命周期（pending/reply/auto-decide） |
-| `server/services/orchestration/run_recovery_service.py` | 启动恢复与重启对账 |
-| `server/services/orchestration/orchestrator_ports.py` | 编排端口协议（`JobControlPort`） |
-| `server/services/orchestration/run_store.py` | Run 持久化存储（文件系统 + 状态管理） |
-| `server/services/orchestration/run_execution_core.py` | 执行核心逻辑 |
 | `server/services/orchestration/run_interaction_service.py` | 交互服务（pending/reply 管理） |
+| `server/services/orchestration/run_recovery_service.py` | 启动恢复与重启对账 |
+| `server/services/orchestration/run_store.py` | Run 持久化存储（文件系统 + 状态管理） |
+| `server/services/orchestration/run_state_service.py` | Run 状态写入服务（.state/state.json 等） |
+| `server/services/orchestration/run_execution_core.py` | 执行核心逻辑 |
+| `server/services/orchestration/run_projection_service.py` | 投影服务 |
+| `server/services/orchestration/run_service_log_mirror.py` | 服务日志镜像 |
+| `server/services/orchestration/run_skill_materialization_service.py` | Skill 物化服务 |
 | `server/services/orchestration/workspace_manager.py` | 工作区创建与管理 |
+| `server/services/orchestration/run_cleanup_manager.py` | 清理管理 |
+| `server/services/orchestration/run_folder_trust_manager.py` | 信任文件夹管理 |
+| `server/services/orchestration/manifest_artifact_inference.py` | Manifest 产物推断 |
+| `server/services/orchestration/runtime_observability_ports.py` | 可观测性端口 |
+| `server/services/orchestration/runtime_protocol_ports.py` | 协议端口 |
 
 ### 2.2 Engine Management — 引擎管理域
 
 | 文件 | 职责 |
-|------|------|
+|------|──────|
 | `server/services/engine_management/engine_adapter_registry.py` | 引擎适配器注册与查找 |
 | `server/services/engine_management/engine_auth_bootstrap.py` | 引擎鉴权引导 |
 | `server/services/engine_management/engine_auth_flow_manager.py` | 鉴权流程管理 |
+| `server/services/engine_management/engine_auth_strategy_service.py` | 鉴权策略服务（解析 auth_strategy.yaml） |
+| `server/services/engine_management/engine_catalog.py` | 引擎目录查询 |
 | `server/services/engine_management/model_registry.py` | 模型注册与查询 |
+| `server/services/engine_management/engine_model_catalog_lifecycle.py` | 模型目录生命周期管理 |
 | `server/services/engine_management/agent_cli_manager.py` | Agent CLI 安装与版本管理 |
 | `server/services/engine_management/engine_upgrade_manager.py` | 引擎升级管理 |
+| `server/services/engine_management/engine_upgrade_store.py` | 升级任务持久化 |
 | `server/services/engine_management/engine_policy.py` | Skill 引擎策略计算与校验 |
+| `server/services/engine_management/engine_status_cache_service.py` | 引擎状态缓存服务 |
 | `server/services/engine_management/runtime_profile.py` | 运行时环境画像与子进程环境组装 |
 | `server/services/engine_management/engine_command_profile.py` | 引擎命令 profile 合并 |
 | `server/services/engine_management/engine_interaction_gate.py` | 交互会话门控 |
-| `server/services/engine_management/engine_upgrade_store.py` | 升级任务持久化 |
 
 ### 2.3 Platform — 平台能力
 
 | 文件 | 职责 |
-|------|------|
+|------|──────|
 | `server/services/platform/schema_validator.py` | JSON Schema 校验（输入/输出/meta-schema 预检） |
 | `server/services/platform/concurrency_manager.py` | 并发槽管理（max_running_jobs） |
 | `server/services/platform/cache_manager.py` | 缓存管理 |
+| `server/services/platform/cache_key_builder.py` | 缓存键构建 |
+| `server/services/platform/data_reset_service.py` | 数据重置服务 |
 | `server/services/platform/options_policy.py` | 运行时选项策略校验 |
+| `server/services/platform/process_supervisor.py` | 子进程监管 |
+| `server/services/platform/process_termination.py` | 子进程终止策略 |
+| `server/services/platform/process_lease_store.py` | 进程租约存储 |
+| `server/services/platform/run_file_filter_service.py` | 文件过滤服务 |
+| `server/services/platform/system_settings_service.py` | 系统设置服务（UI 可写设置） |
+| `server/services/platform/aiosqlite_compat.py` | SQLite 异步兼容层 |
+| `server/services/platform/async_compat.py` | 异步兼容工具 |
 
 ### 2.4 Skill — Skill 管理
 
@@ -109,6 +144,13 @@
 | `server/services/skill/skill_patcher.py` | Skill 运行时补丁（prompt 注入、输出约束） |
 | `server/services/skill/skill_browser.py` | Skill 浏览服务 |
 | `server/services/skill/temp_skill_run_manager.py` | 临时 Skill 运行管理 |
+### 2.5 UI — UI 服务
+
+| 文件 | 职责 |
+|------|──────|
+| `server/services/ui/engine_shell_capability_provider.py` | 引擎 Shell 能力提供（TUI 命令配置） |
+| `server/services/ui/ui_auth.py` | UI 鉴权服务（Basic Auth） |
+| `server/services/ui/ui_shell_manager.py` | UI Shell 会话管理 |
 
 ---
 
@@ -146,9 +188,14 @@ FastAPI 路由定义，按 API 域划分。
 ## 5. 全局配置
 
 | 文件 | 职责 |
-|------|------|
+|------|──────|
 | `server/config.py` | Pydantic Settings 配置（环境变量 + YAML） |
 | `server/core_config.py` | 核心常量 / 路径约定 |
 | `server/models/` | 全局 Pydantic 模型包 + `server.models` facade 导出 |
 | `server/logging_config.py` | 日志配置 |
 | `server/main.py` | FastAPI 入口 |
+| `server/config_registry/keys.py` | 引擎标识常量（`ENGINE_KEYS`） |
+| `server/config_registry/loaders.py` | 配置加载器 |
+| `server/config_registry/registry.py` | 配置注册表 |
+| `server/contracts/schemas/` | 协议 JSON Schema（`runtime_contract.schema.json` 等） |
+| `server/contracts/invariants/` | 不变量合同（`session_fcmp_invariants.yaml` 等） |

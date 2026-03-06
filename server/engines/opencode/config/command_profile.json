@@ -6,5 +6,6 @@
   "resume": [
     "--format",
     "json"
-  ]
+  ],
+  "ui_shell": []
 }

@@ -6,7 +6,7 @@ Skill Runner 是一个专为 AI Agent 设计的技能执行框架。它允许 LL
 ## 核心设计理念
 1.  **标准化 (Standardization)**: 所有技能遵循统一的定义规范 (`runner.json`, `SKILL.md`) 和输入/输出协议。
 2.  **隔离性 (Isolation)**: 每次技能执行 (Run) 都在独立的工作区目录中进行，互不干扰。
-3.  **可扩展性 (Extensibility)**: 支持多种对接入 (Native, Docker, MCP)，目前核心支持基于 Gemini CLI 和 Codex CLI 的 Native 执行。
+3.  **可扩展性 (Extensibility)**: 支持多种对接入 (Native, Docker, MCP)，目前核心支持基于 Codex CLI、Gemini CLI、iFlow CLI、OpenCode 的 Native 执行（共 4 引擎）。
 4.  **无状态与有状态结合**: 服务本身无状态，但通过文件系统 (`data/runs`) 持久化执行上下文。
 
 ## 系统架构图 (概念)
@@ -20,32 +20,42 @@ graph TD
         Orchestrator[Job Orchestrator]
         Registry[Skill Registry]
         Workspace[Workspace Manager]
-        GeminiAdapter[Gemini Adapter]
         CodexAdapter[Codex Adapter]
+        GeminiAdapter[Gemini Adapter]
+        IFlowAdapter[iFlow Adapter]
+        OpenCodeAdapter[OpenCode Adapter]
     end
     
     subgraph Storage [文件系统]
-        SkillsDir[skills/ (技能定义)]
-        RunsDir[data/runs/ (执行沙箱)]
+        SkillsDir[skills/ 技能定义]
+        RunsDir[data/runs/ 执行沙箱]
     end
     
     subgraph External [外部执行器]
-        GeminiCLI[Gemini CLI]
         CodexCLI[Codex CLI]
+        GeminiCLI[Gemini CLI]
+        IFlowCLI[iFlow CLI]
+        OpenCodeCLI[OpenCode]
     end
 
     API --> Orchestrator
     Orchestrator --> Registry
     Orchestrator --> Workspace
-    Orchestrator --> GeminiAdapter
     Orchestrator --> CodexAdapter
+    Orchestrator --> GeminiAdapter
+    Orchestrator --> IFlowAdapter
+    Orchestrator --> OpenCodeAdapter
     
     Registry --> SkillsDir
     Workspace --> RunsDir
-    GeminiAdapter --> GeminiCLI
     CodexAdapter --> CodexCLI
-    GeminiCLI --> RunsDir
+    GeminiAdapter --> GeminiCLI
+    IFlowAdapter --> IFlowCLI
+    OpenCodeAdapter --> OpenCodeCLI
     CodexCLI --> RunsDir
+    GeminiCLI --> RunsDir
+    IFlowCLI --> RunsDir
+    OpenCodeCLI --> RunsDir
 ```
 
 ## 目录结构约定
@@ -59,11 +69,15 @@ graph TD
 skills/
 ├── demo-prime-number/       # 技能 ID
 │   ├── assets/
-│   │   ├── runner.json      # 核心配置文件：定义元数据、Schema、Prompt等
-│   │   ├── input.schema.json # 文件输入定义
+│   │   ├── runner.json          # 核心配置文件：定义元数据、Schema、Prompt等
+│   │   ├── input.schema.json   # 文件输入定义
 │   │   ├── parameter.schema.json # 参数定义
-│   │   └── gemini_settings.json # 默认配置
-│   ├── SKILL.md             # 技能的 Prompt 模板/核心指令
+│   │   ├── output.schema.json  # 输出定义
+│   │   ├── codex_config.toml   # 可选：Codex 推荐配置
+│   │   ├── gemini_settings.json # 可选：Gemini 推荐配置
+│   │   ├── iflow_settings.json # 可选：iFlow 推荐配置
+│   │   └── opencode.json       # 可选：OpenCode 推荐配置
+│   ├── SKILL.md                 # 技能的 Prompt 模板/核心指令
 │   └── ...
 └── ...
 ```
@@ -76,9 +90,11 @@ data/runs/
 ├── <run_id>/   (内部)
 │   ├── uploads/             # 用户上传的文件存放于此
 │   ├── artifacts/           # 技能生成的产物
-│   ├── logs/                # 执行日志 (stdout, stderr, prompt)
+│   ├── .state/              # run 当前状态真相
+│   ├── .audit/              # 审计日志（按 attempt 编号）
+│   ├── result/              # 最终结构化结果
 │   ├── bundle/              # 运行结果打包 (zip + manifest)
-│   ├── .gemini/             # 运行时临时目录
+│   ├── .<engine>/           # 引擎隔离工作区（.codex/.gemini/.iflow 等）
 │   └── ...
 
 data/requests/
@@ -93,10 +109,11 @@ data/requests/
 - **Web 框架**: FastAPI
 - **模板引擎**: Jinja2 (用于 Prompt 渲染)
 - **校验**: JSON Schema (jsonschema)
-- **后端 AGENT CLI 引擎**: (通过 `subprocess` 调用) 
-  - [Gemini CLI](https://geminicli.com/)
+- **后端 AGENT CLI 引擎**: (通过 `subprocess` 调用)
   - [Codex](https://openai.com/codex/)
+  - [Gemini CLI](https://geminicli.com/)
   - [iFlow CLI](https://cli.iflow.cn/)
+  - [OpenCode](https://opencode.ai/)
 
 ## 日志配置
 日志默认输出到终端与 `data/logs/`。

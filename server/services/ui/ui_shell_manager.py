@@ -1,8 +1,4 @@
-import json
 import os
-import platform
-import shutil
-import signal
 import socket
 import subprocess
 import time
@@ -21,6 +17,12 @@ from server.services.engine_management.engine_interaction_gate import (
     engine_interaction_gate,
 )
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
+from server.services.platform.process_supervisor import process_supervisor
+from server.services.platform.process_termination import terminate_popen_process_tree
+from server.services.ui.engine_shell_capability_provider import (
+    EngineShellCapability,
+    EngineShellCapabilityProvider,
+)
 
 
 class UiShellBusyError(RuntimeError):
@@ -75,6 +77,7 @@ class UiShellSession:
         hard_ttl_sec: int,
         sandbox_status: str = "unknown",
         sandbox_message: str = "",
+        process_lease_id: str | None = None,
     ) -> None:
         self.id = session_id
         self.command = command
@@ -96,6 +99,7 @@ class UiShellSession:
         self._lock = Lock()
         self._start_monotonic = time.monotonic()
         self._process = process
+        self.process_lease_id = process_lease_id
 
     def _mark_terminal(
         self,
@@ -130,28 +134,13 @@ class UiShellSession:
         if self.status in TERMINAL_STATES:
             return
 
-        try:
-            if platform.system().lower().startswith("win"):
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(self.pid)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            else:
-                os.killpg(self.pid, signal.SIGTERM)
-                deadline = time.monotonic() + 3
-                while time.monotonic() < deadline:
-                    if self._process.poll() is not None:
-                        break
-                    time.sleep(0.1)
-                if self._process.poll() is None:
-                    os.killpg(self.pid, signal.SIGKILL)
-        except (OSError, subprocess.SubprocessError, ValueError):
-            pass
-
+        result = terminate_popen_process_tree(self._process)
         code = self._process.poll()
-        self._mark_terminal(reason, exit_code=code, error=message)
+        error_message = message
+        if result.outcome == "failed":
+            detail = f"process_termination_failed:{result.detail}"
+            error_message = f"{message}; {detail}" if message else detail
+        self._mark_terminal(reason, exit_code=code, error=error_message)
 
     def snapshot(self) -> Dict[str, Any]:
         self._refresh_status()
@@ -187,50 +176,25 @@ class UiShellManager:
         agent_manager: Optional[AgentCliManager] = None,
         trust_manager: Optional[TrustManagerProtocol] = None,
         interaction_gate: Optional[EngineInteractionGate] = None,
+        capability_provider: Optional[EngineShellCapabilityProvider] = None,
     ) -> None:
         self.agent_manager = agent_manager or AgentCliManager()
         self.trust_manager = trust_manager or run_folder_trust_manager
         self.interaction_gate = interaction_gate or engine_interaction_gate
+        self.capability_provider = capability_provider or EngineShellCapabilityProvider()
         self._lock = Lock()
         self._active_session: Optional[UiShellSession] = None
+        self._capabilities: Dict[str, EngineShellCapability] = {
+            capability.engine: capability for capability in self.capability_provider.list_capabilities()
+        }
         self._command_specs: Dict[str, CommandSpec] = {
-            "codex": CommandSpec(
-                "codex-tui",
-                "Codex TUI",
-                "codex",
-                (
-                    "--sandbox",
-                    "workspace-write",
-                    "--ask-for-approval",
-                    "never",
-                    "-c",
-                    "features.shell_tool=false",
-                    "-c",
-                    "features.unified_exec=false",
-                ),
-            ),
-            "gemini": CommandSpec(
-                "gemini-tui",
-                "Gemini TUI",
-                "gemini",
-                (
-                    "--sandbox",
-                    "--approval-mode",
-                    "default",
-                ),
-            ),
-            "iflow": CommandSpec(
-                "iflow-tui",
-                "iFlow TUI",
-                "iflow",
-                (),
-            ),
-            "opencode": CommandSpec(
-                "opencode-tui",
-                "OpenCode TUI",
-                "opencode",
-                (),
-            ),
+            capability.engine: CommandSpec(
+                capability.command_id,
+                capability.label,
+                capability.engine,
+                tuple(capability.launch_args),
+            )
+            for capability in self._capabilities.values()
         }
 
     def list_commands(self) -> list[Dict[str, str]]:
@@ -282,89 +246,16 @@ class UiShellManager:
             f"ttyd port {base_port} is already in use; set UI_SHELL_TTYD_PORT to another value."
         )
 
-    def _probe_sandbox_status(self, engine: str) -> tuple[str, str]:
-        if engine == "codex":
-            if os.environ.get("LANDLOCK_ENABLED") == "0":
-                return (
-                    "unsupported",
-                    "LANDLOCK is disabled in current environment; codex inline TUI runs without enforced sandbox.",
-                )
-            return ("supported", "LANDLOCK enabled.")
-        if engine == "gemini":
-            env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
-            path_env = env.get("PATH", os.environ.get("PATH", ""))
-            runtime_errors: list[str] = []
-            for runtime in ("docker", "podman"):
-                runtime_path = shutil.which(runtime, path=path_env)
-                if not runtime_path:
-                    continue
-                try:
-                    result = subprocess.run(
-                        [runtime_path, "info"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=3,
-                    )
-                except (OSError, subprocess.SubprocessError, TypeError, ValueError) as exc:
-                    runtime_errors.append(f"{runtime}: {str(exc)}")
-                    continue
-                if result.returncode == 0:
-                    return (
-                        "supported",
-                        f"{engine} sandbox runtime is available via {runtime}.",
-                    )
-                first_line = ((result.stderr or "").strip() or (result.stdout or "").strip()).splitlines()
-                detail = first_line[0] if first_line else f"exit={result.returncode}"
-                runtime_errors.append(f"{runtime}: {detail}")
-            if runtime_errors:
-                return (
-                    "unsupported",
-                    f"{engine} sandbox runtime is unavailable ({'; '.join(runtime_errors)}).",
-                )
-            return (
-                "unsupported",
-                "gemini sandbox runtime is unavailable (docker/podman not found).",
-            )
-        if engine == "iflow":
-            return (
-                "unsupported",
-                "iFlow inline TUI runs without sandbox. iFlow sandbox requires Docker-image execution, "
-                "which is intentionally outside this inline TUI design.",
-            )
-        if engine == "opencode":
-            return (
-                "unsupported",
-                "OpenCode inline TUI runs without sandbox.",
-            )
-        return ("unknown", "Sandbox capability is unknown for this engine.")
-
-    def _read_gemini_selected_auth_type(self) -> Optional[str]:
-        settings_path = self.agent_manager.profile.agent_home / ".gemini" / "settings.json"
-        if not settings_path.exists():
-            return None
-        try:
-            payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-        security = payload.get("security")
-        if not isinstance(security, dict):
-            return None
-        auth = security.get("auth")
-        if not isinstance(auth, dict):
-            return None
-        selected = auth.get("selectedType")
-        if isinstance(selected, str) and selected.strip():
-            return selected.strip()
-        return None
-
-    def _is_gemini_api_key_auth(self) -> bool:
-        selected = self._read_gemini_selected_auth_type()
-        if not selected:
-            return False
-        return "api-key" in selected.lower()
+    def _probe_sandbox_status(
+        self,
+        engine: str,
+        *,
+        capability: EngineShellCapability | None = None,
+    ) -> tuple[str, str]:
+        resolved = capability or self._capabilities.get(engine)
+        if resolved is None:
+            return ("unknown", "Sandbox capability is unknown for this engine.")
+        return resolved.sandbox_probe_strategy.probe(agent_manager=self.agent_manager, engine=engine)
 
     def _cleanup_stale_session_locked(self) -> None:
         if self._active_session is None:
@@ -372,69 +263,36 @@ class UiShellManager:
         session = self._active_session
         state = session.snapshot()
         if state.get("terminal"):
+            self._release_session_lease(session, reason="ui_shell_stale_cleanup")
             self.interaction_gate.release("ui_tui", session.id)
             self._cleanup_trust_for_session(session)
             self._active_session = None
             return
         raise UiShellBusyError("Another inline TUI session is already running")
 
-    def _inject_trust_for_session(self, engine: str, session_dir: Path) -> None:
-        if engine in {"codex", "gemini"}:
+    def _release_session_lease(self, session: UiShellSession, *, reason: str) -> None:
+        process_supervisor.release(session.process_lease_id, reason=reason)
+        session.process_lease_id = None
+
+    def _inject_trust_for_session(self, capability: EngineShellCapability, session_dir: Path) -> None:
+        if capability.trust_bootstrap_parent:
             # Keep the session parent trusted so CLI startup does not ask trust interactively.
             self.trust_manager.bootstrap_parent_trust(self._session_root())
-        self.trust_manager.register_run_folder(engine, session_dir)
-
-    def _write_json(self, path: Path, payload: Dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self.trust_manager.register_run_folder(capability.engine, session_dir)
 
     def _prepare_session_security(
         self,
-        engine: str,
+        capability: EngineShellCapability,
         session_dir: Path,
         env: Dict[str, str],
         *,
         sandbox_enabled: bool,
     ) -> None:
-        # TUI session security is intentionally isolated from RUN-path adapter policies.
-        if engine == "gemini":
-            self._write_json(
-                session_dir / ".gemini" / "settings.json",
-                {
-                    "general": {
-                        "enableAutoUpdate": False,
-                    },
-                    "tools": {
-                        "sandbox": sandbox_enabled,
-                        "autoAccept": False,
-                        "exclude": ["run_shell_command", "ShellTool"],
-                    },
-                    "security": {
-                        "disableYoloMode": True,
-                    },
-                },
-            )
-            return
-        if engine == "iflow":
-            self._write_json(
-                session_dir / ".iflow" / "settings.json",
-                {
-                    "sandbox": False,
-                    "autoAccept": False,
-                    "approvalMode": "default",
-                    "excludeTools": ["ShellTool"],
-                },
-            )
-            return
-        if engine == "opencode":
-            # Project-level config for inline TUI: deny tool calls and external folder access.
-            self._write_json(
-                session_dir / "opencode.json",
-                {
-                    "permission": "deny",
-                },
-            )
-            return
+        capability.session_security_strategy.prepare(
+            session_dir=session_dir,
+            env=env,
+            sandbox_enabled=sandbox_enabled,
+        )
 
     def _cleanup_trust_for_session(self, session: UiShellSession) -> None:
         try:
@@ -492,6 +350,7 @@ class UiShellManager:
         if data.get("terminal"):
             with self._lock:
                 if self._active_session is session:
+                    self._release_session_lease(session, reason="ui_shell_snapshot_terminal")
                     self.interaction_gate.release("ui_tui", session.id)
                     self._cleanup_trust_for_session(session)
                     self._active_session = None
@@ -500,7 +359,10 @@ class UiShellManager:
     def start_session(self, engine: str) -> Dict[str, Any]:
         normalized_engine = engine.strip().lower()
         spec = self._command_specs.get(normalized_engine)
+        capability = self._capabilities.get(normalized_engine)
         if spec is None:
+            raise UiShellValidationError(f"Unsupported engine: {engine}")
+        if capability is None:
             raise UiShellValidationError(f"Unsupported engine: {engine}")
 
         with self._lock:
@@ -516,13 +378,12 @@ class UiShellManager:
 
             sandbox_status, sandbox_message = self._probe_sandbox_status(spec.engine)
             sandbox_enabled = sandbox_status == "supported"
-            if spec.engine == "gemini" and self._is_gemini_api_key_auth():
-                sandbox_enabled = False
-                sandbox_status = "unsupported"
-                sandbox_message = (
-                    "gemini inline TUI disables --sandbox when "
-                    "security.auth.selectedType is gemini-api-key."
-                )
+            sandbox_enabled, sandbox_status, sandbox_message = capability.auth_hint_strategy.apply(
+                agent_manager=self.agent_manager,
+                sandbox_enabled=sandbox_enabled,
+                sandbox_status=sandbox_status,
+                sandbox_message=sandbox_message,
+            )
             session_id = str(uuid.uuid4())
             try:
                 self.interaction_gate.acquire(
@@ -537,9 +398,11 @@ class UiShellManager:
             ttyd_host = self._ttyd_bind_host()
             ttyd_port = self._pick_ttyd_port(ttyd_host)
             trust_registered = False
+            process: subprocess.Popen[Any] | None = None
+            lease_id: str | None = None
 
             try:
-                self._inject_trust_for_session(spec.engine, session_dir)
+                self._inject_trust_for_session(capability, session_dir)
                 trust_registered = True
 
                 env = self.agent_manager.profile.build_subprocess_env(os.environ.copy())
@@ -553,14 +416,14 @@ class UiShellManager:
                 env.pop("GEMINI_SANDBOX", None)
                 env.pop("IFLOW_SANDBOX", None)
                 self._prepare_session_security(
-                    spec.engine,
+                    capability,
                     session_dir,
                     env,
                     sandbox_enabled=sandbox_enabled,
                 )
                 launch_args = list(spec.args)
-                if spec.engine == "gemini" and not sandbox_enabled:
-                    launch_args = [item for item in launch_args if item != "--sandbox"]
+                if capability.sandbox_arg and not sandbox_enabled:
+                    launch_args = [item for item in launch_args if item != capability.sandbox_arg]
 
                 process = self._spawn_ttyd_process(
                     ttyd_path=ttyd_path,
@@ -572,12 +435,16 @@ class UiShellManager:
                     env=env,
                 )
 
-                if spec.engine == "gemini" and "--sandbox" in launch_args:
+                if (
+                    capability.retry_without_sandbox_on_early_exit
+                    and capability.sandbox_arg
+                    and capability.sandbox_arg in launch_args
+                ):
                     # In non-fail-closed mode, if sandbox launch exits immediately, retry once without sandbox.
                     time.sleep(0.4)
                     first_exit_code = process.poll()
                     if first_exit_code is not None:
-                        retry_args = [item for item in launch_args if item != "--sandbox"]
+                        retry_args = [item for item in launch_args if item != capability.sandbox_arg]
                         process = self._spawn_ttyd_process(
                             ttyd_path=ttyd_path,
                             ttyd_host=ttyd_host,
@@ -590,8 +457,20 @@ class UiShellManager:
                         sandbox_status = "unsupported"
                         sandbox_message = (
                             f"{spec.engine} sandbox launch exited early (code {first_exit_code}); "
-                            "retried without --sandbox."
+                            f"retried without {capability.sandbox_arg}."
                         )
+                assert process is not None
+                lease_id = process_supervisor.register_popen_process(
+                    owner_kind="ui_shell",
+                    owner_id=session_id,
+                    process=process,
+                    engine=spec.engine,
+                    metadata={
+                        "session_dir": str(session_dir),
+                        "ttyd_host": ttyd_host,
+                        "ttyd_port": ttyd_port,
+                    },
+                )
             except Exception as exc:
                 # Boundary rollback path: retain trust/gate cleanup behavior for unknown launch failures.
                 logger.exception(
@@ -613,9 +492,17 @@ class UiShellManager:
                             session_dir,
                             exc_info=True,
                         )
+                if isinstance(lease_id, str) and lease_id:
+                    process_supervisor.terminate_lease_sync(
+                        lease_id,
+                        reason="ui_shell_start_failed",
+                    )
+                elif process is not None:
+                    terminate_popen_process_tree(process)
                 self.interaction_gate.release("ui_tui", session_id)
                 raise
 
+            assert process is not None
             session = UiShellSession(
                 session_id=session_id,
                 command=spec,
@@ -627,6 +514,7 @@ class UiShellManager:
                 hard_ttl_sec=self._get_hard_ttl(),
                 sandbox_status=sandbox_status,
                 sandbox_message=sandbox_message,
+                process_lease_id=lease_id,
             )
             self._active_session = session
 
@@ -646,6 +534,7 @@ class UiShellManager:
         data["active"] = True
         with self._lock:
             if self._active_session is session:
+                self._release_session_lease(session, reason="ui_shell_stopped")
                 self.interaction_gate.release("ui_tui", session.id)
                 self._cleanup_trust_for_session(session)
                 self._active_session = None

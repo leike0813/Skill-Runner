@@ -6,5 +6,6 @@
   "resume": [
     "--yolo",
     "--thinking"
-  ]
+  ],
+  "ui_shell": []
 }

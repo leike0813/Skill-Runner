@@ -3,7 +3,6 @@ from typing import Iterable
 
 from server.config import config
 from server.engines.common.trust_registry import create_default_trust_registry
-from server.services.engine_management.runtime_profile import get_runtime_profile
 
 class RunFolderTrustManager:
     """Dispatch run-folder trust operations to engine-registered strategies."""
@@ -14,11 +13,8 @@ class RunFolderTrustManager:
         gemini_trusted_path: Path | None = None,
         runs_root: Path | None = None,
     ) -> None:
-        profile = get_runtime_profile()
-        self.codex_config_path = codex_config_path or (profile.agent_home / ".codex" / "config.toml")
-        self.gemini_trusted_path = gemini_trusted_path or (
-            profile.agent_home / ".gemini" / "trustedFolders.json"
-        )
+        self.codex_config_path = codex_config_path
+        self.gemini_trusted_path = gemini_trusted_path
         self.runs_root = (runs_root or Path(config.SYSTEM.RUNS_DIR)).resolve()
         self._registry = create_default_trust_registry(
             codex_config_path=self.codex_config_path,

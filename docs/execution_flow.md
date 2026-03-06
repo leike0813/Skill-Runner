@@ -58,6 +58,7 @@
    - Codex: `codex exec --full-auto --skip-git-repo-check --json -p skill-runner <prompt>`（不支持 landlock 时回退 `--yolo`）
    - OpenCode: `opencode run --format json --model <provider/model> <prompt>`
    - 设置工作目录为 `data/runs/<uuid>/`。
+   > **注意**: 以上命令行示例为简化展示。实际 CLI 参数由各引擎的 `adapter_profile.json` + `command_profile.json` 驱动，由引擎 `CommandBuilder` 动态构建。
 2. **Run Folder Trust 生命周期（Codex/Gemini）**:
    - 在真正调用 CLI 前，服务会将本次 `run_dir` 写入全局 trust 配置。
      - Codex: `~/.codex/config.toml` -> `projects."<run_dir>".trust_level = "trusted"`

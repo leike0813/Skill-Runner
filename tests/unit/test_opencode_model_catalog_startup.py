@@ -53,6 +53,15 @@ async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
         "server.services.orchestration.job_orchestrator.job_orchestrator.recover_incomplete_runs_on_startup",
         AsyncMock(),
     )
+    monkeypatch.setattr("server.services.platform.process_supervisor.process_supervisor.start", Mock())
+    monkeypatch.setattr(
+        "server.services.platform.process_supervisor.process_supervisor.reap_orphan_leases_on_startup",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.services.platform.process_supervisor.process_supervisor.stop",
+        AsyncMock(return_value=None),
+    )
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.orchestration.runtime_protocol_ports.install_runtime_protocol_ports", lambda: None)
     monkeypatch.setattr(
@@ -61,7 +70,7 @@ async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
     )
     monkeypatch.setattr(
         "server.main.config",
-        SimpleNamespace(SYSTEM=SimpleNamespace(OPENCODE_MODELS_STARTUP_PROBE=True)),
+        SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_MODELS_CATALOG_STARTUP_PROBE=True)),
     )
 
     async with main.lifespan(main.app):

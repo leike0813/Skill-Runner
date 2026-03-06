@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.agent_cli_manager import CommandResult
 from server.services.engine_management.runtime_profile import RuntimeProfile
@@ -199,3 +201,31 @@ def test_probe_resume_capability_failure_keeps_resumable_profile(tmp_path, monke
     profile = manager.resolve_interactive_profile("iflow", 900)
     assert profile.reason == "forced_resumable:resume_flag_missing"
     assert profile.session_timeout_sec == 900
+
+
+@pytest.mark.parametrize(
+    ("engine", "source_name", "target_relpath"),
+    [
+        ("codex", "auth.json", ".codex/auth.json"),
+        ("gemini", "oauth_creds.json", ".gemini/oauth_creds.json"),
+        ("iflow", "iflow_accounts.json", ".iflow/iflow_accounts.json"),
+        ("opencode", "auth.json", ".local/share/opencode/auth.json"),
+    ],
+)
+def test_import_credentials_uses_profile_rules_for_all_engines(
+    tmp_path: Path,
+    engine: str,
+    source_name: str,
+    target_relpath: str,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+
+    source_root = tmp_path / "src"
+    engine_dir = source_root / engine
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    (engine_dir / source_name).write_text("{}", encoding="utf-8")
+
+    copied = manager.import_credentials(source_root)
+    assert source_name in copied[engine]
+    assert (manager.profile.agent_home / target_relpath).exists()

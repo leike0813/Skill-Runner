@@ -1,252 +1,298 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Skill-Runner Icon" width="160" />
+  <img src="assets/icon.png" alt="Skill Runner" width="140" />
 </p>
 
-# Skill Runner
+<h1 align="center">Skill Runner</h1>
 
-Skill Runner 是一个轻量级的 REST 服务，用于统一封装 Codex、Gemini CLI、iFlow CLI、OpenCode CLI 等成熟 Agent 工具，
-以“Skill”协议提供可复用、可验证的自动化能力。
+<p align="center">
+  <strong>AI Agent 技能统一执行框架</strong>
+</p>
 
-## 功能概览
+<p align="center">
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
+  <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+</p>
 
-- 多引擎执行：Codex / Gemini CLI / iFlow CLI / OpenCode CLI
-- Skill 协议：`runner.json` + `SKILL.md` + 输入/参数/输出 schema
-- 执行隔离：每次 run 独立工作目录
-- 结构化输出：JSON 结果 + artifacts + bundle
-- 缓存与复用：同输入同参数可复用结果
-- Web 管理界面：`/ui` 查看技能并上传安装 Skill 包
-- Skill 浏览：`/ui/skills/{skill_id}` 可查看包结构并只读预览文件
-- Engine 管理：`/ui/engines` 查看引擎状态、触发升级、查看升级日志
-- Model 管理：`/ui/engines/{engine}/models` 查看引擎模型清单（OpenCode 使用 runtime probe cache，非快照）
-- 内嵌 TUI 终端：`/ui/engines` 页面内直接启动引擎 TUI（受控单会话）
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="README_FR.md">Français</a> ·
+  <a href="README_JA.md">日本語</a>
+</p>
 
-## 构建与启动（容器）
+---
 
-建议先在宿主机准备挂载目录，避免容器创建导致权限问题：
+Skill Runner 将成熟的 AI Agent CLI 工具 — **Codex**、**Gemini CLI**、**iFlow CLI** 与 **OpenCode** — 统一封装在标准化的 Skill 协议之下，提供确定性执行、结构化产物管理和内置 Web 管理界面。
+
+## ✨ 核心亮点
+
+<table>
+<tr>
+<td align="center" width="25%"><strong>🧩 可插拔技能</strong><br/>即插即用的技能包<br/><sub>Schema 驱动的输入输出</sub></td>
+<td align="center" width="25%"><strong>🤖 多引擎</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>统一适配协议</sub></td>
+<td align="center" width="25%"><strong>🔄 双模式</strong><br/>全自动 &amp; 交互式执行<br/><sub>支持多轮对话</sub></td>
+<td align="center" width="25%"><strong>📦 结构化输出</strong><br/>JSON + 产物 + Bundle<br/><sub>隔离的合同驱动执行</sub></td>
+</tr>
+</table>
+
+## 🧩 可插拔技能设计
+
+Skill Runner 的核心优势在于其**可插拔技能架构** — 每个自动化任务都被打包为自包含、引擎无关的技能包，可以直接安装、共享和执行，无需任何修改。
+
+### 什么是 Skill？
+
+Skill Runner 的技能基于 [Open Agent Skills](https://agentskills.io) 开放标准构建 — 与 Claude Code、Codex CLI、Cursor 等工具使用相同的格式。
+Skill Runner 在此标准上扩展为 **AutoSkill** 超集，增加了执行合同（`runner.json`）和 Schema 校验文件：
+
 ```
+my-skill/
+├── SKILL.md                 # 提示词指令（Open Agent Skills 标准）
+├── assets/
+│   ├── runner.json          # 执行合同（Skill Runner 扩展）
+│   ├── input.schema.json    # 输入 schema（JSON Schema）
+│   ├── parameter.schema.json
+│   └── output.schema.json   # 输出 schema — 执行后自动校验
+├── references/              # 参考文档（可选）
+└── scripts/                 # 辅助脚本（可选）
+```
+
+> 任何标准的 Open Agent Skills 包（包含 `SKILL.md` 的文件夹）都可以在 Skill Runner 上运行。
+> 添加 `assets/runner.json` + Schema 文件即可升级为 **AutoSkill** — 支持自动执行、Schema 校验和可复现结果。
+
+### 设计优势
+
+- **标准化**：兼容 Open Agent Skills 生态 — 技能可跨平台移植。
+- **引擎无关**：一次编写，在任意支持的引擎上运行。同一个 Skill 可以在 Codex、Gemini、iFlow 或 OpenCode 上执行。
+- **Schema 驱动的 I/O**：输入、参数和输出均由 JSON Schema 定义 — Runner 自动校验。
+- **隔离执行**：每次 Run 拥有独立的工作区和标准化的输入输出合同 — 不存在跨 Run 干扰。
+- **零集成安装**：将 Skill 目录放入 `skills/`（或通过 API/UI 上传）即可立即使用。
+- **缓存复用**：相同输入和参数可以复用已有结果 — 无需重复调用引擎。
+
+### 执行模式
+
+每个 Skill 在 `runner.json` 中声明其支持的执行模式：
+
+- **`auto`** — 全自动模式：引擎将提示词执行到底，无需人工干预。
+- **`interactive`** — 交互模式：引擎可能暂停并提出问题；用户（或上游系统）通过交互 API 提交回复。
+
+> 📖 完整规范：[AutoSkill 构建指南](docs/autoskill_package_guide.md) · [文件协议](docs/file_protocol.md)
+
+## 🚀 快速开始
+
+### Docker（推荐）
+
+```bash
 mkdir -p skills agent_config data
-```
-> `data` 目录可选：仅在需要持久化运行记录/调试时挂载。
-
-构建镜像：
-```
-docker build -t skill-runner:local .
-```
-
-使用 Compose 启动（推荐）：
-```
 docker compose up --build
 ```
 
-默认端口：`http://localhost:8000/v1`
-管理界面：`http://localhost:8000/ui`
+- **API 地址**：http://localhost:8000/v1
+- **管理界面**：http://localhost:8000/ui
 
-> 详细容器化说明请见 `docs/containerization.md`。
+或独立运行：
 
-如需为管理界面开启基础鉴权，可设置：
-- `UI_BASIC_AUTH_ENABLED=true`
-- `UI_BASIC_AUTH_USERNAME=<用户名>`
-- `UI_BASIC_AUTH_PASSWORD=<密码>`
+```bash
+docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
+```
 
-说明：
-- 这些变量仅在运行时注入，不会固化在镜像 `ENV` 中。
-- 可在 `docker-compose.yml` 的 `services.api.environment` 中设置，或通过 `docker run -e` 传入。
+### 本地开发
 
-示例（`docker run`）：
+```bash
+# Linux / macOS
+./scripts/deploy_local.sh
+
+# Windows (PowerShell)
+.\scripts\deploy_local.ps1
+```
+
+<details>
+<summary>📋 <strong>进阶配置</strong></summary>
+
+#### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `SKILL_RUNNER_DATA_DIR` | 运行数据目录 | `data/` |
+| `SKILL_RUNNER_AGENT_HOME` | Agent 隔离配置目录 | 自动 |
+| `SKILL_RUNNER_AGENT_CACHE_DIR` | Agent 缓存根目录 | 自动 |
+| `SKILL_RUNNER_NPM_PREFIX` | 受管 CLI 安装前缀 | 自动 |
+| `SKILL_RUNNER_RUNTIME_MODE` | `local` 或 `container` | 自动 |
+
+#### UI Basic Auth
+
 ```bash
 docker run --rm -p 8000:8000 -p 7681:7681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.3.3
+  leike0813/skill-runner:v0.4.0
 ```
 
-## 本地运行（非容器）
+</details>
 
-推荐使用一键脚本（自动启用本地隔离运行时）：
+## 🖥️ Web 管理界面
 
-Linux/macOS:
-```
-./scripts/deploy_local.sh
-```
+通过 `/ui` 访问内置管理界面：
 
-Windows (PowerShell):
-```powershell
-.\scripts\deploy_local.ps1
-```
+- **Skill 浏览器** — 查看已安装技能，浏览包结构与文件内容
+- **引擎管理** — 监控引擎状态，触发升级，查看升级日志
+- **模型目录** — 浏览和管理引擎模型快照
+- **内嵌 TUI** — 在浏览器中直接启动引擎终端（受控单会话）
 
-> Windows 本地若使用内嵌 TUI 终端，请确保安装 `pywinpty`（项目依赖已声明）。
+## 🔑 引擎鉴权
 
-脚本会统一设置：
-- `SKILL_RUNNER_RUNTIME_MODE=local`
-- `SKILL_RUNNER_AGENT_CACHE_DIR`（独立于 `data/`）
-- `SKILL_RUNNER_AGENT_HOME`（隔离的 Agent 配置目录）
-- `SKILL_RUNNER_NPM_PREFIX`（managed prefix）
+Skill Runner 提供多种鉴权方式，从全托管到手动均可。
 
-可选环境变量：
-- `SKILL_RUNNER_DATA_DIR`：运行数据目录（默认 `data/`）
-- `SKILL_RUNNER_AGENT_CACHE_DIR`：Agent 缓存根目录
-- `SKILL_RUNNER_AGENT_HOME`：Agent 隔离配置目录
-- `SKILL_RUNNER_NPM_PREFIX`：Engine CLI 受管安装目录
+### 推荐方式：OAuth Proxy（通过管理 UI）
 
-如需一键验证 UI Basic Auth，可直接使用脚本：
-```
-./scripts/start_ui_auth_server.sh
-```
+首选方案 — 通过管理 UI（`/ui/engines`）内置的 OAuth Proxy 进行鉴权：
 
-可覆盖默认凭据/端口：
-```
-UI_BASIC_AUTH_USERNAME=admin \
-UI_BASIC_AUTH_PASSWORD=secret \
-PORT=8011 \
-./scripts/start_ui_auth_server.sh
-```
+1. 打开引擎管理页面。
+2. 选择引擎，选择 **OAuth Proxy** 作为鉴权方式。
+3. 完成基于浏览器的 OAuth 授权流程。
+4. 凭据自动存储和管理。
 
-快速验证（未鉴权应返回 401）：
-```
-curl -i http://127.0.0.1:8000/ui
-curl -i -u admin:change-me http://127.0.0.1:8000/ui
-```
+这同样支持运行中的会话式鉴权：如果引擎在执行过程中需要鉴权，前端可以展示**会话内鉴权挑战** — Run 暂停，用户完成 OAuth，执行自动恢复。
 
-快速诊断 Engine 鉴权/路径来源（本地/容器）：
+### 备选方式：CLI Delegate
+
+CLI Delegate（委托编排）启动引擎的原生登录流程。与 OAuth Proxy 相比：
+- **原生保真** — 使用引擎内置的鉴权方式，完全原生。
+- **更低风险** — 无代理层；凭据直接流向引擎。
+
+同样在管理 UI 的引擎管理界面中可用。
+
+### 其他方式
+
+<details>
+<summary>点击展开传统鉴权方式</summary>
+
+**内嵌 TUI** — 管理 UI 内嵌了引擎终端（`/ui/engines`），可以直接在浏览器中运行 CLI 登录命令。
+
+**容器内 CLI 登录**：
 ```bash
-./scripts/check_agent_auth.sh local
-./scripts/check_agent_auth.sh container
+docker exec -it <container_id> /bin/bash
+# 在容器内运行对应 CLI 登录流程
 ```
 
-网页内嵌终端入口（需开启 UI 并通过 Basic Auth）：
-```
-http://127.0.0.1:8000/ui/engines
-```
-说明：
-- 仅支持预置引擎 TUI（不支持任意 shell 命令）
-- 全局同一时刻仅允许一个内嵌终端会话
-- 依赖 `ttyd`（本地部署需已安装；容器镜像内已预装）
-- 容器部署请映射 `7681:7681`（默认 ttyd 端口）
-- UI 会展示 `sandbox_status` 作为可观测信息；默认不阻断 TUI 启动
-- 内嵌 TUI 会话中，Gemini 在容器沙箱运行时可用时会显式追加 `--sandbox`
-- iFlow 内嵌 TUI 当前固定为非沙箱运行；UI 会显示告警（其沙箱依赖 Docker 镜像执行，不符合本内嵌 TUI 设计）
-- 内嵌 TUI 使用最小权限策略：Codex/Gemini/iFlow 的 shell 工具均被禁用
-- 内嵌 TUI 安全配置与 RUN 执行路径（`/v1/jobs`）隔离
+**手动复制凭据** — 在宿主机登录后，将凭据文件复制到 `agent_config/<engine>/`：
 
-## API 示例（关键）
+| 引擎 | 凭据文件 |
+|------|---------|
+| Codex | `auth.json` |
+| Gemini | `google_accounts.json`、`oauth_creds.json` |
+| iFlow | `iflow_accounts.json`、`oauth_creds.json` |
+| OpenCode | `auth.json`、`antigravity-accounts.json`（可选） |
 
-列出技能：
-```
+> 启动时仅导入鉴权凭据文件，不导入 settings 配置文件（保证设置隔离）。
+
+</details>
+
+## 📡 API 与客户端设计
+
+```bash
+# 列出可用 Skill
 curl -sS http://localhost:8000/v1/skills
-```
 
-列出引擎与模型：
-```
-curl -sS http://localhost:8000/v1/engines
-curl -sS http://localhost:8000/v1/engines/gemini/models
-```
-
-查看 Engine Manifest（需 Basic Auth 开启后携带凭据）：
-```
-curl -sS -u admin:change-me http://localhost:8000/v1/engines/codex/models/manifest
-```
-
-创建升级任务并查询状态（需 Basic Auth 开启后携带凭据）：
-```
-curl -sS -u admin:change-me -X POST http://localhost:8000/v1/engines/upgrades \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"single","engine":"gemini"}'
-curl -sS -u admin:change-me http://localhost:8000/v1/engines/upgrades/<request_id>
-```
-
-创建任务：
-```
+# 创建任务
 curl -sS -X POST http://localhost:8000/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
     "engine": "gemini",
     "parameter": { "language": "en" },
-    "model": "gemini-3-pro-preview",
-    "runtime_options": { "no_cache": false, "debug": false }
+    "model": "gemini-3-pro-preview"
   }'
-```
 
-上传文件（zip）：
-```
-curl -sS -X POST http://localhost:8000/v1/jobs/<request_id>/upload \
-  -F "file=@inputs.zip"
-```
-
-查询状态与结果：
-```
-curl -sS http://localhost:8000/v1/jobs/<request_id>
+# 获取结果
 curl -sS http://localhost:8000/v1/jobs/<request_id>/result
 ```
 
-获取产物清单与 bundle：
+### 构建前端
+
+Skill Runner 提供**双 SSE 通道**用于实时 Run 观测：
+
+| 通道 | 端点 | 用途 |
+|------|------|------|
+| **Chat** | `GET /v1/jobs/{id}/chat?cursor=N` | 预投影的聊天气泡 — 适用于对话式 UI |
+| **Events** | `GET /v1/jobs/{id}/events?cursor=N` | 完整 FCMP 协议事件 — 适用于管理/调试工具 |
+
+两个通道均支持**基于 cursor 的重连**和**历史查询**（`/chat/history`、`/events/history`）以补偿断连。
+
+典型的前端交互流程：
+
 ```
-curl -sS http://localhost:8000/v1/jobs/<request_id>/artifacts
-curl -sS -o run_bundle.zip http://localhost:8000/v1/jobs/<request_id>/bundle
+POST /v1/jobs → (可选上传) → SSE /chat → 渲染气泡
+                            ↕ waiting_user → POST /interaction/reply
+                            → terminal → GET /result + /bundle
 ```
 
-Codex 的 `model` 格式：
-- `model_name@reasoning_effort`，例如 `gpt-5.2-codex@high`
+> 📖 前端设计指南：[Frontend Design Guide](docs/developer/frontend_design_guide.md)
+> 📖 API 参考：[API Reference](docs/api_reference.md)
 
-完整接口说明见 `docs/api_reference.md`。
+## 🏗️ 系统架构
 
-## 架构概览（简述）
+```mermaid
+graph TD
+    Client[客户端 / LLM] -->|HTTP| API[FastAPI]
+    
+    subgraph 核心层
+        API --> Orchestrator[Job Orchestrator]
+        Orchestrator --> Registry[Skill Registry]
+        Orchestrator --> Workspace[Workspace Manager]
+    end
 
-核心组件：
-- Skill Registry：扫描并加载 `skills/`
-- Workspace Manager：准备 run 目录结构
-- Job Orchestrator：校验输入/输出、执行流程、打包结果
-- Engine Adapters：对接 Codex / Gemini / iFlow CLI
+    subgraph 引擎层
+        Orchestrator --> Codex[Codex Adapter]
+        Orchestrator --> Gemini[Gemini Adapter]
+        Orchestrator --> IFlow[iFlow Adapter]
+        Orchestrator --> OpenCode[OpenCode Adapter]
+    end
 
-执行流程：
-1) POST /v1/jobs  
-2) 可选上传 inputs.zip  
-3) 执行引擎 → 产物落盘  
-4) 输出校验与 bundle 打包  
-5) GET 结果与下载
+    subgraph 存储层
+        Registry --> Skills[skills/]
+        Workspace --> Runs[data/runs/]
+    end
 
-## Agent 工具登录方式
-
-方式一：进入容器内 TUI 登录
+    Codex --> CodexCLI[Codex CLI]
+    Gemini --> GeminiCLI[Gemini CLI]
+    IFlow --> IFlowCLI[iFlow CLI]
+    OpenCode --> OpenCodeCLI[OpenCode]
 ```
-docker exec -it <container_id> /bin/bash
-```
-在容器内运行对应 CLI 登录（会生成凭据文件）。
 
-方式二：在宿主机或其他机器登录后复制凭据
+**执行流程**：`POST /v1/jobs` → 上传输入 → 引擎执行 → 输出校验 → `GET /v1/jobs/{id}/result`
 
-需要的凭据文件：
-- Codex: `auth.json`
-- Gemini: `google_accounts.json`, `oauth_creds.json`
-- iFlow: `iflow_accounts.json`, `oauth_creds.json`
-- OpenCode: `auth.json`（必需）, `antigravity-accounts.json`（可选，插件凭据）
+## 🔌 支持的引擎
 
-复制到挂载目录：
-- `agent_config/codex/`
-- `agent_config/gemini/`
-- `agent_config/iflow/`
-- `agent_config/opencode/`
+| 引擎 | 包名 |
+|------|------|
+| **Codex** | `@openai/codex` |
+| **Gemini CLI** | `@google/gemini-cli` |
+| **iFlow CLI** | `@iflow-ai/iflow-cli` |
+| **OpenCode** | `opencode-ai` |
 
-> 启动时仅导入鉴权凭据文件，不导入 settings 配置文件（保证设置隔离）。
+> 所有引擎均支持 **Auto** 和 **Interactive** 两种执行模式。
 
-## 支持的 Agent 工具
+## 📖 文档导航
 
-- Codex CLI (`@openai/codex`)
-- Gemini CLI (`@google/gemini-cli`)
-- iFlow CLI (`@iflow-ai/iflow-cli`)
-- OpenCode CLI (`opencode-ai`)
+| 文档 | 说明 |
+|------|------|
+| [架构总览](docs/architecture_overview.md) | 系统设计与组件说明 |
+| [AutoSkill 构建指南](docs/autoskill_package_guide.md) | Skill 包构建规范 |
+| [适配器设计](docs/adapter_design.md) | 引擎适配协议（5 阶段管线） |
+| [执行流程](docs/execution_flow.md) | 端到端 Run 生命周期 |
+| [API 参考](docs/api_reference.md) | REST API 接口规范 |
+| [前端设计指南](docs/developer/frontend_design_guide.md) | 构建前端客户端 |
+| [容器化部署](docs/containerization.md) | Docker 部署指南 |
+| [开发者指南](docs/dev_guide.md) | 贡献与开发说明 |
 
-## 免责声明（关于 Agent CLI 快速迭代）
+## ⚠️ 免责声明
 
-Codex / Gemini CLI / iFlow CLI 目前迭代较快，配置格式、命令行为或接口细节可能在短时间内发生变化。
-
-如果你发现以下情况，请直接提交 Issue：
-- 项目中的配置与最新 Agent CLI 版本不一致
-- 升级后出现兼容性报错或行为变化
-
-这类问题属于预期风险，我们会按反馈尽快修复适配。
+Codex、Gemini CLI、iFlow CLI 和 OpenCode 目前迭代较快，配置格式、命令行为或接口细节可能在短时间内发生变化。如果你遇到与新版 CLI 的兼容性问题，请直接 [提交 Issue](https://github.com/leike0813/Skill-Runner/issues)。
 
 ---
 
-更多细节请参考 `docs/` 目录。 
+<p align="center">
+  <sub>Made with ❤️ by <a href="https://github.com/leike0813">Joshua Reed</a></sub>
+</p>

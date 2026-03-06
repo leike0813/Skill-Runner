@@ -106,7 +106,7 @@ Runner 将是一个 Python 脚本，负责读取 YAML 并在本地**黑盒调用
 ### 目录规划
 ```text
 tests/
-├── unit/                     # 单元测试（120+ test files）
+├── unit/                     # 单元测试（160+ test files）
 │   ├── test_schema_validator.py        # Platform: Schema 校验
 │   ├── test_gemini_adapter.py          # Engines: Gemini 适配器
 │   ├── test_codex_adapter.py           # Engines: Codex 适配器
@@ -175,6 +175,7 @@ tests/
     *   `test_runtime_core_import_boundaries.py` — 导入边界检查
     *   `test_runtime_no_orchestration_imports.py` — Runtime 不依赖 Orchestration
     *   `test_services_topology_rules.py` — 服务拓扑规则
+    *   `test_runtime_auth_no_engine_coupling.py` — Auth Runtime 不耦合引擎
 
 ### 工具栈
 - **Framework**: `pytest`

@@ -71,7 +71,8 @@ N4. 不实现分布式队列/多节点（单机运行）
 
 | 子包 | 职责 |
 |------|------|
-| `services/orchestration/` | `JobOrchestrator`、`RunStore`（sqlite）、`WorkspaceManager`、`EngineAdapterRegistry`、`EngineAuthFlowManager`、`ModelRegistry`、`EngineUpgradeManager`、`AgentCliManager` 等 |
+| `services/orchestration/` | `JobOrchestrator`、`RunStore`（sqlite）、`WorkspaceManager`、`RunStateService`、`RunProjectionService` 等 |
+| `services/engine_management/` | `EngineAdapterRegistry`、`EngineAuthFlowManager`、`ModelRegistry`、`EngineUpgradeManager`、`AgentCliManager` 等 |
 | `services/platform/` | `SchemaValidator`（JSON Schema 校验）、`ConcurrencyManager`、`OptionsPolicy`、`CacheManager` |
 | `services/skill/` | `SkillRegistry`、`SkillPackageManager`（安装/卸载）、`SkillPackageValidator`、`SkillPatcher`（运行时补丁）、`TempSkillRunManager` |
 
@@ -245,12 +246,14 @@ skill-name/
 ================================================================================
 详细设计见 `docs/adapter_design.md`。
 
-### 6.1 统一 4 阶段管线
-所有引擎适配器继承 `BaseExecutionAdapter`（`server/runtime/adapter/base_execution_adapter.py`），实现统一的 4 阶段管线：
+### 6.1 统一 5 阶段管线
+所有引擎适配器继承 `BaseExecutionAdapter`（`server/runtime/adapter/base_execution_adapter.py`），实现统一的 5 阶段管线：
 
 ```
 _construct_config(skill, run_dir, options) → Path
     ↓ 合并 default + skill_recommended + user_options + enforced 配置
+_setup_environment(skill, run_dir) → None
+    ↓ 工作区环境准备（skill 副本安装、配置注入等）
 _build_prompt(skill, run_dir, input_data) → str
     ↓ Jinja2 模板渲染 + 文件引用解析
 _execute_process(cmd, run_dir, env) → (exit_code, stdout, stderr)
@@ -261,6 +264,7 @@ _parse_output(raw_stdout) → AdapterTurnResult
 
 方法签名：
 - `_construct_config(self, skill: SkillManifest, run_dir: Path, options: dict[str, Any]) → Path`
+- `_setup_environment(self, skill: SkillManifest, run_dir: Path) → None`
 - `_build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: dict[str, Any]) → str`
 - `async _execute_process(self, cmd: list[str], run_dir: Path, env: dict[str, str]) → tuple[int, str, str]`
 - `_parse_output(self, raw_stdout: str) → AdapterTurnResult`
@@ -522,7 +526,7 @@ Run 状态字段：
 ================================================================================
 | 类别 | 技术 |
 |------|------|
-| 语言 | Python 3.12+ |
+| 语言 | Python 3.11+ |
 | 框架 | FastAPI + Uvicorn |
 | 数据校验 | Pydantic v2（请求/响应模型） + jsonschema（输出校验） |
 | 模板引擎 | Jinja2（prompt 渲染 + UI 模板） |
@@ -533,7 +537,7 @@ Run 状态字段：
 
 容器化说明：
 - 镜像仅提供运行时，不打包 agent CLI。
-- CLI 配置默认在容器内 `/root`，通过 volume 持久化。
+- CLI 配置通过 `SKILL_RUNNER_AGENT_HOME` 环境变量隔离，通过 volume 持久化。
 - 数据目录容器内默认 `/data`，主机端通过 `SKILL_RUNNER_DATA_DIR` 覆盖。
 
 ================================================================================

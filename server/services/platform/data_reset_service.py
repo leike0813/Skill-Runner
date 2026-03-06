@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ...config import config
+from ..engine_management.engine_model_catalog_lifecycle import (
+    engine_model_catalog_lifecycle,
+)
 
 
 DATA_RESET_CONFIRMATION_TEXT = "RESET SKILL RUNNER DATA"
@@ -75,8 +78,14 @@ class DataResetBusyError(RuntimeError):
 
 
 class DataResetService:
-    def __init__(self, cfg: Any = config) -> None:
+    def __init__(
+        self,
+        cfg: Any = config,
+        *,
+        model_catalog_lifecycle: Any = engine_model_catalog_lifecycle,
+    ) -> None:
         self._cfg = cfg
+        self._model_catalog_lifecycle = model_catalog_lifecycle
         self._execution_lock = threading.Lock()
 
     @staticmethod
@@ -117,7 +126,7 @@ class DataResetService:
         if options.include_logs:
             optional_paths.append(Path(self._cfg.SYSTEM.LOGGING.DIR))
         if options.include_engine_catalog:
-            optional_paths.append(Path(self._cfg.SYSTEM.OPENCODE_MODELS_CACHE_PATH))
+            optional_paths.extend(Path(path) for path in self._model_catalog_lifecycle.cache_paths())
         if options.include_agent_status:
             optional_paths.append(data_dir / "agent_status.json")
         if getattr(self._cfg.SYSTEM, "SETTINGS_FILE", None):

@@ -44,8 +44,10 @@ from ..services.engine_management.engine_auth_strategy_service import engine_aut
 from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
-from ..engines.opencode.models.catalog_service import opencode_model_catalog
 from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
+from ..services.engine_management.engine_model_catalog_lifecycle import (
+    engine_model_catalog_lifecycle,
+)
 from ..services.engine_management.agent_cli_manager import AgentCliManager
 from ..services.skill.skill_browser import (
     build_preview_payload,
@@ -94,7 +96,7 @@ LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
 
 def _get_engine_models_context(engine: str, *, error: str | None = None, message: str | None = None) -> dict[str, object]:
     view = model_registry.get_manifest_view(engine)
-    snapshots_supported = engine != "opencode"
+    snapshots_supported = model_registry.supports_model_snapshots(engine)
     return {
         "engine": engine,
         "view": view,
@@ -783,13 +785,19 @@ async def ui_engine_models(request: Request, engine: str, error: str | None = No
     )
 
 
-@router.post("/engines/opencode/models/refresh", response_class=HTMLResponse)
-async def ui_engine_models_refresh_opencode(request: Request):
+@router.post("/engines/{engine}/models/refresh", response_class=HTMLResponse)
+async def ui_engine_models_refresh(request: Request, engine: str):
     try:
-        await opencode_model_catalog.refresh(reason="ui_manual_refresh")
+        if not model_registry.supports_runtime_catalog_refresh(engine):
+            return _render_engine_models_panel(
+                request,
+                engine=engine,
+                error=f"Engine '{engine}' does not support runtime catalog refresh",
+            )
+        await engine_model_catalog_lifecycle.refresh(engine, reason="ui_manual_refresh")
         return _render_engine_models_panel(
             request,
-            engine="opencode",
+            engine=engine,
             message="Model list refreshed",
         )
     except ValueError as exc:
@@ -797,7 +805,7 @@ async def ui_engine_models_refresh_opencode(request: Request):
     except (OSError, RuntimeError, TypeError) as exc:
         return _render_engine_models_panel(
             request,
-            engine="opencode",
+            engine=engine,
             error=str(exc),
         )
 
@@ -812,9 +820,9 @@ async def ui_engine_models_add_snapshot(
     notes: list[str] | None = Form(None),
     supported_effort: list[str] | None = Form(None),
 ):
-    if engine == "opencode":
+    if not model_registry.supports_model_snapshots(engine):
         return RedirectResponse(
-            url=f"/ui/engines/{engine}/models?error=Engine+%27opencode%27+does+not+support+model+snapshots",
+            url=f"/ui/engines/{engine}/models?error=Engine+%27{quote_plus(engine)}%27+does+not+support+model+snapshots",
             status_code=303,
         )
 

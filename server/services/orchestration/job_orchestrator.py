@@ -59,6 +59,7 @@ from server.runtime.protocol.factories import make_fcmp_event
 from server.runtime.protocol.live_publish import fcmp_event_publisher
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.logging.structured_trace import log_event
+from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.config import config
 
 
@@ -310,13 +311,21 @@ class JobOrchestrator:
         skill_id: str,
         engine_name: str,
     ) -> Optional[SkillManifest]:
-        workspace_prefix = {
-            "codex": ".codex",
-            "gemini": ".gemini",
-            "iflow": ".iflow",
-            "opencode": ".opencode",
-        }.get(engine_name, f".{engine_name}")
-        skill_dir = run_dir / workspace_prefix / "skills" / skill_id
+        workspace_subdir = f".{engine_name}"
+        profile_path = (
+            Path(config.SYSTEM.ROOT)
+            / "server"
+            / "engines"
+            / engine_name
+            / "adapter"
+            / "adapter_profile.json"
+        )
+        try:
+            profile = load_adapter_profile(engine_name, profile_path)
+            workspace_subdir = profile.attempt_workspace.workspace_subdir
+        except RuntimeError:
+            pass
+        skill_dir = run_dir / workspace_subdir / "skills" / skill_id
         runner_path = skill_dir / "assets" / "runner.json"
         if not runner_path.exists() or not runner_path.is_file():
             return None

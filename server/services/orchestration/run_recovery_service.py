@@ -10,6 +10,7 @@ from server.models import InteractiveErrorCode, RunStatus
 from server.runtime.logging.structured_trace import log_event
 from server.runtime.session.statechart import SessionEvent, waiting_recovery_event
 from server.services.orchestration.workspace_manager import workspace_manager
+from server.services.platform.process_supervisor import process_supervisor
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,40 @@ class RunRecoveryService:
                 await adapter.cancel_run_process(run_id)
 
     async def cleanup_orphan_runtime_bindings(self, records: list[dict[str, Any]]) -> None:
-        _ = records
+        reports = process_supervisor.consume_startup_orphan_reports()
+        if not reports:
+            return
+
+        request_by_run: dict[str, str] = {}
+        for record in records:
+            record_run_id = str(record.get("run_id") or "").strip()
+            record_request_id = str(record.get("request_id") or "").strip()
+            if record_run_id and record_request_id:
+                request_by_run[record_run_id] = record_request_id
+
+        for report in reports:
+            run_id: str | None = str(report.get("run_id") or "").strip() or None
+            request_id: str | None = str(report.get("request_id") or "").strip() or None
+            if request_id is None and run_id is not None:
+                request_id = request_by_run.get(run_id)
+            outcome_raw = str(report.get("outcome") or "unknown").strip().lower()
+            outcome = "error" if outcome_raw == "failed" else "ok"
+            log_event(
+                logger,
+                event="recovery.orphan_process.reaped",
+                phase="recovery",
+                outcome=outcome,
+                level=logging.WARNING if outcome == "error" else logging.INFO,
+                request_id=request_id,
+                run_id=run_id,
+                attempt=report.get("attempt_number") if isinstance(report.get("attempt_number"), int) else None,
+                engine=str(report.get("engine") or "").strip() or None,
+                owner_kind=str(report.get("owner_kind") or "").strip() or None,
+                owner_id=str(report.get("owner_id") or "").strip() or None,
+                pid=report.get("pid"),
+                error_code="STARTUP_ORPHAN_REAP_FAILED" if outcome == "error" else "STARTUP_ORPHAN_REAP",
+                error_type=str(report.get("detail") or "").strip() or None,
+            )
 
 
 run_recovery_service = RunRecoveryService()

@@ -40,5 +40,28 @@
     "manifest_path": "../models/manifest.json",
     "models_root": "../models",
     "seed_path": null
+  },
+  "cli_management": {
+    "package": "@google/gemini-cli",
+    "binary_candidates": ["gemini", "gemini.cmd", "gemini.exe"],
+    "credential_imports": [
+      { "source": "google_accounts.json", "target_relpath": ".gemini/google_accounts.json" },
+      { "source": "oauth_creds.json", "target_relpath": ".gemini/oauth_creds.json" }
+    ],
+    "credential_policy": {
+      "mode": "all_of_sources",
+      "sources": ["google_accounts.json", "oauth_creds.json"],
+      "settings_validator": null
+    },
+    "resume_probe": {
+      "help_hints": ["--resume"],
+      "dynamic_args": ["--resume", "probe-session", "--help"]
+    },
+    "layout": {
+      "extra_dirs": [".gemini"],
+      "bootstrap_target_relpath": ".gemini/settings.json",
+      "bootstrap_format": "json",
+      "normalize_strategy": null
+    }
   }
 }

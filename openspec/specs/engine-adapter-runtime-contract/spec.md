@@ -287,3 +287,31 @@ adapter/runtime auth handlers MUST NOT 再以 readiness-like 字段表达 sessio
 - **THEN** 该状态 MUST 来自显式 completion path
 - **AND** MUST NOT 来自凭据存在性推断
 
+### Requirement: Adapter MUST 通过统一进程治理注册并释放 run attempt 进程
+运行时 adapter 在创建引擎子进程后 MUST 注册 lease，并在任意退出路径 release；取消执行 MUST 通过统一终止器。
+
+#### Scenario: 正常完成释放 lease
+- **WHEN** run attempt 正常结束
+- **THEN** 对应 lease 状态变为 closed
+
+#### Scenario: 取消执行统一终止
+- **WHEN** 收到取消请求
+- **THEN** adapter 使用统一终止器处理进程树
+- **AND** lease 最终关闭
+
+### Requirement: Platform cache fingerprint SHALL resolve engine defaults via adapter profile
+`cache_key_builder` MUST 使用 adapter profile 的 `config_assets.skill_defaults_path`，并且 MUST NOT 再硬编码 engine 默认配置文件名。
+
+#### Scenario: 计算技能指纹
+- **WHEN** 平台为指定 engine 计算 skill fingerprint
+- **THEN** 默认配置文件路径来自 adapter profile
+- **AND** 平台层不包含 engine 文件名分支
+
+### Requirement: Runtime adapter profile loader SHALL use unified engine catalog
+Runtime adapter profile loader MUST read supported engines from a unified engine catalog source, and MUST NOT maintain a local hard-coded engine source-of-truth.
+
+#### Scenario: 引擎列表更新
+- **WHEN** 统一 engine catalog 增减 engine
+- **THEN** profile loader 使用更新后的列表
+- **AND** 无需同步修改本地硬编码引擎常量
+
