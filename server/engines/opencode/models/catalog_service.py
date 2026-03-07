@@ -266,6 +266,13 @@ class OpencodeModelCatalog:
                     )
             except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 logger.warning("Failed to refresh opencode model catalog", exc_info=True)
+                if "opencode CLI not found" in str(exc):
+                    report_path = Path(config.SYSTEM.DATA_DIR) / "agent_bootstrap_report.json"
+                    logger.warning(
+                        "Opencode model probe missing CLI. Check bootstrap diagnostics report=%s and engine status cache table in runs.db=%s",
+                        report_path,
+                        config.SYSTEM.RUNS_DB,
+                    )
                 if self._cache.get("models"):
                     payload = deepcopy(self._cache)
                     payload["status"] = "stale_cache"

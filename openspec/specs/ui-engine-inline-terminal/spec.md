@@ -2,7 +2,6 @@
 
 ## Purpose
 定义引擎管理页面内嵌终端面板的 xterm.js 集成和 WebSocket 连接约束。
-
 ## Requirements
 ### Requirement: 系统 MUST 提供受控的 UI 鉴权终端会话
 系统 MUST 在 `/ui/engines` 页面内提供终端会话能力，并在 managed 环境中执行预置引擎命令。
@@ -90,3 +89,16 @@
 - **WHEN** 用户点击启动按钮但当前引擎 sandbox 不可用
 - **THEN** 页面立即展示错误反馈
 - **AND** 启动按钮保持可见以便用户重试
+
+### Requirement: 内嵌终端默认端口 MUST 使用高位默认值
+系统 MUST 将 `UI_SHELL_TTYD_PORT` 默认值设置为高位端口，降低与宿主机系统 ttyd 服务冲突概率。
+
+#### Scenario: 未配置环境变量
+- **WHEN** 运行环境未设置 `UI_SHELL_TTYD_PORT`
+- **THEN** 内嵌终端默认端口为 `17681`
+
+#### Scenario: 显式覆盖端口
+- **WHEN** 用户设置 `UI_SHELL_TTYD_PORT=<custom_port>`
+- **THEN** 系统使用该端口
+- **AND** 仍执行现有端口可用性校验逻辑
+

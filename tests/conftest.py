@@ -31,7 +31,6 @@ def _isolate_persistence_root(tmp_path):
     old_tmp_uploads_dir = config.SYSTEM.TMP_UPLOADS_DIR
     old_runs_db = config.SYSTEM.RUNS_DB
     old_skill_installs_db = config.SYSTEM.SKILL_INSTALLS_DB
-    old_engine_upgrades_db = config.SYSTEM.ENGINE_UPGRADES_DB
     old_skill_installs_dir = config.SYSTEM.SKILL_INSTALLS_DIR
     old_skills_archive_dir = config.SYSTEM.SKILLS_ARCHIVE_DIR
     old_skills_staging_dir = config.SYSTEM.SKILLS_STAGING_DIR
@@ -61,7 +60,6 @@ def _isolate_persistence_root(tmp_path):
     config.SYSTEM.TMP_UPLOADS_DIR = str(test_data_dir / "tmp_uploads")
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.SYSTEM.SKILL_INSTALLS_DB = str(tmp_path / "runs.db")
-    config.SYSTEM.ENGINE_UPGRADES_DB = str(tmp_path / "engine_upgrades.db")
     config.SYSTEM.SKILL_INSTALLS_DIR = str(tmp_path / "skill_installs")
     config.SYSTEM.SKILLS_ARCHIVE_DIR = str(tmp_path / "skills" / ".archive")
     config.SYSTEM.SKILLS_STAGING_DIR = str(tmp_path / "skills" / ".staging")
@@ -92,7 +90,6 @@ def _isolate_persistence_root(tmp_path):
         config.SYSTEM.TMP_UPLOADS_DIR = old_tmp_uploads_dir
         config.SYSTEM.RUNS_DB = old_runs_db
         config.SYSTEM.SKILL_INSTALLS_DB = old_skill_installs_db
-        config.SYSTEM.ENGINE_UPGRADES_DB = old_engine_upgrades_db
         config.SYSTEM.SKILL_INSTALLS_DIR = old_skill_installs_dir
         config.SYSTEM.SKILLS_ARCHIVE_DIR = old_skills_archive_dir
         config.SYSTEM.SKILLS_STAGING_DIR = old_skills_staging_dir

@@ -495,6 +495,9 @@ async def ui_engines(request: Request):
             "auth_session": engine_auth_flow_manager.get_active_session_snapshot(),
             "opencode_auth_providers": opencode_providers,
             "auth_ui_capabilities": engine_auth_strategy_service.list_ui_capabilities(),
+            "auth_ui_high_risk_capabilities": (
+                engine_auth_strategy_service.list_ui_high_risk_capabilities()
+            ),
             "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
         },
     )

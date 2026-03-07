@@ -6,9 +6,6 @@
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_status", default="Status:") }}</strong> <span id="run-status">{{ t("client.observe_loading", default="loading") }}</span></div>
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_pending_id", default="Pending ID:") }}</strong> <span id="pending-id">-</span></div>
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_cursor", default="Cursor:") }}</strong> <span id="run-cursor">0</span></div>
-        <div style="flex: 1 1 220px;">
-            <a class="btn btn-secondary" href="/runs">{{ t("client.nav_runs", default="Runs") }}</a>
-        </div>
     </div>
 </section>
 
@@ -77,7 +74,14 @@
 <section class="card" style="margin-top: 16px;">
     <div class="reply-actions" style="justify-content: space-between;">
         <h3 style="margin: 0;">{{ t("client.observe_run_file_tree", default="Run File Tree") }}</h3>
-        <button class="btn btn-secondary" id="file-tree-toggle" type="button">{{ t("client.observe_show_files", default="Show Files") }}</button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <a
+                class="btn btn-secondary file-toolbar-btn"
+                id="file-bundle-download"
+                href="/api/runs/{{ request_id }}/bundle/download{% if run_source != 'installed' %}?source={{ run_source }}{% endif %}"
+            >{{ t("client.observe_download_bundle", default="Download Bundle") }}</a>
+            <button class="btn btn-secondary file-toolbar-btn" id="file-tree-toggle" type="button">{{ t("client.observe_show_files", default="Show Files") }}</button>
+        </div>
     </div>
     <div id="file-tree-section" class="hidden" style="margin-top: 10px;">
         <div class="file-tree-layout">
@@ -263,6 +267,19 @@
         display: flex;
         align-items: center;
         gap: 12px;
+    }
+    .file-toolbar-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        min-height: 34px;
+        padding: 8px 14px;
+        line-height: 1.2;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        text-decoration: none;
     }
     .file-entry {
         margin-bottom: 6px;

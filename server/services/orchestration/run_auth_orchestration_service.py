@@ -46,6 +46,10 @@ _CONVERSATION_METHOD_MAP: dict[str, AuthMethod] = {
     "authorization_code": AuthMethod.AUTHORIZATION_CODE,
     "api_key": AuthMethod.API_KEY,
 }
+_HIGH_RISK_SHORT_LABEL = "High risk!"
+_HIGH_RISK_NOTICE = (
+    "This third-party login path may violate Google policies and could lead to account suspension."
+)
 
 
 def _utc_now() -> datetime:
@@ -1209,6 +1213,8 @@ class RunAuthOrchestrationService:
         }
         prompt_text = f"Authentication is required{provider_hint}. Choose how to continue."
         hint_text = "Choose an authentication method."
+        if any(self._is_conversation_method_high_risk(engine, provider_id, method) for method in methods):
+            hint_text = f"{hint_text} {_HIGH_RISK_SHORT_LABEL} {_HIGH_RISK_NOTICE}"
         return PendingAuthMethodSelection(
             engine=engine,
             provider_id=provider_id,
@@ -1224,7 +1230,15 @@ class RunAuthOrchestrationService:
                 "prompt": prompt_text,
                 "hint": hint_text,
                 "options": [
-                    {"label": method_labels.get(method, str(method.value)), "value": method.value}
+                    {
+                        "label": self._render_method_label(
+                            method=method,
+                            base_label=method_labels.get(method, str(method.value)),
+                            engine=engine,
+                            provider_id=provider_id,
+                        ),
+                        "value": method.value,
+                    }
                     for method in methods
                 ],
             },
@@ -1359,34 +1373,63 @@ class RunAuthOrchestrationService:
         provider_id: str | None,
         auth_method: AuthMethod,
     ) -> tuple[AuthChallengeKind, bool, AuthSubmissionKind | None, str]:
-        _ = engine
-        _ = provider_id
+        is_high_risk = self._is_conversation_method_high_risk(engine, provider_id, auth_method)
+
+        def _append_risk(prompt: str) -> str:
+            if not is_high_risk:
+                return prompt
+            return f"{prompt} {_HIGH_RISK_SHORT_LABEL} {_HIGH_RISK_NOTICE}"
+
         if auth_method == AuthMethod.CALLBACK:
             return (
                 AuthChallengeKind.CALLBACK_URL,
                 True,
                 AuthSubmissionKind.CALLBACK_URL,
-                "Open the authorization link and paste the final callback URL here.",
+                _append_risk("Open the authorization link and paste the final callback URL here."),
             )
         if auth_method == AuthMethod.DEVICE_AUTH:
             return (
                 AuthChallengeKind.OAUTH_LINK,
                 False,
                 None,
-                "Open the authorization link and complete device authentication in the browser.",
+                _append_risk("Open the authorization link and complete device authentication in the browser."),
             )
         if auth_method == AuthMethod.AUTHORIZATION_CODE:
             return (
                 AuthChallengeKind.AUTHORIZATION_CODE,
                 True,
                 AuthSubmissionKind.AUTHORIZATION_CODE,
-                "Open the authorization link and paste the authorization code here.",
+                _append_risk("Open the authorization link and paste the authorization code here."),
             )
         return (
             AuthChallengeKind.API_KEY,
             True,
             AuthSubmissionKind.API_KEY,
-            "Paste the API key here to continue.",
+            _append_risk("Paste the API key here to continue."),
+        )
+
+    def _render_method_label(
+        self,
+        *,
+        method: AuthMethod,
+        base_label: str,
+        engine: str,
+        provider_id: str | None,
+    ) -> str:
+        if self._is_conversation_method_high_risk(engine, provider_id, method):
+            return f"{base_label} ({_HIGH_RISK_SHORT_LABEL})"
+        return base_label
+
+    def _is_conversation_method_high_risk(
+        self,
+        engine: str,
+        provider_id: str | None,
+        method: AuthMethod,
+    ) -> bool:
+        return engine_auth_strategy_service.is_conversation_method_high_risk(
+            engine=engine,
+            provider_id=provider_id,
+            conversation_method=method.value,
         )
 
     def _build_challenge_instructions(

@@ -1,6 +1,6 @@
 {
   "engine": "codex",
-  "version": "0.89.0",
+  "version": "0.99.0",
   "models": [
     {
       "id": "gpt-5.1-codex-mini",

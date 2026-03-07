@@ -594,6 +594,39 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert "result/result.json" in preview_partial.text
         assert "answer" in preview_partial.text
 
+        download = await _request(
+            app,
+            "GET",
+            "/api/runs/req-e2e-1/bundle/download",
+        )
+        assert download.status_code == 200
+        assert download.headers.get("content-type", "").startswith("application/zip")
+        content_disposition = download.headers.get("content-disposition", "")
+        assert "attachment;" in content_disposition
+        assert "req-e2e-1.bundle.zip" in content_disposition
+        with zipfile.ZipFile(io.BytesIO(download.content), mode="r") as archive:
+            assert "result/result.json" in archive.namelist()
+
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_language_query_sets_cookie_and_preserves_query():
+    app = create_app()
+    fake_backend = FakeBackend()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(app, "GET", "/runs?foo=1&bar=2&lang=fr")
+        assert response.status_code == 200
+        cookie_header = response.headers.get("set-cookie", "")
+        assert "lang=fr" in cookie_header
+        assert "Max-Age=31536000" in cookie_header
+        assert "Path=/" in cookie_header
+
+        assert "foo=1" in response.text
+        assert "bar=2" in response.text
+        assert "lang=ja" in response.text
     finally:
         app.dependency_overrides.clear()
 

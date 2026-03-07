@@ -440,3 +440,48 @@ Engine model refresh actions in UI MUST route through a unified catalog lifecycl
 - **THEN** 系统展开该事件详情并展示结构化信息
 - **AND** 若事件包含 raw_ref，用户可触发回跳预览
 
+### Requirement: Engine 管理页内嵌终端入口 MUST 与统一 ttyd 端口策略一致
+系统 MUST 保证 Engine 管理页的内嵌终端入口与统一 `UI_SHELL_TTYD_PORT` 策略一致，不依赖固定 `7681` 常量。
+
+#### Scenario: 默认部署访问内嵌终端
+- **WHEN** 用户通过默认部署进入 `/ui/engines`
+- **THEN** 内嵌终端链接使用会话返回的 `ttyd_port`
+- **AND** 默认端口为 `17681`
+
+#### Scenario: 自定义端口访问内嵌终端
+- **WHEN** 用户通过环境变量修改 `UI_SHELL_TTYD_PORT`
+- **THEN** 页面使用后端返回的会话端口访问 ttyd
+- **AND** 不要求前端改写固定端口常量
+
+### Requirement: Engine 管理页 MUST 在高风险鉴权选项上显示醒目风险标记
+系统 MUST 在 `/ui/engines` 的鉴权方式菜单中，为高风险方法显示简短风险标记，且该标记来源于策略文件。
+
+#### Scenario: OpenCode Google in oauth_proxy
+- **GIVEN** 用户在管理页选择 `transport=oauth_proxy`
+- **AND** 选择 OpenCode provider `google`
+- **WHEN** 页面渲染鉴权方式菜单
+- **THEN** `callback` / `auth_code_or_url` 选项 MUST 显示 `(High risk!)` 标记
+
+#### Scenario: OpenCode Google in cli_delegate
+- **GIVEN** 用户在管理页选择 `transport=cli_delegate`
+- **AND** 选择 OpenCode provider `google`
+- **WHEN** 页面渲染鉴权方式菜单
+- **THEN** `auth_code_or_url` 选项 MUST 显示 `(High risk!)` 标记
+
+### Requirement: 管理页鉴权方法菜单 MUST 仅使用策略能力矩阵
+系统 MUST 从后端策略能力矩阵渲染 OpenCode 方法菜单，禁止前端本地 fallback 硬编码。
+
+#### Scenario: provider transport method resolution
+- **WHEN** 页面根据 provider + transport 渲染方法菜单
+- **THEN** 方法列表 MUST 仅来自后端注入的 capability payload
+- **AND** 当 capability 为空时 MUST 显示“无可用方式”错误，不进行本地推断
+
+### Requirement: 管理端 System Console MUST 提供系统日志浏览能力
+管理 UI MUST 在 `/ui/settings`（文案语义为 System Console）提供日志浏览模块，支持系统日志与 bootstrap 日志的查询与分页展示，并与现有日志设置、数据重置模块并存。
+
+#### Scenario: system console shows log explorer controls
+- **WHEN** 用户打开 `/ui/settings`
+- **THEN** 页面显示 System Console 标题
+- **AND** 显示 Log Explorer 的 source、关键词、级别、时间范围与 Load more 控件
+- **AND** 不影响原有 logging settings 与 data reset 控件
+

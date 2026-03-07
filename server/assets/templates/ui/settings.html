@@ -1,6 +1,6 @@
 {% extends "ui/base.html" %}
 
-{% block title %}{{ t("ui.settings.page_title", default="Skill Runner Settings") }}{% endblock %}
+{% block title %}{{ t("ui.settings.page_title", default="System Console") }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -42,6 +42,50 @@
         border: 1px solid #fecaca;
         background: #fef2f2;
         color: #991b1b;
+    }
+    .log-list {
+        margin-top: 10px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+        max-height: 420px;
+        overflow: auto;
+        padding: 8px;
+        display: grid;
+        gap: 8px;
+    }
+    .log-item {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: #f8fafc;
+        display: grid;
+        gap: 4px;
+    }
+    .log-meta {
+        font-size: 12px;
+        color: #6b7280;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .log-message {
+        font-size: 13px;
+        color: #111827;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .log-raw {
+        margin-top: 2px;
+        font-size: 12px;
+        color: #4b5563;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 96px;
+        overflow: auto;
+        border-top: 1px dashed #d1d5db;
+        padding-top: 4px;
     }
     .danger-card {
         border: 1px solid #fecaca;
@@ -129,16 +173,15 @@
 {% block content %}
 <div class="layout">
     <div class="card">
-        <div class="row" style="justify-content:space-between;">
-            <div>
-                <h1 style="margin:0 0 8px;">{{ t("ui.settings.title", default="设置") }}</h1>
-                <div class="muted">{{ t("ui.settings.subtitle", default="Manage logging settings and execute protected data reset operations.") }}</div>
-            </div>
-            <a class="btn btn-secondary" href="/ui">{{ t("ui.common.back_home", default="返回首页") }}</a>
-        </div>
+        {% set header_title = t("ui.settings.title", default="System Console") %}
+        {% set header_subtitle = t("ui.settings.subtitle", default="Inspect system/bootstrap logs, manage runtime logging settings, and execute protected maintenance operations.") %}
+        {% set header_back_href = "/ui" %}
+        {% set header_back_label = t("ui.common.back_home", default="返回首页") %}
+        {% include "ui/partials/page_header.html" %}
     </div>
 
     {% include "ui/partials/settings_logging_panel.html" %}
+    {% include "ui/partials/settings_log_explorer_panel.html" %}
     {% include "ui/partials/settings_reset_panel.html" %}
 </div>
 
@@ -174,9 +217,16 @@
         dryRunPrefix: {{ t("ui.settings.reset.dry_run_prefix", default="Dry-run preview") | tojson }},
         deletePlanTitle: {{ t("ui.settings.reset.delete_plan_title", default="Delete targets") | tojson }},
         recreatePlanTitle: {{ t("ui.settings.reset.recreate_plan_title", default="Recreate dirs") | tojson }},
+        logReadFailed: {{ t("ui.settings.log_explorer.read_failed", default="Log query failed") | tojson }},
+        logReadFailedNetwork: {{ t("ui.settings.log_explorer.read_failed_network", default="Log query failed: network or service error") | tojson }},
+        logEmpty: {{ t("ui.settings.log_explorer.empty", default="No matched logs") | tojson }},
+        logLoadMore: {{ t("ui.settings.log_explorer.load_more", default="Load more") | tojson }},
+        logNoMore: {{ t("ui.settings.log_explorer.no_more", default="No more logs") | tojson }},
+        logSummaryPrefix: {{ t("ui.settings.log_explorer.summary_prefix", default="Matched") | tojson }},
     };
     const settingsEndpoint = "/v1/management/system/settings";
     const resetEndpoint = "/v1/management/system/reset-data";
+    const logsEndpoint = "/v1/management/system/logs/query";
     const loggingForm = document.getElementById("logging-settings-form");
     const loggingResult = document.getElementById("logging-settings-result");
     const confirmationText = {{ reset_confirmation_text | tojson }};
@@ -186,10 +236,116 @@
     const executeBtn = document.getElementById("danger-reset-execute-btn");
     const confirmInput = document.getElementById("danger-reset-confirm-input");
     const resultBox = document.getElementById("danger-reset-result");
+    const logSourceEl = document.getElementById("log-query-source");
+    const logLevelEl = document.getElementById("log-query-level");
+    const logKeywordEl = document.getElementById("log-query-keyword");
+    const logFromEl = document.getElementById("log-query-from");
+    const logToEl = document.getElementById("log-query-to");
+    const logResultEl = document.getElementById("log-query-result");
+    const logListEl = document.getElementById("log-query-list");
+    const logSubmitBtn = document.getElementById("log-query-submit-btn");
+    const logClearBtn = document.getElementById("log-query-clear-btn");
+    const logLoadMoreBtn = document.getElementById("log-query-load-more-btn");
+    let logCursor = 0;
+    let logTotalMatched = 0;
 
     function setStatus(target, text, kind) {
         target.className = "status-box " + kind;
         target.textContent = text;
+    }
+
+    function setLogSummary(count, total) {
+        setStatus(logResultEl, `${I18N.logSummaryPrefix}: ${count}/${total}`, "success");
+    }
+
+    function renderLogItem(row) {
+        const item = document.createElement("div");
+        item.className = "log-item";
+        const level = row.level || "UNKNOWN";
+        const ts = row.ts || "-";
+        const file = row.file || "-";
+        const lineNo = Number.isInteger(row.line_no) ? row.line_no : 0;
+        const meta = document.createElement("div");
+        meta.className = "log-meta";
+        meta.textContent = `${ts} | ${level} | ${file}:${lineNo}`;
+        const message = document.createElement("div");
+        message.className = "log-message";
+        message.textContent = String(row.message || row.raw || "");
+        const raw = document.createElement("div");
+        raw.className = "log-raw";
+        raw.textContent = String(row.raw || "");
+        item.appendChild(meta);
+        item.appendChild(message);
+        item.appendChild(raw);
+        return item;
+    }
+
+    function appendLogs(items) {
+        if (!Array.isArray(items)) {
+            return;
+        }
+        for (const row of items) {
+            logListEl.appendChild(renderLogItem(row || {}));
+        }
+    }
+
+    function buildLogQueryParams() {
+        const params = new URLSearchParams();
+        params.set("source", (logSourceEl.value || "system").trim());
+        params.set("cursor", String(logCursor));
+        params.set("limit", "200");
+        const q = (logKeywordEl.value || "").trim();
+        if (q) {
+            params.set("q", q);
+        }
+        const level = (logLevelEl.value || "").trim();
+        if (level) {
+            params.set("level", level);
+        }
+        const fromTs = (logFromEl.value || "").trim();
+        if (fromTs) {
+            params.set("from_ts", fromTs);
+        }
+        const toTs = (logToEl.value || "").trim();
+        if (toTs) {
+            params.set("to_ts", toTs);
+        }
+        return params;
+    }
+
+    async function fetchLogs(resetCursor) {
+        if (resetCursor) {
+            logCursor = 0;
+            logListEl.innerHTML = "";
+            logLoadMoreBtn.disabled = false;
+            logLoadMoreBtn.textContent = I18N.logLoadMore;
+        }
+        try {
+            const response = await fetch(`${logsEndpoint}?${buildLogQueryParams().toString()}`);
+            const data = await response.json();
+            if (!response.ok) {
+                const message = typeof data.detail === "string" ? data.detail : I18N.logReadFailed;
+                setStatus(logResultEl, `${I18N.logReadFailed}: ${message}`, "error");
+                return;
+            }
+            appendLogs(Array.isArray(data.items) ? data.items : []);
+            logTotalMatched = Number(data.total_matched || 0);
+            setLogSummary(logListEl.children.length, logTotalMatched);
+            if (data.next_cursor === null || typeof data.next_cursor === "undefined") {
+                logCursor = logListEl.children.length;
+                logLoadMoreBtn.disabled = true;
+                logLoadMoreBtn.textContent = I18N.logNoMore;
+            } else {
+                logCursor = Number(data.next_cursor || 0);
+                logLoadMoreBtn.disabled = false;
+                logLoadMoreBtn.textContent = I18N.logLoadMore;
+            }
+            if (logListEl.children.length === 0) {
+                setStatus(logResultEl, I18N.logEmpty, "success");
+            }
+        } catch (_error) {
+            setStatus(logResultEl, I18N.logReadFailedNetwork, "error");
+        }
     }
 
     if (loggingForm) {
@@ -291,7 +447,6 @@
                 dry_run: document.getElementById("reset-dry-run").checked,
                 include_logs: document.getElementById("reset-include-logs").checked,
                 include_engine_catalog: document.getElementById("reset-include-engine-catalog").checked,
-                include_agent_status: document.getElementById("reset-include-agent-status").checked,
                 include_engine_auth_sessions: Boolean(includeEngineAuth && includeEngineAuth.checked)
             };
             const response = await fetch(resetEndpoint, {
@@ -317,6 +472,33 @@
             closeModal();
         }
     });
+
+    if (logSubmitBtn) {
+        logSubmitBtn.addEventListener("click", function () {
+            fetchLogs(true);
+        });
+    }
+    if (logLoadMoreBtn) {
+        logLoadMoreBtn.addEventListener("click", function () {
+            fetchLogs(false);
+        });
+    }
+    if (logClearBtn) {
+        logClearBtn.addEventListener("click", function () {
+            logKeywordEl.value = "";
+            logLevelEl.value = "";
+            logFromEl.value = "";
+            logToEl.value = "";
+            logCursor = 0;
+            logTotalMatched = 0;
+            logListEl.innerHTML = "";
+            logLoadMoreBtn.disabled = false;
+            logLoadMoreBtn.textContent = I18N.logLoadMore;
+            logResultEl.className = "status-box";
+            logResultEl.textContent = "";
+        });
+    }
+    fetchLogs(true);
 })();
 </script>
 {% endblock %}

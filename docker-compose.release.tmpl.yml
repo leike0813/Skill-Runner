@@ -1,0 +1,61 @@
+name: skillrunner
+services:
+  api:
+    image: __IMAGE_REPO__:__IMAGE_TAG__
+    ports:
+      - "8000:8000"
+      # Keep ttyd host/container ports identical.
+      # Do not split-mutate this mapping (e.g. 28081:17681), or embedded shell URL resolution will break.
+      - "17681:17681"
+    environment:
+      SKILL_RUNNER_RUNTIME_MODE: container
+      SKILL_RUNNER_DATA_DIR: /data
+      SKILL_RUNNER_AGENT_CACHE_DIR: /opt/cache/skill-runner
+      SKILL_RUNNER_AGENT_HOME: /opt/cache/skill-runner/agent-home
+      SKILL_RUNNER_NPM_PREFIX: /opt/cache/skill-runner/npm
+      UV_CACHE_DIR: /opt/cache/skill-runner/uv_cache
+      UV_PROJECT_ENVIRONMENT: /opt/cache/skill-runner/uv_venv
+      NPM_CONFIG_PREFIX: /opt/cache/skill-runner/npm
+      UI_SHELL_TTYD_PORT: 17681
+      # UI Basic Auth is injected at runtime (not baked into image ENV).
+      # Set to "true" and provide username/password for exposed deployments.
+      UI_BASIC_AUTH_ENABLED: "false"
+      # UI_BASIC_AUTH_USERNAME: "admin"
+      # UI_BASIC_AUTH_PASSWORD: "change-me"
+    volumes:
+      - ./skills:/app/skills
+      - ./agent_config:/opt/config
+      - skillrunner_cache:/opt/cache
+      # Optional: persist run/request data for debugging
+      # - ./data:/data
+    networks:
+      - skillrunner_net
+
+  # Optional: enable built-in E2E example client using the same image.
+  # How to enable:
+  # 1) Uncomment this whole service block.
+  # 2) Run `docker compose up -d` (or restart the stack).
+  #
+  # e2e_client:
+  #   image: __IMAGE_REPO__:__IMAGE_TAG__
+  #   entrypoint: ["/entrypoint_e2e.sh"]
+  #   ports:
+  #     - "8011:8011"
+  #   environment:
+  #     SKILL_RUNNER_RUNTIME_MODE: container
+  #     SKILL_RUNNER_E2E_CLIENT_HOST: 0.0.0.0
+  #     SKILL_RUNNER_E2E_CLIENT_PORT: 8011
+  #     SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL: http://api:8000
+  #   depends_on:
+  #     - api
+  #   volumes:
+  #     - ./skills:/app/skills
+  #   networks:
+  #     - skillrunner_net
+
+volumes:
+  skillrunner_cache:
+    name: skillrunner-cache
+networks:
+  skillrunner_net:
+    name: skillrunner-net

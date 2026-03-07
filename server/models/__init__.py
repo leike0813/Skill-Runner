@@ -81,6 +81,8 @@ from .management import (
     ManagementLoggingEditableSettings,
     ManagementLoggingReadonlySettings,
     ManagementLoggingSettingsResponse,
+    ManagementSystemLogItem,
+    ManagementSystemLogQueryResponse,
     ManagementSystemSettingsResponse,
     ManagementSystemSettingsUpdateRequest,
 )
@@ -107,23 +109,11 @@ from .run_dispatch import RunDispatchEnvelope
 from .run_local_skill import RunLocalSkillRef, RunLocalSkillSource
 from .run_projection import CurrentRunProjection, TerminalRunResult
 from .run_state import RunPendingState, RunResumeState, RunRuntimeState, RunStateEnvelope, RunStatePhase
-from .runtime_event import (
-    ChatReplayEventEnvelope,
-    ChatReplayKind,
-    ChatReplayRole,
-    ConversationEventEnvelope,
-    FcmpEventType,
-    InteractionHistoryEventType,
-    InteractiveResolutionMode,
-    OrchestratorEventType,
-    RuntimeEventCategory,
-    RuntimeEventEnvelope,
-    RuntimeEventIdentity,
-    RuntimeEventRef,
-    RuntimeEventSource,
-)
+from .runtime_event import (ChatReplayEventEnvelope, ChatReplayKind, ChatReplayRole, ConversationEventEnvelope,
+                            FcmpEventType, InteractionHistoryEventType, InteractiveResolutionMode,
+                            OrchestratorEventType, RuntimeEventCategory, RuntimeEventEnvelope,
+                            RuntimeEventIdentity, RuntimeEventRef, RuntimeEventSource)
 from .skill import ManifestArtifact, RuntimeDefinition, SkillManifest
-
 __all__ = [
     "AdapterTurnInteraction",
     "AdapterTurnOutcome",
@@ -200,6 +190,8 @@ __all__ = [
     "ManagementSkillListResponse",
     "ManagementSkillSchemasResponse",
     "ManagementSkillSummary",
+    "ManagementSystemLogItem",
+    "ManagementSystemLogQueryResponse",
     "ManagementSystemSettingsResponse",
     "ManagementSystemSettingsUpdateRequest",
     "ManifestArtifact",

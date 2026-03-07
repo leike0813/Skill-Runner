@@ -6,6 +6,10 @@ def _read_template() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _read_e2e_template(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def test_run_observe_template_has_prompt_card_and_shortcut_hint():
     content = _read_template()
     assert "Pending Input Request" in content
@@ -143,6 +147,8 @@ def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():
     assert "/runs/{{ request_id }}/result" not in content
     assert "file-tree-layout" in content
     assert "preview-panel" in content
+    assert 'id="file-bundle-download"' in content
+    assert "/api/runs/{{ request_id }}/bundle/download" in content
     assert "SkillRunnerFileExplorer" in content
     assert "mountFileExplorer" in content
     assert "tree-toggle-btn" in content
@@ -175,3 +181,14 @@ def test_run_observe_template_supports_markdown_and_json_preview_modes() -> None
     assert "fileFormatToml" in content
     assert "fileFormatPython" in content
     assert "fileFormatJavascript" in content
+
+
+def test_e2e_key_pages_keep_standard_table_action_button_classes() -> None:
+    template_paths = [
+        "e2e_client/templates/index.html",
+        "e2e_client/templates/runs.html",
+    ]
+    for template_path in template_paths:
+        content = _read_e2e_template(template_path)
+        assert 'class="table-actions"' in content
+        assert 'class="btn btn-secondary"' in content

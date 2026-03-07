@@ -6,7 +6,7 @@ from server.services.engine_management.engine_upgrade_store import EngineUpgrade
 
 @pytest.mark.asyncio
 async def test_engine_upgrade_store_create_update_get(tmp_path):
-    store = EngineUpgradeStore(tmp_path / "engine_upgrades.db")
+    store = EngineUpgradeStore(tmp_path / "runs.db")
     await store.create_task("req-1", "single", "codex")
     assert await store.has_running_task() is False
 

@@ -23,7 +23,7 @@
             <td>{{ row.pending_interaction_id if row.pending_interaction_id is not none else "-" }}</td>
             <td>{{ row.interaction_count }}</td>
             <td>{{ row.updated_at or "-" }}</td>
-            <td><a href="/ui/runs/{{ row.request_id }}">{{ t("ui.runs.table.details", default="查看详情") }}</a></td>
+            <td><div class="table-actions"><a class="btn btn-primary" href="/ui/runs/{{ row.request_id }}">{{ t("ui.runs.table.details", default="查看详情") }}</a></div></td>
         </tr>
     {% endfor %}
     {% if not runs %}

@@ -37,8 +37,8 @@
     "index_table_skill": "Skill",
     "index_table_version": "バージョン",
     "index_title": "利用可能な Skills",
-    "nav_runs": "実行",
-    "nav_skills": "スキル",
+    "nav_runs": "実行レコード",
+    "nav_skills": "スキルリスト",
     "observe_artifacts_label": "artifacts",
     "observe_auth_awaiting": "認証待機中",
     "observe_auth_engine": "engine：",
@@ -55,6 +55,7 @@
     "observe_canceled_error": "ユーザーによりキャンセルされました",
     "observe_conversation": "会話",
     "observe_cursor": "カーソル：",
+    "observe_download_bundle": "Bundle をダウンロード",
     "observe_default_prompt": "続行するには返信してください。",
     "observe_file_read_failed_http": "読み取り失敗：HTTP",
     "observe_file_tree_loading": "読み込み中…",
@@ -234,6 +235,8 @@
       "method_api_key": "API Key",
       "method_auth_code": "認可コードモード",
       "method_callback": "Callback モード",
+      "high_risk_short": "高リスク!",
+      "high_risk_notice": "このサードパーティログイン経路は Google ポリシーに抵触する可能性があり、アカウント停止につながるおそれがあります。",
       "page_title": "Engine 管理",
       "status_canceled": "キャンセル済み",
       "status_code_submitted": "認可コードを送信しました。結果待ちです",
@@ -300,8 +303,8 @@
       "nav_engines_title": "エンジン管理",
       "nav_runs_desc": "request_id で run ツリー・状態・ログを確認します。",
       "nav_runs_title": "Run 観測",
-      "nav_settings_desc": "ランタイムログ設定を調整し、危険なメンテナンス操作にアクセスします。",
-      "nav_settings_title": "設定",
+      "nav_settings_desc": "system/bootstrap ログを確認し、保護されたメンテナンス操作を管理します。",
+      "nav_settings_title": "System Console",
       "page_title": "Skill Runner UI",
       "subtitle": "このページでインストール済み Skill を確認し、Skill パッケージをアップロードしてインストールできます。",
       "title": "Skill Runner 管理 UI"
@@ -426,7 +429,28 @@
         "subtitle": "UI 設定で編集可能なのは以下の項目のみです。読み取り専用入力は引き続き system config/env によって制御されます。",
         "title": "ログ設定"
       },
-      "page_title": "Skill Runner 設定",
+      "page_title": "System Console",
+      "log_explorer": {
+        "clear": "クリア",
+        "empty": "一致するログはありません",
+        "from_ts": "開始時刻（ISO8601）",
+        "keyword": "キーワード",
+        "keyword_placeholder": "message / request_id / event",
+        "level": "レベル",
+        "level_all": "すべて",
+        "load_more": "さらに読み込む",
+        "no_more": "これ以上ログはありません",
+        "read_failed": "ログ検索に失敗しました",
+        "read_failed_network": "ログ検索に失敗しました：ネットワークまたはサービスエラー",
+        "search": "検索",
+        "source": "ソース",
+        "source_bootstrap": "Bootstrap",
+        "source_system": "System",
+        "subtitle": "診断のために system/bootstrap ログを検索・フィルタします。",
+        "summary_prefix": "一致件数",
+        "title": "Log Explorer",
+        "to_ts": "終了時刻（ISO8601）"
+      },
       "reset": {
         "action": "プロジェクトデータをリセット",
         "confirm_desc": "続行するには下の確認テキストを入力してください。アクティブなランタイム状態が削除される可能性があります。",
@@ -439,7 +463,6 @@
         "execute_failed_network": "実行に失敗しました：ネットワークまたはサービスエラー",
         "execute_success": "実行成功",
         "failed": "リセットに失敗しました",
-        "include_agent_status": "agent status ファイルも削除",
         "include_engine_auth_sessions": "エンジン認証セッションログも削除",
         "include_engine_catalog": "エンジンモデルキャッシュも削除",
         "include_logs": "アプリケーションログ（data/logs）も削除",
@@ -452,8 +475,8 @@
         "subtitle": "この操作はデータベースと run データディレクトリを削除します。不可逆のため、メンテナンス時間帯のみで使用してください。",
         "title": "Danger Zone: プロジェクトデータをリセット"
       },
-      "subtitle": "ログ設定を管理し、保護されたデータリセット操作を実行します。",
-      "title": "設定"
+      "subtitle": "system/bootstrap ログの確認、実行時ログ設定の管理、保護されたメンテナンス操作を行います。",
+      "title": "System Console"
     },
     "skill_detail": {
       "meta_description": "description:",
@@ -463,6 +486,7 @@
       "page_title": "Skill ブラウザ",
       "preview_hint": "左側パネルからファイルを選択してください。",
       "preview_title": "ファイルプレビュー",
+      "subtitle": "パッケージ構造の確認とファイルプレビューを行います。",
       "structure_title": "パッケージ構造（読み取り専用）"
     },
     "skills": {

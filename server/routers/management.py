@@ -21,6 +21,7 @@ from ..models import (
     ManagementEngineListResponse,
     ManagementEngineSummary,
     ManagementSystemSettingsResponse,
+    ManagementSystemLogQueryResponse,
     ManagementSystemSettingsUpdateRequest,
     ManagementRunConversationState,
     ManagementRunFilePreviewResponse,
@@ -51,6 +52,7 @@ from ..services.platform.system_settings_service import (
     SystemSettingsValidationError,
     system_settings_service,
 )
+from ..services.platform.system_log_explorer_service import system_log_explorer_service
 from ..services.skill.skill_registry import skill_registry
 from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
@@ -122,7 +124,6 @@ async def reset_management_data(request: ManagementDataResetRequest):
     options = DataResetOptions(
         include_logs=request.include_logs,
         include_engine_catalog=request.include_engine_catalog,
-        include_agent_status=request.include_agent_status,
         include_engine_auth_sessions=(
             request.include_engine_auth_sessions
             and bool(config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED)
@@ -145,6 +146,48 @@ async def reset_management_data(request: ManagementDataResetRequest):
         )
         raise HTTPException(status_code=500, detail=str(exc))
     return ManagementDataResetResponse(**result.to_payload())
+
+
+@router.get("/system/logs/query", response_model=ManagementSystemLogQueryResponse)
+async def query_management_system_logs(
+    source: str = Query(...),
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=1000),
+    q: str | None = Query(default=None),
+    level: str | None = Query(default=None),
+    from_ts: datetime | None = Query(default=None),
+    to_ts: datetime | None = Query(default=None),
+):
+    if source.strip().lower() not in {"system", "bootstrap"}:
+        raise HTTPException(status_code=400, detail="source must be one of: system, bootstrap")
+    normalized_level = level.strip().upper() if isinstance(level, str) and level.strip() else None
+    if normalized_level and normalized_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise HTTPException(status_code=400, detail="level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL")
+    try:
+        payload = await asyncio.to_thread(
+            system_log_explorer_service.query,
+            source=source,
+            cursor=cursor,
+            limit=limit,
+            q=q,
+            level=normalized_level,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.query_system_logs failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "query_system_logs",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+    return ManagementSystemLogQueryResponse(**payload)
 
 
 @router.get("/skills", response_model=ManagementSkillListResponse)

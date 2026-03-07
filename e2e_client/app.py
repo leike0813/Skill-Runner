@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 
 from .config import load_settings
 from .routes import router, templates
-from server.i18n import get_language, get_translator
+from server.i18n import SUPPORTED_LANGUAGES, get_language, get_translator
 
 
 def create_app() -> FastAPI:
@@ -26,7 +26,16 @@ def create_app() -> FastAPI:
     async def i18n_middleware(request: Request, call_next):
         request.state.lang = get_language(request)
         request.state.t = get_translator(request)
+        selected_lang = request.query_params.get("lang", "").strip().lower()
         response = await call_next(request)
+        if selected_lang in SUPPORTED_LANGUAGES:
+            response.set_cookie(
+                key="lang",
+                value=selected_lang,
+                max_age=31536000,
+                path="/",
+                samesite="lax",
+            )
         return response
 
     static_dir = Path(__file__).parent.parent / "server" / "assets" / "static"

@@ -20,10 +20,12 @@ load_skill_runner_test_env() {
 
   # Keep one shared root for test artifacts/cache/venv unless caller overrides.
   export SKILL_RUNNER_TEST_ARTIFACT_ROOT="${SKILL_RUNNER_TEST_ARTIFACT_ROOT:-$artifact_root_default}"
+  export SKILL_RUNNER_LOCAL_ROOT="${SKILL_RUNNER_LOCAL_ROOT:-$SKILL_RUNNER_TEST_ARTIFACT_ROOT}"
+  export SKILL_RUNNER_AGENT_CACHE_DIR="${SKILL_RUNNER_AGENT_CACHE_DIR:-$SKILL_RUNNER_LOCAL_ROOT/agent-cache}"
 
-  # Shared directories (E2E defaults as baseline).
+  # Shared directories (E2E defaults as baseline), aligned with local deploy layout.
   export SKILL_RUNNER_DATA_DIR="${SKILL_RUNNER_DATA_DIR:-$SKILL_RUNNER_TEST_ARTIFACT_ROOT/data}"
-  export UV_CACHE_DIR="${UV_CACHE_DIR:-$SKILL_RUNNER_TEST_ARTIFACT_ROOT/uv_cache}"
-  export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$SKILL_RUNNER_TEST_ARTIFACT_ROOT/.venv}"
+  export UV_CACHE_DIR="${UV_CACHE_DIR:-$SKILL_RUNNER_AGENT_CACHE_DIR/uv_cache}"
+  export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$SKILL_RUNNER_AGENT_CACHE_DIR/uv_venv}"
   export E2E_DOWNLOAD_DIR="${E2E_DOWNLOAD_DIR:-${SKILL_RUNNER_E2E_DOWNLOAD_DIR:-$SKILL_RUNNER_TEST_ARTIFACT_ROOT/e2e-test-download}}"
 }

@@ -31,7 +31,8 @@ If not set, wrappers default to `<project_root>/e2e-test-download`.
 Useful environment overrides:
 - `E2E_DOWNLOAD_DIR` (or `SKILL_RUNNER_E2E_DOWNLOAD_DIR` in wrappers): bundle download root
 - `SKILL_RUNNER_DATA_DIR`: in-process E2E data root
-- `UV_CACHE_DIR`, `UV_PROJECT_ENVIRONMENT`: uv cache and venv paths
+- `SKILL_RUNNER_AGENT_CACHE_DIR`: agent cache root for test wrappers (defaults to `$SKILL_RUNNER_TEST_ARTIFACT_ROOT/agent-cache`)
+- `UV_CACHE_DIR`, `UV_PROJECT_ENVIRONMENT`: uv cache/venv paths (defaults to `.../agent-cache/uv_cache` and `.../agent-cache/uv_venv`)
 
 Shared wrapper environment:
 - `tests/config/test_env.sh` is the single source for test wrapper directory defaults.

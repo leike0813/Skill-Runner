@@ -10,7 +10,7 @@ from jinja2 import pass_context
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request  # type: ignore[import-not-found]
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse  # type: ignore[import-not-found]
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse  # type: ignore[import-not-found]
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from .backend import (
@@ -439,6 +439,26 @@ async def get_run_bundle_entries_api(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"request_id": request_id, "entries": entries}
+
+
+@router.get("/api/runs/{request_id}/bundle/download")
+async def download_run_bundle_api(
+    request_id: str,
+    source: str | None = None,
+    backend: BackendClient = Depends(get_backend_client),
+):
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+    try:
+        bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
+    except Exception as exc:
+        raise _to_http_exception(exc)
+    filename = f"{request_id}.bundle.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=bundle_bytes,
+        media_type="application/zip",
+        headers=headers,
+    )
 
 
 @router.get("/api/runs/{request_id}/bundle/file")
@@ -1480,4 +1500,3 @@ def _normalize_zip_member_name(raw_name: str) -> str | None:
         return None
     normalized = candidate.as_posix().rstrip("/")
     return normalized or None
-

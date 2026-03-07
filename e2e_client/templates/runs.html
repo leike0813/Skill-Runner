@@ -29,9 +29,7 @@
                 <td>{{ row.engine }}</td>
                 <td>{{ row.updated_at or "-" }}</td>
                 <td>{{ row.step_count }}</td>
-                <td>
-                    <a class="btn btn-secondary" href="/runs/{{ row.request_id }}">{{ t("client.btn_details", default="Details") }}</a>
-                </td>
+                <td><div class="table-actions"><a class="btn btn-secondary" href="/runs/{{ row.request_id }}">{{ t("client.btn_details", default="Details") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not rows %}

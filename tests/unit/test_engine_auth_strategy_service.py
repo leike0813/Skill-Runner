@@ -20,6 +20,44 @@ def test_strategy_service_exposes_ui_capabilities_from_policy() -> None:
     assert "deepseek" not in capabilities["cli_delegate"]["opencode"]
 
 
+def test_strategy_service_exposes_high_risk_capabilities_from_policy() -> None:
+    service = EngineAuthStrategyService()
+
+    high_risk = service.list_ui_high_risk_capabilities()
+
+    assert high_risk["oauth_proxy"]["opencode"]["google"] == ["callback", "auth_code_or_url"]
+    assert high_risk["cli_delegate"]["opencode"]["google"] == ["auth_code_or_url"]
+    assert "deepseek" not in high_risk["oauth_proxy"]["opencode"]
+
+
+def test_strategy_service_high_risk_helpers_resolve_runtime_and_conversation_methods() -> None:
+    service = EngineAuthStrategyService()
+
+    assert service.is_runtime_method_high_risk(
+        engine="opencode",
+        transport="oauth_proxy",
+        provider_id="google",
+        auth_method="callback",
+    )
+    assert service.is_runtime_method_high_risk(
+        engine="opencode",
+        transport="cli_delegate",
+        provider_id="google",
+        auth_method="auth_code_or_url",
+    )
+    assert not service.is_runtime_method_high_risk(
+        engine="opencode",
+        transport="oauth_proxy",
+        provider_id="deepseek",
+        auth_method="api_key",
+    )
+    assert service.is_conversation_method_high_risk(
+        engine="opencode",
+        provider_id="google",
+        conversation_method="callback",
+    )
+
+
 def test_strategy_service_supports_start_requires_explicit_provider_for_opencode() -> None:
     service = EngineAuthStrategyService()
 

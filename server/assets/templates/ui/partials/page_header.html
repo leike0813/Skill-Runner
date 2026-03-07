@@ -1,0 +1,13 @@
+<div class="page-header" data-ui-page-header="true">
+    <div class="page-header-main">
+        <h1 class="page-header-title">{{ header_title }}</h1>
+        {% if header_subtitle %}
+        <div class="muted page-header-subtitle">{{ header_subtitle }}</div>
+        {% endif %}
+    </div>
+    {% if header_back_href %}
+    <div class="page-header-actions">
+        <a class="btn btn-secondary page-header-back-btn" href="{{ header_back_href }}">{{ header_back_label }}</a>
+    </div>
+    {% endif %}
+</div>

@@ -25,10 +25,6 @@ NON_LOCALIZED_EXACT_KEYS: frozenset[str] = frozenset(
         "ui.engines.method_callback",
         "ui.engines.transport_cli_delegate",
         "ui.engines.transport_oauth_proxy",
-        "ui.engines.table.auth_codex",
-        "ui.engines.table.auth_gemini",
-        "ui.engines.table.auth_iflow",
-        "ui.engines.table.auth_opencode",
     }
 )
 

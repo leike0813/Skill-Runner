@@ -21,9 +21,11 @@
 {% block content %}
 <div class="layout">
     <div class="card">
-        <a href="/ui">{{ t("ui.common.back_home", default="← Back to UI") }}</a>
-        <h1>{{ t("ui.runs.title", default="Run 观测") }}</h1>
-        <div class="muted">{{ t("ui.runs.subtitle", default="Observe runs by request id and inspect run-level artifacts.") }}</div>
+        {% set header_title = t("ui.runs.title", default="Run 观测") %}
+        {% set header_subtitle = t("ui.runs.subtitle", default="Observe runs by request id and inspect run-level artifacts.") %}
+        {% set header_back_href = "/ui" %}
+        {% set header_back_label = t("ui.common.back_home", default="← Back to UI") %}
+        {% include "ui/partials/page_header.html" %}
     </div>
     <div class="card">
         <div

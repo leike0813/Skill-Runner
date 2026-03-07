@@ -10,6 +10,7 @@ import sys
 
 from server.config import config
 from server.models import EngineUpgradeTaskStatus
+from server.services.engine_management.model_registry import model_registry
 from server.services.engine_management.engine_status_cache_service import engine_status_cache_service
 from server.services.engine_management.engine_upgrade_store import engine_upgrade_store
 from server.services.engine_management.runtime_profile import get_runtime_profile
@@ -83,6 +84,7 @@ class EngineUpgradeManager:
                 results[engine] = await self._run_single_engine_upgrade(engine)
                 if results[engine]["status"] == "succeeded":
                     await self._refresh_engine_status_cache(engine)
+                    self._refresh_engine_model_registry(engine)
             all_success = all(result["status"] == "succeeded" for result in results.values())
             final_status = EngineUpgradeTaskStatus.SUCCEEDED if all_success else EngineUpgradeTaskStatus.FAILED
             await self._store.update_task(request_id, status=final_status, results=results)
@@ -155,6 +157,24 @@ class EngineUpgradeManager:
                     "engine": engine,
                     "error_type": type(exc).__name__,
                     "fallback": "keep_previous_engine_status_cache",
+                },
+                exc_info=True,
+            )
+
+    def _refresh_engine_model_registry(self, engine: str) -> None:
+        try:
+            if model_registry.supports_runtime_catalog_refresh(engine):
+                return
+            model_registry.refresh(engine)
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
+            logger.warning(
+                "Engine model registry refresh failed after upgrade",
+                extra={
+                    "component": "engine_management.engine_upgrade_manager",
+                    "action": "refresh_engine_model_registry",
+                    "engine": engine,
+                    "error_type": type(exc).__name__,
+                    "fallback": "keep_previous_engine_model_registry_cache",
                 },
                 exc_info=True,
             )

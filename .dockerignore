@@ -20,6 +20,5 @@ references
 tests
 docs
 openspec
-e2e_client
 
 *.log

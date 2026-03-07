@@ -60,6 +60,18 @@ def test_available_methods_for_drops_unknown_strategy_values(monkeypatch) -> Non
     assert methods == [AuthMethod.CALLBACK]
 
 
+def test_challenge_profile_appends_high_risk_notice_for_opencode_google() -> None:
+    service = RunAuthOrchestrationService()
+
+    _challenge_kind, _accepts_input, _input_kind, prompt = service._challenge_profile(  # noqa: SLF001
+        engine="opencode",
+        provider_id="google",
+        auth_method=AuthMethod.CALLBACK,
+    )
+
+    assert "High risk!" in prompt
+
+
 @pytest.mark.asyncio
 async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-selection"

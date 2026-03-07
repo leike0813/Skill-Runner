@@ -2,7 +2,6 @@
 
 ## Purpose
 定义全局应用日志的持久化、轮换、目录配额，以及 UI 可写日志设置与只读运行时输入的边界。
-
 ## Requirements
 ### Requirement: Global app logs MUST persist to disk with configurable path and policy
 The system MUST persist application logs to a disk file under a configurable directory and filename policy.
@@ -82,3 +81,30 @@ The system MUST include tests that verify setup idempotency, format switch behav
 #### Scenario: Logging behavior regression introduced
 - **WHEN** tests execute logging unit suites
 - **THEN** regressions in handler duplication, JSON payload shape, or quota cleanup are detected and fail CI
+
+### Requirement: Bootstrap diagnostics log MUST be persisted with rotation
+系统 MUST 持久化启动阶段诊断日志，并通过轮转限制日志文件增长。
+
+#### Scenario: Bootstrap log file exists after startup
+- **WHEN** 容器完成启动
+- **THEN** `${SKILL_RUNNER_DATA_DIR}/logs/bootstrap.log` 存在
+- **AND** 启动阶段关键事件可在该日志中检索到
+
+#### Scenario: Large bootstrap logs are rotated
+- **WHEN** 启动阶段日志超过配置阈值
+- **THEN** 系统按轮转策略生成分片文件
+- **AND** 不影响主服务继续启动
+
+### Requirement: 日志查询 MUST 限制为白名单日志源
+系统日志查询实现 MUST 仅允许读取受控日志源（system/bootstrap），禁止任意文件路径输入，以防止路径穿越与越权读取。
+
+#### Scenario: reject unsupported source
+- **WHEN** 客户端请求 `/v1/management/system/logs/query?source=unknown`
+- **THEN** 服务返回 `400`
+- **AND** 错误提示仅允许 `system|bootstrap`
+
+#### Scenario: source file family is restricted
+- **WHEN** 客户端请求 `source=system`
+- **THEN** 查询实现仅扫描 `skill_runner.log*`
+- **AND** 不会扫描其他非白名单文件
+

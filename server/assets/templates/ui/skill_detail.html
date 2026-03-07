@@ -56,8 +56,11 @@
 {% block content %}
 <div class="layout">
     <div class="card">
-        <div><a href="/ui">{{ t("ui.common.back_home", default="← Back to UI") }}</a></div>
-        <h2 style="margin:8px 0 4px;">{{ skill.id }}</h2>
+        {% set header_title = skill.id %}
+        {% set header_subtitle = t("ui.skill_detail.subtitle", default="Inspect package structure and preview files.") %}
+        {% set header_back_href = "/ui" %}
+        {% set header_back_label = t("ui.common.back_home", default="← Back to UI") %}
+        {% include "ui/partials/page_header.html" %}
         <div class="meta">{{ t("ui.skill_detail.meta_name", default="name:") }} {{ skill.name or "-" }}</div>
         <div class="meta">{{ t("ui.skill_detail.meta_description", default="description:") }} {{ skill.description or "-" }}</div>
         <div class="meta">{{ t("ui.skill_detail.meta_version", default="version:") }} {{ skill.version or "-" }}</div>

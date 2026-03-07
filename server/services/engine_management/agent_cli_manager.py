@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from copy import deepcopy
@@ -61,6 +62,7 @@ _PATH_RESOLVE_EXCEPTIONS = (
     RuntimeError,
     ValueError,
 )
+_SEMVER_PATTERN = re.compile(r"\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b")
 
 
 def _supported_engines() -> tuple[str, ...]:
@@ -246,27 +248,44 @@ class AgentCliManager:
         output = (result.stdout or "").strip() or (result.stderr or "").strip()
         if not output:
             return None
-        return output.splitlines()[0].strip()
+        first_line = output.splitlines()[0].strip()
+        normalized = self._normalize_version_text(first_line)
+        return normalized or None
+
+    def _normalize_version_text(self, raw: str) -> str:
+        text = raw.strip()
+        if not text:
+            return ""
+        match = _SEMVER_PATTERN.search(text)
+        if match is not None:
+            return match.group(0)
+        return text
 
     def ensure_installed(self) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
         for engine in self.supported_engines():
             if self.resolve_managed_engine_command(engine) is None:
-                results[engine] = self.install_package(self._engine_profile(engine).cli_management.package)
+                results[engine] = self.install_package(self.engine_package(engine))
         return results
 
     def upgrade_all(self) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
         for engine in self.supported_engines():
-            results[engine] = self.install_package(self._engine_profile(engine).cli_management.package)
+            results[engine] = self.install_package(self.engine_package(engine))
         return results
 
     def upgrade_engine(self, engine: str) -> CommandResult:
         normalized = engine.strip().lower()
         if normalized not in self.supported_engines():
             raise ValueError(f"Unsupported engine: {engine}")
-        package = self._engine_profile(normalized).cli_management.package
+        package = self.engine_package(normalized)
         return self.install_package(package)
+
+    def engine_package(self, engine: str) -> str:
+        normalized = engine.strip().lower()
+        if normalized not in self.supported_engines():
+            raise ValueError(f"Unsupported engine: {engine}")
+        return self._engine_profile(normalized).cli_management.package
 
     def install_package(self, package: str) -> CommandResult:
         env = self.profile.build_subprocess_env()

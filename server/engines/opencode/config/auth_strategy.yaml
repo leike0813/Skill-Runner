@@ -27,11 +27,16 @@ providers:
         methods:
           - callback
           - auth_code_or_url
+        high_risk_methods:
+          - callback
+          - auth_code_or_url
         driver:
           start_method: auth
           execution_mode: protocol_proxy
       cli_delegate:
         methods:
+          - auth_code_or_url
+        high_risk_methods:
           - auth_code_or_url
         driver:
           start_method: auth

@@ -5,12 +5,9 @@ from pathlib import Path
 from .config import config
 
 
-def _load_local_env_file() -> None:
-    root = Path(__file__).resolve().parent.parent
-    env_path = root / ".env.engine_auth.local"
+def _load_env_file(env_path: Path) -> None:
     if not env_path.exists():
         return
-
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -25,7 +22,17 @@ def _load_local_env_file() -> None:
         os.environ.setdefault(key, value)
 
 
-_load_local_env_file()
+def _load_shared_engine_auth_env_files() -> None:
+    root = Path(__file__).resolve().parent.parent
+    env_paths = (
+        root / "server" / "engines" / "gemini" / "auth" / "protocol" / "shared_oauth_credentials.env",
+        root / "server" / "engines" / "opencode" / "auth" / "protocol" / "shared_google_antigravity_oauth_credentials.env",
+    )
+    for env_path in env_paths:
+        _load_env_file(env_path)
+
+
+_load_shared_engine_auth_env_files()
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[import-not-found]
 from fastapi.responses import JSONResponse  # type: ignore[import-not-found]
@@ -33,7 +40,7 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, ui
 from .services.engine_management.runtime_profile import get_runtime_profile
-from .i18n import get_language, get_translator
+from .i18n import SUPPORTED_LANGUAGES, get_language, get_translator
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +134,16 @@ app = FastAPI(
 async def i18n_middleware(request: Request, call_next):
     request.state.lang = get_language(request)
     request.state.t = get_translator(request)
+    selected_lang = request.query_params.get("lang", "").strip().lower()
     response = await call_next(request)
+    if selected_lang in SUPPORTED_LANGUAGES:
+        response.set_cookie(
+            key="lang",
+            value=selected_lang,
+            max_age=31536000,
+            path="/",
+            samesite="lax",
+        )
     return response
 
 

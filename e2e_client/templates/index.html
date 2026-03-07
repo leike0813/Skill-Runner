@@ -23,7 +23,7 @@
                 <td><span class="badge badge-info">{{ skill.version }}</span></td>
                 <td>{{ ", ".join(skill.effective_engines or skill.engines or []) }}</td>
                 <td>{{ skill.health }}</td>
-                <td><a class="btn btn-secondary" href="/skills/{{ skill.id }}/run">{{ t("client.btn_run", default="Run") }}</a></td>
+                <td><div class="table-actions"><a class="btn btn-secondary" href="/skills/{{ skill.id }}/run">{{ t("client.btn_run", default="Run") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not skills %}
@@ -55,7 +55,7 @@
                 <td><span class="badge badge-info">{{ skill.version }}</span></td>
                 <td>{{ ", ".join(skill.engines or []) }}</td>
                 <td>{{ ", ".join(skill.execution_modes or []) }}</td>
-                <td><a class="btn btn-secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">{{ t("client.btn_run_temp", default="Run (Temp)") }}</a></td>
+                <td><div class="table-actions"><a class="btn btn-secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">{{ t("client.btn_run_temp", default="Run (Temp)") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not fixture_skills %}

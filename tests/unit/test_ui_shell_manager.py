@@ -115,7 +115,7 @@ def test_ui_shell_manager_single_active_session_busy(tmp_path: Path, patch_fake_
     manager = _new_manager(tmp_path)
     started = manager.start_session("codex")
     assert started["active"] is True
-    assert started["ttyd_port"] == 7681
+    assert started["ttyd_port"] == 17681
     with pytest.raises(UiShellBusyError):
         manager.start_session("gemini")
 
@@ -193,12 +193,13 @@ def test_ui_shell_manager_non_codex_sandbox_probe_is_non_blocking(
 
 def test_ui_shell_manager_local_port_conflict_fallback(tmp_path: Path, patch_fake_popen, monkeypatch):
     manager = _new_manager(tmp_path, mode="local")
+    fallback_port = manager._ttyd_port() + 1
     monkeypatch.setattr(
         "server.services.ui.ui_shell_manager.UiShellManager._is_port_available",
-        lambda self, host, port: port == 7682,  # noqa: ARG005
+        lambda self, host, port: port == fallback_port,  # noqa: ARG005
     )
     started = manager.start_session("codex")
-    assert started["ttyd_port"] == 7682
+    assert started["ttyd_port"] == fallback_port
 
 
 def test_ui_shell_manager_container_port_conflict_raises_busy(tmp_path: Path, patch_fake_popen, monkeypatch):

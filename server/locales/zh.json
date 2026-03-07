@@ -37,8 +37,8 @@
     "index_table_skill": "Skill",
     "index_table_version": "版本",
     "index_title": "可用 Skills",
-    "nav_runs": "运行",
-    "nav_skills": "技能",
+    "nav_runs": "运行记录",
+    "nav_skills": "技能列表",
     "observe_artifacts_label": "artifacts",
     "observe_auth_awaiting": "等待鉴权",
     "observe_auth_engine": "engine：",
@@ -55,6 +55,7 @@
     "observe_canceled_error": "用户已取消",
     "observe_conversation": "对话",
     "observe_cursor": "游标：",
+    "observe_download_bundle": "下载 Bundle",
     "observe_default_prompt": "请回复以继续。",
     "observe_file_read_failed_http": "读取失败：HTTP",
     "observe_file_tree_loading": "加载中…",
@@ -234,6 +235,8 @@
       "method_api_key": "API Key",
       "method_auth_code": "授权码模式",
       "method_callback": "回调模式",
+      "high_risk_short": "高风险!",
+      "high_risk_notice": "该第三方登录链路可能违反 Google 政策，并可能导致账号被封禁。",
       "page_title": "引擎管理",
       "status_canceled": "已取消",
       "status_code_submitted": "已提交授权码，等待结果",
@@ -300,8 +303,8 @@
       "nav_engines_title": "Engine 管理",
       "nav_runs_desc": "按 request_id 查看 run 文件树、状态与日志输出。",
       "nav_runs_title": "Run 观测",
-      "nav_settings_desc": "调整运行时日志设置，并进入危险操作维护区。",
-      "nav_settings_title": "设置",
+      "nav_settings_desc": "查看系统/bootstrap 日志，并管理受保护的维护控制项。",
+      "nav_settings_title": "System Console",
       "page_title": "Skill Runner UI",
       "subtitle": "用于查看已安装 Skill，并通过网页上传 Skill 包进行安装。",
       "title": "Skill Runner 管理界面"
@@ -426,7 +429,28 @@
         "subtitle": "仅以下字段可在 UI 设置中编辑；只读输入仍由系统 config/env 控制。",
         "title": "日志设置"
       },
-      "page_title": "Skill Runner 设置",
+      "page_title": "System Console",
+      "log_explorer": {
+        "clear": "清空",
+        "empty": "没有匹配的日志",
+        "from_ts": "开始时间（ISO8601）",
+        "keyword": "关键词",
+        "keyword_placeholder": "message / request_id / event",
+        "level": "级别",
+        "level_all": "全部",
+        "load_more": "加载更多",
+        "no_more": "没有更多日志",
+        "read_failed": "日志查询失败",
+        "read_failed_network": "日志查询失败：网络或服务异常",
+        "search": "查询",
+        "source": "日志源",
+        "source_bootstrap": "Bootstrap",
+        "source_system": "System",
+        "subtitle": "用于搜索与筛选 system/bootstrap 日志，辅助排障。",
+        "summary_prefix": "匹配",
+        "title": "日志浏览器",
+        "to_ts": "结束时间（ISO8601）"
+      },
       "reset": {
         "action": "重置项目数据",
         "confirm_desc": "请输入下方确认文本后继续。此操作可能移除当前运行中的状态。",
@@ -439,7 +463,6 @@
         "execute_failed_network": "执行失败: 网络或服务异常",
         "execute_success": "执行成功",
         "failed": "重置失败",
-        "include_agent_status": "同时清理 agent 状态文件",
         "include_engine_auth_sessions": "同时清理 engine 鉴权会话日志",
         "include_engine_catalog": "同时清理 engine 模型缓存",
         "include_logs": "同时清理应用日志（data/logs）",
@@ -452,8 +475,8 @@
         "subtitle": "该操作会删除数据库和 run 数据目录，不可逆，请仅在维护窗口执行。",
         "title": "Danger Zone：重置项目数据"
       },
-      "subtitle": "管理日志设置并执行受保护的数据重置操作。",
-      "title": "设置"
+      "subtitle": "查看 system/bootstrap 日志，管理运行日志设置，并执行受保护的维护操作。",
+      "title": "System Console"
     },
     "skill_detail": {
       "meta_description": "description:",
@@ -463,6 +486,7 @@
       "page_title": "Skill 浏览",
       "preview_hint": "请从左侧面板选择文件。",
       "preview_title": "文件预览",
+      "subtitle": "查看包结构并预览文件内容。",
       "structure_title": "包结构（只读）"
     },
     "skills": {

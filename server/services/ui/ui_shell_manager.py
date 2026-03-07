@@ -214,7 +214,7 @@ class UiShellManager:
         return os.environ.get("UI_SHELL_TTYD_BIND_HOST", "0.0.0.0").strip() or "0.0.0.0"
 
     def _ttyd_port(self) -> int:
-        value = int(os.environ.get("UI_SHELL_TTYD_PORT", "7681"))
+        value = int(os.environ.get("UI_SHELL_TTYD_PORT", "17681"))
         if value <= 0 or value > 65535:
             raise UiShellRuntimeError("UI_SHELL_TTYD_PORT must be in 1..65535")
         return value

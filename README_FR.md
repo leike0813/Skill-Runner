@@ -93,7 +93,7 @@ docker compose up --build
 Ou exécution indépendante :
 
 ```bash
-docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 ```
 
 ### Développement local
@@ -122,7 +122,7 @@ docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
 #### Authentification UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 7681:7681 \
+docker run --rm -p 8000:8000 -p 17681:17681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
@@ -154,6 +154,9 @@ L'approche privilégiée — authentifier les moteurs via le proxy OAuth intégr
 4. Les identifiants sont automatiquement stockés et gérés.
 
 Cela fonctionne également pendant les exécutions actives : si un moteur nécessite une authentification en cours d'exécution, le frontend peut présenter un **défi d'authentification en session** — l'exécution se met en pause, l'utilisateur complète OAuth, et l'exécution reprend automatiquement.
+
+> ⚠️ **Avertissement à haut risque (OpenCode + Google/Antigravity) :**  
+> Pour `opencode` avec `provider_id=google` (voie Antigravity, via le plugin tiers `opencode-antigravity-auth`), `oauth_proxy` et `cli_delegate` sont tous deux considérés comme des voies de connexion tierce à haut risque. Cette voie peut enfreindre les politiques Google et entraîner une suspension de compte.
 
 ### Alternative : CLI Delegate
 

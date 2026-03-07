@@ -19,7 +19,6 @@ DATA_RESET_CONFIRMATION_TEXT = "RESET SKILL RUNNER DATA"
 class DataResetOptions:
     include_logs: bool = False
     include_engine_catalog: bool = False
-    include_agent_status: bool = False
     include_engine_auth_sessions: bool = False
     dry_run: bool = False
 
@@ -108,7 +107,6 @@ class DataResetService:
         db_files = self._ordered_unique(
             [
                 Path(self._cfg.SYSTEM.RUNS_DB),
-                Path(self._cfg.SYSTEM.ENGINE_UPGRADES_DB),
             ]
         )
         data_dirs = self._ordered_unique(
@@ -123,8 +121,6 @@ class DataResetService:
             optional_paths.append(Path(self._cfg.SYSTEM.LOGGING.DIR))
         if options.include_engine_catalog:
             optional_paths.extend(Path(path) for path in self._model_catalog_lifecycle.cache_paths())
-        if options.include_agent_status:
-            optional_paths.append(data_dir / "agent_status.json")
         if include_engine_auth_sessions:
             optional_paths.append(data_dir / "engine_auth_sessions")
         optional_paths.append(data_dir / "ui_shell_sessions")

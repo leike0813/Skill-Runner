@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY server ./server
+COPY e2e_client ./e2e_client
 COPY skills ./skills
 
 RUN python3 -m venv /opt/venv \
@@ -52,12 +53,13 @@ RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/uv pip install --python /opt/venv/bin/python .
 
 COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/entrypoint_e2e.sh /entrypoint_e2e.sh
 COPY scripts/agent_manager.sh /app/scripts/agent_manager.sh
 COPY scripts/agent_manager.py /app/scripts/agent_manager.py
 COPY scripts/upgrade_agents.sh /app/scripts/upgrade_agents.sh
 COPY scripts/deploy_local.sh /app/scripts/deploy_local.sh
-RUN chmod +x /entrypoint.sh /app/scripts/agent_manager.sh /app/scripts/upgrade_agents.sh /app/scripts/deploy_local.sh
+RUN chmod +x /entrypoint.sh /entrypoint_e2e.sh /app/scripts/agent_manager.sh /app/scripts/upgrade_agents.sh /app/scripts/deploy_local.sh
 
-EXPOSE 8000 7681
+EXPOSE 8000 8011 17681
 
 ENTRYPOINT ["/entrypoint.sh"]

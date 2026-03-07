@@ -156,3 +156,42 @@ The example client MUST present a product-style chat experience while preserving
 - **THEN** 客户端 MUST 仅渲染返回结果
 - **AND** 命中黑名单的目录（例如 `node_modules`）不得出现在页面
 
+### Requirement: Release compose MUST preserve optional E2E client topology
+系统 MUST 在 release compose 资产中保留与本地 compose 一致的可选 `e2e_client` 服务块（默认注释），并继续采用同镜像双入口模式。
+
+#### Scenario: Optional e2e_client remains commented
+- **WHEN** 用户下载 release compose 资产
+- **THEN** `api` 为默认启用服务
+- **AND** `e2e_client` 服务保持默认注释并附带启用提示
+
+#### Scenario: Enabling e2e_client uses same image
+- **WHEN** 用户按注释提示启用 `e2e_client`
+- **THEN** `e2e_client` 与 `api` 使用同一镜像 tag
+- **AND** 仅通过入口命令区分服务角色
+
+### Requirement: 示例客户端 Run Observation MUST 提供 bundle 下载入口
+示例客户端 MUST 在 Run Observation 页面提供可直接下载当前 run bundle 的入口，避免用户离开 E2E 页面进行二次操作。
+
+#### Scenario: user downloads run bundle from observation page
+- **WHEN** 用户在 `/runs/{request_id}` 页面点击下载 bundle
+- **THEN** 浏览器开始下载 zip 文件
+- **AND** 下载目标对应当前 run 的 bundle 内容
+
+#### Scenario: download action does not break file explorer
+- **WHEN** 用户触发 bundle 下载
+- **THEN** 文件树与文件预览功能继续可用
+- **AND** 页面不会被强制跳转到非 observation 页面
+
+### Requirement: E2E 示例客户端 MUST 支持同镜像独立入口启动
+系统 MUST 支持将 E2E 示例客户端与主服务打包到同一镜像中，并通过独立入口在单独容器服务中启动客户端。
+
+#### Scenario: 同镜像启动 E2E 客户端
+- **WHEN** 使用主服务镜像并指定 E2E 客户端入口命令启动容器
+- **THEN** E2E 客户端可在独立端口提供页面服务
+- **AND** 客户端仍仅通过公开 HTTP API 与后端交互
+
+#### Scenario: 主服务入口保持默认
+- **WHEN** 用户未覆盖镜像入口命令直接启动容器
+- **THEN** 容器默认运行后端主服务
+- **AND** E2E 客户端不会自动占用其端口
+

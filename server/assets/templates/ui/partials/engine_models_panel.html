@@ -1,8 +1,10 @@
 <div id="engine-models-panel">
     <div class="card">
-        <a href="/ui/engines">{{ t("ui.common.back_engines", default="← Back to Engines") }}</a>
-        <h1>{{ t("ui.engine_models.title", default="模型管理：{engine}", engine=engine) }}</h1>
-        <div class="muted">{{ t("ui.engine_models.detected_version", default="Detected Version:") }} {{ view.cli_version_detected or "-" }}</div>
+        {% set header_title = t("ui.engine_models.title", default="模型管理：{engine}", engine=engine) %}
+        {% set header_subtitle = t("ui.engine_models.detected_version", default="Detected Version:") ~ " " ~ (view.cli_version_detected or "-") %}
+        {% set header_back_href = "/ui/engines" %}
+        {% set header_back_label = t("ui.common.back_engines", default="← Back to Engines") %}
+        {% include "ui/partials/page_header.html" %}
         <div class="muted">{{ t("ui.engine_models.resolved_snapshot", default="Resolved Snapshot:") }} {{ view.resolved_snapshot_version }} ({{ view.resolved_snapshot_file }})</div>
         {% if engine == "opencode" %}
         <div class="row" style="margin-top: 10px;">

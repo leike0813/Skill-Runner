@@ -14,7 +14,6 @@ def _build_fake_config(tmp_path: Path) -> SimpleNamespace:
         SYSTEM=SimpleNamespace(
             DATA_DIR=str(data_dir),
             RUNS_DB=str(data_dir / "runs.db"),
-            ENGINE_UPGRADES_DB=str(data_dir / "engine_upgrades.db"),
             RUNS_DIR=str(data_dir / "runs"),
             SKILL_INSTALLS_DIR=str(data_dir / "skill_installs"),
             TMP_UPLOADS_DIR=str(data_dir / "tmp_uploads"),
@@ -38,7 +37,6 @@ def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_p
     options = DataResetOptions(
         include_logs=True,
         include_engine_catalog=True,
-        include_agent_status=True,
         include_engine_auth_sessions=True,
     )
     targets = service.build_targets(options)
@@ -46,7 +44,6 @@ def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_p
 
     assert (data_dir / "ui_shell_sessions") in targets.optional_paths
     assert (data_dir / "system_settings.json") not in targets.optional_paths
-    assert (data_dir / "agent_status.json") in targets.optional_paths
     assert (data_dir / "engine_auth_sessions") in targets.optional_paths
     assert (data_dir / "logs") in targets.optional_paths
     assert (data_dir / "tmp_uploads") in targets.optional_paths
@@ -79,7 +76,6 @@ def test_data_reset_service_execute_reset_deletes_targets_and_recreates_dirs(tmp
     options = DataResetOptions(
         include_logs=True,
         include_engine_catalog=True,
-        include_agent_status=True,
         include_engine_auth_sessions=True,
     )
     targets = service.build_targets(options)
@@ -116,7 +112,6 @@ def test_data_reset_service_dry_run_returns_preview_details(tmp_path: Path):
     options = DataResetOptions(
         include_logs=True,
         include_engine_catalog=True,
-        include_agent_status=True,
         include_engine_auth_sessions=True,
         dry_run=True,
     )
@@ -181,7 +176,6 @@ def test_reset_script_delegates_to_shared_data_reset_service(monkeypatch):
             "--yes",
             "--include-logs",
             "--include-engine-catalog",
-            "--include-agent-status",
             "--include-engine-auth-sessions",
         ],
     )
@@ -192,6 +186,5 @@ def test_reset_script_delegates_to_shared_data_reset_service(monkeypatch):
     options = calls["execute"]
     assert getattr(options, "include_logs") is True
     assert getattr(options, "include_engine_catalog") is True
-    assert getattr(options, "include_agent_status") is True
     assert getattr(options, "include_engine_auth_sessions") is True
     assert getattr(options, "dry_run") is False

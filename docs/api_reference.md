@@ -22,6 +22,7 @@
 ### System 管理
 - `GET /v1/management/system/settings`：获取系统设置（日志配置、鉴权会话日志持久化开关、数据重置确认文本）
 - `PUT /v1/management/system/settings`：更新系统设置（当前支持日志级别配置）
+- `GET /v1/management/system/logs/query`：查询系统日志与 bootstrap 日志（关键词/级别/时间范围/分页）
 - `POST /v1/management/system/reset-data`：执行数据重置（**破坏性操作**，需确认文本）
 
 ### Skill 管理
@@ -87,10 +88,54 @@
 - `400`: 日志级别验证失败（如非法级别名）。
 - `500`: 文件系统写入错误。
 
+### 查询系统日志（System Console）
+`GET /v1/management/system/logs/query`
+
+用于管理端 **System Console** 查询日志。支持 `system`（`skill_runner.log*`）与 `bootstrap`（`bootstrap.log*`）两种日志源。
+
+**Query 参数**:
+- `source`（必填）：`system` / `bootstrap`
+- `cursor`（可选，默认 `0`）：分页偏移
+- `limit`（可选，默认 `200`，最大 `1000`）
+- `q`（可选）：关键词（对 `message/raw` 做 case-insensitive 匹配）
+- `level`（可选）：`DEBUG|INFO|WARNING|ERROR|CRITICAL`
+- `from_ts` / `to_ts`（可选）：ISO8601 时间范围过滤
+
+**Response** (`ManagementSystemLogQueryResponse`):
+```json
+{
+  "source": "system",
+  "items": [
+    {
+      "ts": "2026-03-07T01:20:52Z",
+      "level": "ERROR",
+      "message": "Failed to install codex",
+      "raw": "2026-03-07 01:20:52 ERROR server.test: Failed to install codex",
+      "source": "system",
+      "file": "skill_runner.log",
+      "line_no": 120
+    }
+  ],
+  "next_cursor": 1,
+  "total_matched": 42
+}
+```
+
+**错误码**:
+- `400`: `source` 或 `level` 参数非法。
+- `500`: 日志文件读取失败（文件系统错误）。
+
+**过滤规则**:
+- 仅允许白名单日志族：
+  - `source=system` → `skill_runner.log*`
+  - `source=bootstrap` → `bootstrap.log*`
+- 不支持任意路径输入。
+- 时间过滤为 best-effort；无法解析时间戳的行在启用时间过滤时会被排除。
+
 ### 数据重置
 `POST /v1/management/system/reset-data`
 
-**⚠️ 破坏性操作** — 将删除运行记录、缓存条目及可选的日志/引擎目录/Agent 状态数据。
+**⚠️ 破坏性操作** — 将删除运行记录、缓存条目及可选的日志/引擎目录/Agent 状态缓存数据。
 
 **Request Body** (`ManagementDataResetRequest`):
 ```json
@@ -98,7 +143,6 @@
   "confirmation": "CONFIRM RESET",
   "include_logs": true,
   "include_engine_catalog": false,
-  "include_agent_status": false,
   "include_engine_auth_sessions": false,
   "dry_run": true
 }
@@ -796,10 +840,10 @@
 - 文本文件可预览；二进制文件显示“不可预览（无信息）”。
 - 文本文件预览大小上限为 `256KB`，超限显示“文件过大不可预览”。
 
-### 系统设置页面
+### System Console 页面
 `GET /ui/settings`
 
-返回系统设置页面，提供日志级别配置、数据重置等管理操作的 GUI 入口（后端通过 `/v1/management/system/*` 实现）。
+返回 System Console 页面，提供日志级别配置、日志浏览（system/bootstrap）与数据重置等管理操作 GUI（后端通过 `/v1/management/system/*` 实现）。
 
 ### Engine 管理页面
 `GET /ui/engines`
@@ -830,7 +874,7 @@
 
 运行说明：
 - 终端实际由 `ttyd` 提供，前端会按会话返回的端口嵌入 `http://<host>:<ttyd_port>/`。
-- 容器部署时需显式映射 ttyd 端口（默认 `7681:7681`）。
+- 容器部署时需显式映射 ttyd 端口（默认 `17681:17681`）。
 
 兼容性说明：
 - 旧页面 `GET /ui/engines/auth-shell` 已下线，返回 `404`。

@@ -617,6 +617,63 @@ async def test_management_get_system_settings(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_management_query_system_logs(monkeypatch):
+    captured = {}
+
+    def _query(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return {
+            "source": kwargs["source"],
+            "items": [
+                {
+                    "ts": "2026-03-07T01:20:52Z",
+                    "level": "ERROR",
+                    "message": "Failed to install codex",
+                    "raw": "2026-03-07 01:20:52 ERROR server.test: Failed to install codex",
+                    "source": kwargs["source"],
+                    "file": "skill_runner.log",
+                    "line_no": 12,
+                }
+            ],
+            "next_cursor": 1,
+            "total_matched": 2,
+        }
+
+    monkeypatch.setattr("server.routers.management.system_log_explorer_service.query", _query)
+
+    response = await _request(
+        "GET",
+        "/v1/management/system/logs/query?source=system&cursor=0&limit=200&level=error&q=install",
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "system"
+    assert payload["total_matched"] == 2
+    assert payload["items"][0]["line_no"] == 12
+    assert captured["level"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_management_query_system_logs_rejects_invalid_source():
+    response = await _request(
+        "GET",
+        "/v1/management/system/logs/query?source=unknown",
+    )
+    assert response.status_code == 400
+    assert "source must be one of" in response.text
+
+
+@pytest.mark.asyncio
+async def test_management_query_system_logs_rejects_invalid_level():
+    response = await _request(
+        "GET",
+        "/v1/management/system/logs/query?source=system&level=TRACE",
+    )
+    assert response.status_code == 400
+    assert "level must be one of" in response.text
+
+
+@pytest.mark.asyncio
 async def test_management_update_system_settings(monkeypatch):
     captured = {}
 
@@ -716,7 +773,6 @@ async def test_management_reset_data_execute_with_include_flags(monkeypatch):
             "dry_run": False,
             "include_logs": True,
             "include_engine_catalog": True,
-            "include_agent_status": True,
             "include_engine_auth_sessions": True,
         },
     )
@@ -727,7 +783,6 @@ async def test_management_reset_data_execute_with_include_flags(monkeypatch):
     assert body["recreated_count"] == 2
     assert captured["options"].include_logs is True
     assert captured["options"].include_engine_catalog is True
-    assert captured["options"].include_agent_status is True
     assert captured["options"].include_engine_auth_sessions is True
 
 

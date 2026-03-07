@@ -18,9 +18,7 @@
             <td>{{ skill.version or "-" }}</td>
             <td>{{ ", ".join(skill.engines or []) }}</td>
             <td>{{ skill.health or "-" }}</td>
-            <td>
-                <a href="/ui/skills/{{ skill.id }}">{{ t("ui.skills.table.browse", default="Browse") }}</a>
-            </td>
+            <td><div class="table-actions"><a class="btn btn-primary" href="/ui/skills/{{ skill.id }}">{{ t("ui.skills.table.browse", default="Browse") }}</a></div></td>
         </tr>
     {% endfor %}
     </tbody>

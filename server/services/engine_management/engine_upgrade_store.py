@@ -13,7 +13,7 @@ class EngineUpgradeStore:
     """SQLite-backed store for engine upgrade task lifecycle."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or Path(config.SYSTEM.ENGINE_UPGRADES_DB)
+        self.db_path = db_path or Path(config.SYSTEM.RUNS_DB)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_lock = asyncio.Lock()
         self._initialized = False

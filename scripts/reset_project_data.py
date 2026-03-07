@@ -66,11 +66,6 @@ def main() -> int:
         help="Also remove engine model catalog cache files.",
     )
     parser.add_argument(
-        "--include-agent-status",
-        action="store_true",
-        help="Also remove data/agent_status.json if present.",
-    )
-    parser.add_argument(
         "--include-engine-auth-sessions",
         action="store_true",
         help="Also remove data/engine_auth_sessions (auth observability logs).",
@@ -80,7 +75,6 @@ def main() -> int:
     options = DataResetOptions(
         include_logs=args.include_logs,
         include_engine_catalog=args.include_engine_catalog,
-        include_agent_status=args.include_agent_status,
         include_engine_auth_sessions=args.include_engine_auth_sessions,
         dry_run=args.dry_run,
     )

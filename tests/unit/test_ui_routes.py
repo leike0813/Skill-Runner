@@ -43,6 +43,10 @@ def _read_run_detail_template() -> str:
     return Path("server/assets/templates/ui/run_detail.html").read_text(encoding="utf-8")
 
 
+def _read_ui_template(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_ui_index_available_when_auth_disabled(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
@@ -51,6 +55,23 @@ async def test_ui_index_available_when_auth_disabled(monkeypatch):
     response = await _request("GET", "/ui")
     assert response.status_code == 200
     assert "Skill Runner 管理界面" in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_language_query_sets_cookie_and_preserves_query(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+
+    response = await _request("GET", "/ui?foo=1&bar=2&lang=en")
+    assert response.status_code == 200
+    cookie_header = response.headers.get("set-cookie", "")
+    assert "lang=en" in cookie_header
+    assert "Max-Age=31536000" in cookie_header
+    assert "Path=/" in cookie_header
+
+    assert "foo=1" in response.text
+    assert "bar=2" in response.text
+    assert "lang=zh" in response.text
 
 
 @pytest.mark.asyncio
@@ -92,9 +113,13 @@ async def test_ui_settings_contains_logging_and_reset_controls(monkeypatch):
 
     response = await _request("GET", "/ui/settings")
     assert response.status_code == 200
+    assert "System Console" in response.text
     assert "日志设置" in response.text
     assert "Danger Zone：重置项目数据" in response.text
     assert 'id="danger-reset-open-btn"' in response.text
+    assert 'id="log-query-source"' in response.text
+    assert 'id="log-query-submit-btn"' in response.text
+    assert "/v1/management/system/logs/query" in response.text
     assert "/v1/management/system/reset-data" in response.text
     assert "/v1/management/system/settings" in response.text
     assert DATA_RESET_CONFIRMATION_TEXT in response.text
@@ -252,6 +277,33 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "extractProtocolRawRef(row)" in content
 
 
+def test_ui_core_pages_use_shared_page_header_partial():
+    template_paths = [
+        "server/assets/templates/ui/engines.html",
+        "server/assets/templates/ui/runs.html",
+        "server/assets/templates/ui/settings.html",
+        "server/assets/templates/ui/skill_detail.html",
+        "server/assets/templates/ui/run_detail.html",
+        "server/assets/templates/ui/partials/engine_models_panel.html",
+    ]
+    for template_path in template_paths:
+        content = _read_ui_template(template_path)
+        assert '{% include "ui/partials/page_header.html" %}' in content
+
+
+def test_page_header_partial_uses_standard_secondary_back_button():
+    content = _read_ui_template("server/assets/templates/ui/partials/page_header.html")
+    assert 'data-ui-page-header="true"' in content
+    assert 'class="btn btn-secondary page-header-back-btn"' in content
+
+
+def test_design_system_enforces_non_wrapping_buttons_and_table_actions():
+    content = _read_ui_template("server/assets/static/css/design-system.css")
+    assert ".btn {" in content
+    assert "white-space: nowrap;" in content
+    assert ".table-actions" in content
+
+
 @pytest.mark.asyncio
 async def test_ui_skills_table_highlight(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
@@ -400,7 +452,7 @@ async def test_ui_engines_page(monkeypatch):
     assert "Engine 管理" in response.text
     assert "正在检测 Engine 版本与状态，请稍候..." not in response.text
     assert 'hx-get="/ui/management/engines/table"' not in response.text
-    assert "<table>" in response.text
+    assert "<table" in response.text
     assert "内嵌终端（ttyd）" in response.text
     assert "引擎鉴权" in response.text
     assert 'id="auth-transport-select"' in response.text
@@ -444,10 +496,28 @@ async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypat
             },
         },
     )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_auth_strategy_service.list_ui_high_risk_capabilities",
+        lambda: {
+            "oauth_proxy": {
+                "codex": [],
+                "gemini": [],
+                "iflow": [],
+                "opencode": {"google": ["callback", "auth_code_or_url"]},
+            },
+            "cli_delegate": {
+                "codex": [],
+                "gemini": [],
+                "iflow": [],
+                "opencode": {"google": ["auth_code_or_url"]},
+            },
+        },
+    )
 
     response = await _request("GET", "/ui/engines")
     assert response.status_code == 200
     assert '"deepseek": ["api_key"]' in response.text
+    assert "const authUiHighRiskCapabilities = " in response.text
 
 
 @pytest.mark.asyncio
@@ -568,8 +638,8 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-entry="codex"' in response.text
     assert 'data-engine-auth-entry="iflow"' in response.text
-    assert "Auth (Codex)" in response.text
-    assert "Auth (iFlow)" in response.text
+    assert ("Auth (Codex)" in response.text) or ("鉴权(Codex)" in response.text)
+    assert ("Auth (iFlow)" in response.text) or ("鉴权(iFlow)" in response.text)
     assert "启动TUI" in response.text
     assert "升级" in response.text
     assert 'data-engine-auth-start=' not in response.text
@@ -1217,7 +1287,7 @@ async def test_ui_pages_use_management_data_endpoints(monkeypatch):
     engines_res = await _request("GET", "/ui/engines")
     assert engines_res.status_code == 200
     assert '/ui/management/engines/table' not in engines_res.text
-    assert "<table>" in engines_res.text
+    assert "<table" in engines_res.text
 
     runs_res = await _request("GET", "/ui/runs")
     assert runs_res.status_code == 200

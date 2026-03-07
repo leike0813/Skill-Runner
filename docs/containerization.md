@@ -1,7 +1,7 @@
 # Containerization Guide
 
-This guide describes a container setup that provides the runtime for Skill Runner
-without bundling the agent CLIs into the image.
+This guide describes a container setup that packages backend API and built-in E2E client
+into the same image with different entrypoints. Agent CLIs are still not bundled in image.
 
 ## Goals
 
@@ -14,8 +14,11 @@ without bundling the agent CLIs into the image.
 ## Files
 
 - `Dockerfile`: runtime image (Node + Python 3.11).
-- `docker-compose.yml`: recommended volume layout.
+- `docker-compose.yml`: local development compose (build-first; `api` enabled by default; optional commented `e2e_client` block).
+- `docker-compose.release.tmpl.yml`: release compose template (image-first; rendered in CI).
+- `scripts/render_release_compose.py`: render `docker-compose.release.yml` from template + image tag.
 - `scripts/entrypoint.sh`: runtime checks + uvicorn start (baked into image).
+- `scripts/entrypoint_e2e.sh`: built-in E2E client entrypoint (same image, different startup path).
 - `scripts/agent_manager.py`: cross-platform Engine manager (ensure/check/upgrade/import credentials).
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
 - `scripts/upgrade_agents.sh`: upgrade wrapper (`local` / `container` mode).
@@ -51,10 +54,11 @@ Use the upgrade script to refresh installed CLIs:
 
 ## Agent CLI status
 
-The entrypoint and application startup refresh engine versions and write a status file:
+The entrypoint and application startup refresh engine versions and persist status into SQLite:
 
-- Path: `${SKILL_RUNNER_DATA_DIR:-/data}/agent_status.json`
-- Fields: `present` and `version` per CLI
+- Database: `${SKILL_RUNNER_DATA_DIR:-/data}/runs.db`
+- Table: `engine_status_cache`
+- Fields: `engine`, `present`, `version`, `updated_at`
 
 ## Configuration, isolation & auth
 
@@ -111,7 +115,7 @@ services:
 
 Example docker run:
 ```bash
-docker run --rm -p 8000:8000 -p 7681:7681 \
+docker run --rm -p 8000:8000 -p 17681:17681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
@@ -121,14 +125,14 @@ docker run --rm -p 8000:8000 -p 7681:7681 \
     - `/ui/skills/{skill_id}`
     - `/ui/skills/{skill_id}/view?path=<relative_path>`
   - UI also provides inline managed TUI on `/ui/engines`:
-    - engine table reads cached versions from `agent_status.json`
+    - engine table reads cached versions from `runs.db.engine_status_cache`
     - per-engine “start TUI” buttons (predefined commands only)
     - single active session globally
-    - powered by `ttyd` gateway (default port `7681`)
-    - compose example exposes `7681:7681` for browser access
+    - powered by `ttyd` gateway (default port `17681`)
+    - compose example exposes `17681:17681` for browser access
   - Optional ttyd runtime options:
     - `UI_SHELL_TTYD_BIND_HOST` (default `0.0.0.0`)
-    - `UI_SHELL_TTYD_PORT` (default `7681`)
+    - `UI_SHELL_TTYD_PORT` (default `17681`)
 - Default config bootstrap (inside isolated Agent Home):
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`
@@ -230,11 +234,39 @@ OpenAI OAuth proxy note:
 
 ## Start the service
 
+For local development, use the repository compose file (build-first):
+
 ```
 docker compose up --build
 ```
 
 The API will be available at `http://localhost:8000/v1`.
+
+To enable the built-in E2E example client, uncomment the `e2e_client` service block in
+`docker-compose.yml` and restart compose. The E2E UI will be available at
+`http://localhost:8011`.
+
+### Bootstrap diagnostics (agent install / startup)
+
+Container startup now writes structured bootstrap diagnostics to:
+
+- `${SKILL_RUNNER_DATA_DIR}/logs/bootstrap.log`
+- `${SKILL_RUNNER_DATA_DIR}/agent_bootstrap_report.json`
+
+If startup prints `Failed to install <engine>: exit=1` or later warns
+`opencode CLI not found`, inspect the two files above first. The report includes
+per-engine `exit_code`, `duration_ms`, and summarized stderr output.
+
+## Release compose asset (tag-only)
+
+For versioned deployments, download `docker-compose.release.yml` from the GitHub release assets.
+This file is generated only for `v*` tags and uses pinned image tags (no local build).
+
+```bash
+docker compose -f docker-compose.release.yml up -d
+```
+
+`docker-compose.release.yml.sha256` is published alongside for integrity verification.
 
 ## Build and run locally
 
@@ -258,5 +290,14 @@ docker run --rm -p 8000:8000 \
   -v "$(pwd)/skills:/app/skills" \
   -v "$(pwd)/agent_config:/opt/config" \
   -v skillrunner_cache:/opt/cache \
+  skill-runner:local
+```
+
+Run the built-in E2E client from the same image:
+
+```bash
+docker run --rm -p 8011:8011 \
+  --entrypoint /entrypoint_e2e.sh \
+  -e SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL=http://host.docker.internal:8000 \
   skill-runner:local
 ```

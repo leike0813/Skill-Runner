@@ -97,6 +97,13 @@
             "$ref": "#/$defs/runtime_auth_method"
           }
         },
+        "high_risk_methods": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/runtime_auth_method"
+          }
+        },
         "driver": {
           "$ref": "#/$defs/driver_policy"
         }

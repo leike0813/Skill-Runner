@@ -1,0 +1,43 @@
+<div class="card">
+    <h2>{{ t("ui.settings.log_explorer.title", default="Log Explorer") }}</h2>
+    <div class="muted">{{ t("ui.settings.log_explorer.subtitle", default="Search and filter system/bootstrap logs for diagnostics.") }}</div>
+    <div class="field-grid" style="margin-top:12px;">
+        <label>
+            {{ t("ui.settings.log_explorer.source", default="Source") }}
+            <select id="log-query-source">
+                <option value="system">{{ t("ui.settings.log_explorer.source_system", default="System") }}</option>
+                <option value="bootstrap">{{ t("ui.settings.log_explorer.source_bootstrap", default="Bootstrap") }}</option>
+            </select>
+        </label>
+        <label>
+            {{ t("ui.settings.log_explorer.level", default="Level") }}
+            <select id="log-query-level">
+                <option value="">{{ t("ui.settings.log_explorer.level_all", default="All") }}</option>
+                {% for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] %}
+                <option value="{{ level }}">{{ level }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            {{ t("ui.settings.log_explorer.keyword", default="Keyword") }}
+            <input id="log-query-keyword" type="text" placeholder="{{ t("ui.settings.log_explorer.keyword_placeholder", default="message / request_id / event") }}">
+        </label>
+        <label>
+            {{ t("ui.settings.log_explorer.from_ts", default="From (ISO8601)") }}
+            <input id="log-query-from" type="text" placeholder="2026-03-07T00:00:00Z">
+        </label>
+        <label>
+            {{ t("ui.settings.log_explorer.to_ts", default="To (ISO8601)") }}
+            <input id="log-query-to" type="text" placeholder="2026-03-07T23:59:59Z">
+        </label>
+    </div>
+    <div class="row" style="margin-top:10px; gap:10px;">
+        <button id="log-query-submit-btn" class="btn btn-primary" type="button">{{ t("ui.settings.log_explorer.search", default="Search") }}</button>
+        <button id="log-query-clear-btn" class="btn btn-secondary" type="button">{{ t("ui.settings.log_explorer.clear", default="Clear") }}</button>
+    </div>
+    <div id="log-query-result" class="status-box" style="margin-top:10px;"></div>
+    <div id="log-query-list" class="log-list" aria-live="polite"></div>
+    <div class="row" style="margin-top:10px;">
+        <button id="log-query-load-more-btn" class="btn btn-secondary" type="button">{{ t("ui.settings.log_explorer.load_more", default="Load more") }}</button>
+    </div>
+</div>

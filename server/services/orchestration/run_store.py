@@ -205,6 +205,16 @@ class RunStore:
             )
             await conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS engine_status_cache (
+                    engine TEXT PRIMARY KEY,
+                    present INTEGER NOT NULL,
+                    version TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS request_interactions (
                     request_id TEXT NOT NULL,
                     interaction_id INTEGER NOT NULL,

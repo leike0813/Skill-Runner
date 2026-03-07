@@ -16,6 +16,12 @@ from server.config_registry.registry import config_registry
 _VALID_TRANSPORTS = ("oauth_proxy", "cli_delegate")
 _NON_OPENCODE_ENGINES = ("codex", "gemini", "iflow")
 _ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode")
+_CONVERSATION_TO_RUNTIME_METHOD_MAP: dict[str, str] = {
+    "callback": "callback",
+    "device_auth": "auth_code_or_url",
+    "authorization_code": "auth_code_or_url",
+    "api_key": "api_key",
+}
 
 
 class EngineAuthStrategyLoadError(RuntimeError):
@@ -235,6 +241,64 @@ class EngineAuthStrategyService:
                     normalized.append(value)
         return tuple(normalized)
 
+    def runtime_high_risk_methods_for_transport(
+        self,
+        *,
+        engine: str,
+        transport: str,
+        provider_id: str | None = None,
+    ) -> tuple[str, ...]:
+        block = self._transport_block(
+            engine=engine,
+            provider_id=provider_id,
+            transport=transport,
+        )
+        methods_obj = block.get("high_risk_methods")
+        methods = methods_obj if isinstance(methods_obj, list) else []
+        normalized: list[str] = []
+        for method in methods:
+            if isinstance(method, str):
+                value = method.strip().lower()
+                if value:
+                    normalized.append(value)
+        return tuple(normalized)
+
+    def is_runtime_method_high_risk(
+        self,
+        *,
+        engine: str,
+        transport: str,
+        auth_method: str,
+        provider_id: str | None = None,
+    ) -> bool:
+        normalized = auth_method.strip().lower()
+        if not normalized:
+            return False
+        return normalized in self.runtime_high_risk_methods_for_transport(
+            engine=engine,
+            transport=transport,
+            provider_id=provider_id,
+        )
+
+    def is_conversation_method_high_risk(
+        self,
+        *,
+        engine: str,
+        conversation_method: str,
+        provider_id: str | None = None,
+    ) -> bool:
+        normalized_conversation_method = conversation_method.strip().lower()
+        runtime_method = _CONVERSATION_TO_RUNTIME_METHOD_MAP.get(normalized_conversation_method)
+        if runtime_method is None:
+            return False
+        transport = self.resolve_conversation_transport(engine, provider_id=provider_id)
+        return self.is_runtime_method_high_risk(
+            engine=engine,
+            transport=transport,
+            auth_method=runtime_method,
+            provider_id=provider_id,
+        )
+
     def list_ui_capabilities(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {
             "oauth_proxy": {
@@ -268,6 +332,48 @@ class EngineAuthStrategyService:
             for transport in _VALID_TRANSPORTS:
                 methods = list(
                     self.runtime_methods_for_transport(
+                        engine="opencode",
+                        transport=transport,
+                        provider_id=normalized_provider,
+                    )
+                )
+                if methods:
+                    payload[transport]["opencode"][normalized_provider] = methods
+        return payload
+
+    def list_ui_high_risk_capabilities(self) -> dict[str, dict[str, Any]]:
+        payload: dict[str, dict[str, Any]] = {
+            "oauth_proxy": {
+                "codex": [],
+                "gemini": [],
+                "iflow": [],
+                "opencode": {},
+            },
+            "cli_delegate": {
+                "codex": [],
+                "gemini": [],
+                "iflow": [],
+                "opencode": {},
+            },
+        }
+        for engine in _NON_OPENCODE_ENGINES:
+            for transport in _VALID_TRANSPORTS:
+                payload[transport][engine] = list(
+                    self.runtime_high_risk_methods_for_transport(engine=engine, transport=transport)
+                )
+
+        opencode_block = self._engine_block("opencode")
+        providers_obj = opencode_block.get("providers")
+        providers = providers_obj if isinstance(providers_obj, dict) else {}
+        for provider_id, provider_block in providers.items():
+            if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
+                continue
+            normalized_provider = provider_id.strip().lower()
+            if not normalized_provider:
+                continue
+            for transport in _VALID_TRANSPORTS:
+                methods = list(
+                    self.runtime_high_risk_methods_for_transport(
                         engine="opencode",
                         transport=transport,
                         provider_id=normalized_provider,

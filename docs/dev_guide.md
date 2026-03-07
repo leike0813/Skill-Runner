@@ -411,6 +411,7 @@ Artifact 索引规则：
 | POST | `/v1/management/runs/{request_id}/cancel` | 取消运行 |
 | GET | `/v1/management/system/settings` | 读取 Settings 页面所需的系统设置视图 |
 | PUT | `/v1/management/system/settings` | 更新可写日志设置并热重载 |
+| GET | `/v1/management/system/logs/query` | 查询 system/bootstrap 日志（source/cursor/limit/q/level/time range） |
 | POST | `/v1/management/system/reset-data` | 高危：重置项目数据库与落盘数据（需确认文本） |
 
 ### Skills API（`server/routers/skills.py`）
@@ -486,7 +487,6 @@ Artifact 索引规则：
 - 可选开关：
   - `include_logs`
   - `include_engine_catalog`
-  - `include_agent_status`
   - `include_engine_auth_sessions`
 - 默认会清理核心数据库、runs/requests 目录，以及 `data/ui_shell_sessions`。
 
@@ -602,12 +602,12 @@ Run 状态字段：
 
 日志配置分为两部分：
 
-- Settings 页面可写并持久化到 `data/system_settings.json`：
+- System Console 页面可写并持久化到 `data/system_settings.json`：
   - `logging.level`
   - `logging.format`
   - `logging.retention_days`
   - `logging.dir_max_bytes`
-- 系统配置/环境变量输入（Settings 页面只读展示）：
+- 系统配置/环境变量输入（System Console 页面只读展示）：
   - `LOG_DIR`
   - `LOG_FILE_BASENAME`
   - `LOG_ROTATION_WHEN`
@@ -618,6 +618,6 @@ Run 状态字段：
 管理 UI 中：
 
 - `/ui` 首页提供 Settings 导航入口
-- `/ui/settings` 承载日志设置与 data reset 危险操作区
+- `/ui/settings` 承载 System Console（日志设置 + Log Explorer + data reset）
 
-`/v1/management/system/reset-data` 仍保持原确认文本保护；当 `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=false` 时，Settings 页面不会显示 engine auth session 清理项。
+`/v1/management/system/reset-data` 仍保持原确认文本保护；当 `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=false` 时，System Console 页面不会显示 engine auth session 清理项。

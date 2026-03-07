@@ -1,4 +1,4 @@
-<table>
+<table class="table table-striped">
     <thead>
         <tr>
             <th>{{ t("ui.engines.table.engine", default="Engine") }}</th>
@@ -14,8 +14,8 @@
             <td>{{ row.cli_version or "-" }}</td>
             <td>{{ row.models_count }}</td>
             <td>
+                <div class="table-actions">
                 <form
-                    style="display:inline-block; margin-right: 12px;"
                     hx-post="/ui/engines/upgrades"
                     hx-target="#upgrade-status-container"
                     hx-swap="innerHTML"
@@ -26,15 +26,16 @@
                 </form>
                 <button class="btn btn-primary" type="button" data-engine-start="{{ row.engine }}">{{ t("ui.engines.table.start_tui", default="启动TUI") }}</button>
                 {% if row.engine == "codex" %}
-                <button type="button" class="btn btn-secondary engine-auth-entry-btn" data-engine-auth-entry="codex">{{ t("ui.engines.table.auth_codex", default="鉴权(Codex)") }}</button>
+                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="codex">{{ t("ui.engines.table.auth_codex", default="鉴权(Codex)") }}</button>
                 {% elif row.engine == "gemini" %}
-                <button type="button" class="btn btn-secondary engine-auth-entry-btn" data-engine-auth-entry="gemini">{{ t("ui.engines.table.auth_gemini", default="鉴权(Gemini)") }}</button>
+                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="gemini">{{ t("ui.engines.table.auth_gemini", default="鉴权(Gemini)") }}</button>
                 {% elif row.engine == "iflow" %}
-                <button type="button" class="btn btn-secondary engine-auth-entry-btn" data-engine-auth-entry="iflow">{{ t("ui.engines.table.auth_iflow", default="鉴权(iFlow)") }}</button>
+                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="iflow">{{ t("ui.engines.table.auth_iflow", default="鉴权(iFlow)") }}</button>
                 {% elif row.engine == "opencode" %}
-                <button type="button" class="btn btn-secondary engine-auth-entry-btn" data-engine-auth-entry="opencode">{{ t("ui.engines.table.auth_opencode", default="鉴权(OpenCode)") }}</button>
+                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="opencode">{{ t("ui.engines.table.auth_opencode", default="鉴权(OpenCode)") }}</button>
                 {% endif %}
-                <a href="/ui/engines/{{ row.engine }}/models">{{ t("ui.engines.table.models_manage", default="模型管理") }}</a>
+                <a class="btn btn-primary" href="/ui/engines/{{ row.engine }}/models">{{ t("ui.engines.table.models_manage", default="模型管理") }}</a>
+                </div>
             </td>
         </tr>
     {% endfor %}

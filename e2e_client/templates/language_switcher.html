@@ -16,7 +16,7 @@
       {% if code == current_lang %}
         <span class="lang-option is-active" aria-current="true">{{ label }}</span>
       {% else %}
-        <a class="lang-option" href="{{ request.url.path }}?lang={{ code }}">{{ label }}</a>
+        <a class="lang-option" href="{{ request.url.include_query_params(lang=code) }}">{{ label }}</a>
       {% endif %}
     {% endfor %}
   </div>

@@ -55,6 +55,7 @@
     "observe_canceled_error": "Annulé par l'utilisateur",
     "observe_conversation": "Conversation",
     "observe_cursor": "Curseur :",
+    "observe_download_bundle": "Télécharger le bundle",
     "observe_default_prompt": "Veuillez répondre pour continuer.",
     "observe_file_read_failed_http": "Échec de lecture : HTTP",
     "observe_file_tree_loading": "Chargement...",
@@ -234,6 +235,8 @@
       "method_api_key": "Clé API",
       "method_auth_code": "Mode code d'autorisation",
       "method_callback": "Mode callback",
+      "high_risk_short": "Risque élevé !",
+      "high_risk_notice": "Cette voie de connexion tierce peut enfreindre les politiques Google et entraîner une suspension de compte.",
       "page_title": "Gestion des engines",
       "status_canceled": "Annulé",
       "status_code_submitted": "Code d'autorisation envoyé ; en attente du résultat",
@@ -300,8 +303,8 @@
       "nav_engines_title": "Gestion des moteurs",
       "nav_runs_desc": "Inspecter l'arborescence, l'état et les journaux d'exécution via request_id.",
       "nav_runs_title": "Observabilité des Runs",
-      "nav_settings_desc": "Ajuster les paramètres de journalisation runtime et accéder aux opérations de maintenance sensibles.",
-      "nav_settings_title": "Paramètres",
+      "nav_settings_desc": "Consulter les journaux system/bootstrap et gérer les opérations de maintenance protégées.",
+      "nav_settings_title": "System Console",
       "page_title": "Skill Runner UI",
       "subtitle": "Utilisez cette page pour consulter les Skills installés et téléverser des packages Skill à installer.",
       "title": "Interface d'administration Skill Runner"
@@ -426,7 +429,28 @@
         "subtitle": "Seuls les champs ci-dessous sont modifiables depuis l'UI ; les entrées en lecture seule restent pilotées par la config système/env.",
         "title": "Paramètres de journalisation"
       },
-      "page_title": "Paramètres Skill Runner",
+      "page_title": "System Console",
+      "log_explorer": {
+        "clear": "Effacer",
+        "empty": "Aucun journal correspondant",
+        "from_ts": "Depuis (ISO8601)",
+        "keyword": "Mot-clé",
+        "keyword_placeholder": "message / request_id / event",
+        "level": "Niveau",
+        "level_all": "Tous",
+        "load_more": "Charger plus",
+        "no_more": "Plus de journaux",
+        "read_failed": "Échec de requête des journaux",
+        "read_failed_network": "Échec de requête des journaux : erreur réseau ou service",
+        "search": "Rechercher",
+        "source": "Source",
+        "source_bootstrap": "Bootstrap",
+        "source_system": "System",
+        "subtitle": "Rechercher et filtrer les journaux system/bootstrap pour le diagnostic.",
+        "summary_prefix": "Correspondances",
+        "title": "Log Explorer",
+        "to_ts": "Jusqu'à (ISO8601)"
+      },
       "reset": {
         "action": "Réinitialiser les données du projet",
         "confirm_desc": "Saisissez le texte de confirmation ci-dessous pour continuer. Cela peut supprimer l'état runtime actif.",
@@ -439,7 +463,6 @@
         "execute_failed_network": "Échec d'exécution : erreur réseau ou service",
         "execute_success": "Exécution réussie",
         "failed": "Échec de la réinitialisation",
-        "include_agent_status": "Nettoyer aussi le fichier d'état agent",
         "include_engine_auth_sessions": "Nettoyer aussi les logs de session d'auth moteur",
         "include_engine_catalog": "Nettoyer aussi le cache de modèles moteur",
         "include_logs": "Nettoyer aussi les logs applicatifs (data/logs)",
@@ -452,8 +475,8 @@
         "subtitle": "Cette opération supprime la base de données et les répertoires de données run. Elle est irréversible et doit être réservée aux fenêtres de maintenance.",
         "title": "Zone dangereuse : réinitialiser les données du projet"
       },
-      "subtitle": "Gérer les paramètres de journalisation et exécuter des opérations protégées de réinitialisation des données.",
-      "title": "Paramètres"
+      "subtitle": "Consulter les journaux system/bootstrap, gérer la journalisation runtime et exécuter des opérations de maintenance protégées.",
+      "title": "System Console"
     },
     "skill_detail": {
       "meta_description": "description:",
@@ -463,6 +486,7 @@
       "page_title": "Explorateur de Skill",
       "preview_hint": "Sélectionnez un fichier dans le panneau de gauche.",
       "preview_title": "Aperçu du fichier",
+      "subtitle": "Inspecter la structure du package et prévisualiser les fichiers.",
       "structure_title": "Structure du package (lecture seule)"
     },
     "skills": {

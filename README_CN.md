@@ -93,7 +93,7 @@ docker compose up --build
 或独立运行：
 
 ```bash
-docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 ```
 
 ### 本地开发
@@ -122,7 +122,7 @@ docker run --rm -p 8000:8000 -p 7681:7681 leike0813/skill-runner:v0.4.0
 #### UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 7681:7681 \
+docker run --rm -p 8000:8000 -p 17681:17681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
@@ -154,6 +154,9 @@ Skill Runner 提供多种鉴权方式，从全托管到手动均可。
 4. 凭据自动存储和管理。
 
 这同样支持运行中的会话式鉴权：如果引擎在执行过程中需要鉴权，前端可以展示**会话内鉴权挑战** — Run 暂停，用户完成 OAuth，执行自动恢复。
+
+> ⚠️ **高风险提示（OpenCode + Google/Antigravity）：**  
+> 对于 `opencode` 且 `provider_id=google`（Antigravity 链路，使用第三方插件 `opencode-antigravity-auth`），`oauth_proxy` 和 `cli_delegate` 都属于高风险第三方登录路径。该链路可能违反 Google 政策，并可能导致账号被封禁。
 
 ### 备选方式：CLI Delegate
 

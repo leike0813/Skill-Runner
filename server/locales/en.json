@@ -55,6 +55,7 @@
     "observe_canceled_error": "Canceled by user",
     "observe_conversation": "Conversation",
     "observe_cursor": "Cursor:",
+    "observe_download_bundle": "Download Bundle",
     "observe_default_prompt": "Please reply to continue.",
     "observe_file_read_failed_http": "Read failed: HTTP",
     "observe_file_tree_loading": "Loading...",
@@ -234,6 +235,8 @@
       "method_api_key": "API Key",
       "method_auth_code": "Authorization code mode",
       "method_callback": "Callback mode",
+      "high_risk_short": "High risk!",
+      "high_risk_notice": "This third-party login path may violate Google policies and could lead to account suspension.",
       "page_title": "Engine Management",
       "status_canceled": "Canceled",
       "status_code_submitted": "Authorization code submitted; waiting for result",
@@ -301,7 +304,7 @@
       "nav_runs_desc": "Inspect run tree, status, and logs by request_id.",
       "nav_runs_title": "Run Observability",
       "nav_settings_desc": "Adjust runtime logging settings and access dangerous maintenance actions.",
-      "nav_settings_title": "Settings",
+      "nav_settings_title": "System Console",
       "page_title": "Skill Runner UI",
       "subtitle": "Use this page to inspect installed skills and upload skill packages for installation.",
       "title": "Skill Runner Admin UI"
@@ -426,7 +429,28 @@
         "subtitle": "Only fields below are editable from UI settings; read-only inputs are still controlled by system config/env.",
         "title": "Logging Settings"
       },
-      "page_title": "Skill Runner Settings",
+      "page_title": "System Console",
+      "log_explorer": {
+        "clear": "Clear",
+        "empty": "No matched logs",
+        "from_ts": "From (ISO8601)",
+        "keyword": "Keyword",
+        "keyword_placeholder": "message / request_id / event",
+        "level": "Level",
+        "level_all": "All",
+        "load_more": "Load more",
+        "no_more": "No more logs",
+        "read_failed": "Log query failed",
+        "read_failed_network": "Log query failed: network or service error",
+        "search": "Search",
+        "source": "Source",
+        "source_bootstrap": "Bootstrap",
+        "source_system": "System",
+        "subtitle": "Search and filter system/bootstrap logs for diagnostics.",
+        "summary_prefix": "Matched",
+        "title": "Log Explorer",
+        "to_ts": "To (ISO8601)"
+      },
       "reset": {
         "action": "Reset project data",
         "confirm_desc": "Input the confirmation text below to continue. This may remove active runtime state.",
@@ -439,7 +463,6 @@
         "execute_failed_network": "Execution failed: network or service error",
         "execute_success": "Execution succeeded",
         "failed": "Reset failed",
-        "include_agent_status": "Also clean agent status file",
         "include_engine_auth_sessions": "Also clean engine auth session logs",
         "include_engine_catalog": "Also clean engine model cache",
         "include_logs": "Also clean application logs (data/logs)",
@@ -452,8 +475,8 @@
         "subtitle": "This operation removes database and run data directories. It is irreversible and should only be used during maintenance windows.",
         "title": "Danger Zone: Reset Project Data"
       },
-      "subtitle": "Manage logging settings and execute protected data reset operations.",
-      "title": "Settings"
+      "subtitle": "Inspect system/bootstrap logs, manage runtime logging settings, and execute protected maintenance operations.",
+      "title": "System Console"
     },
     "skill_detail": {
       "meta_description": "description:",
@@ -463,6 +486,7 @@
       "page_title": "Skill Browser",
       "preview_hint": "Select a file from the left panel.",
       "preview_title": "File Preview",
+      "subtitle": "Inspect package structure and preview files.",
       "structure_title": "Package Structure (Read-only)"
     },
     "skills": {

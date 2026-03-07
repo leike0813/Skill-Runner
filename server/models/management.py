@@ -54,7 +54,6 @@ class ManagementDataResetRequest(BaseModel):
     dry_run: bool = False
     include_logs: bool = False
     include_engine_catalog: bool = False
-    include_agent_status: bool = False
     include_engine_auth_sessions: bool = False
 
 
@@ -122,6 +121,27 @@ class ManagementSystemSettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     logging: ManagementLoggingEditableSettings
+
+
+class ManagementSystemLogItem(BaseModel):
+    """Single log row returned by management system log explorer."""
+
+    ts: Optional[str] = None
+    level: Optional[str] = None
+    message: str
+    raw: str
+    source: str
+    file: str
+    line_no: int = Field(ge=1)
+
+
+class ManagementSystemLogQueryResponse(BaseModel):
+    """Cursor-based system log query response for management API."""
+
+    source: str
+    items: List[ManagementSystemLogItem] = Field(default_factory=list)
+    next_cursor: Optional[int] = Field(default=None, ge=0)
+    total_matched: int = Field(default=0, ge=0)
 
 
 class ManagementEngineSummary(BaseModel):

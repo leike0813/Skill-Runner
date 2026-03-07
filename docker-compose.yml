@@ -1,10 +1,15 @@
 name: skillrunner
 services:
   api:
-    image: leike0813/skill-runner:v0.3.3
+    image: leike0813/skill-runner:local
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
-      - "7681:7681"
+      # Keep ttyd host/container ports identical.
+      # Do not split-mutate this mapping (e.g. 28081:17681), or embedded shell URL resolution will break.
+      - "17681:17681"
     environment:
       SKILL_RUNNER_RUNTIME_MODE: container
       SKILL_RUNNER_DATA_DIR: /data
@@ -14,7 +19,7 @@ services:
       UV_CACHE_DIR: /opt/cache/skill-runner/uv_cache
       UV_PROJECT_ENVIRONMENT: /opt/cache/skill-runner/uv_venv
       NPM_CONFIG_PREFIX: /opt/cache/skill-runner/npm
-      UI_SHELL_TTYD_PORT: 7681
+      UI_SHELL_TTYD_PORT: 17681
       # UI Basic Auth is injected at runtime (not baked into image ENV).
       # Set to "true" and provide username/password for exposed deployments.
       UI_BASIC_AUTH_ENABLED: "false"
@@ -28,6 +33,29 @@ services:
       # - ./data:/data
     networks:
       - skillrunner_net
+
+  # Optional: enable built-in E2E example client using the same image.
+  # How to enable:
+  # 1) Uncomment this whole service block.
+  # 2) Run `docker compose up -d --build` (or restart the stack).
+  #
+  e2e_client:
+    image: leike0813/skill-runner:local
+    entrypoint: ["/entrypoint_e2e.sh"]
+    ports:
+      - "8011:8011"
+    environment:
+      SKILL_RUNNER_RUNTIME_MODE: container
+      SKILL_RUNNER_E2E_CLIENT_HOST: 0.0.0.0
+      SKILL_RUNNER_E2E_CLIENT_PORT: 8011
+      SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL: http://api:8000
+    depends_on:
+      - api
+    volumes:
+      - ./skills:/app/skills
+    networks:
+      - skillrunner_net
+
 volumes:
   skillrunner_cache:
     name: skillrunner-cache

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -201,6 +202,22 @@ def test_probe_resume_capability_failure_keeps_resumable_profile(tmp_path, monke
     profile = manager.resolve_interactive_profile("iflow", 900)
     assert profile.reason == "forced_resumable:resume_flag_missing"
     assert profile.session_timeout_sec == 900
+
+
+def test_read_version_extracts_semver_from_prefixed_output(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+    monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(  # noqa: ARG005
+            stdout="codex-cli 0.105.0\n",
+            stderr="",
+            returncode=0,
+        ),
+    )
+
+    assert manager.read_version("codex") == "0.105.0"
 
 
 @pytest.mark.parametrize(

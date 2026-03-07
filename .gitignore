@@ -8,10 +8,13 @@ venv/
 .history/
 .mypy_cache/
 .pytest_cache/
+.ruff_cache/
+.venv/
 .vscode/
 .codex/
 .agent/
-data/*
+data/
+agent_config/
 *.log
 *.egg-info/
 debug_parse.py

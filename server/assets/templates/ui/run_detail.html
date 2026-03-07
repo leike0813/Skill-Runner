@@ -361,8 +361,11 @@
 {% block content %}
 <div class="layout">
     <div class="card">
-        <div><a href="/ui/runs">{{ t("ui.run_detail.back_runs", default="← Back to Runs") }}</a></div>
-        <h2 style="margin:8px 0 4px;">{{ t("ui.run_detail.request_label", default="Request:") }} {{ detail.request_id }}</h2>
+        {% set header_title = t("ui.run_detail.request_label", default="Request:") ~ " " ~ detail.request_id %}
+        {% set header_subtitle = none %}
+        {% set header_back_href = "/ui/runs" %}
+        {% set header_back_label = t("ui.run_detail.back_runs", default="← Back to Runs") %}
+        {% include "ui/partials/page_header.html" %}
         <div style="display:flex; justify-content:flex-end; margin:6px 0 0;">
             <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
         </div>

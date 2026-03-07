@@ -6,7 +6,6 @@
     <div class="danger-options">
         <label><input id="reset-include-logs" type="checkbox"> {{ t("ui.settings.reset.include_logs", default="Also clean application logs (data/logs)") }}</label>
         <label><input id="reset-include-engine-catalog" type="checkbox"> {{ t("ui.settings.reset.include_engine_catalog", default="Also clean engine model cache") }}</label>
-        <label><input id="reset-include-agent-status" type="checkbox"> {{ t("ui.settings.reset.include_agent_status", default="Also clean agent status file") }}</label>
         {% if engine_auth_session_log_persistence_enabled %}
         <label><input id="reset-include-engine-auth-sessions" type="checkbox"> {{ t("ui.settings.reset.include_engine_auth_sessions", default="Also clean engine auth session logs") }}</label>
         {% endif %}
