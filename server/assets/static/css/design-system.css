@@ -60,6 +60,8 @@ a:hover {
   border: 0;
   border-radius: var(--radius-md);
   padding: 9px 14px;
+  font-family: inherit;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;

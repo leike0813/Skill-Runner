@@ -30,6 +30,8 @@ from ..models import (
     PendingOwner,
     RunCreateRequest,
     RunCreateResponse,
+    RunFilePreviewResponse,
+    RunFilesResponse,
     RunUploadResponse,
     RequestStatusResponse,
     RequestSkillSource,
@@ -601,6 +603,22 @@ async def get_run_artifacts(request_id: str):
 @router.get("/{request_id}/bundle")
 async def get_run_bundle(request_id: str):
     return await run_read_facade.get_bundle(request_id=request_id)
+
+
+@router.get("/{request_id}/files", response_model=RunFilesResponse)
+async def get_run_files(request_id: str):
+    return await run_read_facade.get_files(request_id=request_id)
+
+
+@router.get("/{request_id}/file", response_model=RunFilePreviewResponse)
+async def get_run_file(
+    request_id: str,
+    path: str = Query(..., min_length=1),
+):
+    return await run_read_facade.get_file_preview(
+        request_id=request_id,
+        path=path,
+    )
 
 @router.get("/{request_id}/artifacts/{artifact_path:path}")
 async def download_run_artifact(request_id: str, artifact_path: str):

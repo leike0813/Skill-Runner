@@ -101,7 +101,9 @@ def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: dict[st
     - Must output JSON if possible.
 2.  **Runtime Dependencies**:
     - Check `skill.runtime.dependencies`.
-    - If present, wrap command with `uv run --with ...`.
+    - If present, first probe `uv` dependency injection.
+    - Probe success: wrap command with `uv run --with ...`.
+    - Probe failure: emit warning and fallback to direct command execution (best-effort).
 3.  **IO Capture**:
     - Stream `stdout` and `stderr` to `run_dir/logs/`.
 

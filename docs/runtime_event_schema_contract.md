@@ -85,43 +85,49 @@ Schema 文件：
   - `ticket_consumed?`
 - `auth.session.failed` / `auth.session.timed_out` 属于 orchestrator audit lifecycle；它们可以被翻译为 FCMP `auth.failed`，但不得与 FCMP event type 名称混淆
 
-8. `interaction.auto_decide.timeout`
+8. orchestrator terminal lifecycle events
+- `lifecycle.run.terminal` 的 `data` 在 `failed|canceled` 场景允许携带：
+  - `code`（错误码摘要）
+  - `message`（长度受控的错误摘要）
+- FCMP terminal `conversation.state.changed.data.terminal.error` SHOULD 优先使用上述摘要字段。
+
+9. `interaction.auto_decide.timeout`
 - `interaction_id`, `resolution_mode=auto_decide_timeout`, `policy`, `accepted_at`, `timeout_sec?`
 
-9. `current_run_projection`
+10. `current_run_projection`
 - run 的唯一 current truth
 - `status`, `current_attempt`, `pending_owner`, `resume_ticket_id?`, `resume_cause?`
 - waiting/running/queued 只存在于 projection，不写 terminal result
 
-10. `terminal_run_result`
+11. `terminal_run_result`
 - 仅允许 terminal status
 - 当前合同兼容 `success|succeeded|failed|canceled`
 - 非 terminal 状态必须通过 projection 读取，不得通过 `/result` 或 `result/result.json` 读取
 
-11. `run_state_envelope`
+12. `run_state_envelope`
 - 对应 `.state/state.json`
 - 是 current truth 的 canonical 文件 schema
 - waiting payload 内嵌于 `pending.owner + pending.payload`
 
-12. `run_dispatch_envelope`
+13. `run_dispatch_envelope`
 - 对应 `.state/dispatch.json`
 - 是 dispatch lifecycle 的 canonical 文件 schema
 - 只允许 `created|admitted|dispatch_scheduled|worker_claimed|attempt_materializing`
 
-13. `fcmp_event_envelope.correlation`
+14. `fcmp_event_envelope.correlation`
 - 允许以 additive 方式承载 live publish 关联锚点
 - 当前 canonical 用法为 `correlation.publish_id`
 
-14. `rasp_event_envelope.correlation`
+15. `rasp_event_envelope.correlation`
 - live publish 下的 FCMP / RASP 关联同样通过 `correlation.publish_id` 表达
 - 不改变 RASP 的 attempt-local `seq` 语义
 
-15. lifecycle normalization
+16. lifecycle normalization
 - FCMP conversation lifecycle 已收敛为单轨：只保留 `conversation.state.changed`
 - `conversation.started`、`conversation.completed`、`conversation.failed` 不再是合法 FCMP 类型
 - terminal success/failure/cancel 统一通过 `conversation.state.changed.data.terminal` 表达
 
-16. `chat_replay_event_envelope`
+17. `chat_replay_event_envelope`
 - 聊天气泡的 canonical persisted truth
 - `seq` 为 run-scoped 全局递增顺序
 - `role` 只允许 `user|assistant|system`
@@ -133,7 +139,7 @@ Schema 文件：
 - `text` 为最终可渲染文本
 - `correlation` 允许包含 `interaction_id`、`auth_session_id`、`submission_kind`、`fcmp_seq`
 
-17. `chat_replay_history_response`
+18. `chat_replay_history_response`
 - `/chat/history` 的 canonical 响应结构
 - 包含：
   - `events`

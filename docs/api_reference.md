@@ -648,6 +648,63 @@
 **说明**:
 - Bundle 内包含运行产物与 `bundle/manifest.json`；debug=true 时会额外包含 logs 等调试文件，并使用 `bundle/manifest_debug.json`。
 
+### 获取 Run 文件树 (Get Run Files)
+`GET /v1/jobs/{request_id}/files`
+
+返回当前 run 可浏览文件树（run scope）。
+
+**Response** (`RunFilesResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "run_id": "9d2c1f31-...",
+  "entries": [
+    {
+      "path": "result",
+      "name": "result",
+      "is_dir": true,
+      "depth": 0
+    },
+    {
+      "path": "result/result.json",
+      "name": "result.json",
+      "is_dir": false,
+      "depth": 1
+    }
+  ]
+}
+```
+
+### 获取 Run 文件预览 (Get Run File Preview)
+`GET /v1/jobs/{request_id}/file?path=...`
+
+返回后端 canonical 文件预览载荷（与管理 UI 文件预览同源）。
+
+**Query 参数**:
+- `path`（必填）：run 目录内相对路径
+
+**Response** (`RunFilePreviewResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "run_id": "9d2c1f31-...",
+  "path": "result/result.json",
+  "preview": {
+    "mode": "text",
+    "content": "{\"status\":\"success\"}",
+    "size": 20,
+    "meta": "20 bytes, utf-8",
+    "detected_format": "json",
+    "rendered_html": "<div>...</div>",
+    "json_pretty": "{\n  \"status\": \"success\"\n}"
+  }
+}
+```
+
+**错误码**:
+- `400`: `path` 非法（绝对路径、包含 `..`、路径被过滤等）。
+- `404`: `request_id`、run 或目标文件不存在。
+
 ### 获取日志 (Get Logs)
 `GET /v1/jobs/{request_id}/logs`
 

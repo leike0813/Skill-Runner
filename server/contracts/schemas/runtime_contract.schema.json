@@ -1151,6 +1151,13 @@
                       "failed",
                       "canceled"
                     ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1177,6 +1184,13 @@
                   "status": {
                     "type": "string",
                     "const": "canceled"
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1522,6 +1536,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "code": {
                     "type": "string",
                     "minLength": 1
                   }

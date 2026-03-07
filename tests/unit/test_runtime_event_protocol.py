@@ -663,6 +663,89 @@ def test_translate_orchestrator_interaction_reply_accepted_to_fcmp_pair() -> Non
     assert state_changed["resume_cause"] == "interaction_reply"
 
 
+def test_translate_orchestrator_terminal_failed_carries_error_summary() -> None:
+    specs = translate_orchestrator_event_to_fcmp_specs(
+        engine="codex",
+        type_name="lifecycle.run.terminal",
+        data={
+            "status": "failed",
+            "code": "SCHEMA_VALIDATION_FAILED",
+            "message": "Missing required artifacts: report.md",
+        },
+        updated_at="2026-03-07T00:00:00Z",
+        default_attempt_number=1,
+    )
+    assert len(specs) == 1
+    payload = specs[0]["data"]
+    assert payload["to"] == "failed"
+    assert payload["terminal"]["error"]["code"] == "SCHEMA_VALIDATION_FAILED"
+    assert payload["terminal"]["error"]["message"] == "Missing required artifacts: report.md"
+
+
+def test_build_fcmp_events_uses_orchestrator_terminal_summary(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-terminal-summary"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-terminal-summary",
+        engine="codex",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="failed",
+        status_updated_at="2026-03-07T00:00:00Z",
+        orchestrator_events=[
+            {
+                "ts": "2026-03-07T00:00:00Z",
+                "attempt_number": 1,
+                "seq": 2,
+                "category": "lifecycle",
+                "type": "lifecycle.run.terminal",
+                "data": {
+                    "status": "failed",
+                    "code": "PROCESS_EXIT_NONZERO",
+                    "message": "engine exited with non-zero status",
+                },
+            }
+        ],
+    )
+
+    terminal_events = [
+        event
+        for event in fcmp_events
+        if event.type == "conversation.state.changed" and event.data.get("to") == "failed"
+    ]
+    assert len(terminal_events) == 1
+    terminal_payload = terminal_events[0].data["terminal"]
+    assert terminal_payload["error"]["code"] == "PROCESS_EXIT_NONZERO"
+    assert terminal_payload["error"]["message"] == "engine exited with non-zero status"
+
+
+def test_translate_orchestrator_error_run_failed_maps_to_diagnostic_warning() -> None:
+    specs = translate_orchestrator_event_to_fcmp_specs(
+        engine="codex",
+        type_name="error.run.failed",
+        data={
+            "message": "orchestrator failed to materialize attempt",
+            "code": "ORCHESTRATOR_ERROR",
+        },
+        updated_at="2026-03-07T00:00:00Z",
+        default_attempt_number=1,
+    )
+    assert len(specs) == 1
+    assert specs[0]["type_name"] == "diagnostic.warning"
+    assert specs[0]["data"]["code"] == "ORCHESTRATOR_ERROR"
+    assert specs[0]["data"]["detail"] == "orchestrator failed to materialize attempt"
+
+
 def test_fcmp_maps_auth_session_busy_to_diagnostic_warning(tmp_path: Path):
     run_dir = tmp_path / "run-auth-busy"
     logs_dir = run_dir / "logs"

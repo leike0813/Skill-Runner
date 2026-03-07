@@ -90,6 +90,54 @@ async def test_v1_skills_route_available(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_v1_jobs_file_routes_available(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.jobs.run_read_facade.get_files",
+        AsyncMock(
+            return_value={
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "entries": [
+                    {"path": "result", "name": "result", "is_dir": True, "depth": 0},
+                    {"path": "result/result.json", "name": "result.json", "is_dir": False, "depth": 1},
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_read_facade.get_file_preview",
+        AsyncMock(
+            return_value={
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "path": "result/result.json",
+                "preview": {
+                    "mode": "text",
+                    "content": '{"ok":true}',
+                    "size": 11,
+                    "meta": "11 bytes, utf-8",
+                    "detected_format": "json",
+                    "rendered_html": None,
+                    "json_pretty": "{\n  \"ok\": true\n}",
+                },
+            }
+        ),
+    )
+
+    files_res = await _request("GET", "/v1/jobs/req-1/files")
+    assert files_res.status_code == 200
+    files_body = files_res.json()
+    assert files_body["request_id"] == "req-1"
+    assert files_body["entries"][1]["path"] == "result/result.json"
+
+    preview_res = await _request("GET", "/v1/jobs/req-1/file?path=result/result.json")
+    assert preview_res.status_code == 200
+    preview_body = preview_res.json()
+    assert preview_body["path"] == "result/result.json"
+    assert preview_body["preview"]["detected_format"] == "json"
+
+
+@pytest.mark.asyncio
 async def test_v1_engines_route_available(monkeypatch):
     monkeypatch.setattr(
         "server.routers.engines.model_registry.list_engines",

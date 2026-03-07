@@ -74,6 +74,7 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `resume_cause` / `pending_owner` / `resume_ticket_id` / `ticket_consumed` 为可选扩展字段，用于描述 waiting 态离开时的 winner 路径；
 - `meta.attempt` 表示该事件归属的已 materialize attempt，而不是未来 attempt 的预约值。
 - terminal lifecycle 统一折叠进 `data.terminal`，不再额外发送 `conversation.completed` 或 `conversation.failed`。
+- terminal `error.message` 应优先使用 orchestrator `lifecycle.run.terminal.data.message` 的摘要值（长度受控）。
 
 terminal 示例：
 

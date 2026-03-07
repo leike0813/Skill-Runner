@@ -37,6 +37,9 @@ from .types import EngineRunResult, ProcessExecutionResult, RuntimeStreamParseRe
 
 logger = logging.getLogger(__name__)
 
+RUNTIME_DEPENDENCIES_INJECTION_FAILED = "RUNTIME_DEPENDENCIES_INJECTION_FAILED"
+_RUNTIME_DEPENDENCY_WARNING_MAX_CHARS = 512
+
 
 AUTH_REQUIRED_PATTERNS = (
     re.compile(r"enter authorization code", re.IGNORECASE),
@@ -134,6 +137,7 @@ class EngineExecutionAdapter:
             failure_reason=process_result.failure_reason,
             repair_level=repair_level,
             turn_result=turn_result,
+            runtime_warnings=process_result.runtime_warnings,
         )
 
     def build_start_command(
@@ -287,7 +291,7 @@ class EngineExecutionAdapter:
         options: dict[str, Any],
         live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
-        _ = skill
+        runtime_warnings: list[dict[str, str]] = []
         resume_handle = options.get("__resume_session_handle")
         if isinstance(resume_handle, dict):
             command = self.build_resume_command(
@@ -299,14 +303,43 @@ class EngineExecutionAdapter:
             command = self.build_start_command(prompt=prompt, options=options)
 
         env = self.build_subprocess_env(os.environ.copy())
-        proc = await self._create_subprocess(*command, cwd=run_dir, env=env)
-        return await self._capture_process_output(
+        runtime_dependencies = self._resolve_runtime_dependencies(skill)
+        command_to_execute = command
+        if runtime_dependencies:
+            probe_ok, probe_error_summary = await self._probe_uv_dependency_injection(
+                run_dir=run_dir,
+                env=env,
+                dependencies=runtime_dependencies,
+                timeout_sec=self._resolve_hard_timeout(options),
+            )
+            if probe_ok:
+                command_to_execute = self._wrap_command_with_uv(
+                    command=command,
+                    dependencies=runtime_dependencies,
+                )
+            else:
+                warning_payload = {
+                    "code": RUNTIME_DEPENDENCIES_INJECTION_FAILED,
+                    "detail": probe_error_summary
+                    or "Failed to inject runtime.dependencies with uv; fallback to direct execution.",
+                }
+                runtime_warnings.append(warning_payload)
+                logger.warning(
+                    "runtime_dependencies_injection_failed deps=%s detail=%s",
+                    ",".join(runtime_dependencies),
+                    warning_payload["detail"],
+                )
+
+        proc = await self._create_subprocess(*command_to_execute, cwd=run_dir, env=env)
+        process_result = await self._capture_process_output(
             proc,
             run_dir,
             options,
             self.process_prefix,
             live_runtime_emitter=live_runtime_emitter,
         )
+        process_result.runtime_warnings.extend(runtime_warnings)
+        return process_result
 
     # Backward-compatible component wrappers used by existing tests and thin callers.
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: dict[str, Any]) -> Path:
@@ -530,6 +563,73 @@ class EngineExecutionAdapter:
         else:
             kwargs["start_new_session"] = True
         return await asyncio.create_subprocess_exec(*cmd, **kwargs)
+
+    def _resolve_runtime_dependencies(self, skill: SkillManifest) -> list[str]:
+        runtime = getattr(skill, "runtime", None)
+        dependencies_obj = getattr(runtime, "dependencies", None)
+        if not isinstance(dependencies_obj, list):
+            return []
+        normalized: list[str] = []
+        for item in dependencies_obj:
+            if not isinstance(item, str):
+                continue
+            dep = item.strip()
+            if not dep:
+                continue
+            normalized.append(dep)
+        return normalized
+
+    def _wrap_command_with_uv(self, *, command: list[str], dependencies: list[str]) -> list[str]:
+        wrapped: list[str] = ["uv", "run"]
+        for dependency in dependencies:
+            wrapped.extend(["--with", dependency])
+        wrapped.append("--")
+        wrapped.extend(command)
+        return wrapped
+
+    def _summarize_runtime_dependency_error(self, text: str) -> str:
+        compact = " ".join(text.replace("\r", "\n").split())
+        if not compact:
+            return "uv dependency probe failed with empty output."
+        if len(compact) > _RUNTIME_DEPENDENCY_WARNING_MAX_CHARS:
+            return compact[: _RUNTIME_DEPENDENCY_WARNING_MAX_CHARS - 3] + "..."
+        return compact
+
+    async def _probe_uv_dependency_injection(
+        self,
+        *,
+        run_dir: Path,
+        env: dict[str, str],
+        dependencies: list[str],
+        timeout_sec: int,
+    ) -> tuple[bool, str | None]:
+        probe_cmd = self._wrap_command_with_uv(
+            command=["python", "-c", "print('skill-runner-deps-probe')"],
+            dependencies=dependencies,
+        )
+        try:
+            probe_proc = await self._create_subprocess(*probe_cmd, cwd=run_dir, env=env)
+        except (FileNotFoundError, OSError) as exc:
+            return False, self._summarize_runtime_dependency_error(f"failed to spawn uv probe: {exc}")
+
+        probe_timeout = max(1, min(timeout_sec, 120))
+        try:
+            stdout_raw, stderr_raw = await asyncio.wait_for(probe_proc.communicate(), timeout=probe_timeout)
+        except asyncio.TimeoutError:
+            await self._terminate_process_tree(probe_proc, f"{self.__class__.__name__}DepsProbe")
+            return False, self._summarize_runtime_dependency_error(
+                f"uv dependency probe timed out after {probe_timeout}s"
+            )
+
+        if probe_proc.returncode == 0:
+            return True, None
+
+        stdout_text = stdout_raw.decode("utf-8", errors="replace") if isinstance(stdout_raw, (bytes, bytearray)) else ""
+        stderr_text = stderr_raw.decode("utf-8", errors="replace") if isinstance(stderr_raw, (bytes, bytearray)) else ""
+        summary = self._summarize_runtime_dependency_error(
+            f"uv dependency probe exited {probe_proc.returncode}: {stderr_text or stdout_text}"
+        )
+        return False, summary
 
     async def _terminate_process_tree(self, proc: asyncio.subprocess.Process, prefix: str) -> None:
         result = await terminate_asyncio_process_tree(proc)

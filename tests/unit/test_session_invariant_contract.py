@@ -113,4 +113,5 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "single_method_auth_challenge_bypasses_selection",
         "single_method_auth_busy_reprojects_existing_challenge",
         "single_method_busy_reprojects_challenge_without_resume",
+        "terminal_failed_should_include_error_summary_when_available",
     }

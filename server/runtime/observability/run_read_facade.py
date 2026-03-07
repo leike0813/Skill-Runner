@@ -7,7 +7,15 @@ from typing import Any
 from fastapi import HTTPException, Request  # type: ignore[import-not-found]
 from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 
-from server.models import CancelResponse, RunArtifactsResponse, RunLogsResponse, RunResultResponse, RunStatus
+from server.models import (
+    CancelResponse,
+    RunArtifactsResponse,
+    RunFilePreviewResponse,
+    RunFilesResponse,
+    RunLogsResponse,
+    RunResultResponse,
+    RunStatus,
+)
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
 from .run_source_adapter import (
@@ -121,6 +129,68 @@ class RunReadFacade:
         if not bundle_path.exists():
             raise HTTPException(status_code=404, detail="Bundle not found")
         return FileResponse(path=bundle_path, filename=bundle_path.name)
+
+    async def get_files(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None = None,
+        request_id: str,
+    ) -> RunFilesResponse:
+        _request_record, _run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
+        try:
+            detail = await run_observability_service.get_run_detail(request_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        raw_entries = detail.get("entries")
+        entries = raw_entries if isinstance(raw_entries, list) else []
+        normalized_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            normalized_entries.append(
+                {
+                    "path": str(entry.get("rel_path") or ""),
+                    "name": str(entry.get("name") or ""),
+                    "is_dir": bool(entry.get("is_dir")),
+                    "depth": int(entry.get("depth") or 0),
+                }
+            )
+        return RunFilesResponse(
+            request_id=request_id,
+            run_id=str(detail.get("run_id") or ""),
+            entries=normalized_entries,
+        )
+
+    async def get_file_preview(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None = None,
+        request_id: str,
+        path: str,
+    ) -> RunFilePreviewResponse:
+        _request_record, _run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
+        try:
+            detail = await run_observability_service.get_run_detail(request_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        try:
+            preview = await run_observability_service.build_run_file_preview(request_id, path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        return RunFilePreviewResponse(
+            request_id=request_id,
+            run_id=str(detail.get("run_id") or ""),
+            path=Path(path).as_posix(),
+            preview=preview,
+        )
 
     async def get_artifact_file(
         self,

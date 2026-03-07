@@ -231,6 +231,19 @@ When orchestration accepts interaction replies, auth submissions, or emits user-
 - **AND** 每个 attempt 的 `service.<attempt>.log` MUST 只包含自身 `run_id + attempt` 的记录
 - **AND** 缺少 `run_id` 的记录 MUST 被丢弃
 
+### Requirement: Terminal lifecycle emission MUST carry failure summary when available
+当 run 进入 `failed|canceled` 终态时，orchestrator MUST 在 `lifecycle.run.terminal` 的 payload 中携带稳定错误摘要（至少 `code`，可选 `message`）。
+
+#### Scenario: failed terminal lifecycle includes code and summary
+- **WHEN** run 收敛到 `failed`
+- **THEN** `lifecycle.run.terminal.data.status=failed`
+- **AND** payload SHOULD 包含 `code`
+- **AND** payload SHOULD 包含长度受控的 `message` 摘要
+
+#### Scenario: FCMP terminal prefers lifecycle summary
+- **WHEN** FCMP 从 orchestrator terminal lifecycle 翻译 terminal 状态
+- **THEN** `conversation.state.changed.data.terminal.error` MUST 优先使用 `lifecycle.run.terminal` 的 `code/message` 摘要
+
 ### Requirement: run lifecycle orchestration MUST mirror service logs outside attempt windows
 
 create-run、upload-run、reply/auth 提交与 auth 状态轮询等 attempt 外编排路径 MUST 进入 run-scope 镜像，确保 run 全生命周期日志完整。
@@ -391,4 +404,29 @@ The periodic run cleanup workflow SHALL include auxiliary runtime storage cleanu
 - **WHEN** run cleanup executes
 - **AND** a `ui_shell_sessions` directory is associated with an active `ui_shell` lease
 - **THEN** cleanup SHALL NOT delete that active session directory
+
+### Requirement: Terminal output normalization MUST attempt artifact path autofix before failing missing required artifacts
+当终态校验发现 `required artifacts` 缺失时，orchestrator MUST 先尝试基于 `output_data` 的 artifact 路径字段执行路径纠偏，再决定是否失败。
+
+#### Scenario: missing required artifact is repaired from run-local source path
+- **GIVEN** output schema 定义了 artifact 字段
+- **AND** final `output_data` 中该字段给出的路径位于 `run_dir` 内
+- **AND** canonical `run_dir/artifacts/...` 目标文件缺失
+- **WHEN** 终态归一化执行 artifact 校验
+- **THEN** orchestrator MUST 将源文件搬运到 canonical artifacts 路径
+- **AND** MUST 改写 `output_data` 中对应字段为 canonical 路径
+- **AND** MUST 在修复后重新执行 artifact + schema 校验
+
+#### Scenario: out-of-run path is rejected and run keeps failed semantics
+- **GIVEN** final `output_data` artifact 路径指向 `run_dir` 外部
+- **WHEN** orchestrator 执行 artifact path autofix
+- **THEN** orchestrator MUST 拒绝该路径修复尝试
+- **AND** MUST 记录对应 warning
+- **AND** 若 required artifacts 仍缺失，run MUST 维持 failed
+
+#### Scenario: canonical target exists and source is not overwritten
+- **GIVEN** canonical artifacts 目标路径已存在文件
+- **WHEN** orchestrator 尝试执行 artifact path autofix
+- **THEN** orchestrator MUST NOT 覆盖已存在目标文件
+- **AND** MUST 记录目标冲突 warning
 

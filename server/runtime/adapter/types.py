@@ -15,11 +15,13 @@ class ProcessExecutionResult:
         raw_stdout: str,
         raw_stderr: str,
         failure_reason: Optional[str] = None,
+        runtime_warnings: Optional[list[dict[str, str]]] = None,
     ) -> None:
         self.exit_code = exit_code
         self.raw_stdout = raw_stdout
         self.raw_stderr = raw_stderr
         self.failure_reason = failure_reason
+        self.runtime_warnings = list(runtime_warnings or [])
 
 
 class RuntimeStreamRawRow(TypedDict):
@@ -75,6 +77,7 @@ class EngineRunResult:
         failure_reason: str | None = None,
         repair_level: str = "none",
         turn_result: AdapterTurnResult | None = None,
+        runtime_warnings: list[dict[str, str]] | None = None,
     ) -> None:
         self.exit_code = exit_code
         self.raw_stdout = raw_stdout
@@ -83,3 +86,4 @@ class EngineRunResult:
         self.failure_reason = failure_reason
         self.repair_level = repair_level
         self.turn_result = turn_result
+        self.runtime_warnings = list(runtime_warnings or [])

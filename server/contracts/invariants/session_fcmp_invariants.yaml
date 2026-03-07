@@ -294,3 +294,5 @@ ordering_rules:
     rule: single_method_auth_challenge_bypasses_selection
   - id: OR-52
     rule: single_method_auth_busy_reprojects_existing_challenge
+  - id: OR-53
+    rule: terminal_failed_should_include_error_summary_when_available

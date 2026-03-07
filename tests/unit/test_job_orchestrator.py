@@ -31,6 +31,7 @@ def _final_engine_result(
     artifacts_created: list[Path] | None = None,
     failure_reason: str | None = None,
     repair_level: str = "none",
+    runtime_warnings: list[dict[str, str]] | None = None,
 ) -> EngineRunResult:
     return EngineRunResult(
         exit_code=exit_code,
@@ -39,6 +40,7 @@ def _final_engine_result(
         artifacts_created=artifacts_created or [],
         failure_reason=failure_reason,
         repair_level=repair_level,
+        runtime_warnings=runtime_warnings,
         turn_result=AdapterTurnResult(
             outcome=AdapterTurnOutcome.FINAL,
             final_data=final_data,
@@ -99,6 +101,40 @@ class MissingArtifactsAdapter:
         return _final_engine_result(final_data={"value": "ok"})
 
 
+class AutofixArtifactPathAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        uploads_dir = run_dir / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        digest_path = uploads_dir / "digest.md"
+        digest_path.write_text("digest content", encoding="utf-8")
+        return _final_engine_result(
+            final_data={"digest_path": str(digest_path)},
+        )
+
+
+class AutofixArtifactTargetExistsAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        uploads_dir = run_dir / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        digest_path = uploads_dir / "digest.md"
+        digest_path.write_text("digest content", encoding="utf-8")
+        artifacts_dir = run_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        (artifacts_dir / "digest.md").mkdir(parents=True, exist_ok=True)
+        return _final_engine_result(
+            final_data={"digest_path": str(digest_path)},
+        )
+
+
+class AutofixArtifactOutsideRunDirAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        outside_file = run_dir.parent / "outside-digest.md"
+        outside_file.write_text("outside", encoding="utf-8")
+        return _final_engine_result(
+            final_data={"digest_path": str(outside_file)},
+        )
+
+
 class AuthRequiredAdapter:
     async def run(self, skill, input_data, run_dir, options):
         return EngineRunResult(
@@ -149,6 +185,19 @@ class RepairSchemaFailAdapter:
             final_data={"value": "not-an-integer"},
             raw_stdout="fenced output",
             repair_level="deterministic_generic",
+        )
+
+
+class RuntimeDependenciesWarningAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        return _final_engine_result(
+            final_data={"value": "ok"},
+            runtime_warnings=[
+                {
+                    "code": "RUNTIME_DEPENDENCIES_INJECTION_FAILED",
+                    "detail": "uv dependency probe timed out",
+                }
+            ],
         )
 
 
@@ -545,6 +594,183 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "digest_path": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-filename": "digest.md",
+            }
+        },
+        "required": ["digest_path"],
+    }
+    (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        artifacts=[{"role": "digest", "pattern": "digest.md", "required": True}],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json",
+        },
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AutofixArtifactPathAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert (run_dir / "artifacts" / "digest.md").is_file()
+        assert not (run_dir / "uploads" / "digest.md").exists()
+        assert result_data["data"]["digest_path"] == str(run_dir / "artifacts" / "digest.md")
+        assert "OUTPUT_ARTIFACT_PATH_REPAIRED" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "digest_path": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-filename": "digest.md",
+            }
+        },
+        "required": ["digest_path"],
+    }
+    (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        artifacts=[{"role": "digest", "pattern": "digest.md", "required": True}],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json",
+        },
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AutofixArtifactTargetExistsAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert "Missing required artifacts" in result_data["error"]["message"]
+        assert "OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "digest_path": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-filename": "digest.md",
+            }
+        },
+        "required": ["digest_path"],
+    }
+    (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        artifacts=[{"role": "digest", "pattern": "digest.md", "required": True}],
+        schemas={
+            "input": "input.schema.json",
+            "parameter": "parameter.schema.json",
+            "output": "output.schema.json",
+        },
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AutofixArtifactOutsideRunDirAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "failed"
+        assert "Missing required artifacts" in result_data["error"]["message"]
+        assert "OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR" in result_data["validation_warnings"]
+        assert not (run_dir / "artifacts" / "digest.md").exists()
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
 async def test_run_job_marks_auth_required_error_code(tmp_path):
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
@@ -577,6 +803,22 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] == "AUTH_REQUIRED"
+        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        orchestrator_events = [
+            json.loads(line)
+            for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        terminal_rows = [
+            row
+            for row in orchestrator_events
+            if row.get("type") == "lifecycle.run.terminal"
+        ]
+        assert terminal_rows
+        terminal_data = terminal_rows[-1]["data"]
+        assert terminal_data["status"] == "failed"
+        assert terminal_data["code"] == "AUTH_REQUIRED"
+        assert "authentication is required" in terminal_data["message"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -783,6 +1025,59 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
         assert "OUTPUT_REPAIRED_GENERIC" in status_data["warnings"]
         assert result_data["repair_level"] == "deterministic_generic"
         assert await local_store.get_cached_run("cache-key-repair") == run_id
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_records_runtime_dependency_injection_warning(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": RuntimeDependenciesWarningAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert result_data["status"] == "success"
+        assert "RUNTIME_DEPENDENCIES_INJECTION_FAILED" in result_data["validation_warnings"]
+        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        orchestrator_events = [
+            json.loads(line)
+            for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert any(
+            row.get("type") == "diagnostic.warning"
+            and row.get("data", {}).get("code") == "RUNTIME_DEPENDENCIES_INJECTION_FAILED"
+            for row in orchestrator_events
+        )
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

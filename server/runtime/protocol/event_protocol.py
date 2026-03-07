@@ -681,19 +681,14 @@ def translate_orchestrator_event_to_fcmp_specs(
     if type_name in {
         OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
         OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value,
-        OrchestratorEventType.ERROR_RUN_FAILED.value,
     }:
         status = str(data.get("status") or "").strip().lower()
         trigger = "turn.failed"
         message = data.get("message") if isinstance(data.get("message"), str) else None
-        code = None
+        code = data.get("code") if isinstance(data.get("code"), str) else None
         if type_name == OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value:
             status = "canceled"
             trigger = "run.canceled"
-        elif type_name == OrchestratorEventType.ERROR_RUN_FAILED.value:
-            status = "failed"
-            trigger = "run.error"
-            code = "ORCHESTRATOR_ERROR"
         elif status == "succeeded":
             trigger = "turn.succeeded"
         elif status == "canceled":
@@ -714,6 +709,18 @@ def translate_orchestrator_event_to_fcmp_specs(
                     reason_code=code or status.upper(),
                     message=message,
                 ),
+            ),
+        )
+        return specs
+
+    if type_name == OrchestratorEventType.ERROR_RUN_FAILED.value:
+        message = data.get("message") if isinstance(data.get("message"), str) else None
+        code = data.get("code") if isinstance(data.get("code"), str) else "ORCHESTRATOR_ERROR"
+        push(
+            FcmpEventType.DIAGNOSTIC_WARNING.value,
+            make_diagnostic_warning_payload(
+                code=code,
+                detail=message,
             ),
         )
         return specs
@@ -974,6 +981,7 @@ def build_fcmp_events(
         pending_owner = "waiting_auth.challenge_active"
 
     state_transition_events_emitted = 0
+    terminal_state_emitted = False
     auth_required_emitted = False
     auth_completed_emitted = False
     auth_failed_emitted = False
@@ -1004,6 +1012,60 @@ def build_fcmp_events(
             )
             started_emitted = True
             state_transition_events_emitted += 1
+            continue
+        if type_name_obj == "lifecycle.run.terminal":
+            status_obj = row_data.get("status")
+            status = (
+                status_obj.strip().lower()
+                if isinstance(status_obj, str) and status_obj.strip()
+                else (
+                    effective_status
+                    if effective_status in {"succeeded", "failed", "canceled"}
+                    else None
+                )
+            )
+            if status not in {"succeeded", "failed", "canceled"}:
+                continue
+            trigger_map = {
+                "succeeded": "turn.succeeded",
+                "failed": "turn.failed",
+                "canceled": "run.canceled",
+            }
+            reason_code_obj = row_data.get("code")
+            reason_code = reason_code_obj if isinstance(reason_code_obj, str) and reason_code_obj.strip() else None
+            message = row_data.get("message") if isinstance(row_data.get("message"), str) else None
+            orchestrator_terminal_payload = make_fcmp_terminal_payload(
+                status=status,
+                code=reason_code or status.upper(),
+                reason_code=reason_code or status.upper(),
+                message=message,
+                diagnostics=completion_diagnostics,
+            )
+            push(
+                FcmpEventType.CONVERSATION_STATE_CHANGED.value,
+                make_fcmp_state_changed(
+                    source_state="running",
+                    target_state=status,
+                    trigger=trigger_map[status],
+                    updated_at=row_ts,
+                    pending_interaction_id=None,
+                    terminal=orchestrator_terminal_payload,
+                ),
+            )
+            state_transition_events_emitted += 1
+            terminal_state_emitted = True
+            continue
+        if type_name_obj == "error.run.failed":
+            code_obj = row_data.get("code")
+            warning_code = code_obj if isinstance(code_obj, str) and code_obj.strip() else "ORCHESTRATOR_ERROR"
+            detail = row_data.get("message") if isinstance(row_data.get("message"), str) else None
+            push(
+                FcmpEventType.DIAGNOSTIC_WARNING.value,
+                make_diagnostic_warning_payload(
+                    code=warning_code,
+                    detail=detail,
+                ),
+            )
             continue
         if type_name_obj == "interaction.user_input.required":
             interaction_id_obj = row_data.get("interaction_id")
@@ -1321,7 +1383,7 @@ def build_fcmp_events(
             reason_code=completion_reason_code or effective_status.upper(),
             diagnostics=completion_diagnostics,
         )
-    if effective_status in terminal_state_trigger_map:
+    if effective_status in terminal_state_trigger_map and not terminal_state_emitted:
         push(
             FcmpEventType.CONVERSATION_STATE_CHANGED.value,
             make_fcmp_state_changed(

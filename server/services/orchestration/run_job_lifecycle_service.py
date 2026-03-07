@@ -28,6 +28,12 @@ from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
 from server.runtime.session.statechart import timeout_requires_auto_decision
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_audit_contract_service import run_audit_contract_service
+from server.services.orchestration.run_artifact_path_autofix import (
+    autofix_missing_artifact_paths,
+    collect_run_artifacts,
+    missing_required_artifact_patterns,
+    required_artifact_patterns,
+)
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
@@ -36,6 +42,8 @@ from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_registry import skill_registry
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_ERROR_SUMMARY_MAX_CHARS = 512
 
 
 def _normalize_opencode_provider(value: Any) -> str | None:
@@ -124,6 +132,17 @@ def _adapter_accepts_live_runtime_emitter(adapter: Any) -> bool:
         if parameter.name == "live_runtime_emitter":
             return True
     return False
+
+
+def _summarize_terminal_error_message(message: Any) -> str | None:
+    if not isinstance(message, str):
+        return None
+    normalized = " ".join(message.replace("\r", "\n").split())
+    if not normalized:
+        return None
+    if len(normalized) > _TERMINAL_ERROR_SUMMARY_MAX_CHARS:
+        return normalized[: _TERMINAL_ERROR_SUMMARY_MAX_CHARS - 3] + "..."
+    return normalized
 
 
 class RunCanceled(Exception):
@@ -398,6 +417,7 @@ class _RunJobLifecyclePipeline:
             normalized_error_message: Optional[str] = None
             final_validation_warnings: list[str] = []
             final_error_code: Optional[str] = None
+            terminal_error_summary: Optional[str] = None
             trust_registered = False
             adapter: Any | None = None
 
@@ -561,6 +581,11 @@ class _RunJobLifecyclePipeline:
                 )
                 process_raw_stdout = result.raw_stdout or ""
                 process_raw_stderr = result.raw_stderr or ""
+                runtime_execution_warnings = (
+                    result.runtime_warnings
+                    if isinstance(getattr(result, "runtime_warnings", None), list)
+                    else []
+                )
                 runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
                     adapter=adapter,
                     raw_stdout=process_raw_stdout,
@@ -582,6 +607,7 @@ class _RunJobLifecyclePipeline:
 
                 # 6. Verify Result and Normalize
                 warnings: list[str] = []
+                seen_runtime_warning_codes: set[str] = set()
                 output_data: Dict[str, Any] = {}
                 schema_output_errors: list[str] = []
                 terminal_validation_errors: list[str] = []
@@ -591,6 +617,35 @@ class _RunJobLifecyclePipeline:
                 pending_auth: Optional[Dict[str, Any]] = None
                 repair_level = result.repair_level or "none"
                 has_structured_output = False
+                for warning in runtime_execution_warnings:
+                    if not isinstance(warning, dict):
+                        continue
+                    code_obj = warning.get("code")
+                    if not isinstance(code_obj, str) or not code_obj.strip():
+                        continue
+                    warning_code = code_obj.strip()
+                    warning_detail_obj = warning.get("detail")
+                    warning_detail = (
+                        warning_detail_obj.strip()
+                        if isinstance(warning_detail_obj, str) and warning_detail_obj.strip()
+                        else None
+                    )
+                    if warning_code not in warnings:
+                        warnings.append(warning_code)
+                    if warning_code in seen_runtime_warning_codes:
+                        continue
+                    seen_runtime_warning_codes.add(warning_code)
+                    self._append_orchestrator_event(
+                        run_dir=run_dir,
+                        attempt_number=attempt_number,
+                        category="diagnostic",
+                        type_name=OrchestratorEventType.DIAGNOSTIC_WARNING.value,
+                        data=make_diagnostic_warning_payload(
+                            code=warning_code,
+                            detail=warning_detail,
+                        ),
+                        engine_name=engine_name,
+                    )
                 structured_output_payload = self._resolve_structured_output_payload(
                     result=result,
                     runtime_parse_result=runtime_parse_result,
@@ -711,23 +766,35 @@ class _RunJobLifecyclePipeline:
 
                 # 6.1 Normalization (N0)
                 # Create standard envelope
-                artifacts_dir = run_dir / "artifacts"
-                artifacts = []
-                if artifacts_dir.exists():
-                    for path in artifacts_dir.rglob("*"):
-                        if path.is_file():
-                            artifacts.append(path.relative_to(run_dir).as_posix())
-                artifacts.sort()
-                required_artifacts = [
-                    artifact.pattern
-                    for artifact in skill.artifacts
-                    if artifact.required
-                ] if skill.artifacts else []
-                missing_artifacts = []
-                for pattern in required_artifacts:
-                    expected_path = f"artifacts/{pattern}"
-                    if expected_path not in artifacts:
-                        missing_artifacts.append(pattern)
+                artifacts = collect_run_artifacts(run_dir)
+                required_artifacts = required_artifact_patterns(skill)
+                missing_artifacts = missing_required_artifact_patterns(
+                    required_patterns=required_artifacts,
+                    artifacts=artifacts,
+                )
+                if missing_artifacts:
+                    autofix_result = autofix_missing_artifact_paths(
+                        skill=skill,
+                        run_dir=run_dir,
+                        output_data=output_data,
+                        missing_patterns=missing_artifacts,
+                    )
+                    output_data = autofix_result.output_data
+                    if (
+                        isinstance(turn_payload_for_completion, dict)
+                        and turn_payload_for_completion
+                    ):
+                        turn_payload_for_completion = dict(output_data)
+                    for warning_code in autofix_result.warnings:
+                        if warning_code not in warnings:
+                            warnings.append(warning_code)
+                    if autofix_result.attempted:
+                        artifacts = collect_run_artifacts(run_dir)
+                        missing_artifacts = missing_required_artifact_patterns(
+                            required_patterns=required_artifacts,
+                            artifacts=artifacts,
+                        )
+                        schema_output_errors = schema_validator.validate_output(skill, output_data)
                 artifact_errors: list[str] = []
                 if missing_artifacts:
                     artifact_errors.append(
@@ -914,6 +981,9 @@ class _RunJobLifecyclePipeline:
                     if isinstance(normalized_error, dict) and normalized_error.get("code")
                     else None
                 )
+                terminal_error_summary = _summarize_terminal_error_message(
+                    normalized_error.get("message") if isinstance(normalized_error, dict) else None
+                )
 
                 # Allow adapter to communicate error via output if present
                 if result.exit_code != 0 and result.raw_stderr:
@@ -1070,12 +1140,18 @@ class _RunJobLifecyclePipeline:
                     self._build_run_bundle(run_dir, debug=False)
                     self._build_run_bundle(run_dir, debug=True)
                 if final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}:
+                    terminal_payload: Dict[str, Any] = {"status": final_status.value}
+                    if final_status in {RunStatus.FAILED, RunStatus.CANCELED}:
+                        if isinstance(final_error_code, str) and final_error_code:
+                            terminal_payload["code"] = final_error_code
+                        if isinstance(terminal_error_summary, str) and terminal_error_summary:
+                            terminal_payload["message"] = terminal_error_summary
                     self._append_orchestrator_event(
                         run_dir=run_dir,
                         attempt_number=attempt_number,
                         category="lifecycle",
                         type_name=OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
-                        data={"status": final_status.value},
+                        data=terminal_payload,
                         engine_name=engine_name,
                     )
                 if cache_key and final_status == RunStatus.SUCCEEDED:
@@ -1186,12 +1262,29 @@ class _RunJobLifecyclePipeline:
                     str(result_path) if result_path is not None else None,
                 )
                 if run_dir:
+                    failure_terminal_payload: Dict[str, Any] = {"status": RunStatus.FAILED.value}
+                    if isinstance(final_error_code, str) and final_error_code:
+                        failure_terminal_payload["code"] = final_error_code
+                    summary_message = _summarize_terminal_error_message(normalized_error_message)
+                    if isinstance(summary_message, str) and summary_message:
+                        failure_terminal_payload["message"] = summary_message
+                    self._append_orchestrator_event(
+                        run_dir=run_dir,
+                        attempt_number=attempt_number,
+                        category="lifecycle",
+                        type_name=OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
+                        data=failure_terminal_payload,
+                        engine_name=engine_name,
+                    )
                     self._append_orchestrator_event(
                         run_dir=run_dir,
                         attempt_number=attempt_number,
                         category="error",
                         type_name=OrchestratorEventType.ERROR_RUN_FAILED.value,
-                        data={"message": normalized_error_message or "unknown"},
+                        data={
+                            "message": _summarize_terminal_error_message(normalized_error_message) or "unknown",
+                            "code": final_error_code or "ORCHESTRATOR_ERROR",
+                        },
                         engine_name=engine_name,
                     )
                 log_event(

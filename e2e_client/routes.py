@@ -23,7 +23,6 @@ from .backend import (
 )
 from .config import E2EClientSettings
 from server.i18n import get_language, get_translator
-from server.services.platform.file_preview_renderer import build_preview_payload_from_bytes
 
 
 TEMPLATE_ROOT = Path(__file__).parent / "templates"
@@ -431,13 +430,11 @@ async def get_run_bundle_entries_api(
 ):
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
-        bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
+        payload = await backend.get_run_files(request_id, run_source=run_source)
     except Exception as exc:
         raise _to_http_exception(exc)
-    try:
-        entries = _list_bundle_entries(bundle_bytes)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    entries_obj = payload.get("entries")
+    entries = entries_obj if isinstance(entries_obj, list) else []
     return {"request_id": request_id, "entries": entries}
 
 
@@ -470,17 +467,15 @@ async def get_run_bundle_file_api(
 ):
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
-        bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
+        payload = await backend.get_run_file_preview(
+            request_id,
+            path=path,
+            run_source=run_source,
+        )
     except Exception as exc:
         raise _to_http_exception(exc)
-    try:
-        preview = _build_bundle_file_preview(bundle_bytes, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except IsADirectoryError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    preview_obj = payload.get("preview")
+    preview = preview_obj if isinstance(preview_obj, dict) else {}
     return {"request_id": request_id, "path": path, "preview": preview}
 
 
@@ -494,17 +489,15 @@ async def get_run_bundle_file_view(
 ):
     run_source = _resolve_run_source(source=source, request_id=request_id)
     try:
-        bundle_bytes = await backend.get_run_bundle(request_id, run_source=run_source)
+        payload = await backend.get_run_file_preview(
+            request_id,
+            path=path,
+            run_source=run_source,
+        )
     except Exception as exc:
         raise _to_http_exception(exc)
-    try:
-        preview = _build_bundle_file_preview(bundle_bytes, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except IsADirectoryError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    preview_obj = payload.get("preview")
+    preview = preview_obj if isinstance(preview_obj, dict) else {}
     return templates.TemplateResponse(
         request=request,
         name="partials/file_preview.html",
@@ -1390,89 +1383,6 @@ def _as_schema_dict(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _list_bundle_entries(bundle_bytes: bytes) -> list[dict[str, Any]]:
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(bundle_bytes))
-    except zipfile.BadZipFile as exc:
-        raise ValueError("Bundle is not a valid zip archive") from exc
-    with archive:
-        file_sizes: dict[str, int] = {}
-        dir_paths: set[str] = set()
-        for info in archive.infolist():
-            normalized = _normalize_zip_member_name(info.filename)
-            if not normalized:
-                continue
-            if info.is_dir():
-                dir_paths.add(normalized)
-                continue
-            file_sizes[normalized] = int(info.file_size)
-            parent = PurePosixPath(normalized).parent
-            while str(parent) not in {"", "."}:
-                dir_paths.add(parent.as_posix())
-                parent = parent.parent
-
-    meta: dict[str, dict[str, Any]] = {}
-    for path in sorted(dir_paths):
-        meta[path] = {"is_dir": True, "size": None}
-    for path, size in file_sizes.items():
-        meta[path] = {"is_dir": False, "size": size}
-
-    children: dict[str, list[str]] = {}
-    for path in meta:
-        parent_key = PurePosixPath(path).parent.as_posix()
-        if parent_key == ".":
-            parent_key = ""
-        children.setdefault(parent_key, []).append(path)
-
-    entries: list[dict[str, Any]] = []
-
-    def _walk(parent: str, depth: int) -> None:
-        for child in sorted(
-            children.get(parent, []),
-            key=lambda item: (
-                not bool(meta[item]["is_dir"]),
-                PurePosixPath(item).name.lower(),
-            ),
-        ):
-            child_meta = meta[child]
-            entries.append(
-                {
-                    "path": child,
-                    "name": PurePosixPath(child).name,
-                    "is_dir": bool(child_meta["is_dir"]),
-                    "depth": depth,
-                    "size": child_meta["size"],
-                }
-            )
-            if bool(child_meta["is_dir"]):
-                _walk(child, depth + 1)
-
-    _walk("", 0)
-    return entries
-
-
-def _build_bundle_file_preview(bundle_bytes: bytes, relative_path: str) -> dict[str, Any]:
-    normalized = _normalize_bundle_request_path(relative_path)
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(bundle_bytes))
-    except zipfile.BadZipFile as exc:
-        raise ValueError("Bundle is not a valid zip archive") from exc
-    with archive:
-        try:
-            info = archive.getinfo(normalized)
-        except KeyError as exc:
-            raise FileNotFoundError("file not found in bundle") from exc
-        if info.is_dir():
-            raise IsADirectoryError("path points to a directory")
-        size = int(info.file_size)
-        data = archive.read(normalized)
-        return build_preview_payload_from_bytes(
-            data=data,
-            size=size,
-            filename=Path(normalized).name,
-        )
-
-
 def _normalize_bundle_request_path(path: str) -> str:
     raw = path.strip().replace("\\", "/")
     if not raw:
@@ -1488,15 +1398,3 @@ def _normalize_bundle_request_path(path: str) -> str:
         raise ValueError("invalid path")
     return normalized
 
-
-def _normalize_zip_member_name(raw_name: str) -> str | None:
-    candidate = PurePosixPath(raw_name.replace("\\", "/"))
-    if candidate.is_absolute():
-        return None
-    parts = candidate.parts
-    if not parts:
-        return None
-    if any(part in {"", ".", ".."} for part in parts):
-        return None
-    normalized = candidate.as_posix().rstrip("/")
-    return normalized or None

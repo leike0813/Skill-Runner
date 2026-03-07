@@ -112,6 +112,23 @@ class BackendClient:
     ) -> bytes:
         raise NotImplementedError
 
+    async def get_run_files(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    async def get_run_file_preview(
+        self,
+        request_id: str,
+        *,
+        path: str,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     def stream_run_events(
         self,
         request_id: str,
@@ -314,6 +331,30 @@ class HttpBackendClient(BackendClient):
     ) -> bytes:
         _ = run_source
         return await self._request_bytes("GET", f"/v1/jobs/{request_id}/bundle")
+
+    async def get_run_files(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            "GET",
+            f"{self._run_base_path(request_id, run_source=run_source)}/files",
+        )
+
+    async def get_run_file_preview(
+        self,
+        request_id: str,
+        *,
+        path: str,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            "GET",
+            f"{self._run_base_path(request_id, run_source=run_source)}/file",
+            params={"path": path},
+        )
 
     async def stream_run_events(
         self,

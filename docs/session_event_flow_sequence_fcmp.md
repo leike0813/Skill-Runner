@@ -138,6 +138,7 @@ sequenceDiagram
 - `interaction.auto_decide.timeout` -> `interaction.auto_decide.timeout` + `conversation.state.changed(waiting_user->queued)`
 - `turn.succeeded` -> terminal `conversation.state.changed(... to=succeeded, data.terminal.status=succeeded)`
 - `turn.failed` / `run.canceled` -> terminal `conversation.state.changed(... to=failed|canceled, data.terminal.status=failed|canceled)`
+- failed/canceled terminal SHOULD 在 `data.terminal.error.code/message` 中携带错误摘要（message 为长度受控摘要）。
 
 ## 6) 会话中鉴权流（waiting_auth -> queued -> running）
 

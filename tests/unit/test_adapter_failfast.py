@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from server.models import EngineSessionHandle, EngineSessionHandleType, SkillManifest
-from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
+from server.runtime.adapter.base_execution_adapter import (
+    RUNTIME_DEPENDENCIES_INJECTION_FAILED,
+    EngineExecutionAdapter,
+)
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.types import ProcessExecutionResult
 
@@ -204,3 +207,107 @@ async def test_auth_completed_resume_revalidates_run_folder_before_execute(tmp_p
     )
 
     assert validator.calls == [(run_dir, run_dir / "dummy.json")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_dependencies_probe_success_wraps_command(tmp_path: Path):
+    adapter = EngineExecutionAdapter(
+        config_composer=_NoopComposer(),
+        run_folder_validator=_NoopRunFolderValidator(),
+        prompt_builder=_NoopPromptBuilder(),
+        command_builder=_NoopCommandBuilder(),
+        stream_parser=_NoopStreamParser(),
+        session_codec=_NoopSessionCodec(),
+        process_prefix="Test",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, object] = {}
+
+    async def _fake_probe(**kwargs):  # type: ignore[no-untyped-def]
+        _ = kwargs
+        return True, None
+
+    async def _fake_create_subprocess(*cmd: str, cwd: Path, env: dict[str, str]):  # type: ignore[no-untyped-def]
+        _ = cwd, env
+        captured["cmd"] = list(cmd)
+        return object()
+
+    async def _fake_capture_process_output(*args, **kwargs):  # type: ignore[no-untyped-def]
+        _ = args, kwargs
+        return ProcessExecutionResult(exit_code=0, raw_stdout="", raw_stderr="")
+
+    adapter.build_start_command = lambda **kwargs: ["python", "-c", "print('ok')"]  # type: ignore[method-assign]
+    adapter._probe_uv_dependency_injection = _fake_probe  # type: ignore[method-assign]
+    adapter._create_subprocess = _fake_create_subprocess  # type: ignore[method-assign]
+    adapter._capture_process_output = _fake_capture_process_output  # type: ignore[method-assign]
+
+    skill = SkillManifest(
+        id="x",
+        runtime={"language": "python", "version": "3.11", "dependencies": ["pymupdf4llm"]},
+    )
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        skill,
+        {},
+    )
+    assert result.runtime_warnings == []
+    assert captured["cmd"] == [
+        "uv",
+        "run",
+        "--with",
+        "pymupdf4llm",
+        "--",
+        "python",
+        "-c",
+        "print('ok')",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_dependencies_probe_failure_falls_back_and_warns(tmp_path: Path):
+    adapter = EngineExecutionAdapter(
+        config_composer=_NoopComposer(),
+        run_folder_validator=_NoopRunFolderValidator(),
+        prompt_builder=_NoopPromptBuilder(),
+        command_builder=_NoopCommandBuilder(),
+        stream_parser=_NoopStreamParser(),
+        session_codec=_NoopSessionCodec(),
+        process_prefix="Test",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, object] = {}
+
+    async def _fake_probe(**kwargs):  # type: ignore[no-untyped-def]
+        _ = kwargs
+        return False, "network unavailable"
+
+    async def _fake_create_subprocess(*cmd: str, cwd: Path, env: dict[str, str]):  # type: ignore[no-untyped-def]
+        _ = cwd, env
+        captured["cmd"] = list(cmd)
+        return object()
+
+    async def _fake_capture_process_output(*args, **kwargs):  # type: ignore[no-untyped-def]
+        _ = args, kwargs
+        return ProcessExecutionResult(exit_code=0, raw_stdout="", raw_stderr="")
+
+    adapter.build_start_command = lambda **kwargs: ["python", "-c", "print('ok')"]  # type: ignore[method-assign]
+    adapter._probe_uv_dependency_injection = _fake_probe  # type: ignore[method-assign]
+    adapter._create_subprocess = _fake_create_subprocess  # type: ignore[method-assign]
+    adapter._capture_process_output = _fake_capture_process_output  # type: ignore[method-assign]
+
+    skill = SkillManifest(
+        id="x",
+        runtime={"language": "python", "version": "3.11", "dependencies": ["pymupdf4llm"]},
+    )
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        skill,
+        {},
+    )
+    assert captured["cmd"] == ["python", "-c", "print('ok')"]
+    assert len(result.runtime_warnings) == 1
+    assert result.runtime_warnings[0]["code"] == RUNTIME_DEPENDENCIES_INJECTION_FAILED

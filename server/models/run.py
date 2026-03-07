@@ -146,6 +146,32 @@ class RunArtifactsResponse(BaseModel):
     artifacts: List[str]
 
 
+class RunFileEntry(BaseModel):
+    """Run file tree entry for jobs file explorer APIs."""
+
+    path: str
+    name: str
+    is_dir: bool
+    depth: int
+
+
+class RunFilesResponse(BaseModel):
+    """Response payload for run file tree in jobs API."""
+
+    request_id: str
+    run_id: str
+    entries: List[RunFileEntry] = []
+
+
+class RunFilePreviewResponse(BaseModel):
+    """Response payload for run file preview in jobs API."""
+
+    request_id: str
+    run_id: str
+    path: str
+    preview: Dict[str, Any]
+
+
 class RunLogsResponse(BaseModel):
     """Response payload containing run logs."""
 

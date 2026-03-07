@@ -192,6 +192,7 @@ stateDiagram-v2
 2. `transitions` 状态机转移（与 `server/runtime/session/statechart.py` 对齐）。
 3. `fcmp_mapping`（状态迁移到 FCMP 事件的映射、配对规则）。
 4. `ordering_rules`（终态唯一性、resume 单次消费、attempt 单调、pending/history/result 一致性、`seq` 连续递增、续跑 reply 先于 assistant 输出）。
+5. failed/canceled terminal 的错误摘要可观测性约束（`code/message` 优先通过 `lifecycle.run.terminal` 传递）。
 
 测试锚点：
 

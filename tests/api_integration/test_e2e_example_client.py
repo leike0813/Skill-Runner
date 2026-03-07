@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 from pathlib import Path
 from typing import Any
 import zipfile
@@ -252,6 +253,48 @@ class FakeBackend:
                 archive.writestr("result/result.json", '{"answer":"ok"}')
                 archive.writestr("artifacts/out.txt", "artifact text")
         return buffer.getvalue()
+
+    async def get_run_files(
+        self,
+        request_id: str,
+        *,
+        run_source: str = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        del run_source
+        return {
+            "request_id": request_id,
+            "run_id": "run-temp-1" if self._is_temp_request(request_id) else "run-e2e-1",
+            "entries": [
+                {"path": "result", "name": "result", "is_dir": True, "depth": 0},
+                {"path": "result/result.json", "name": "result.json", "is_dir": False, "depth": 1},
+            ],
+        }
+
+    async def get_run_file_preview(
+        self,
+        request_id: str,
+        *,
+        path: str,
+        run_source: str = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        del run_source
+        if path != "result/result.json":
+            raise RuntimeError("unexpected preview path")
+        answer = "temp-ok" if self._is_temp_request(request_id) else "ok"
+        return {
+            "request_id": request_id,
+            "run_id": "run-temp-1" if self._is_temp_request(request_id) else "run-e2e-1",
+            "path": path,
+            "preview": {
+                "mode": "text",
+                "content": f'{{"answer":"{answer}"}}',
+                "size": 16,
+                "meta": "16 bytes, utf-8",
+                "detected_format": "json",
+                "rendered_html": None,
+                "json_pretty": json.dumps({"answer": answer}, ensure_ascii=False, indent=2),
+            },
+        }
 
     async def stream_run_events(
         self,
