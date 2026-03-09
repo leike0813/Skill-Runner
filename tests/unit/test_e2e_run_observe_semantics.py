@@ -85,6 +85,16 @@ def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
     assert "Authorization code submitted" not in content
 
 
+def test_run_observe_auth_import_panel_not_cleared_before_signature_early_return():
+    content = _read_template()
+    signature_guard = "if (signature && signature === lastAuthRenderSignature && !authCardEl.classList.contains(\"hidden\"))"
+    clear_call = "clearAuthImportPanel();"
+    guard_idx = content.find(signature_guard)
+    clear_idx = content.find(clear_call, guard_idx if guard_idx >= 0 else 0)
+    assert guard_idx >= 0
+    assert clear_idx > guard_idx
+
+
 def test_run_observe_template_hides_technical_auth_details():
     content = _read_template()
     assert 'id="auth-card-kind"' not in content

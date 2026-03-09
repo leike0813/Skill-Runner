@@ -33,6 +33,8 @@
 ### Engine 管理
 - `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/models_count`，版本来自后台缓存）
 - `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`）
+- `GET /v1/management/engines/{engine}/auth/import/spec`：返回该引擎（及 OpenCode provider）导入鉴权文件要求
+- `POST /v1/management/engines/{engine}/auth/import`：提交并导入鉴权文件（multipart）
 
 ### Run 管理（对话窗口）
 - `GET /v1/management/runs`：运行摘要列表（支持 `limit`）
@@ -572,6 +574,34 @@
 - `409`: 非 `waiting_user` 状态提交、`interaction_id` 过期/不匹配、或 `idempotency_key` 冲突。
 - `SESSION_RESUME_FAILED`: `resumable` 路径下无法提取/使用会话句柄（Codex `thread_id`、Gemini `session_id`、iFlow `session-id`）。
 
+### 会话中导入鉴权文件 (Auth Import In Conversation)
+`POST /v1/jobs/{request_id}/interaction/auth/import`
+
+用于 `waiting_auth` 阶段且可用方法包含 `import` 时提交鉴权文件。
+
+**Request**:
+- `Content-Type`: `multipart/form-data`
+- `provider_id`（可选；OpenCode 建议传入，其他引擎可省略）
+- `files`（可重复）：鉴权文件
+
+**Response** (`InteractionReplyResponse`):
+```json
+{
+  "request_id": "d290f1ee-6c54-4b01-90e6-...",
+  "status": "queued",
+  "accepted": true,
+  "mode": "auth"
+}
+```
+
+**行为说明**:
+- 导入校验通过后，服务直接走 `auth.completed` 分支，清理 pending auth 并恢复 run 调度。
+- 该接口仅在 `waiting_auth` 且当前可用方法包含 `import` 时受理。
+
+**错误码**:
+- `409`: 当前不在待鉴权状态。
+- `422`: 文件缺失、结构不合法、provider 不匹配或当前引擎/provider 不支持导入。
+
 ### 上传文件 (Upload File)
 `POST /v1/jobs/{request_id}/upload`
 
@@ -743,6 +773,71 @@
 **Query 参数**:
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
 - `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
+
+### 获取引擎鉴权导入规格（管理 API）
+`GET /v1/management/engines/{engine}/auth/import/spec`
+
+用于 UI 渲染“导入鉴权文件”对话框。规则来自 engine adapter profile（声明式）。
+
+**Query 参数**:
+- `provider_id`（可选）：OpenCode 必填（如 `openai` / `google`），其他引擎忽略。
+
+**Response** (`ManagementEngineAuthImportSpecResponse`):
+```json
+{
+  "engine": "gemini",
+  "provider_id": null,
+  "supported": true,
+  "required_files": [
+    {
+      "filename": "google_accounts.json",
+      "aliases": [],
+      "default_path_hint": "$HOME/.gemini/google_accounts.json",
+      "target_relpath": ".gemini/google_accounts.json",
+      "import_validator": "gemini_google_accounts_json"
+    },
+    {
+      "filename": "oauth_creds.json",
+      "aliases": [],
+      "default_path_hint": "$HOME/.gemini/oauth_creds.json",
+      "target_relpath": ".gemini/oauth_creds.json",
+      "import_validator": "gemini_oauth_creds_json"
+    }
+  ],
+  "optional_files": [],
+  "risk_notice_required": false
+}
+```
+
+**错误码**:
+- `422`: 引擎/provider 不支持导入或导入规则非法。
+
+### 提交引擎鉴权文件导入（管理 API）
+`POST /v1/management/engines/{engine}/auth/import`
+
+**Request**:
+- `Content-Type`: `multipart/form-data`
+- `provider_id`（可选，OpenCode 必填）
+- `files`（可重复）：鉴权文件
+
+**Response** (`ManagementEngineAuthImportSubmitResponse`):
+```json
+{
+  "engine": "opencode",
+  "provider_id": "openai",
+  "imported_files": [
+    {
+      "source": "auth.json",
+      "target_relpath": ".local/share/opencode/auth.json",
+      "target_path": "/home/user/.local/share/opencode/auth.json"
+    }
+  ],
+  "risk_notice_required": false
+}
+```
+
+**错误码**:
+- `422`: 缺少必需文件、结构校验失败、provider 不匹配等。
 
 ### 获取日志片段（raw_ref 回跳）
 `GET /v1/jobs/{request_id}/logs/range`

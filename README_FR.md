@@ -83,7 +83,7 @@ Chaque skill déclare ses modes supportés dans `runner.json` :
 ### Docker (recommandé)
 
 ```bash
-mkdir -p skills agent_config data
+mkdir -p skills data
 docker compose up --build
 ```
 
@@ -179,16 +179,8 @@ docker exec -it <container_id> /bin/bash
 # Exécuter le flux de connexion CLI dans le conteneur
 ```
 
-**Copie manuelle des identifiants** — Se connecter sur la machine hôte et copier les fichiers d'identifiants vers `agent_config/<engine>/` :
-
-| Moteur | Fichiers requis |
-|--------|----------------|
-| Codex | `auth.json` |
-| Gemini | `google_accounts.json`, `oauth_creds.json` |
-| iFlow | `iflow_accounts.json`, `oauth_creds.json` |
-| OpenCode | `auth.json`, `antigravity-accounts.json` (optionnel) |
-
-> Au démarrage, seuls les fichiers d'authentification sont importés ; les fichiers de configuration ne le sont pas (isolation par conception).
+**Importer les identifiants via l'UI** — Dans `/ui/engines`, ouvrez le menu d'authentification et choisissez **Import Credentials**.  
+Le service valide les fichiers envoyés puis les écrit automatiquement dans les chemins cibles de l'Agent Home isolé.
 
 </details>
 

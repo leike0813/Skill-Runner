@@ -80,6 +80,16 @@ class BackendClient:
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def post_run_auth_import(
+        self,
+        request_id: str,
+        *,
+        files: list[tuple[str, bytes]],
+        provider_id: str | None = None,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def get_run_result(
         self,
         request_id: str,
@@ -279,6 +289,45 @@ class HttpBackendClient(BackendClient):
             f"{self._run_base_path(request_id, run_source=run_source)}/interaction/reply",
             json_payload=payload,
         )
+
+    async def post_run_auth_import(
+        self,
+        request_id: str,
+        *,
+        files: list[tuple[str, bytes]],
+        provider_id: str | None = None,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> dict[str, Any]:
+        url = f"{self._base_url}{self._run_base_path(request_id, run_source=run_source)}/interaction/auth/import"
+        multipart_files: list[tuple[str, tuple[str, bytes, str]]] = []
+        for filename, content in files:
+            safe_name = str(filename).strip()
+            if not safe_name:
+                continue
+            multipart_files.append(("files", (safe_name, content, "application/octet-stream")))
+        if not multipart_files:
+            raise BackendApiError(422, "No files uploaded")
+        data: dict[str, str] = {}
+        normalized_provider = str(provider_id).strip().lower() if isinstance(provider_id, str) else ""
+        if normalized_provider:
+            data["provider_id"] = normalized_provider
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.request(
+                    method="POST",
+                    url=url,
+                    data=data if data else None,
+                    files=multipart_files,
+                )
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise _backend_unreachable_error(exc) from exc
+        if response.status_code >= 400:
+            detail = _extract_error_detail_from_response(response)
+            raise BackendApiError(response.status_code, detail)
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise BackendApiError(502, "Backend returned non-object payload")
+        return payload
 
     async def get_run_auth_session(
         self,

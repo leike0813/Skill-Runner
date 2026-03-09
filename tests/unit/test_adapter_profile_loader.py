@@ -108,6 +108,9 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                         "bootstrap_format": "json",
                         "normalize_strategy": None
                     }
+                },
+                "parser_auth_patterns": {
+                    "rules": []
                 }
             }
         ),
@@ -227,6 +230,9 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                         "bootstrap_format": "text",
                         "normalize_strategy": None
                     }
+                },
+                "parser_auth_patterns": {
+                    "rules": []
                 }
             }
         ),
@@ -319,6 +325,9 @@ def test_load_adapter_profile_fails_when_credential_target_is_absolute(tmp_path:
                         "bootstrap_format": "text",
                         "normalize_strategy": None
                     }
+                },
+                "parser_auth_patterns": {
+                    "rules": []
                 }
             }
         ),

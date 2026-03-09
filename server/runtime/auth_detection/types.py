@@ -11,7 +11,7 @@ AuthSubcategory = Literal[
     "auth_expired",
     "unknown_auth",
 ]
-AuthConfidence = Literal["high", "medium", "low"]
+AuthConfidence = Literal["high", "low"]
 EvidenceSource = Literal[
     "stdout_text",
     "stderr_text",
@@ -20,6 +20,7 @@ EvidenceSource = Literal[
     "structured_ndjson",
     "process_exit",
     "combined",
+    "parser_signal",
 ]
 RuleOperator = Literal["eq", "in", "regex", "contains", "gte"]
 
@@ -35,23 +36,14 @@ class RuleMatchDefinition(TypedDict, total=False):
     any: list[RuleMatchClause]
 
 
-class RuleClassificationDefinition(TypedDict):
-    classification: AuthClassification
-    subcategory: AuthSubcategory | None
-    confidence: AuthConfidence
-
-
 class AuthDetectionRule(TypedDict):
     id: str
     enabled: bool
     priority: int
     match: RuleMatchDefinition
-    classify: RuleClassificationDefinition
 
 
 class AuthDetectionRulePack(TypedDict):
-    version: int
-    engine: str
     rules: list[AuthDetectionRule]
 
 

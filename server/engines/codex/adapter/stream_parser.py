@@ -4,6 +4,9 @@ import json
 from typing import TYPE_CHECKING
 
 from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage
+from server.runtime.adapter.common.parser_auth_signal_matcher import (
+    detect_auth_signal_from_patterns,
+)
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
@@ -120,13 +123,16 @@ class CodexStreamParser:
             if isinstance(item, dict) and item.get("type") == "agent_message":
                 text = item.get("text")
                 if isinstance(text, str) and text.strip():
+                    row_stream = str(row["stream"])
+                    row_from = row["byte_from"]
+                    row_to = row["byte_to"]
                     assistant_messages.append(
                         {
                             "text": text,
                             "raw_ref": {
-                                "stream": row["stream"],
-                                "byte_from": row["byte_from"],
-                                "byte_to": row["byte_to"],
+                                "stream": row_stream,
+                                "byte_from": row_from if isinstance(row_from, int) else 0,
+                                "byte_to": row_to if isinstance(row_to, int) else 0,
                             },
                         }
                     )
@@ -161,13 +167,16 @@ class CodexStreamParser:
                 if isinstance(item, dict) and item.get("type") == "agent_message":
                     text = item.get("text")
                     if isinstance(text, str) and text.strip():
+                        row_stream = str(row["stream"])
+                        row_from = row["byte_from"]
+                        row_to = row["byte_to"]
                         assistant_messages.append(
                             {
                                 "text": text,
                                 "raw_ref": {
-                                    "stream": row["stream"],
-                                    "byte_from": row["byte_from"],
-                                    "byte_to": row["byte_to"],
+                                    "stream": row_stream,
+                                    "byte_from": row_from if isinstance(row_from, int) else 0,
+                                    "byte_to": row_to if isinstance(row_to, int) else 0,
                                 },
                             }
                         )
@@ -176,7 +185,27 @@ class CodexStreamParser:
         if raw_rows:
             diagnostics.append("UNPARSED_CONTENT_FELL_BACK_TO_RAW")
 
-        return {
+        stdout_text = stdout_raw.decode("utf-8", errors="replace")
+        stderr_text = stderr_raw.decode("utf-8", errors="replace")
+        pty_text = pty_raw.decode("utf-8", errors="replace")
+        auth_signal = detect_auth_signal_from_patterns(
+            engine="codex",
+            rules=self._adapter.profile.parser_auth_patterns.rules,
+            evidence={
+                "engine": "codex",
+                "stdout_text": stdout_text,
+                "stderr_text": stderr_text,
+                "pty_output": pty_text,
+                "combined_text": "\n".join(
+                    part for part in (stdout_text, stderr_text, pty_text) if part
+                ),
+                "parser_diagnostics": list(dict.fromkeys(diagnostics)),
+                "structured_types": list(dict.fromkeys(structured_types)),
+                "extracted": {},
+            },
+        )
+
+        result: dict[str, object] = {
             "parser": "codex_ndjson",
             "confidence": 0.95 if assistant_messages else 0.6,
             "session_id": session_id,
@@ -185,6 +214,9 @@ class CodexStreamParser:
             "diagnostics": diagnostics,
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if auth_signal is not None:
+            result["auth_signal"] = auth_signal
+        return result
 
     def start_live_session(self) -> "_CodexLiveSession":
         return _CodexLiveSession(self)

@@ -83,7 +83,7 @@ my-skill/
 ### Docker（推奨）
 
 ```bash
-mkdir -p skills agent_config data
+mkdir -p skills data
 docker compose up --build
 ```
 
@@ -179,16 +179,8 @@ docker exec -it <container_id> /bin/bash
 # コンテナ内で CLI ログインフローを実行
 ```
 
-**手動認証情報コピー** — ホストマシンでログインし、認証情報ファイルを `agent_config/<engine>/` にコピー：
-
-| エンジン | 必要なファイル |
-|---------|--------------|
-| Codex | `auth.json` |
-| Gemini | `google_accounts.json`、`oauth_creds.json` |
-| iFlow | `iflow_accounts.json`、`oauth_creds.json` |
-| OpenCode | `auth.json`、`antigravity-accounts.json`（任意） |
-
-> 起動時に認証ファイルのみインポートされます。設定ファイルはインポートされません（設計による分離）。
+**UI から認証情報ファイルをインポート** — `/ui/engines` の認証メニューで **Import Credentials** を選択します。  
+サービスがアップロードファイルを検証し、分離された Agent Home の所定パスへ自動保存します。
 
 </details>
 

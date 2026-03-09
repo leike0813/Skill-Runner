@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -31,6 +32,11 @@ from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.logging.structured_trace import log_event
 from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
 from server.services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
+from server.services.engine_management.auth_import_service import (
+    AuthImportError,
+    AuthImportValidationError,
+    auth_import_service,
+)
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_projection_service import run_projection_service
@@ -44,6 +50,7 @@ _CONVERSATION_METHOD_MAP: dict[str, AuthMethod] = {
     "callback": AuthMethod.CALLBACK,
     "device_auth": AuthMethod.DEVICE_AUTH,
     "authorization_code": AuthMethod.AUTHORIZATION_CODE,
+    "import": AuthMethod.IMPORT,
     "api_key": AuthMethod.API_KEY,
 }
 _HIGH_RISK_SHORT_LABEL = "High risk!"
@@ -151,6 +158,24 @@ class RunAuthOrchestrationService:
                 update_status=update_status,
             )
             return selection
+        if available_methods[0] == AuthMethod.IMPORT:
+            pending_auth = self._build_import_pending_auth(
+                request_id=request_id,
+                engine=engine_name,
+                provider_id=provider_id,
+                source_attempt=attempt_number,
+            )
+            await self._persist_pending_auth(
+                request_id=request_id,
+                run_id=run_id,
+                run_dir=run_dir,
+                pending_auth=pending_auth,
+                snapshot={},
+                run_store_backend=run_store_backend,
+                append_orchestrator_event=append_orchestrator_event,
+                event_type=OrchestratorEventType.AUTH_METHOD_SELECTED.value,
+            )
+            return pending_auth
         try:
             pending_auth = await self._start_pending_auth(
                 request_id=request_id,
@@ -270,12 +295,36 @@ class RunAuthOrchestrationService:
                 error_code="UNSUPPORTED_AUTH_METHOD",
             )
             raise HTTPException(status_code=422, detail="Unsupported auth method")
+        engine_name = str((existing_pending or existing_selection or {}).get("engine") or request_record.get("engine") or "")
+        if selection.value == AuthMethod.IMPORT:
+            pending_auth = self._build_import_pending_auth(
+                request_id=request_id,
+                engine=engine_name,
+                provider_id=provider_id,
+                source_attempt=source_attempt,
+            )
+            await self._persist_pending_auth(
+                request_id=request_id,
+                run_id=resolved_run_id,
+                run_dir=run_dir,
+                pending_auth=pending_auth,
+                snapshot={},
+                run_store_backend=run_store_backend,
+                append_orchestrator_event=append_orchestrator_event,
+                event_type=OrchestratorEventType.AUTH_METHOD_SELECTED.value,
+            )
+            return InteractionReplyResponse(
+                request_id=request_id,
+                status=RunStatus.WAITING_AUTH,
+                accepted=True,
+                mode="auth",
+            )
         try:
             pending_auth = await self._start_pending_auth(
                 request_id=request_id,
                 run_id=resolved_run_id,
                 run_dir=run_dir,
-                engine=str((existing_pending or existing_selection or {}).get("engine") or request_record.get("engine") or ""),
+                engine=engine_name,
                 provider_id=provider_id,
                 auth_method=selection.value,
                 source_attempt=source_attempt,
@@ -286,7 +335,7 @@ class RunAuthOrchestrationService:
             )
         except EngineInteractionBusyError as exc:
             selection_payload = self._build_method_selection(
-                engine=str((existing_pending or existing_selection or {}).get("engine") or request_record.get("engine") or ""),
+                engine=engine_name,
                 provider_id=provider_id,
                 available_methods=available_methods,
                 source_attempt=source_attempt,
@@ -430,61 +479,17 @@ class RunAuthOrchestrationService:
         )
         if self._snapshot_is_terminal_success(snapshot):
             source_attempt = self._resolve_source_attempt(pending_payload, resume_context)
-            target_attempt = source_attempt + 1
-            resume_ticket = await maybe_await(
-                run_store_backend.issue_resume_ticket(
-                    request_id,
-                    cause=ResumeCause.AUTH_COMPLETED.value,
-                    source_attempt=source_attempt,
-                    target_attempt=target_attempt,
-                    payload={"auth_session_id": auth_session_id},
-                )
+            resume_ticket_id = await self._complete_waiting_auth_success(
+                request_id=request_id,
+                run_id=run_id,
+                run_dir=run_dir,
+                auth_session_id=auth_session_id,
+                source_attempt=source_attempt,
+                background_tasks=background_tasks,
+                run_store_backend=run_store_backend,
+                append_orchestrator_event=append_orchestrator_event,
+                resume_run_job=resume_run_job,
             )
-            ticket_dispatched = await maybe_await(
-                run_store_backend.mark_resume_ticket_dispatched(
-                    request_id,
-                    str(resume_ticket["ticket_id"]),
-                )
-            )
-            if ticket_dispatched:
-                await maybe_await(run_store_backend.clear_pending_auth(request_id))
-                await maybe_await(run_store_backend.clear_pending_auth_method_selection(request_id))
-                await maybe_await(run_store_backend.clear_auth_resume_context(request_id))
-                await run_projection_service.write_non_terminal_projection(
-                    run_dir=run_dir,
-                    request_id=request_id,
-                    run_id=run_id,
-                    status=RunStatus.QUEUED,
-                    current_attempt=source_attempt,
-                    pending_owner=None,
-                    resume_ticket_id=str(resume_ticket["ticket_id"]),
-                    resume_cause=ResumeCause.AUTH_COMPLETED,
-                    source_attempt=source_attempt,
-                    target_attempt=target_attempt,
-                    run_store_backend=run_store_backend,
-                )
-                append_orchestrator_event(
-                    run_dir=run_dir,
-                    attempt_number=source_attempt,
-                    category="interaction",
-                    type_name=OrchestratorEventType.AUTH_SESSION_COMPLETED.value,
-                    data=self._build_auth_session_completed_payload(
-                        auth_session_id=auth_session_id,
-                        source_attempt=source_attempt,
-                        target_attempt=target_attempt,
-                        resume_ticket_id=str(resume_ticket["ticket_id"]),
-                        ticket_consumed=True,
-                    ),
-                )
-                await self._schedule_resume(
-                    request_id=request_id,
-                    background_tasks=background_tasks,
-                    run_store_backend=run_store_backend,
-                    resume_run_job=resume_run_job,
-                    target_attempt=target_attempt,
-                    resume_ticket_id=str(resume_ticket["ticket_id"]),
-                    resume_cause=ResumeCause.AUTH_COMPLETED.value,
-                )
             log_event(
                 logger,
                 event="auth.completed",
@@ -494,7 +499,7 @@ class RunAuthOrchestrationService:
                 run_id=run_id,
                 attempt=source_attempt,
                 auth_session_id=auth_session_id,
-                resume_ticket_id=str(resume_ticket["ticket_id"]),
+                resume_ticket_id=resume_ticket_id,
             )
             return InteractionReplyResponse(
                 request_id=request_id,
@@ -553,6 +558,182 @@ class RunAuthOrchestrationService:
             accepted=True,
             mode="auth",
         )
+
+    async def submit_auth_import(
+        self,
+        *,
+        request_id: str,
+        run_id: str,
+        provider_id: str | None,
+        files: dict[str, bytes],
+        background_tasks: BackgroundTasks,
+        run_store_backend: Any = run_store,
+        append_orchestrator_event: Callable[..., None],
+        update_status: Callable[..., None],
+        resume_run_job: Callable[..., Any],
+    ) -> InteractionReplyResponse:
+        self._capture_runtime_loop()
+        _ = update_status
+        pending_auth_payload = await maybe_await(run_store_backend.get_pending_auth(request_id))
+        pending_selection_payload = await maybe_await(
+            run_store_backend.get_pending_auth_method_selection(request_id)
+        )
+        if not isinstance(pending_auth_payload, dict) and not isinstance(pending_selection_payload, dict):
+            raise HTTPException(status_code=409, detail="No pending auth flow")
+        request_record = await maybe_await(run_store_backend.get_request(request_id))
+        if not isinstance(request_record, dict):
+            raise HTTPException(status_code=404, detail="Request not found")
+        run_dir = workspace_manager.get_run_dir(run_id)
+        if run_dir is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        engine = self._normalize_string(request_record.get("engine")) or ""
+        pending_provider_id = self._resolve_provider_id(
+            pending_auth_payload,
+            pending_selection_payload,
+        )
+        effective_provider_id = self._normalize_provider_id(provider_id) or pending_provider_id
+        available_methods = self._available_methods_for(engine, effective_provider_id)
+        if AuthMethod.IMPORT not in available_methods:
+            raise HTTPException(status_code=422, detail="Import auth method is not available")
+        source_attempt = self._resolve_source_attempt(
+            pending_auth_payload,
+            pending_selection_payload,
+        )
+        try:
+            import_result = auth_import_service.import_auth_files(
+                engine=engine,
+                provider_id=effective_provider_id,
+                files=files,
+            )
+        except (AuthImportError, AuthImportValidationError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        auth_session_id = (
+            self._normalize_string((pending_auth_payload or {}).get("auth_session_id"))
+            or f"import::{request_id}::{uuid.uuid4()}"
+        )
+        append_orchestrator_event(
+            run_dir=run_dir,
+            attempt_number=source_attempt,
+            category="interaction",
+            type_name=OrchestratorEventType.AUTH_INPUT_ACCEPTED.value,
+            data=self._build_auth_input_accepted_payload(
+                auth_session_id=auth_session_id,
+                submission_kind=AuthSubmissionKind.IMPORT_FILES,
+            ),
+        )
+        log_event(
+            logger,
+            event="auth.input.accepted",
+            phase="auth_orchestration",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=source_attempt,
+            auth_session_id=auth_session_id,
+            submission_kind=AuthSubmissionKind.IMPORT_FILES,
+            imported_files=len(import_result.get("imported_files", [])),
+        )
+
+        resume_ticket_id = await self._complete_waiting_auth_success(
+            request_id=request_id,
+            run_id=run_id,
+            run_dir=run_dir,
+            auth_session_id=auth_session_id,
+            source_attempt=source_attempt,
+            background_tasks=background_tasks,
+            run_store_backend=run_store_backend,
+            append_orchestrator_event=append_orchestrator_event,
+            resume_run_job=resume_run_job,
+        )
+        log_event(
+            logger,
+            event="auth.completed",
+            phase="auth_orchestration",
+            outcome="ok",
+            request_id=request_id,
+            run_id=run_id,
+            attempt=source_attempt,
+            auth_session_id=auth_session_id,
+            resume_ticket_id=resume_ticket_id,
+            import_mode="file_import",
+        )
+        return InteractionReplyResponse(
+            request_id=request_id,
+            status=RunStatus.QUEUED,
+            accepted=True,
+            mode="auth",
+        )
+
+    async def _complete_waiting_auth_success(
+        self,
+        *,
+        request_id: str,
+        run_id: str,
+        run_dir: Path,
+        auth_session_id: str,
+        source_attempt: int,
+        background_tasks: BackgroundTasks,
+        run_store_backend: Any,
+        append_orchestrator_event: Callable[..., None],
+        resume_run_job: Callable[..., Any],
+    ) -> str:
+        target_attempt = source_attempt + 1
+        resume_ticket = await maybe_await(
+            run_store_backend.issue_resume_ticket(
+                request_id,
+                cause=ResumeCause.AUTH_COMPLETED.value,
+                source_attempt=source_attempt,
+                target_attempt=target_attempt,
+                payload={"auth_session_id": auth_session_id},
+            )
+        )
+        ticket_dispatched = await maybe_await(
+            run_store_backend.mark_resume_ticket_dispatched(
+                request_id,
+                str(resume_ticket["ticket_id"]),
+            )
+        )
+        if ticket_dispatched:
+            await maybe_await(run_store_backend.clear_pending_auth(request_id))
+            await maybe_await(run_store_backend.clear_pending_auth_method_selection(request_id))
+            await maybe_await(run_store_backend.clear_auth_resume_context(request_id))
+            await run_projection_service.write_non_terminal_projection(
+                run_dir=run_dir,
+                request_id=request_id,
+                run_id=run_id,
+                status=RunStatus.QUEUED,
+                current_attempt=source_attempt,
+                pending_owner=None,
+                resume_ticket_id=str(resume_ticket["ticket_id"]),
+                resume_cause=ResumeCause.AUTH_COMPLETED,
+                source_attempt=source_attempt,
+                target_attempt=target_attempt,
+                run_store_backend=run_store_backend,
+            )
+            append_orchestrator_event(
+                run_dir=run_dir,
+                attempt_number=source_attempt,
+                category="interaction",
+                type_name=OrchestratorEventType.AUTH_SESSION_COMPLETED.value,
+                data=self._build_auth_session_completed_payload(
+                    auth_session_id=auth_session_id,
+                    source_attempt=source_attempt,
+                    target_attempt=target_attempt,
+                    resume_ticket_id=str(resume_ticket["ticket_id"]),
+                    ticket_consumed=True,
+                ),
+            )
+            await self._schedule_resume(
+                request_id=request_id,
+                background_tasks=background_tasks,
+                run_store_backend=run_store_backend,
+                resume_run_job=resume_run_job,
+                target_attempt=target_attempt,
+                resume_ticket_id=str(resume_ticket["ticket_id"]),
+                resume_cause=ResumeCause.AUTH_COMPLETED.value,
+            )
+        return str(resume_ticket["ticket_id"])
 
     async def get_auth_session_status(
         self,
@@ -1210,6 +1391,7 @@ class RunAuthOrchestrationService:
             AuthMethod.DEVICE_AUTH: "Device Authorization",
             AuthMethod.AUTHORIZATION_CODE: "Authorization Code",
             AuthMethod.API_KEY: "API Key",
+            AuthMethod.IMPORT: "Import Credentials",
         }
         prompt_text = f"Authentication is required{provider_hint}. Choose how to continue."
         hint_text = "Choose an authentication method."
@@ -1280,6 +1462,34 @@ class RunAuthOrchestrationService:
             timeout_sec=_timeout_sec_from_snapshot(snapshot),
             created_at=self._normalize_string(snapshot.get("created_at")),
             expires_at=self._normalize_string(snapshot.get("expires_at")),
+        )
+
+    def _build_import_pending_auth(
+        self,
+        *,
+        request_id: str,
+        engine: str,
+        provider_id: str | None,
+        source_attempt: int,
+    ) -> PendingAuth:
+        return PendingAuth(
+            auth_session_id=f"import::{request_id}",
+            engine=engine,
+            provider_id=provider_id,
+            auth_method=AuthMethod.IMPORT,
+            challenge_kind=AuthChallengeKind.IMPORT_FILES,
+            prompt="Upload credential files to complete authentication.",
+            auth_url=None,
+            user_code=None,
+            instructions="Use the import action and upload required auth files.",
+            accepts_chat_input=False,
+            input_kind=None,
+            last_error=None,
+            source_attempt=source_attempt,
+            phase=AuthSessionPhase.CHALLENGE_ACTIVE,
+            timeout_sec=None,
+            created_at=_utc_iso(),
+            expires_at=None,
         )
 
     def _build_auth_resume_context(
@@ -1401,6 +1611,13 @@ class RunAuthOrchestrationService:
                 AuthSubmissionKind.AUTHORIZATION_CODE,
                 _append_risk("Open the authorization link and paste the authorization code here."),
             )
+        if auth_method == AuthMethod.IMPORT:
+            return (
+                AuthChallengeKind.IMPORT_FILES,
+                False,
+                None,
+                _append_risk("Import credential files to complete authentication."),
+            )
         return (
             AuthChallengeKind.API_KEY,
             True,
@@ -1460,6 +1677,8 @@ class RunAuthOrchestrationService:
             return "callback"
         if auth_method in {AuthMethod.DEVICE_AUTH, AuthMethod.AUTHORIZATION_CODE}:
             return "auth_code_or_url"
+        if auth_method == AuthMethod.IMPORT:
+            return "import"
         return "api_key"
 
     def _map_submission_kind_to_runtime_kind(
@@ -1475,6 +1694,8 @@ class RunAuthOrchestrationService:
             return "text"
         if submission.kind == AuthSubmissionKind.AUTHORIZATION_CODE:
             return "code"
+        if submission.kind == AuthSubmissionKind.IMPORT_FILES:
+            return "import"
         return "api_key"
 
     def _snapshot_is_terminal_success(self, snapshot: dict[str, Any]) -> bool:
@@ -1541,6 +1762,8 @@ class RunAuthOrchestrationService:
             return AuthMethod.CALLBACK
         if submission_kind == AuthSubmissionKind.AUTHORIZATION_CODE:
             return AuthMethod.AUTHORIZATION_CODE
+        if submission_kind == AuthSubmissionKind.IMPORT_FILES:
+            return AuthMethod.IMPORT
         return AuthMethod.API_KEY
 
     def _merge_request_options(self, request_record: dict[str, Any]) -> dict[str, Any]:

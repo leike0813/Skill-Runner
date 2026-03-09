@@ -15,7 +15,7 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Query, Request  # type: ignore[import-not-found]
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Query, Request  # type: ignore[import-not-found]
 from typing import Any
 from ..config import config
 from ..models import (
@@ -731,6 +731,28 @@ async def reply_interaction(
     return await run_interaction_service.submit_reply(
         request_id=request_id,
         request=request,
+        background_tasks=background_tasks,
+        run_store_backend=run_store,
+    )
+
+
+@router.post("/{request_id}/interaction/auth/import", response_model=InteractionReplyResponse)
+async def import_interaction_auth(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    provider_id: str | None = Form(default=None),
+    files: list[UploadFile] = File(default=[]),
+):
+    uploaded: dict[str, bytes] = {}
+    for item in files:
+        name = Path(item.filename or "").name.strip()
+        if not name:
+            continue
+        uploaded[name] = await item.read()
+    return await run_interaction_service.submit_auth_import(
+        request_id=request_id,
+        provider_id=provider_id,
+        files=uploaded,
         background_tasks=background_tasks,
         run_store_backend=run_store,
     )

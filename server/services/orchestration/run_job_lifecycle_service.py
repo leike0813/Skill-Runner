@@ -22,6 +22,7 @@ from server.models import (
 )
 from server.runtime.logging.run_context import bind_run_logging_context
 from server.runtime.logging.structured_trace import log_event
+from server.runtime.auth_detection.signal import auth_detection_result_from_auth_signal
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.protocol.factories import make_diagnostic_warning_payload
 from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
@@ -591,12 +592,9 @@ class _RunJobLifecyclePipeline:
                     raw_stdout=process_raw_stdout,
                     raw_stderr=process_raw_stderr,
                 )
-                auth_detection_result = self.auth_detection_service.detect(
+                auth_detection_result = auth_detection_result_from_auth_signal(
                     engine=engine_name,
-                    raw_stdout=process_raw_stdout,
-                    raw_stderr=process_raw_stderr,
-                    pty_output=f"{process_raw_stdout}{process_raw_stderr}",
-                    runtime_parse_result=runtime_parse_result,
+                    auth_signal=getattr(result, "auth_signal_snapshot", None),
                 )
                 auth_detection_high = (
                     auth_detection_result.detected

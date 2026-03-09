@@ -9,7 +9,7 @@
   "expected_detection": {
     "classification": "auth_required",
     "subcategory": "unknown_auth",
-    "confidence": "medium"
+    "confidence": "low"
   },
   "evidence_priority": [
     "structured_json",

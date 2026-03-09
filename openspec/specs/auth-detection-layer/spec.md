@@ -1,69 +1,84 @@
 # auth-detection-layer Specification
 
 ## Purpose
-TBD - created by archiving change introduce-auth-detection-layer. Update Purpose after archive.
+Define a single-source, parser-driven auth detection model for runtime execution.
 ## Requirements
-### Requirement: Backend auth failures MUST be detected before generic user-input inference
-系统 MUST 在 run 执行拿到引擎输出后、generic `waiting_user` 推断前执行 auth detection，并在高置信度命中时优先于 generic pending-interaction inference。
+### Requirement: Auth evidence declarations MUST be single-source
+Auth evidence patterns MUST be declared in:
+- engine-specific `adapter_profile.json` (`parser_auth_patterns.rules`)
+- common fallback patterns (`server/engines/common/auth_detection/common_fallback_patterns.json`)
 
-#### Scenario: 高置信度鉴权命中优先于等待态推断
-- **WHEN** run 已完成引擎执行并拿到输出材料
-- **AND** auth detection 命中高置信度 auth-required 规则
-- **THEN** 系统必须在 generic `waiting_user` 推断前完成判定
-- **AND** generic pending-interaction 推断必须被跳过
+Runtime MUST NOT read legacy YAML rule packs.
 
-### Requirement: Auth detection MUST use a hybrid rule architecture
-系统 MUST 采用“Python engine-specific detector + YAML rule pack”的混合模型。
+#### Scenario: Legacy rule-pack source is retired
+- **WHEN** runtime loads auth detection declarations
+- **THEN** it MUST NOT read `server/engines/auth_detection/*.yaml`
+- **AND** missing/invalid adapter/common declarations MUST fail validation paths.
 
-#### Scenario: 结构化提取由 detector 完成
-- **WHEN** 系统处理某引擎输出
-- **THEN** 引擎专用结构化提取必须由 Python detector 实现
+### Requirement: Parser MUST perform one-pass auth signal classification
+Each engine parser MUST match declared auth evidence and emit `auth_signal` directly.
 
-#### Scenario: 分类映射由规则包完成
-- **WHEN** 系统完成证据提取
-- **THEN** 文本/字段匹配和分类映射必须来自可校验的 YAML 规则包
+`auth_signal` is the authoritative runtime auth classification result and includes:
+- `required`
+- `confidence` (`high|low`)
+- `matched_pattern_id`
+- optional `provider_id`
+- optional `reason_code`
 
-### Requirement: Auth detection MUST produce structured internal results
-任一 detector 命中 auth-like 模式时，系统 MUST 产出统一结构化结果。
+#### Scenario: Parser emits high-confidence signal for declared evidence
+- **GIVEN** runtime output matches an engine-specific declared pattern
+- **THEN** parser MUST emit `auth_signal.required=true` with `confidence=high`.
 
-#### Scenario: 统一结果字段
-- **WHEN** 任一 rule 命中
-- **THEN** detection 结果必须包含：
-  - `classification`
-  - `subcategory`
-  - `confidence`
-  - `engine`
-  - `provider_id`
-  - `matched_rule_ids`
-  - `evidence_excerpt`
-  - `evidence_sources`
+#### Scenario: Parser emits low-confidence signal for fallback evidence
+- **GIVEN** runtime output misses engine-specific patterns but matches common fallback
+- **THEN** parser MUST emit `auth_signal.required=true` with `confidence=low`.
 
-### Requirement: Rule packs MUST be versioned and validated
-系统 MUST 在启动时加载并校验 auth detection rule packs。
+### Requirement: Lifecycle MUST consume auth signal snapshot only
+Execution lifecycle MUST consume only the execution-stage `auth_signal_snapshot` and MUST NOT run second-pass auth detection over parser diagnostics or combined text.
 
-#### Scenario: 规则包非法 fail-fast
-- **WHEN** rule pack 存在 duplicate rule id、非法 operator 或非法 subcategory
-- **THEN** 系统启动必须失败
-- **AND** 服务不得进入可运行状态
+#### Scenario: No second-pass detect in lifecycle
+- **WHEN** run lifecycle classifies terminal auth outcome
+- **THEN** it MUST use `auth_signal_snapshot` from execution result
+- **AND** it MUST NOT invoke rule-based detect over terminal output text again.
 
-### Requirement: Detection MUST degrade conservatively for ambiguous auth-like failures
-对于只呈现问题行为但缺乏稳定 auth 证据的样本，系统 MAY 产出 `auth_required` + `confidence=medium`，但 MUST 保持保守。
+### Requirement: Waiting-auth transition MUST be high-confidence only
+Only high-confidence auth signal MUST drive `waiting_auth` entry.
 
-#### Scenario: medium 命中仅进入审计
-- **WHEN** 输出只命中问题样本层
-- **THEN** 系统可以产出 `auth_required`
-- **AND** `confidence` 必须为 `medium`
-- **AND** 编排层不得仅因该结果强制写 `failure_reason=AUTH_REQUIRED`
+Low-confidence auth signal is diagnostic-only and MUST NOT force `waiting_auth`.
 
-### Requirement: Detection results MUST be persisted to internal audit artifacts
-每次 attempt 的 detection 结果 MUST 写入内部审计产物。
+#### Scenario: High-confidence auth signal enters waiting_auth
+- **GIVEN** `auth_signal.required=true` and `confidence=high`
+- **AND** idle-blocking early-exit condition is satisfied (if process still blocked)
+- **THEN** runtime MUST transition to `waiting_auth` flow.
 
-#### Scenario: Attempt meta 记录 auth detection
-- **WHEN** detection 执行完成
-- **THEN** `.audit/meta.{attempt}.json` 必须记录 `auth_detection`
+#### Scenario: Low-confidence auth signal does not enter waiting_auth
+- **GIVEN** `auth_signal.required=true` and `confidence=low`
+- **THEN** runtime MUST keep it as diagnostic evidence only
+- **AND** MUST NOT transition to `waiting_auth` based solely on that signal.
 
-#### Scenario: Parser diagnostics 记录 detection 命中
-- **WHEN** detection 命中 `medium` 或 `high`
-- **THEN** 系统必须写入对应 diagnostic entry
-- **AND** 不修改 FCMP / 对外 runtime payload
+### Requirement: RASP auth diagnostics MUST carry structured auth signal payload
+RASP keeps existing diagnostic event envelope and MUST carry auth signal detail in `diagnostic.warning.data.auth_signal`.
+
+#### Scenario: Structured auth diagnostic payload
+- **WHEN** auth signal is persisted to RASP diagnostic stream
+- **THEN** `diagnostic.warning.data` MUST include:
+  - `code` (`AUTH_SIGNAL_MATCHED_HIGH|AUTH_SIGNAL_MATCHED_LOW`)
+  - `auth_signal.matched_pattern_id`
+  - `auth_signal.confidence`
+  - optional `auth_signal.provider_id`
+  - optional `auth_signal.reason_code`
+- **AND** event category/type/source envelope semantics MUST remain unchanged.
+
+### Requirement: Backend auth detection MUST use parser-signal single source
+runtime auth detection MUST be parser-signal driven, with evidence declarations only from adapter profiles and common fallback patterns.
+
+#### Scenario: runtime does not read legacy yaml rule packs
+- **WHEN** backend loads auth detection declarations
+- **THEN** it MUST NOT read `server/engines/auth_detection/*.yaml`
+- **AND** parser MUST classify auth signal directly from declared match patterns.
+
+#### Scenario: fallback signal is low-confidence only
+- **GIVEN** engine-specific evidence is not matched
+- **AND** common fallback evidence is matched
+- **THEN** parser MUST emit `auth_signal.required=true` and `confidence=low`.
 

@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request  # type: ignore[import-not-found]
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile  # type: ignore[import-not-found]
 
 from ..config import config
 from ..logging_config import get_logging_settings_payload, reload_logging_from_settings
@@ -18,6 +18,8 @@ from ..models import (
     ManagementDataResetRequest,
     ManagementDataResetResponse,
     ManagementEngineDetail,
+    ManagementEngineAuthImportSpecResponse,
+    ManagementEngineAuthImportSubmitResponse,
     ManagementEngineListResponse,
     ManagementEngineSummary,
     ManagementSystemSettingsResponse,
@@ -36,6 +38,8 @@ from ..models import (
     SkillManifest,
 )
 from ..services.engine_management.model_registry import model_registry
+from ..services.engine_management.auth_import_service import auth_import_service, AuthImportError
+from ..services.engine_management.auth_import_validator_registry import AuthImportValidationError
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..runtime.observability.run_observability import run_observability_service
@@ -308,6 +312,50 @@ async def get_management_engine(engine: str):
         upgrade_status={"state": "idle"},
         last_error=None,
     )
+
+
+@router.get(
+    "/engines/{engine}/auth/import/spec",
+    response_model=ManagementEngineAuthImportSpecResponse,
+)
+async def get_management_engine_auth_import_spec(
+    engine: str,
+    provider_id: str | None = Query(default=None),
+):
+    try:
+        payload = auth_import_service.get_import_spec(
+            engine=engine,
+            provider_id=provider_id,
+        )
+    except (AuthImportError, AuthImportValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ManagementEngineAuthImportSpecResponse(**payload)
+
+
+@router.post(
+    "/engines/{engine}/auth/import",
+    response_model=ManagementEngineAuthImportSubmitResponse,
+)
+async def submit_management_engine_auth_import(
+    engine: str,
+    provider_id: str | None = Form(default=None),
+    files: list[UploadFile] = File(default=[]),
+):
+    uploaded: dict[str, bytes] = {}
+    for item in files:
+        filename = Path(item.filename or "").name.strip()
+        if not filename:
+            continue
+        uploaded[filename] = await item.read()
+    try:
+        payload = auth_import_service.import_auth_files(
+            engine=engine,
+            provider_id=provider_id,
+            files=uploaded,
+        )
+    except (AuthImportError, AuthImportValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ManagementEngineAuthImportSubmitResponse(**payload)
 
 
 @router.get("/runs", response_model=ManagementRunListResponse)

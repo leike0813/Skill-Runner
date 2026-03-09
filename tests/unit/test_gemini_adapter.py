@@ -330,6 +330,20 @@ def test_parse_runtime_stream_uses_latest_response_frame(adapter):
     assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest response"]
 
 
+def test_parse_runtime_stream_detects_oauth_code_prompt(adapter):
+    oauth_prompt = (
+        "Please visit the following URL to authorize the application:\n\n"
+        "https://accounts.google.com/o/oauth2/v2/auth?... \n\n"
+        "Enter the authorization code:"
+    ).encode("utf-8")
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=oauth_prompt,
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    assert "GEMINI_OAUTH_CODE_PROMPT_DETECTED" in parsed["diagnostics"]
+
+
 def test_parse_output_valid_ask_user_envelope(adapter):
     raw = json.dumps(
         {

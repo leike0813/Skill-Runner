@@ -19,7 +19,7 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/render_release_compose.py`: render `docker-compose.release.yml` from template + image tag.
 - `scripts/entrypoint.sh`: runtime checks + uvicorn start (baked into image).
 - `scripts/entrypoint_e2e.sh`: built-in E2E client entrypoint (same image, different startup path).
-- `scripts/agent_manager.py`: cross-platform Engine manager (ensure/check/upgrade/import credentials).
+- `scripts/agent_manager.py`: cross-platform Engine manager (ensure/check/upgrade).
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
 - `scripts/upgrade_agents.sh`: upgrade wrapper (`local` / `container` mode).
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
@@ -29,7 +29,6 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 The default compose file mounts:
 
 - `./skills:/app/skills` (skills registry)
-- `./agent_config:/opt/config` (credential import source; optional)
 - `skillrunner_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
 - *(optional)* `./data:/data` (runs.db, runs/, logs, settings)
 
@@ -167,9 +166,7 @@ entrypoint detects the kernel version at startup and exports
 
 ### Agent CLI login workflows
 
-You can authenticate the CLI tools in two ways. The service runs in isolated
-Agent Home mode. If `/opt/config` is mounted, entrypoint imports **credentials only**
-from `/opt/config` into isolated Agent Home (settings are not imported).
+You can authenticate the CLI tools through managed flows while running in isolated Agent Home mode.
 
 Method 1: Login inside the container (TUI)
 - Start the container, then exec into it:
@@ -184,14 +181,10 @@ Method 1: Login inside the container (TUI)
   - Codex/Gemini/iFlow: `${SKILL_RUNNER_AGENT_HOME}/.<tool>/...`
   - OpenCode: `${SKILL_RUNNER_AGENT_HOME}/.local/share/opencode/auth.json` and `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/antigravity-accounts.json`
 
-Method 2: Login on another machine and copy credentials
-- Login on any machine where the CLI works.
-- Copy credential files into host-mounted import source:
-  - Codex → `agent_config/codex/auth.json`
-  - Gemini → `agent_config/gemini/google_accounts.json`, `agent_config/gemini/oauth_creds.json`
-  - iFlow → `agent_config/iflow/iflow_accounts.json`, `agent_config/iflow/oauth_creds.json`
-  - OpenCode → `agent_config/opencode/auth.json` (required), `agent_config/opencode/antigravity-accounts.json` (optional)
-- Restart the container (or rerun `agent_manager.py --import-credentials /opt/config`) to import.
+Method 2: Import credential files from Admin UI
+- Open `/ui/engines`.
+- Choose engine/provider auth menu entry: **Import Credentials**.
+- Upload required files. Service validates payload structure and writes to isolated Agent Home.
 
 OpenAI OAuth proxy note:
 - Skill Runner `oauth_proxy` for `codex` and `opencode/openai` starts a per-session local callback listener (`127.0.0.1:1455`) and stops it when session finishes.
@@ -288,7 +281,6 @@ docker run --rm -p 8000:8000 \
   -e NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm \
   -e SKILL_RUNNER_DATA_DIR=/data \
   -v "$(pwd)/skills:/app/skills" \
-  -v "$(pwd)/agent_config:/opt/config" \
   -v skillrunner_cache:/opt/cache \
   skill-runner:local
 ```

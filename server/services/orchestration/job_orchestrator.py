@@ -43,10 +43,6 @@ from server.services.orchestration.run_auth_orchestration_service import (
     run_auth_orchestration_service,
 )
 from server.services.orchestration.run_projection_service import run_projection_service
-from server.runtime.auth_detection.service import (
-    AuthDetectionService,
-    auth_detection_service,
-)
 from server.runtime.session.timeout import resolve_interactive_reply_timeout
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
@@ -77,7 +73,6 @@ class OrchestratorDeps:
     interaction_service: RunInteractionLifecycleService | None = None
     recovery_service: RunRecoveryService | None = None
     run_job_lifecycle_service: RunJobLifecycleService | None = None
-    auth_detection_service: AuthDetectionService | None = None
     auth_orchestration_service: RunAuthOrchestrationService | None = None
 
 
@@ -105,9 +100,6 @@ class JobOrchestrator:
         )
         self.interaction_service = self.deps.interaction_service or RunInteractionLifecycleService()
         self.recovery_service = self.deps.recovery_service or RunRecoveryService()
-        self.auth_detection_service = (
-            self.deps.auth_detection_service or auth_detection_service
-        )
         self.auth_orchestration_service = (
             self.deps.auth_orchestration_service or run_auth_orchestration_service
         )

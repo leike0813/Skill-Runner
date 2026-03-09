@@ -11,7 +11,8 @@
     "attempt_workspace",
     "config_assets",
     "model_catalog",
-    "cli_management"
+    "cli_management",
+    "parser_auth_patterns"
   ],
   "properties": {
     "engine": {
@@ -170,7 +171,26 @@
             "required": ["source", "target_relpath"],
             "properties": {
               "source": { "type": "string", "minLength": 1 },
-              "target_relpath": { "type": "string", "minLength": 1 }
+              "target_relpath": { "type": "string", "minLength": 1 },
+              "import_validator": {
+                "type": ["string", "null"],
+                "enum": [
+                  null,
+                  "json_object",
+                  "codex_auth_json",
+                  "gemini_google_accounts_json",
+                  "gemini_oauth_creds_json",
+                  "iflow_accounts_json",
+                  "iflow_oauth_creds_json",
+                  "opencode_auth_json",
+                  "opencode_antigravity_accounts_json"
+                ]
+              },
+              "aliases": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
             }
           }
         },
@@ -235,6 +255,58 @@
             }
           }
         }
+      }
+    },
+    "parser_auth_patterns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules"],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "enabled", "priority", "match"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "enabled": { "type": "boolean" },
+              "priority": { "type": "integer" },
+              "match": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "all": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/parser_auth_clause" }
+                  },
+                  "any": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/parser_auth_clause" }
+                  }
+                },
+                "anyOf": [
+                  { "required": ["all"] },
+                  { "required": ["any"] }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "parser_auth_clause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "op", "value"],
+      "properties": {
+        "field": { "type": "string", "minLength": 1 },
+        "op": {
+          "enum": ["eq", "in", "regex", "contains", "gte"]
+        },
+        "value": {}
       }
     }
   }

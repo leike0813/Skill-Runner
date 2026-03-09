@@ -83,7 +83,7 @@ my-skill/
 ### Docker（推荐）
 
 ```bash
-mkdir -p skills agent_config data
+mkdir -p skills data
 docker compose up --build
 ```
 
@@ -179,16 +179,8 @@ docker exec -it <container_id> /bin/bash
 # 在容器内运行对应 CLI 登录流程
 ```
 
-**手动复制凭据** — 在宿主机登录后，将凭据文件复制到 `agent_config/<engine>/`：
-
-| 引擎 | 凭据文件 |
-|------|---------|
-| Codex | `auth.json` |
-| Gemini | `google_accounts.json`、`oauth_creds.json` |
-| iFlow | `iflow_accounts.json`、`oauth_creds.json` |
-| OpenCode | `auth.json`、`antigravity-accounts.json`（可选） |
-
-> 启动时仅导入鉴权凭据文件，不导入 settings 配置文件（保证设置隔离）。
+**通过 UI 导入凭据文件** — 在 `/ui/engines` 的鉴权菜单中选择 **Import Credentials**。
+服务会自动校验上传文件并写入隔离的 Agent Home 目标路径。
 
 </details>
 

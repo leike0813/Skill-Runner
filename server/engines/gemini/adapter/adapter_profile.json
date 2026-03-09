@@ -45,8 +45,16 @@
     "package": "@google/gemini-cli",
     "binary_candidates": ["gemini", "gemini.cmd", "gemini.exe"],
     "credential_imports": [
-      { "source": "google_accounts.json", "target_relpath": ".gemini/google_accounts.json" },
-      { "source": "oauth_creds.json", "target_relpath": ".gemini/oauth_creds.json" }
+      {
+        "source": "google_accounts.json",
+        "target_relpath": ".gemini/google_accounts.json",
+        "import_validator": "gemini_google_accounts_json"
+      },
+      {
+        "source": "oauth_creds.json",
+        "target_relpath": ".gemini/oauth_creds.json",
+        "import_validator": "gemini_oauth_creds_json"
+      }
     ],
     "credential_policy": {
       "mode": "all_of_sources",
@@ -63,5 +71,47 @@
       "bootstrap_format": "json",
       "normalize_strategy": null
     }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "gemini_oauth_code_prompt_detected",
+        "enabled": true,
+        "priority": 950,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Please\\s+visit\\s+the\\s+following\\s+URL\\s+to\\s+authorize\\s+the\\s+application"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Enter\\s+the\\s+authorization\\s+code"
+            }
+          ]
+        }
+      },
+      {
+        "id": "gemini_auth_method_not_configured",
+        "enabled": true,
+        "priority": 900,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Please set an Auth method"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "GEMINI_API_KEY|GOOGLE_GENAI_USE_VERTEXAI|GOOGLE_GENAI_USE_GCA"
+            }
+          ]
+        }
+      }
+    ]
   }
 }

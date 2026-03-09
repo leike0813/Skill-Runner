@@ -17,3 +17,4 @@ in_conversation:
   methods:
     - callback
     - authorization_code
+    - import

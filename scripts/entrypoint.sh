@@ -91,13 +91,6 @@ else:
 ' "${BOOTSTRAP_REPORT_FILE}" 2>/dev/null || echo "unknown")"
 bootstrap_log_event "event=agent.ensure.done phase=agent_ensure outcome=${ensure_outcome} duration_sec=${ensure_duration_sec} report_file=${BOOTSTRAP_REPORT_FILE}"
 
-if [ -d "/opt/config" ]; then
-  bootstrap_log_event "event=agent.credentials_import.start phase=agent_credentials_import outcome=running source=/opt/config"
-  echo "Importing auth credentials from /opt/config (settings are ignored by design)..."
-  python3 /app/scripts/agent_manager.py --import-credentials /opt/config || true
-  bootstrap_log_event "event=agent.credentials_import.done phase=agent_credentials_import outcome=ok source=/opt/config"
-fi
-
 bootstrap_log_event "event=bootstrap.trust_bootstrap.start phase=run_trust_bootstrap outcome=running"
 python3 -c '
 from pathlib import Path

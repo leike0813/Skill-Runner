@@ -468,6 +468,52 @@ class RunInteractionService:
                 accepted=True,
             )
 
+    async def submit_auth_import(
+        self,
+        *,
+        request_id: str,
+        provider_id: str | None,
+        files: dict[str, bytes],
+        background_tasks: BackgroundTasks,
+        run_store_backend: Any = run_store,
+    ) -> InteractionReplyResponse:
+        request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=installed_run_source_adapter,
+            request_id=request_id,
+        )
+        status, _, _, _ = _read_run_status(run_dir)
+        run_id_obj = request_record.get("run_id")
+        run_id = run_id_obj if isinstance(run_id_obj, str) else None
+        if run_id is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if status != RunStatus.WAITING_AUTH:
+            raise HTTPException(status_code=409, detail="Run is not waiting for auth")
+        with contextlib.ExitStack() as run_log_stack:
+            run_log_stack.enter_context(
+                bind_run_logging_context(
+                    run_id=run_id,
+                    request_id=request_id,
+                    attempt_number=None,
+                )
+            )
+            run_log_stack.enter_context(
+                RunServiceLogMirrorSession.open_run_scope(
+                    run_dir=run_dir,
+                    run_id=run_id,
+                )
+            )
+            return await run_auth_orchestration_service.submit_auth_import(
+                request_id=request_id,
+                run_id=run_id,
+                provider_id=provider_id,
+                files=files,
+                background_tasks=background_tasks,
+                run_store_backend=run_store_backend,
+                append_orchestrator_event=job_orchestrator._append_orchestrator_event,
+                update_status=job_orchestrator._update_status,
+                resume_run_job=job_orchestrator.run_job,
+            )
+
     async def get_auth_session_status(
         self,
         *,

@@ -4,6 +4,9 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
+from server.runtime.adapter.common.parser_auth_signal_matcher import (
+    detect_auth_signal_from_patterns,
+)
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
@@ -237,6 +240,8 @@ class GeminiStreamParser:
                 or find_session_id_in_text(pty_text)
             )
 
+        combined_auth_prompt_text = "\n".join(part for part in (stdout_text, stderr_text, pty_text) if part)
+
         def _row_overlaps_consumed(row: RuntimeStreamRawRow) -> bool:
             ranges = consumed_ranges.get(row["stream"], [])
             if not ranges:
@@ -256,7 +261,22 @@ class GeminiStreamParser:
         if any(row["stream"] == "stdout" for row in raw_rows):
             diagnostics.append("GEMINI_STDOUT_NOISE")
 
-        return {
+        auth_signal = detect_auth_signal_from_patterns(
+            engine="gemini",
+            rules=self._adapter.profile.parser_auth_patterns.rules,
+            evidence={
+                "engine": "gemini",
+                "stdout_text": stdout_text,
+                "stderr_text": stderr_text,
+                "pty_output": pty_text,
+                "combined_text": combined_auth_prompt_text,
+                "parser_diagnostics": list(dict.fromkeys(diagnostics)),
+                "structured_types": list(dict.fromkeys(structured_types)),
+                "extracted": {},
+            },
+        )
+
+        result: RuntimeStreamParseResult = {
             "parser": "gemini_json",
             "confidence": confidence,
             "session_id": session_id,
@@ -265,6 +285,9 @@ class GeminiStreamParser:
             "diagnostics": list(dict.fromkeys(diagnostics)),
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if auth_signal is not None:
+            result["auth_signal"] = auth_signal
+        return result
 
     def start_live_session(self) -> "_GeminiLiveSession":
         return _GeminiLiveSession(self)

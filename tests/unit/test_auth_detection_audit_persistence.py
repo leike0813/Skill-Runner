@@ -34,21 +34,24 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
         options={},
         auth_detection={
             "classification": "auth_required",
-            "subcategory": "invalid_api_key",
+            "subcategory": None,
             "confidence": "high",
             "engine": "opencode",
             "provider_id": "deepseek",
             "matched_rule_ids": ["opencode_invalid_api_key_from_message"],
             "evidence_sources": ["stdout_text", "structured_ndjson"],
             "evidence_excerpt": "Invalid API key",
-            "details": {"extracted": {"message": "Invalid API key"}},
+            "details": {
+                "reason_code": "OPENCODE_INVALID_API_KEY_FROM_MESSAGE",
+                "extracted": {"message": "Invalid API key"},
+            },
         },
     )
 
     audit_dir = run_dir / ".audit"
     meta_payload = json.loads((audit_dir / "meta.1.json").read_text(encoding="utf-8"))
     assert meta_payload["auth_detection"]["classification"] == "auth_required"
-    assert meta_payload["auth_detection"]["subcategory"] == "invalid_api_key"
+    assert meta_payload["auth_detection"]["subcategory"] is None
 
     diagnostics_rows = [
         json.loads(line)
@@ -56,5 +59,6 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
         if line.strip()
     ]
     assert diagnostics_rows
-    assert diagnostics_rows[0]["data"]["code"] == "AUTH_DETECTION_MATCHED"
-    assert diagnostics_rows[0]["data"]["confidence"] == "high"
+    assert diagnostics_rows[0]["data"]["code"] == "AUTH_SIGNAL_MATCHED_HIGH"
+    assert diagnostics_rows[0]["data"]["auth_signal"]["confidence"] == "high"
+    assert diagnostics_rows[0]["data"]["auth_signal"]["reason_code"] == "OPENCODE_INVALID_API_KEY_FROM_MESSAGE"

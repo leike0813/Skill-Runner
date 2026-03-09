@@ -430,3 +430,60 @@ The periodic run cleanup workflow SHALL include auxiliary runtime storage cleanu
 - **THEN** orchestrator MUST NOT 覆盖已存在目标文件
 - **AND** MUST 记录目标冲突 warning
 
+### Requirement: container startup MUST NOT perform implicit credential import
+容器启动编排 MUST 不再从 `/opt/config` 做隐式鉴权文件导入。
+
+#### Scenario: bootstrap runs without /opt/config import phase
+- **GIVEN** 服务以容器模式启动
+- **WHEN** entrypoint 执行 bootstrap 流程
+- **THEN** bootstrap MUST 不再尝试 `/opt/config` 导入
+- **AND** 导入行为 MUST 仅通过显式管理 API 或会话导入 API 触发
+
+### Requirement: Runtime auth detection MUST use adapter profile as single source
+运行时鉴权判定规则 MUST 由引擎 adapter profile 声明，并由 runtime 按 profile 加载；不得再依赖独立 rule-pack 目录作为并行来源。
+
+#### Scenario: auth detection rules are loaded from adapter profile
+- **GIVEN** 引擎 adapter profile 中定义 `auth_detection.rules`
+- **WHEN** runtime 加载鉴权判定规则
+- **THEN** 规则 MUST 仅从 adapter profile 加载
+- **AND** 规则优先级 MUST 按 `priority` 生效
+
+### Requirement: Runtime adapter MUST early-exit blocked auth-required runs
+当 run 读流阶段命中高置信 `auth_required` 且进程进入空闲阻塞，adapter MUST 提前终止该进程并返回 `AUTH_REQUIRED`，交由 orchestrator 进入 `waiting_auth`。
+
+#### Scenario: high-confidence auth-required with blocking idle
+- **GIVEN** 运行中进程输出命中 `auth_required/high`
+- **AND** 进程在阈值窗口内无新输出且仍存活
+- **WHEN** adapter 监控循环触发 early-exit
+- **THEN** adapter MUST 终止当前进程并返回 `failure_reason=AUTH_REQUIRED`
+- **AND** orchestrator MUST 进入既有 `waiting_auth` 流程
+
+### Requirement: runtime auth-required判定 MUST 以 parser signal 为唯一主语义
+run 执行链路中的鉴权判定 MUST 直接消费 parser 产出的 `auth_signal`，不得再依赖独立规则层做二次文本匹配。
+
+#### Scenario: high-confidence auth signal triggers waiting_auth path
+- **GIVEN** parser 在运行流中产出 `auth_signal.required=true` 且 `confidence=high`
+- **AND** 进程输出进入 idle 阻塞并超过全局 grace
+- **WHEN** runtime 触发 early-exit
+- **THEN** run MUST 以 `AUTH_REQUIRED` 进入鉴权编排路径
+- **AND** lifecycle MUST 将状态推进到 `waiting_auth`（在策略允许时）
+
+#### Scenario: medium confidence signal is audited but not forced as waiting_auth
+- **GIVEN** parser 产出 `auth_signal.required=true` 且 `confidence=medium`
+- **WHEN** run 进入终态归一化
+- **THEN** 审计中 MUST 记录该鉴权信号
+- **AND** MUST NOT 仅凭该信号强制触发 waiting_auth
+
+### Requirement: lifecycle auth transition MUST consume auth_signal snapshot only
+run lifecycle MUST consume execution-stage `auth_signal_snapshot` as its only auth classification source.
+
+#### Scenario: high-confidence signal enters waiting_auth
+- **GIVEN** `auth_signal_snapshot.required=true` and `confidence=high`
+- **WHEN** run terminal normalization executes
+- **THEN** lifecycle MUST enter `waiting_auth` path when session capability permits.
+
+#### Scenario: low-confidence signal stays diagnostic-only
+- **GIVEN** `auth_signal_snapshot.required=true` and `confidence=low`
+- **WHEN** run terminal normalization executes
+- **THEN** lifecycle MUST NOT transition to `waiting_auth` based solely on this signal.
+

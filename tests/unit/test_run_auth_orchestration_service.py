@@ -108,11 +108,19 @@ async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, t
 
     assert selection is not None
     assert selection.phase == AuthSessionPhase.METHOD_SELECTION
-    assert selection.available_methods == [AuthMethod.CALLBACK, AuthMethod.DEVICE_AUTH]
+    assert selection.available_methods == [
+        AuthMethod.CALLBACK,
+        AuthMethod.DEVICE_AUTH,
+        AuthMethod.IMPORT,
+    ]
     assert selection.ask_user is not None
     assert selection.ask_user.kind == "choose_one"
     assert selection.ask_user.hint == "Choose an authentication method."
-    assert [item.value for item in selection.ask_user.options] == ["callback", "device_auth"]
+    assert [item.value for item in selection.ask_user.options] == [
+        "callback",
+        "device_auth",
+        "import",
+    ]
     start_session.assert_not_awaited()
     backend.set_pending_auth_method_selection.assert_awaited_once()
     assert appended[0]["type_name"] == "auth.method.selection.required"
@@ -204,13 +212,16 @@ async def test_create_pending_auth_opencode_prefers_canonical_provider_over_dete
     )
 
     backend = SimpleNamespace(
+        clear_pending_auth=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
+        set_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     service = RunAuthOrchestrationService()
-    pending_auth = await service.create_pending_auth(
+    selection = await service.create_pending_auth(
         run_id="run-1",
         run_dir=run_dir,
         request_id="req-1",
@@ -225,8 +236,13 @@ async def test_create_pending_auth_opencode_prefers_canonical_provider_over_dete
         update_status=lambda *_args, **_kwargs: None,
     )
 
-    assert pending_auth is not None
-    assert pending_auth.provider_id == "google"
+    assert selection is not None
+    assert selection.phase == AuthSessionPhase.METHOD_SELECTION
+    assert selection.provider_id == "google"
+    assert selection.available_methods == [
+        AuthMethod.CALLBACK,
+        AuthMethod.IMPORT,
+    ]
 
 
 @pytest.mark.asyncio

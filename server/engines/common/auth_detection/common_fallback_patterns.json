@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "opencode_iflowcn_unknown_loop_fallback",
+      "enabled": true,
+      "priority": 200,
+      "match": {
+        "all": [
+          {
+            "field": "engine",
+            "op": "eq",
+            "value": "opencode"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "--model=iflowcn/"
+          },
+          {
+            "field": "combined_text",
+            "op": "contains",
+            "value": "\"type\":\"step_finish\""
+          },
+          {
+            "field": "combined_text",
+            "op": "contains",
+            "value": "\"reason\":\"unknown\""
+          }
+        ]
+      }
+    },
+    {
+      "id": "opencode_unknown_step_loop_fallback",
+      "enabled": true,
+      "priority": 195,
+      "match": {
+        "all": [
+          {
+            "field": "engine",
+            "op": "eq",
+            "value": "opencode"
+          },
+          {
+            "field": "extracted.step_finish_unknown_count",
+            "op": "gte",
+            "value": 2
+          },
+          {
+            "field": "extracted.saw_manual_interrupt",
+            "op": "eq",
+            "value": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_device_code_prompt_variant_fallback",
+      "enabled": true,
+      "priority": 180,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "device\\s*code"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(verification\\s*(url|uri)|open\\s+.*browser|go\\s+to\\s+https?://)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_auth_code_prompt_variant_fallback",
+      "enabled": true,
+      "priority": 175,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "https?://\\S+"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(authorize|oauth|login|verification)"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(enter|paste).*(authorization|verification|one-time|device)\\s*code"
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_auth_required_text_fallback",
+      "enabled": true,
+      "priority": 170,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(authentication|authorization|login)\\s+(is\\s+)?required"
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_token_expired_text_fallback",
+      "enabled": true,
+      "priority": 165,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(token|credential|session).*(expired|invalid|revoked|not\\s+valid)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_api_key_missing_text_fallback",
+      "enabled": true,
+      "priority": 160,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(api[_ -]?key|access[_ -]?token).*(missing|not\\s+configured|not\\s+set|required)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "generic_unauthorized_status_text_fallback",
+      "enabled": true,
+      "priority": 155,
+      "match": {
+        "all": [
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "\\b(401|403)\\b"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(unauthorized|forbidden|www-authenticate|bearer)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "opencode_provider_auth_message_fallback",
+      "enabled": true,
+      "priority": 150,
+      "match": {
+        "all": [
+          {
+            "field": "engine",
+            "op": "eq",
+            "value": "opencode"
+          },
+          {
+            "field": "extracted.provider_id",
+            "op": "regex",
+            "value": ".+"
+          },
+          {
+            "field": "extracted.message",
+            "op": "regex",
+            "value": "(auth|token|api\\s*key|unauthoriz|forbidden|expired)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "iflow_low_conf_auth_hint_fallback",
+      "enabled": true,
+      "priority": 145,
+      "match": {
+        "all": [
+          {
+            "field": "engine",
+            "op": "eq",
+            "value": "iflow"
+          },
+          {
+            "field": "parser_diagnostics",
+            "op": "contains",
+            "value": "LOW_CONFIDENCE_PARSE"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(oauth|token|authorize|api\\s*key|credential)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gemini_noncanonical_oauth_prompt_fallback",
+      "enabled": true,
+      "priority": 140,
+      "match": {
+        "all": [
+          {
+            "field": "engine",
+            "op": "eq",
+            "value": "gemini"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "https?://\\S+"
+          },
+          {
+            "field": "combined_text",
+            "op": "regex",
+            "value": "(authorization|verification|one-time|device)\\s*code"
+          }
+        ]
+      }
+    }
+  ]
+}

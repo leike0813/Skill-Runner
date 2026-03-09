@@ -192,6 +192,7 @@
             "callback",
             "device_auth",
             "authorization_code",
+            "import",
             "api_key",
             null
           ]
@@ -203,6 +204,7 @@
             "callback_url",
             "authorization_code",
             "api_key",
+            "import_files",
             "browser_callback_only"
           ]
         },
@@ -239,6 +241,7 @@
           "enum": [
             "callback_url",
             "authorization_code",
+            "import_files",
             "api_key",
             null
           ]
@@ -313,6 +316,7 @@
               "callback",
               "device_auth",
               "authorization_code",
+              "import",
               "api_key"
             ]
           }
@@ -1392,6 +1396,7 @@
                     "enum": [
                       "callback_url",
                       "authorization_code",
+                      "import_files",
                       "api_key"
                     ]
                   },
@@ -1579,6 +1584,41 @@
                     "type": [
                       "string",
                       "null"
+                    ]
+                  },
+                  "auth_signal": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "matched_pattern_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1
+                      },
+                      "confidence": {
+                        "type": "string",
+                        "enum": [
+                          "high",
+                          "low"
+                        ]
+                      },
+                      "provider_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reason_code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "confidence"
                     ]
                   }
                 },
@@ -1862,6 +1902,41 @@
                     "type": [
                       "string",
                       "null"
+                    ]
+                  },
+                  "auth_signal": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "matched_pattern_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1
+                      },
+                      "confidence": {
+                        "type": "string",
+                        "enum": [
+                          "high",
+                          "low"
+                        ]
+                      },
+                      "provider_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reason_code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "confidence"
                     ]
                   }
                 },
@@ -2450,6 +2525,7 @@
                     "enum": [
                       "callback_url",
                       "authorization_code",
+                      "import_files",
                       "api_key"
                     ]
                   },

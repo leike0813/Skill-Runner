@@ -53,6 +53,14 @@
         <div id="auth-card-link" class="prompt-list hidden"></div>
         <div id="auth-card-code" class="prompt-list hidden"></div>
         <div id="auth-card-error" class="prompt-list hidden"></div>
+        <div id="auth-import-panel" class="prompt-list hidden">
+            <div id="auth-import-hint" style="margin-bottom: 8px;"></div>
+            <div id="auth-import-risk" class="prompt-list hidden" style="color: #991b1b; margin-bottom: 8px;"></div>
+            <div id="auth-import-files" class="action-button-group"></div>
+            <div style="margin-top: 8px;">
+                <button id="auth-import-submit" class="btn btn-primary" type="button">{{ t("client.observe_auth_import_submit", default="Import and Continue") }}</button>
+            </div>
+        </div>
     </div>
 
     <form id="reply-form" class="reply-box">
@@ -220,6 +228,25 @@
     }
     .prompt-list.hidden {
         display: none;
+    }
+    .auth-import-file-item {
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px;
+        background: #fff;
+        min-width: min(280px, 100%);
+    }
+    .auth-import-file-item label {
+        display: block;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 6px;
+    }
+    .auth-import-file-item small {
+        display: block;
+        margin-top: 4px;
+        color: var(--neutral-500);
+        font-size: 12px;
     }
     .reply-box {
         margin-top: 12px;
@@ -394,6 +421,14 @@
         authPasteCode: {{ t("client.observe_auth_paste_code", default="Paste authorization code here...") | tojson }},
         authSubmitApiKey: {{ t("client.observe_auth_submit_api_key", default="Submit API Key") | tojson }},
         authSubmitCode: {{ t("client.observe_auth_submit_code", default="Submit Code") | tojson }},
+        authImportSubmit: {{ t("client.observe_auth_import_submit", default="Import and Continue") | tojson }},
+        authImportSubmitting: {{ t("client.observe_auth_import_submitting", default="Importing...") | tojson }},
+        authImportRequired: {{ t("client.observe_auth_import_required", default="Required") | tojson }},
+        authImportOptional: {{ t("client.observe_auth_import_optional", default="Optional") | tojson }},
+        authImportHintDefault: {{ t("client.observe_auth_import_hint_default", default="Upload auth files to continue this run.") | tojson }},
+        authImportNoFile: {{ t("client.observe_auth_import_no_file", default="Please select required files before submitting.") | tojson }},
+        authImportFailedPrefix: {{ t("client.observe_auth_import_failed_prefix", default="Import failed:") | tojson }},
+        authImportRiskNotice: {{ t("client.observe_auth_import_risk_notice", default="High risk: this third-party Google login path may violate policy and could lead to account suspension.") | tojson }},
         authInProgress: {{ t("client.observe_auth_in_progress", default="Authentication is in progress...") | tojson }},
         authAwaiting: {{ t("client.observe_auth_awaiting", default="Awaiting Auth") | tojson }},
         requiredFieldsPrefix: {{ t("client.observe_required_fields_prefix", default="required_fields:") | tojson }},
@@ -463,6 +498,11 @@
     const authLinkEl = document.getElementById("auth-card-link");
     const authCodeEl = document.getElementById("auth-card-code");
     const authErrorEl = document.getElementById("auth-card-error");
+    const authImportPanelEl = document.getElementById("auth-import-panel");
+    const authImportHintEl = document.getElementById("auth-import-hint");
+    const authImportRiskEl = document.getElementById("auth-import-risk");
+    const authImportFilesEl = document.getElementById("auth-import-files");
+    const authImportSubmitEl = document.getElementById("auth-import-submit");
     const fileTreeToggleEl = document.getElementById("file-tree-toggle");
     const fileTreeSectionEl = document.getElementById("file-tree-section");
     const fileTreePanelEl = document.getElementById("file-tree-panel");
@@ -496,6 +536,7 @@
     let waitingUserWatchdogInFlight = false;
     let waitingAuthWatchdogTimer = null;
     let waitingAuthWatchdogInFlight = false;
+    let currentAuthImportSpec = null;
 
     function apiUrl(path) {
         return path;
@@ -567,6 +608,170 @@
             return JSON.stringify(value);
         } catch (_err) {
             return "";
+        }
+    }
+
+    function resolveAuthImportSpec(engine, providerId) {
+        const engineKey = safeText(engine).trim().toLowerCase();
+        const providerKey = safeText(providerId).trim().toLowerCase();
+        if (engineKey === "codex") {
+            return {
+                required: [{ filename: "auth.json", defaultPathHint: "$HOME/.codex/auth.json" }],
+                optional: [],
+                riskNotice: false,
+            };
+        }
+        if (engineKey === "gemini") {
+            return {
+                required: [
+                    { filename: "oauth_creds.json", defaultPathHint: "$HOME/.gemini/oauth_creds.json" },
+                    { filename: "google_accounts.json", defaultPathHint: "$HOME/.gemini/google_accounts.json" },
+                ],
+                optional: [],
+                riskNotice: false,
+            };
+        }
+        if (engineKey === "iflow") {
+            return {
+                required: [
+                    { filename: "oauth_creds.json", defaultPathHint: "$HOME/.iflow/oauth_creds.json" },
+                    { filename: "iflow_accounts.json", defaultPathHint: "$HOME/.iflow/iflow_accounts.json" },
+                ],
+                optional: [],
+                riskNotice: false,
+            };
+        }
+        if (engineKey === "opencode" && providerKey === "openai") {
+            return {
+                required: [
+                    { filename: "auth.json", defaultPathHint: "$HOME/.local/share/opencode/auth.json" },
+                ],
+                optional: [],
+                riskNotice: false,
+            };
+        }
+        if (engineKey === "opencode" && providerKey === "google") {
+            return {
+                required: [
+                    { filename: "auth.json", defaultPathHint: "$HOME/.local/share/opencode/auth.json" },
+                ],
+                optional: [
+                    { filename: "antigravity-accounts.json", defaultPathHint: "$HOME/.config/opencode/antigravity-accounts.json" },
+                ],
+                riskNotice: true,
+            };
+        }
+        return null;
+    }
+
+    function clearAuthImportPanel() {
+        currentAuthImportSpec = null;
+        if (authImportPanelEl) authImportPanelEl.classList.add("hidden");
+        if (authImportHintEl) authImportHintEl.textContent = "";
+        if (authImportRiskEl) {
+            authImportRiskEl.classList.add("hidden");
+            authImportRiskEl.textContent = "";
+        }
+        if (authImportFilesEl) authImportFilesEl.innerHTML = "";
+        if (authImportSubmitEl) {
+            authImportSubmitEl.disabled = false;
+            authImportSubmitEl.textContent = I18N.authImportSubmit;
+        }
+    }
+
+    function renderAuthImportPanel(payload, hintText) {
+        if (!authImportPanelEl || !authImportFilesEl || !authImportHintEl) return false;
+        const spec = resolveAuthImportSpec(payload.engine, payload.provider_id);
+        if (!spec) return false;
+        currentAuthImportSpec = {
+            engine: safeText(payload.engine).trim().toLowerCase(),
+            providerId: safeText(payload.provider_id).trim().toLowerCase(),
+            ...spec,
+        };
+        authImportPanelEl.classList.remove("hidden");
+        authImportHintEl.textContent = hintText || I18N.authImportHintDefault;
+        if (authImportRiskEl) {
+            if (spec.riskNotice) {
+                authImportRiskEl.textContent = I18N.authImportRiskNotice;
+                authImportRiskEl.classList.remove("hidden");
+            } else {
+                authImportRiskEl.classList.add("hidden");
+                authImportRiskEl.textContent = "";
+            }
+        }
+        authImportFilesEl.innerHTML = "";
+        const appendItem = (item, required) => {
+            const row = document.createElement("div");
+            row.className = "auth-import-file-item";
+            const label = document.createElement("label");
+            label.textContent = `${item.filename} (${required ? I18N.authImportRequired : I18N.authImportOptional})`;
+            row.appendChild(label);
+            const input = document.createElement("input");
+            input.type = "file";
+            input.setAttribute("data-import-filename", item.filename);
+            input.required = required;
+            row.appendChild(input);
+            const hint = document.createElement("small");
+            hint.textContent = item.defaultPathHint;
+            row.appendChild(hint);
+            authImportFilesEl.appendChild(row);
+        };
+        spec.required.forEach((item) => appendItem(item, true));
+        spec.optional.forEach((item) => appendItem(item, false));
+        return true;
+    }
+
+    async function submitAuthImport() {
+        if (!currentAuthImportSpec || !authImportFilesEl || !authImportSubmitEl) return;
+        clearReplyError();
+        const form = new FormData();
+        if (currentAuthImportSpec.providerId) {
+            form.append("provider_id", currentAuthImportSpec.providerId);
+        }
+        let hasAnyFile = false;
+        for (const item of [...currentAuthImportSpec.required, ...currentAuthImportSpec.optional]) {
+            const input = authImportFilesEl.querySelector(`input[data-import-filename="${item.filename}"]`);
+            if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
+                if (currentAuthImportSpec.required.some((required) => required.filename === item.filename)) {
+                    showReplyError(`${I18N.authImportNoFile} (${item.filename})`);
+                    return;
+                }
+                continue;
+            }
+            hasAnyFile = true;
+            form.append("files", input.files[0], item.filename);
+        }
+        if (!hasAnyFile) {
+            showReplyError(I18N.authImportNoFile);
+            return;
+        }
+        authImportSubmitEl.disabled = true;
+        authImportSubmitEl.textContent = I18N.authImportSubmitting;
+        try {
+            const res = await fetch(apiUrl(`/api/runs/${requestId}/auth/import`), {
+                method: "POST",
+                body: form,
+            });
+            if (!res.ok) {
+                let message = `${I18N.authImportFailedPrefix} HTTP ${res.status}`;
+                try {
+                    const payload = await res.json();
+                    if (payload && typeof payload.detail === "string") {
+                        message = `${I18N.authImportFailedPrefix} ${payload.detail}`;
+                    }
+                } catch (_err) {}
+                showReplyError(message);
+                return;
+            }
+            await refreshState();
+            if (!stream && !isTerminal(currentStatus)) {
+                await startStream();
+            }
+        } catch (_err) {
+            showReplyError(`${I18N.authImportFailedPrefix} ${I18N.submitFailedNetwork}`);
+        } finally {
+            authImportSubmitEl.disabled = false;
+            authImportSubmitEl.textContent = I18N.authImportSubmit;
         }
     }
 
@@ -800,6 +1005,7 @@
 
     function clearAuthCard() {
         lastAuthRenderSignature = "";
+        clearAuthImportPanel();
         authCardEl.classList.add("hidden");
         authTextEl.textContent = "";
         authHintEl.textContent = "";
@@ -999,6 +1205,7 @@
     function renderAuthCard(payload) {
         const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
         const phase = safeText(payload.phase).trim() || "challenge_active";
+        const challengeKind = safeText(payload.challenge_kind).trim();
         const availableMethods = normalizeList(payload.available_methods);
         const askUserOptions = normalizeChoiceOptions(askUser && askUser.options);
         const selectionOptions = askUserOptions.length
@@ -1039,6 +1246,7 @@
         }
         lastAuthRenderSignature = signature;
 
+        clearAuthImportPanel();
         clearPromptCard();
         authCardEl.classList.remove("hidden");
         const authSessionId = safeText(payload.auth_session_id).trim();
@@ -1050,6 +1258,7 @@
         const acceptsChatInput = payload.accepts_chat_input === true;
         const inputKind = safeText(payload.input_kind).trim();
         const isMethodSelection = phase === "method_selection";
+        const isImportChallenge = inputKind === "import_files" || challengeKind === "import_files";
 
         authTextEl.textContent = prompt;
         authHintEl.textContent = "";
@@ -1130,6 +1339,17 @@
         if (isMethodSelection) {
             setReplyComposerVisible(false);
             setReplyEnabled(false);
+        } else if (isImportChallenge) {
+            const rendered = renderAuthImportPanel(payload, hint);
+            if (rendered) {
+                setReplyComposerVisible(false);
+                setReplyEnabled(false);
+                replySubmitEl.textContent = I18N.authImportSubmit;
+            } else {
+                setReplyComposerVisible(false);
+                setReplyEnabled(false);
+                showReplyError(`${I18N.authImportFailedPrefix} unsupported import target`);
+            }
         } else if (acceptsChatInput && inputKind) {
             setReplyComposerVisible(true);
             replyTextEl.placeholder = hint || (inputKind === "api_key"
@@ -1582,6 +1802,11 @@
         if (replySubmitEl.disabled) return;
         await submitReply();
     });
+    if (authImportSubmitEl) {
+        authImportSubmitEl.addEventListener("click", async () => {
+            await submitAuthImport();
+        });
+    }
 
     fileTreeToggleEl.addEventListener("click", async () => {
         fileTreeExpanded = !fileTreeExpanded;

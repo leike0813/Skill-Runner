@@ -45,8 +45,17 @@
     "package": "opencode-ai",
     "binary_candidates": ["opencode", "opencode.cmd", "opencode.exe"],
     "credential_imports": [
-      { "source": "auth.json", "target_relpath": ".local/share/opencode/auth.json" },
-      { "source": "antigravity-accounts.json", "target_relpath": ".config/opencode/antigravity-accounts.json" }
+      {
+        "source": "auth.json",
+        "target_relpath": ".local/share/opencode/auth.json",
+        "import_validator": "opencode_auth_json"
+      },
+      {
+        "source": "antigravity-accounts.json",
+        "target_relpath": ".config/opencode/antigravity-accounts.json",
+        "import_validator": "opencode_antigravity_accounts_json",
+        "aliases": ["antigravity_accounts.json"]
+      }
     ],
     "credential_policy": {
       "mode": "any_of_sources",
@@ -69,5 +78,107 @@
       "bootstrap_format": "json",
       "normalize_strategy": null
     }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "opencode_google_api_key_missing",
+        "enabled": true,
+        "priority": 1000,
+        "match": {
+          "all": [
+            {
+              "field": "extracted.error_name",
+              "op": "eq",
+              "value": "ProviderAuthError"
+            },
+            {
+              "field": "extracted.provider_id",
+              "op": "eq",
+              "value": "google"
+            },
+            {
+              "field": "extracted.message",
+              "op": "regex",
+              "value": "API key is missing"
+            }
+          ]
+        }
+      },
+      {
+        "id": "opencode_missing_auth_header",
+        "enabled": true,
+        "priority": 950,
+        "match": {
+          "all": [
+            {
+              "field": "extracted.status_code",
+              "op": "eq",
+              "value": 401
+            },
+            {
+              "field": "extracted.message",
+              "op": "regex",
+              "value": "Missing Authentication header|Authorization.+request header|API secret key"
+            }
+          ]
+        }
+      },
+      {
+        "id": "opencode_invalid_api_key",
+        "enabled": true,
+        "priority": 940,
+        "match": {
+          "all": [
+            {
+              "field": "extracted.status_code",
+              "op": "eq",
+              "value": 401
+            },
+            {
+              "field": "extracted.message",
+              "op": "regex",
+              "value": "Invalid API key|Invalid Authentication"
+            }
+          ]
+        }
+      },
+      {
+        "id": "opencode_response_error_invalid_auth",
+        "enabled": true,
+        "priority": 930,
+        "match": {
+          "all": [
+            {
+              "field": "extracted.response_error_type",
+              "op": "in",
+              "value": [
+                "invalid_authentication_error",
+                "authentication_error"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "opencode_token_expired",
+        "enabled": true,
+        "priority": 920,
+        "match": {
+          "all": [
+            {
+              "field": "extracted.status_code",
+              "op": "eq",
+              "value": 401
+            },
+            {
+              "field": "extracted.message",
+              "op": "regex",
+              "value": "token expired or incorrect"
+            }
+          ]
+        }
+      }
+    ]
   }
 }

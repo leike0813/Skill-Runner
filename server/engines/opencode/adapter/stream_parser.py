@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
+from server.runtime.adapter.common.parser_auth_signal_matcher import (
+    detect_auth_signal_from_patterns,
+)
 from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
@@ -99,14 +103,61 @@ class OpencodeStreamParser:
     ) -> RuntimeStreamParseResult:
         stdout_rows = strip_runtime_script_envelope(stream_lines_with_offsets("stdout", stdout_raw))
         pty_rows = strip_runtime_script_envelope(stream_lines_with_offsets("pty", pty_raw))
-        records, raw_rows = collect_json_parse_errors(stdout_rows)
-        pty_records, pty_raw_rows = collect_json_parse_errors(pty_rows)
-        records = self._slice_latest_step_rows(records)
-        pty_records = self._slice_latest_step_rows(pty_records)
+        all_records, raw_rows = collect_json_parse_errors(stdout_rows)
+        all_pty_records, pty_raw_rows = collect_json_parse_errors(pty_rows)
+        records = self._slice_latest_step_rows(all_records)
+        pty_records = self._slice_latest_step_rows(all_pty_records)
         assistant_messages: list[RuntimeAssistantMessage] = []
         diagnostics: list[str] = []
         session_id: str | None = None
         structured_types: list[str] = []
+        extracted: dict[str, Any] = {
+            "error_name": None,
+            "status_code": None,
+            "message": None,
+            "provider_id": None,
+            "response_error_type": None,
+            "step_finish_unknown_count": 0,
+            "saw_manual_interrupt": False,
+        }
+
+        def _accumulate_extracted(parsed_rows: list[dict[str, Any]]) -> None:
+            nonlocal session_id
+            for row in parsed_rows:
+                payload = row["payload"]
+                row_session_id = find_session_id(payload)
+                if row_session_id and not session_id:
+                    session_id = row_session_id
+                payload_type = payload.get("type")
+                if isinstance(payload_type, str):
+                    structured_types.append(payload_type)
+                if not isinstance(payload, dict):
+                    continue
+                if payload_type == "error":
+                    error = payload.get("error")
+                    if isinstance(error, dict):
+                        extracted["error_name"] = error.get("name")
+                        data = error.get("data")
+                        if isinstance(data, dict):
+                            extracted["status_code"] = data.get("statusCode")
+                            extracted["message"] = data.get("message")
+                            extracted["provider_id"] = data.get("providerID")
+                            response_body = data.get("responseBody")
+                            if isinstance(response_body, str):
+                                try:
+                                    response_payload = json.loads(response_body)
+                                except json.JSONDecodeError:
+                                    response_payload = None
+                                if isinstance(response_payload, dict):
+                                    error_payload = response_payload.get("error")
+                                    if isinstance(error_payload, dict):
+                                        extracted["response_error_type"] = error_payload.get("type")
+                elif payload_type == "step_finish":
+                    part = payload.get("part")
+                    if isinstance(part, dict) and part.get("reason") == "unknown":
+                        extracted["step_finish_unknown_count"] = int(
+                            extracted["step_finish_unknown_count"]
+                        ) + 1
 
         def _consume(parsed_rows: list[dict[str, Any]]) -> None:
             nonlocal session_id
@@ -133,6 +184,8 @@ class OpencodeStreamParser:
                         }
                     )
 
+        _accumulate_extracted(all_records)
+        _accumulate_extracted(all_pty_records)
         _consume(records)
         if not assistant_messages and pty_records:
             diagnostics.append("PTY_FALLBACK_USED")
@@ -140,7 +193,32 @@ class OpencodeStreamParser:
         raw_rows.extend(pty_raw_rows)
         if raw_rows:
             diagnostics.append("UNPARSED_CONTENT_FELL_BACK_TO_RAW")
-        return {
+        stdout_text = stdout_raw.decode("utf-8", errors="replace")
+        stderr_text = stderr_raw.decode("utf-8", errors="replace")
+        pty_text = pty_raw.decode("utf-8", errors="replace")
+        combined_text = "\n".join(part for part in (stdout_text, stderr_text, pty_text) if part)
+        if extracted.get("provider_id") is None:
+            model_match = re.search(r"--model=([a-zA-Z0-9._-]+)/", combined_text)
+            if model_match is not None:
+                extracted["provider_id"] = model_match.group(1)
+        if "^C" in combined_text or 'COMMAND_EXIT_CODE="130"' in combined_text:
+            extracted["saw_manual_interrupt"] = True
+        auth_signal = detect_auth_signal_from_patterns(
+            engine="opencode",
+            rules=self._adapter.profile.parser_auth_patterns.rules,
+            evidence={
+                "engine": "opencode",
+                "stdout_text": stdout_text,
+                "stderr_text": stderr_text,
+                "pty_output": pty_text,
+                "combined_text": combined_text,
+                "parser_diagnostics": list(dict.fromkeys(diagnostics)),
+                "structured_types": list(dict.fromkeys(structured_types)),
+                "provider_id": extracted.get("provider_id"),
+                "extracted": extracted,
+            },
+        )
+        result: RuntimeStreamParseResult = {
             "parser": "opencode_ndjson",
             "confidence": 0.95 if assistant_messages else 0.6,
             "session_id": session_id,
@@ -149,6 +227,9 @@ class OpencodeStreamParser:
             "diagnostics": diagnostics,
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if auth_signal is not None:
+            result["auth_signal"] = auth_signal
+        return result
 
     def start_live_session(self) -> "_OpencodeLiveSession":
         return _OpencodeLiveSession(self)

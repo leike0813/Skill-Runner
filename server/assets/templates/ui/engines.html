@@ -78,6 +78,73 @@
         }
         .auth-actions { display: flex; gap: 8px; margin-top: 10px; }
         .engine-auth-entry-btn { width: 136px; text-align: center; }
+        .auth-menu-separator {
+            border: 0;
+            border-top: 1px solid #e5e7eb;
+            margin: 2px 0;
+        }
+        .auth-import-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 120;
+            padding: 16px;
+        }
+        .auth-import-modal.show {
+            display: flex;
+        }
+        .auth-import-card {
+            width: min(680px, 100%);
+            max-height: 80vh;
+            overflow: auto;
+            background: #fff;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 20px 50px rgba(15, 23, 42, 0.24);
+        }
+        .auth-import-file-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 10px;
+        }
+        .auth-import-file-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            background: #f9fafb;
+        }
+        .auth-import-file-item label {
+            display: block;
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 6px;
+            color: #111827;
+        }
+        .auth-import-file-item small {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .auth-import-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 14px;
+        }
+        .auth-import-risk {
+            border: 1px solid #fca5a5;
+            background: #fef2f2;
+            color: #991b1b;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-top: 10px;
+            font-size: 13px;
+        }
         .table-actions .btn,
         .table-actions a.btn,
         .table-actions button.btn {
@@ -159,6 +226,19 @@
             <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.choose", default="请选择") }}</div>
             <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
         </div>
+        <div id="auth-import-modal" class="auth-import-modal" aria-hidden="true">
+            <div class="auth-import-card">
+                <div style="font-size:18px; font-weight:700; color:#111827;" id="auth-import-title">{{ t("ui.engines.import_dialog_title", default="Import Authentication Files") }}</div>
+                <div style="margin-top:4px; color:#6b7280; font-size:13px;" id="auth-import-subtitle"></div>
+                <div id="auth-import-risk" class="auth-import-risk" style="display:none;"></div>
+                <div id="auth-import-error" class="error" style="display:none;"></div>
+                <div id="auth-import-file-list" class="auth-import-file-list"></div>
+                <div class="auth-import-actions">
+                    <button id="auth-import-cancel-btn" class="btn btn-secondary" type="button">{{ t("ui.common.cancel", default="取消") }}</button>
+                    <button id="auth-import-submit-btn" class="btn btn-primary" type="button">{{ t("ui.engines.import_submit", default="Import and Save") }}</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="card">
@@ -199,6 +279,18 @@
         methodCallback: {{ t("ui.engines.method_callback", default="回调模式") | tojson }},
         methodAuthCode: {{ t("ui.engines.method_auth_code", default="授权码模式") | tojson }},
         methodApiKey: {{ t("ui.engines.method_api_key", default="API Key") | tojson }},
+        methodImport: {{ t("ui.engines.method_import", default="Import Credentials") | tojson }},
+        importMenuEntry: {{ t("ui.engines.import_menu_entry", default="Import Credentials...") | tojson }},
+        importDialogTitle: {{ t("ui.engines.import_dialog_title", default="Import Authentication Files") | tojson }},
+        importDialogSubtitle: {{ t("ui.engines.import_dialog_subtitle", default="Upload required auth files. They will be validated and written to the engine config directory.") | tojson }},
+        importRequired: {{ t("ui.engines.import_required", default="Required") | tojson }},
+        importOptional: {{ t("ui.engines.import_optional", default="Optional") | tojson }},
+        importDefaultPath: {{ t("ui.engines.import_default_path", default="Default path hint") | tojson }},
+        importSubmit: {{ t("ui.engines.import_submit", default="Import and Save") | tojson }},
+        importSubmitting: {{ t("ui.engines.import_submitting", default="Importing...") | tojson }},
+        importSucceeded: {{ t("ui.engines.import_succeeded", default="Import succeeded.") | tojson }},
+        importFailed: {{ t("ui.engines.import_failed", default="Import failed") | tojson }},
+        importNoFileSelected: {{ t("ui.engines.import_no_file_selected", default="Please select required files before importing.") | tojson }},
         highRiskShort: {{ t("ui.engines.high_risk_short", default="High risk!") | tojson }},
         highRiskNotice: {{ t("ui.engines.high_risk_notice", default="This third-party login path may violate Google policies and could lead to account suspension.") | tojson }},
         engineCodex: {{ t("ui.engines.engine_codex", default="Codex") | tojson }},
@@ -273,6 +365,7 @@
         callback: I18N.methodCallback,
         auth_code_or_url: I18N.methodAuthCode,
         api_key: I18N.methodApiKey,
+        import: I18N.methodImport,
     };
     const engineLabels = {
         codex: I18N.engineCodex,
@@ -313,11 +406,20 @@
     const authMenuPopoverEl = document.getElementById("auth-menu-popover");
     const authMenuTitleEl = document.getElementById("auth-menu-title");
     const authMenuItemsEl = document.getElementById("auth-menu-items");
+    const authImportModalEl = document.getElementById("auth-import-modal");
+    const authImportTitleEl = document.getElementById("auth-import-title");
+    const authImportSubtitleEl = document.getElementById("auth-import-subtitle");
+    const authImportRiskEl = document.getElementById("auth-import-risk");
+    const authImportErrorEl = document.getElementById("auth-import-error");
+    const authImportFileListEl = document.getElementById("auth-import-file-list");
+    const authImportCancelBtn = document.getElementById("auth-import-cancel-btn");
+    const authImportSubmitBtn = document.getElementById("auth-import-submit-btn");
 
     let authSubmitLocked = false;
     let authStartPending = false;
     let tuiStartPending = false;
     let authMenuState = null;
+    let authImportDialogState = null;
 
     function showError(text) {
         errorEl.style.display = "block";
@@ -523,6 +625,12 @@
         authMenuTitleEl.textContent = title;
         authMenuItemsEl.innerHTML = "";
         items.forEach((item) => {
+            if (item && item.separator === true) {
+                const hr = document.createElement("hr");
+                hr.className = "auth-menu-separator";
+                authMenuItemsEl.appendChild(hr);
+                return;
+            }
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = item.secondary ? "btn btn-secondary" : "btn btn-primary";
@@ -536,6 +644,175 @@
             });
             authMenuItemsEl.appendChild(btn);
         });
+    }
+
+    function clearAuthImportError() {
+        if (!authImportErrorEl) return;
+        authImportErrorEl.style.display = "none";
+        authImportErrorEl.textContent = "";
+    }
+
+    function showAuthImportError(message) {
+        if (!authImportErrorEl) return;
+        authImportErrorEl.style.display = "block";
+        authImportErrorEl.textContent = String(message || I18N.importFailed);
+    }
+
+    function closeAuthImportDialog() {
+        authImportDialogState = null;
+        clearAuthImportError();
+        if (authImportRiskEl) {
+            authImportRiskEl.style.display = "none";
+            authImportRiskEl.textContent = "";
+        }
+        if (authImportFileListEl) {
+            authImportFileListEl.innerHTML = "";
+        }
+        if (authImportModalEl) {
+            authImportModalEl.classList.remove("show");
+            authImportModalEl.setAttribute("aria-hidden", "true");
+        }
+        if (authImportSubmitBtn) {
+            authImportSubmitBtn.disabled = false;
+            authImportSubmitBtn.textContent = I18N.importSubmit;
+        }
+    }
+
+    async function submitAuthImportDialog() {
+        if (!authImportDialogState || !authImportFileListEl) {
+            closeAuthImportDialog();
+            return;
+        }
+        clearAuthImportError();
+        const { engine, providerId, spec } = authImportDialogState;
+        const requestFiles = [...(spec.required_files || []), ...(spec.optional_files || [])];
+        const formData = new FormData();
+        if (providerId) {
+            formData.append("provider_id", providerId);
+        }
+        let hasSelectedFile = false;
+        for (const fileSpec of requestFiles) {
+            const inputEl = authImportFileListEl.querySelector(`input[data-spec-name="${fileSpec.filename}"]`);
+            if (!(inputEl instanceof HTMLInputElement) || !inputEl.files || inputEl.files.length === 0) {
+                if (spec.required_files.some((required) => required.filename === fileSpec.filename)) {
+                    showAuthImportError(`${I18N.importNoFileSelected} (${fileSpec.filename})`);
+                    return;
+                }
+                continue;
+            }
+            const selected = inputEl.files[0];
+            formData.append("files", selected, fileSpec.filename);
+            hasSelectedFile = true;
+        }
+        if (!hasSelectedFile) {
+            showAuthImportError(I18N.importNoFileSelected);
+            return;
+        }
+        if (authImportSubmitBtn) {
+            authImportSubmitBtn.disabled = true;
+            authImportSubmitBtn.textContent = I18N.importSubmitting;
+        }
+        try {
+            const encodedEngine = encodeURIComponent(engine);
+            const response = await fetch(`/v1/management/engines/${encodedEngine}/auth/import`, {
+                method: "POST",
+                body: formData,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string" ? payload.detail : I18N.importFailed;
+                showAuthImportError(detail);
+                return;
+            }
+            clearAuthImportError();
+            clearAuthError();
+            authStateEl.textContent = `${I18N.authStatePrefix}${I18N.importSucceeded}`;
+            closeAuthImportDialog();
+        } catch (_err) {
+            showAuthImportError(I18N.importFailed);
+        } finally {
+            if (authImportSubmitBtn) {
+                authImportSubmitBtn.disabled = false;
+                authImportSubmitBtn.textContent = I18N.importSubmit;
+            }
+        }
+    }
+
+    async function openAuthImportDialog(anchor, engine, providerId = "") {
+        const normalizedEngine = String(engine || "").trim().toLowerCase();
+        if (!normalizedEngine || !authImportModalEl || !authImportFileListEl) return;
+        clearAuthImportError();
+        const query = new URLSearchParams();
+        const provider = String(providerId || "").trim().toLowerCase();
+        if (provider) query.set("provider_id", provider);
+        const encodedEngine = encodeURIComponent(normalizedEngine);
+        const specUrl = `/v1/management/engines/${encodedEngine}/auth/import/spec${query.toString() ? `?${query.toString()}` : ""}`;
+        try {
+            const response = await fetch(specUrl, { method: "GET" });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string" ? payload.detail : I18N.importFailed;
+                showAuthError(detail);
+                return;
+            }
+            if (!payload || payload.supported === false) {
+                showAuthError(I18N.errorProviderNoMethod);
+                return;
+            }
+            authImportDialogState = {
+                engine: normalizedEngine,
+                providerId: provider,
+                spec: payload,
+            };
+            if (authImportTitleEl) {
+                authImportTitleEl.textContent = I18N.importDialogTitle;
+            }
+            if (authImportSubtitleEl) {
+                const engineLabel = engineLabels[normalizedEngine] || normalizedEngine;
+                const providerLabel = provider ? ` / ${provider}` : "";
+                authImportSubtitleEl.textContent = `${engineLabel}${providerLabel} · ${I18N.importDialogSubtitle}`;
+            }
+            if (authImportRiskEl) {
+                if (payload.risk_notice_required === true) {
+                    authImportRiskEl.style.display = "block";
+                    authImportRiskEl.textContent = I18N.highRiskNotice;
+                } else {
+                    authImportRiskEl.style.display = "none";
+                    authImportRiskEl.textContent = "";
+                }
+            }
+            authImportFileListEl.innerHTML = "";
+            const renderItem = (fileSpec, required) => {
+                const container = document.createElement("div");
+                container.className = "auth-import-file-item";
+                const label = document.createElement("label");
+                label.textContent = `${fileSpec.filename} (${required ? I18N.importRequired : I18N.importOptional})`;
+                container.appendChild(label);
+                const hint = document.createElement("small");
+                hint.textContent = `${I18N.importDefaultPath}: ${fileSpec.default_path_hint}`;
+                container.appendChild(hint);
+                const input = document.createElement("input");
+                input.type = "file";
+                input.setAttribute("data-spec-name", fileSpec.filename);
+                input.required = required;
+                container.appendChild(input);
+                authImportFileListEl.appendChild(container);
+            };
+            (payload.required_files || []).forEach((fileSpec) => renderItem(fileSpec, true));
+            (payload.optional_files || []).forEach((fileSpec) => renderItem(fileSpec, false));
+            if (!payload.required_files?.length && !payload.optional_files?.length) {
+                showAuthError(I18N.errorNoMethodForEngine);
+                return;
+            }
+            authImportModalEl.classList.add("show");
+            authImportModalEl.setAttribute("aria-hidden", "false");
+            hideAuthMenu();
+            if (anchor instanceof HTMLElement) {
+                anchor.blur();
+            }
+        } catch (_err) {
+            showAuthError(I18N.importFailed);
+        }
     }
 
     function openEngineAuthMenu(anchor, engine) {
@@ -553,16 +830,21 @@
                 showAuthError(I18N.errorNoMethodForEngine);
                 return;
             }
-            renderAuthMenuItems(
-                methods.map((method) => ({
+            const items = [
+                ...methods.map((method) => ({
                     label: renderAuthMethodLabel(method, transport, normalizedEngine, ""),
                     onClick: () => {
                         hideAuthMenu();
                         startAuth(normalizedEngine, transport, method, "");
                     },
                 })),
-                `${engineLabels[normalizedEngine] || normalizedEngine} · ${I18N.chooseMethod}`
-            );
+                { separator: true },
+                {
+                    label: I18N.importMenuEntry,
+                    onClick: () => openAuthImportDialog(anchor, normalizedEngine),
+                },
+            ];
+            renderAuthMenuItems(items, `${engineLabels[normalizedEngine] || normalizedEngine} · ${I18N.chooseMethod}`);
             authMenuState = { level: "method", engine: normalizedEngine, anchor };
             positionAuthMenu(anchor);
             return;
@@ -591,6 +873,8 @@
             showAuthError(`${I18N.errorProviderNoMethod} provider=${providerId}, transport=${transport}`);
             return;
         }
+        const providerAuthMode = String(provider.auth_mode || "").trim().toLowerCase();
+        const supportsImport = providerAuthMode === "oauth";
         const items = [
             {
                 label: I18N.backProviderList,
@@ -605,6 +889,13 @@
                 },
             })),
         ];
+        if (supportsImport) {
+            items.push({ separator: true });
+            items.push({
+                label: I18N.importMenuEntry,
+                onClick: () => openAuthImportDialog(anchor, "opencode", providerId),
+            });
+        }
         renderAuthMenuItems(items, `OpenCode / ${provider.display_name} · ${I18N.chooseMethodSuffix}`);
         authMenuState = { level: "method", engine: "opencode", providerId, anchor };
         positionAuthMenu(anchor);
@@ -1020,6 +1311,28 @@
             clearAuthError();
         });
     }
+    if (authImportCancelBtn) {
+        authImportCancelBtn.addEventListener("click", () => {
+            closeAuthImportDialog();
+        });
+    }
+    if (authImportSubmitBtn) {
+        authImportSubmitBtn.addEventListener("click", () => {
+            submitAuthImportDialog();
+        });
+    }
+    if (authImportModalEl) {
+        authImportModalEl.addEventListener("click", (evt) => {
+            if (evt.target === authImportModalEl) {
+                closeAuthImportDialog();
+            }
+        });
+    }
+    document.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape" && authImportModalEl && authImportModalEl.classList.contains("show")) {
+            closeAuthImportDialog();
+        }
+    });
 
     document.body.addEventListener("click", (evt) => {
         const target = evt.target;

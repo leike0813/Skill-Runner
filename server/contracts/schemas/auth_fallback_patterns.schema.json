@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuthFallbackPatterns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "rules"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "enabled", "priority", "match"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "all": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/parser_auth_clause"
+                }
+              },
+              "any": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/parser_auth_clause"
+                }
+              }
+            },
+            "anyOf": [
+              { "required": ["all"] },
+              { "required": ["any"] }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "parser_auth_clause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "op", "value"],
+      "properties": {
+        "field": { "type": "string", "minLength": 1 },
+        "op": {
+          "enum": ["eq", "in", "regex", "contains", "gte"]
+        },
+        "value": {}
+      }
+    }
+  }
+}

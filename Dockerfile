@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     procps \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /app /data /opt/cache /opt/config \
+    && mkdir -p /app /data /opt/cache \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && case "${TARGETARCH}" in \
          amd64) ttyd_arch="x86_64" ;; \

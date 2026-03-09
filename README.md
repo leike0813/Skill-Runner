@@ -83,7 +83,7 @@ Every skill declares its supported execution modes in `runner.json`:
 ### Docker (recommended)
 
 ```bash
-mkdir -p skills agent_config data
+mkdir -p skills data
 docker compose up --build
 ```
 
@@ -179,16 +179,8 @@ docker exec -it <container_id> /bin/bash
 # Run the CLI login flow inside the container
 ```
 
-**Manual credential copy** — Login on the host machine and copy credential files to `agent_config/<engine>/`:
-
-| Engine | Required Files |
-|--------|---------------|
-| Codex | `auth.json` |
-| Gemini | `google_accounts.json`, `oauth_creds.json` |
-| iFlow | `iflow_accounts.json`, `oauth_creds.json` |
-| OpenCode | `auth.json`, `antigravity-accounts.json` (optional) |
-
-> Startup imports **credentials only**; settings files are not imported (isolation by design).
+**Import credential files via UI** — In `/ui/engines`, open the engine auth menu and choose **Import Credentials**.
+Skill Runner validates the uploaded files and writes them into the isolated Agent Home paths automatically.
 
 </details>
 

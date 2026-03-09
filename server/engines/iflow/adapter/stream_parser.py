@@ -4,6 +4,9 @@ import re
 from typing import TYPE_CHECKING
 
 from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
+from server.runtime.adapter.common.parser_auth_signal_matcher import (
+    detect_auth_signal_from_patterns,
+)
 from server.runtime.protocol.parse_utils import (
     dedup_assistant_messages,
     find_session_id_in_text,
@@ -79,7 +82,22 @@ class IFlowStreamParser:
         if stdout_rows and stderr_rows:
             diagnostics.append("IFLOW_CHANNEL_DRIFT_OBSERVED")
 
-        return {
+        auth_signal = detect_auth_signal_from_patterns(
+            engine="iflow",
+            rules=self._adapter.profile.parser_auth_patterns.rules,
+            evidence={
+                "engine": "iflow",
+                "stdout_text": "\n".join(row["line"] for row in stdout_rows if row["line"]),
+                "stderr_text": "\n".join(row["line"] for row in stderr_rows if row["line"]),
+                "pty_output": "\n".join(row["line"] for row in pty_rows if row["line"]),
+                "combined_text": merged,
+                "parser_diagnostics": list(dict.fromkeys(diagnostics)),
+                "structured_types": ["iflow.execution_info"],
+                "extracted": {},
+            },
+        )
+
+        result: RuntimeStreamParseResult = {
             "parser": "iflow_text",
             "confidence": confidence,
             "session_id": find_session_id_in_text(merged),
@@ -88,6 +106,9 @@ class IFlowStreamParser:
             "diagnostics": list(dict.fromkeys(diagnostics)),
             "structured_types": ["iflow.execution_info"],
         }
+        if auth_signal is not None:
+            result["auth_signal"] = auth_signal
+        return result
 
     def start_live_session(self) -> "_IFlowLiveSession":
         return _IFlowLiveSession(self)

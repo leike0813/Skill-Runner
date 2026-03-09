@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from server.config import config
 from server.models import EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from server.runtime.adapter.base_execution_adapter import (
     RUNTIME_DEPENDENCIES_INJECTION_FAILED,
@@ -46,6 +47,44 @@ class _NoopCommandBuilder:
 class _NoopStreamParser:
     def parse(self, raw_stdout: str):  # noqa: ANN001
         return {"turn_result": {"outcome": "final", "final_data": {}, "repair_level": "none"}}
+
+    def parse_runtime_stream(
+        self,
+        *,
+        stdout_raw: bytes,
+        stderr_raw: bytes,
+        pty_raw: bytes = b"",
+    ) -> dict[str, object]:
+        combined = "\n".join(
+            part.decode("utf-8", errors="replace")
+            for part in (stdout_raw, stderr_raw, pty_raw)
+            if part
+        )
+        if "SERVER_OAUTH2_REQUIRED" in combined:
+            return {
+                "parser": "test_noop",
+                "confidence": 0.9,
+                "session_id": None,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": [],
+                "auth_signal": {
+                    "required": True,
+                    "confidence": "high",
+                    "subcategory": "oauth_reauth",
+                    "matched_pattern_id": "test_server_oauth2_required",
+                },
+            }
+        return {
+            "parser": "test_noop",
+            "confidence": 0.3,
+            "session_id": None,
+            "assistant_messages": [],
+            "raw_rows": [],
+            "diagnostics": [],
+            "structured_types": [],
+        }
 
 
 class _NoopSessionCodec:
@@ -117,11 +156,46 @@ async def test_capture_process_output_auth_required_classified(tmp_path: Path):
         run_dir,
         SkillManifest(id="x"),
         {
+            "__engine_name": "iflow",
             "command": ["python", "-c", "import sys; sys.stderr.write('SERVER_OAUTH2_REQUIRED'); sys.exit(1)"],
             "hard_timeout_seconds": 10,
         },
     )
     assert result.failure_reason == "AUTH_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_auth_required_early_exit_on_blocking_idle(tmp_path: Path):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    old_idle_grace = config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS
+    config.defrost()
+    config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = 0.4
+    config.freeze()
+    try:
+        start = time.monotonic()
+        result = await adapter._execute_process(
+            "noop",
+            run_dir,
+            SkillManifest(id="x"),
+            {
+                "__engine_name": "iflow",
+                "command": [
+                    "python",
+                    "-c",
+                    "import sys,time; sys.stdout.write('SERVER_OAUTH2_REQUIRED\\n'); sys.stdout.flush(); time.sleep(60)",
+                ],
+                "hard_timeout_seconds": 30,
+            },
+        )
+        elapsed = time.monotonic() - start
+        assert result.failure_reason == "AUTH_REQUIRED"
+        assert elapsed < 10
+    finally:
+        config.defrost()
+        config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = old_idle_grace
+        config.freeze()
 
 
 @pytest.mark.asyncio

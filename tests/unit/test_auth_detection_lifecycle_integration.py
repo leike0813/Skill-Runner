@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +17,6 @@ from server.models import (
     RunStatus,
     SkillManifest,
 )
-from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.adapter.types import EngineRunResult
 from server.services.orchestration.job_orchestrator import JobOrchestrator, OrchestratorDeps
 from server.services.orchestration.run_store import RunStore
@@ -46,15 +44,29 @@ class _HighAuthInteractiveAdapter:
     stream_parser = object()
 
     def parse_runtime_stream(self, **_kwargs):
-        return {}
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "high",
+                "subcategory": "oauth_reauth",
+                "matched_pattern_id": "iflow_server_oauth2_required",
+            }
+        }
 
     async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
         _ = live_runtime_emitter
+        signal = {
+            "required": True,
+            "confidence": "high",
+            "subcategory": "oauth_reauth",
+            "matched_pattern_id": "iflow_server_oauth2_required",
+        }
         return EngineRunResult(
             exit_code=0,
             raw_stdout="",
             raw_stderr="SERVER_OAUTH2_REQUIRED",
             artifacts_created=[],
+            auth_signal_snapshot=signal,
             turn_result=AdapterTurnResult(
                 outcome=AdapterTurnOutcome.ASK_USER,
                 interaction=AdapterTurnInteraction(
@@ -66,21 +78,37 @@ class _HighAuthInteractiveAdapter:
         )
 
 
-class _MediumAuthLoopAdapter:
+class _LowAuthLoopAdapter:
     def __init__(self, stdout_text: str):
         self.stdout_text = stdout_text
         self.stream_parser = object()
 
     def parse_runtime_stream(self, **_kwargs):
-        return {}
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "low",
+                "subcategory": None,
+                "provider_id": "iflowcn",
+                "matched_pattern_id": "opencode_iflowcn_unknown_loop_fallback",
+            }
+        }
 
     async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
         _ = live_runtime_emitter
+        signal = {
+            "required": True,
+            "confidence": "low",
+            "subcategory": None,
+            "provider_id": "iflowcn",
+            "matched_pattern_id": "opencode_iflowcn_unknown_loop_fallback",
+        }
         return EngineRunResult(
             exit_code=130,
             raw_stdout=self.stdout_text,
             raw_stderr="",
             artifacts_created=[],
+            auth_signal_snapshot=signal,
         )
 
 
@@ -90,7 +118,14 @@ class _CodexHighAuthExitOneAdapter:
         self.stream_parser = object()
 
     def parse_runtime_stream(self, **_kwargs):
-        return {}
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "high",
+                "subcategory": "api_key_missing",
+                "matched_pattern_id": "codex_missing_bearer_401",
+            }
+        }
 
     async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
         _ = skill
@@ -103,16 +138,30 @@ class _CodexHighAuthExitOneAdapter:
             raw_stdout=self.stdout_text,
             raw_stderr="",
             artifacts_created=[],
+            auth_signal_snapshot={
+                "required": True,
+                "confidence": "high",
+                "subcategory": "api_key_missing",
+                "matched_pattern_id": "codex_missing_bearer_401",
+            },
         )
 
 
 class _ExitOneAdapter:
-    def __init__(self, stdout_text: str = "", stderr_text: str = ""):
+    def __init__(
+        self,
+        stdout_text: str = "",
+        stderr_text: str = "",
+        auth_signal: dict[str, object] | None = None,
+    ):
         self.stdout_text = stdout_text
         self.stderr_text = stderr_text
+        self.auth_signal = auth_signal
         self.stream_parser = object()
 
     def parse_runtime_stream(self, **_kwargs):
+        if isinstance(self.auth_signal, dict):
+            return {"auth_signal": dict(self.auth_signal)}
         return {}
 
     async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
@@ -126,6 +175,7 @@ class _ExitOneAdapter:
             raw_stdout=self.stdout_text,
             raw_stderr=self.stderr_text,
             artifacts_created=[],
+            auth_signal_snapshot=dict(self.auth_signal) if isinstance(self.auth_signal, dict) else None,
         )
 
 
@@ -196,15 +246,12 @@ async def _seed_interactive_request(
 
 def _build_orchestrator(
     local_store: RunStore,
-    *,
-    auth_detection_service: object | None = None,
 ) -> JobOrchestrator:
     orchestrator = JobOrchestrator(
         OrchestratorDeps(
             run_store_backend=local_store,
             concurrency_backend=_NoopConcurrencyManager(),
             trust_manager_backend=_NoopTrustManager(),
-            auth_detection_service=auth_detection_service,
         )
     )
     orchestrator.agent_cli_manager.resolve_interactive_profile = (
@@ -269,7 +316,7 @@ async def test_high_confidence_auth_detection_overrides_waiting_user(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_medium_confidence_auth_detection_is_audited_without_forcing_auth_required(
+async def test_low_confidence_auth_detection_is_audited_without_forcing_waiting_auth(
     tmp_path: Path,
 ) -> None:
     old_runs_dir = config.SYSTEM.RUNS_DIR
@@ -284,7 +331,7 @@ async def test_medium_confidence_auth_detection_is_audited_without_forcing_auth_
         run_id = _create_run(skill, "opencode")
         await _seed_interactive_request(
             local_store,
-            request_id="req-auth-medium",
+            request_id="req-auth-low",
             run_id=run_id,
             skill_id=skill.id,
             engine="opencode",
@@ -292,7 +339,7 @@ async def test_medium_confidence_auth_detection_is_audited_without_forcing_auth_
         fixture = load_sample("opencode", "iflowcn_unknown_step_finish_loop")
         orchestrator = _build_orchestrator(local_store)
         orchestrator.adapters = {
-            "opencode": _MediumAuthLoopAdapter(stdout_text=fixture["stdout"])
+            "opencode": _LowAuthLoopAdapter(stdout_text=fixture["stdout"])
         }
 
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
@@ -308,8 +355,8 @@ async def test_medium_confidence_auth_detection_is_audited_without_forcing_auth_
         meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
         assert result_data["error"]["code"] is None
         assert meta_data["auth_detection"]["classification"] == "auth_required"
-        assert meta_data["auth_detection"]["subcategory"] == "unknown_auth"
-        assert meta_data["auth_detection"]["confidence"] == "medium"
+        assert meta_data["auth_detection"]["subcategory"] is None
+        assert meta_data["auth_detection"]["confidence"] == "low"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -358,7 +405,9 @@ async def test_high_confidence_auth_detection_with_selection_survives_nonzero_ex
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
         assert state_data["pending"]["owner"] == "waiting_auth.method_selection"
-        assert pending_selection["available_methods"] == ["callback", "device_auth"]
+        methods = pending_selection["available_methods"]
+        assert "callback" in methods
+        assert "device_auth" in methods
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -392,23 +441,17 @@ async def test_opencode_high_confidence_auth_with_null_detection_provider_uses_m
             engine="opencode",
             engine_options={"model": "deepseek/deepseek-reasoner"},
         )
-        orchestrator = _build_orchestrator(
-            local_store,
-            auth_detection_service=SimpleNamespace(
-                detect=lambda **_kwargs: AuthDetectionResult(
-                    classification="auth_required",
-                    subcategory="api_key_missing",
-                    confidence="high",
-                    engine="opencode",
-                    provider_id=None,
-                    matched_rule_ids=["opencode_deepseek_api_key_missing"],
-                    evidence_sources=["structured_ndjson"],
-                    evidence_excerpt="API key is missing",
-                    details={},
-                )
-            ),
-        )
-        orchestrator.adapters = {"opencode": _ExitOneAdapter()}
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "opencode": _ExitOneAdapter(
+                auth_signal={
+                    "required": True,
+                    "confidence": "high",
+                    "subcategory": "api_key_missing",
+                    "matched_pattern_id": "opencode_deepseek_api_key_missing",
+                }
+            )
+        }
 
         with patch(
             "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
@@ -472,23 +515,17 @@ async def test_opencode_high_confidence_auth_with_unresolved_model_audits_reason
             engine="opencode",
             engine_options={"model": "deepseek"},
         )
-        orchestrator = _build_orchestrator(
-            local_store,
-            auth_detection_service=SimpleNamespace(
-                detect=lambda **_kwargs: AuthDetectionResult(
-                    classification="auth_required",
-                    subcategory="api_key_missing",
-                    confidence="high",
-                    engine="opencode",
-                    provider_id=None,
-                    matched_rule_ids=["opencode_deepseek_api_key_missing"],
-                    evidence_sources=["structured_ndjson"],
-                    evidence_excerpt="API key is missing",
-                    details={},
-                )
-            ),
-        )
-        orchestrator.adapters = {"opencode": _ExitOneAdapter()}
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "opencode": _ExitOneAdapter(
+                auth_signal={
+                    "required": True,
+                    "confidence": "high",
+                    "subcategory": "api_key_missing",
+                    "matched_pattern_id": "opencode_deepseek_api_key_missing",
+                }
+            )
+        }
 
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
             await orchestrator.run_job(

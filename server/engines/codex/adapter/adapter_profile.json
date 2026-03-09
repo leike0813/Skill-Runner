@@ -45,7 +45,11 @@
     "package": "@openai/codex",
     "binary_candidates": ["codex", "codex.cmd", "codex.exe"],
     "credential_imports": [
-      { "source": "auth.json", "target_relpath": ".codex/auth.json" }
+      {
+        "source": "auth.json",
+        "target_relpath": ".codex/auth.json",
+        "import_validator": "codex_auth_json"
+      }
     ],
     "credential_policy": {
       "mode": "all_of_sources",
@@ -62,5 +66,28 @@
       "bootstrap_format": "text",
       "normalize_strategy": null
     }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "codex_missing_bearer_401",
+        "enabled": true,
+        "priority": 900,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "401\\s+Unauthorized"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Missing bearer or basic authentication in header"
+            }
+          ]
+        }
+      }
+    ]
   }
 }

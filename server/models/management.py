@@ -144,6 +144,36 @@ class ManagementSystemLogQueryResponse(BaseModel):
     total_matched: int = Field(default=0, ge=0)
 
 
+class ManagementEngineAuthImportFileSpec(BaseModel):
+    """Per-file import requirement for engine auth import."""
+
+    filename: str
+    aliases: List[str] = Field(default_factory=list)
+    default_path_hint: str
+    target_relpath: str
+    import_validator: Optional[str] = None
+
+
+class ManagementEngineAuthImportSpecResponse(BaseModel):
+    """Auth import capability spec for one engine/provider."""
+
+    engine: str
+    provider_id: Optional[str] = None
+    supported: bool = True
+    required_files: List[ManagementEngineAuthImportFileSpec] = Field(default_factory=list)
+    optional_files: List[ManagementEngineAuthImportFileSpec] = Field(default_factory=list)
+    risk_notice_required: bool = False
+
+
+class ManagementEngineAuthImportSubmitResponse(BaseModel):
+    """Auth import submission result."""
+
+    engine: str
+    provider_id: Optional[str] = None
+    imported_files: List[Dict[str, Any]] = Field(default_factory=list)
+    risk_notice_required: bool = False
+
+
 class ManagementEngineSummary(BaseModel):
     """Frontend-friendly engine summary used by management API."""
 

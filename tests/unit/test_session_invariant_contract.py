@@ -114,4 +114,8 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "single_method_auth_busy_reprojects_existing_challenge",
         "single_method_busy_reprojects_challenge_without_resume",
         "terminal_failed_should_include_error_summary_when_available",
+        "auth_signal_sources_single_source",
+        "lifecycle_consumes_auth_signal_snapshot_only",
+        "low_confidence_auth_signal_must_not_enter_waiting_auth",
+        "rasp_auth_signal_diagnostic_payload_structured",
     }

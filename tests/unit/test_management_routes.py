@@ -238,6 +238,78 @@ async def test_management_engines_list_and_detail(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_management_engine_auth_import_spec_route(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.management.auth_import_service.get_import_spec",
+        lambda **_kwargs: {
+            "engine": "gemini",
+            "provider_id": None,
+            "supported": True,
+            "required_files": [
+                {
+                    "filename": "google_accounts.json",
+                    "aliases": [],
+                    "default_path_hint": "$HOME/.gemini/google_accounts.json",
+                    "target_relpath": ".gemini/google_accounts.json",
+                    "import_validator": "gemini_google_accounts_json",
+                },
+                {
+                    "filename": "oauth_creds.json",
+                    "aliases": [],
+                    "default_path_hint": "$HOME/.gemini/oauth_creds.json",
+                    "target_relpath": ".gemini/oauth_creds.json",
+                    "import_validator": "gemini_oauth_creds_json",
+                },
+            ],
+            "optional_files": [],
+            "risk_notice_required": False,
+        },
+    )
+    response = await _request("GET", "/v1/management/engines/gemini/auth/import/spec")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["engine"] == "gemini"
+    assert body["supported"] is True
+    assert [item["filename"] for item in body["required_files"]] == [
+        "google_accounts.json",
+        "oauth_creds.json",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_management_engine_auth_import_submit_route(monkeypatch):
+    submitted = AsyncMock()
+    submitted.return_value = {
+        "engine": "opencode",
+        "provider_id": "google",
+        "imported_files": [
+            {
+                "source": "auth.json",
+                "target_relpath": ".local/share/opencode/auth.json",
+                "target_path": "/tmp/auth.json",
+                "required": True,
+            }
+        ],
+        "risk_notice_required": True,
+    }
+    monkeypatch.setattr(
+        "server.routers.management.auth_import_service.import_auth_files",
+        lambda **_kwargs: submitted.return_value,
+    )
+    response = await _request(
+        "POST",
+        "/v1/management/engines/opencode/auth/import",
+        data={"provider_id": "google"},
+        files=[("files", ("auth.json", b"{}", "application/json"))],
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["engine"] == "opencode"
+    assert body["provider_id"] == "google"
+    assert body["imported_files"][0]["source"] == "auth.json"
+
+
+@pytest.mark.asyncio
 async def test_management_run_state_includes_pending_and_interaction_count(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
     run_dir.mkdir(parents=True, exist_ok=True)

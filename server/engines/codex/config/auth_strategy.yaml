@@ -18,3 +18,4 @@ in_conversation:
   methods:
     - callback
     - device_auth
+    - import

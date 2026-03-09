@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from ...models import (
 from ..protocol.contracts import LiveRuntimeEmitter
 from ...services.platform.process_supervisor import process_supervisor
 from ...services.platform.process_termination import terminate_asyncio_process_tree
+from ..auth_detection.signal import extract_auth_signal
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
@@ -33,7 +35,7 @@ from .contracts import (
     SessionHandleCodec,
     StreamParser,
 )
-from .types import EngineRunResult, ProcessExecutionResult, RuntimeStreamParseResult
+from .types import EngineRunResult, ProcessExecutionResult, RuntimeAuthSignal, RuntimeStreamParseResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +43,8 @@ RUNTIME_DEPENDENCIES_INJECTION_FAILED = "RUNTIME_DEPENDENCIES_INJECTION_FAILED"
 _RUNTIME_DEPENDENCY_WARNING_MAX_CHARS = 512
 
 
-AUTH_REQUIRED_PATTERNS = (
-    re.compile(r"enter authorization code", re.IGNORECASE),
-    re.compile(r"visit this url", re.IGNORECASE),
-    re.compile(r"401\\s+unauthorized", re.IGNORECASE),
-    re.compile(r"missing\\s+bearer", re.IGNORECASE),
-    re.compile(r"server_oauth2_required", re.IGNORECASE),
-    re.compile(r"需要使用服务器oauth2流程", re.IGNORECASE),
-)
+AUTH_DETECTION_MONITOR_INTERVAL_SECONDS = 0.1
+AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 0.25
 
 
 @dataclass
@@ -138,6 +134,7 @@ class EngineExecutionAdapter:
             repair_level=repair_level,
             turn_result=turn_result,
             runtime_warnings=process_result.runtime_warnings,
+            auth_signal_snapshot=process_result.auth_signal_snapshot,
         )
 
     def build_start_command(
@@ -418,6 +415,14 @@ class EngineExecutionAdapter:
     ) -> ProcessExecutionResult:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
+        auth_engine = self._resolve_auth_detection_engine(options=options)
+        auth_idle_grace_sec = self._resolve_auth_detection_idle_grace_seconds()
+        auth_signal: RuntimeAuthSignal | None = None
+        auth_detection_armed = False
+        auth_early_exit = False
+        last_output_monotonic = time.monotonic()
+        last_probe_monotonic = 0.0
+        detection_lock = asyncio.Lock()
         attempt_number_obj = options.get("__attempt_number")
         attempt_number = attempt_number_obj if isinstance(attempt_number_obj, int) and attempt_number_obj > 0 else 1
         audit_dir = run_dir / ".audit"
@@ -427,6 +432,40 @@ class EngineExecutionAdapter:
         stdout_log = stdout_log_path.open("w", encoding="utf-8")
         stderr_log = stderr_log_path.open("w", encoding="utf-8")
 
+        async def _probe_auth_detection(force: bool = False) -> None:
+            nonlocal auth_signal, auth_detection_armed, last_probe_monotonic
+            if auth_engine is None:
+                return
+            now = time.monotonic()
+            if not force and (now - last_probe_monotonic) < AUTH_DETECTION_PROBE_THROTTLE_SECONDS:
+                return
+            last_probe_monotonic = now
+            if detection_lock.locked():
+                return
+            async with detection_lock:
+                current_stdout = "".join(stdout_chunks)
+                current_stderr = "".join(stderr_chunks)
+                runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
+                    raw_stdout=current_stdout,
+                    raw_stderr=current_stderr,
+                )
+                signal = extract_auth_signal(runtime_parse_result)
+                if isinstance(signal, dict):
+                    auth_signal = signal
+                if (
+                    isinstance(signal, dict)
+                    and bool(signal.get("required"))
+                    and signal.get("confidence") == "high"
+                ):
+                    if not auth_detection_armed:
+                        logger.info(
+                            "[%s] auth detection armed engine=%s matched_pattern=%s",
+                            prefix,
+                            auth_engine,
+                            str(signal.get("matched_pattern_id") or "<none>"),
+                        )
+                    auth_detection_armed = True
+
         async def read_stream(
             stream: asyncio.StreamReader | None,
             chunks: list[str],
@@ -435,6 +474,7 @@ class EngineExecutionAdapter:
             log_file: Any,
             stream_name: str,
         ) -> None:
+            nonlocal last_output_monotonic
             if stream is None:
                 return
             offset = 0
@@ -446,6 +486,7 @@ class EngineExecutionAdapter:
                 chunks.append(decoded_chunk)
                 log_file.write(decoded_chunk)
                 log_file.flush()
+                last_output_monotonic = time.monotonic()
                 if live_runtime_emitter is not None:
                     await live_runtime_emitter.on_stream_chunk(
                         stream=stream_name,
@@ -456,6 +497,7 @@ class EngineExecutionAdapter:
                 offset += len(chunk)
                 if should_print:
                     logger.info("[%s]%s", tag, decoded_chunk.rstrip())
+                await _probe_auth_detection()
 
         stdout_task = asyncio.create_task(
             read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False, stdout_log, "stdout")
@@ -489,10 +531,37 @@ class EngineExecutionAdapter:
         timeout_sec = self._resolve_hard_timeout(options)
         timed_out = False
         try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
+            started_monotonic = time.monotonic()
+            while True:
+                if proc.returncode is not None:
+                    break
+                now = time.monotonic()
+                if now - started_monotonic >= timeout_sec:
+                    timed_out = True
+                    logger.error("[%s] hard timeout reached (%ss), terminating process", prefix, timeout_sec)
+                    await self._terminate_process_tree(proc, prefix)
+                    break
+                if (
+                    auth_detection_armed
+                    and auth_signal is not None
+                    and now - last_output_monotonic >= auth_idle_grace_sec
+                ):
+                    auth_early_exit = True
+                    logger.warning(
+                        "[%s] auth detection early-exit triggered after %.2fs idle (engine=%s)",
+                        prefix,
+                        auth_idle_grace_sec,
+                        auth_engine,
+                    )
+                    await self._terminate_process_tree(proc, prefix)
+                    break
+                await asyncio.sleep(AUTH_DETECTION_MONITOR_INTERVAL_SECONDS)
+            await _probe_auth_detection(force=True)
+            if proc.returncode is None:
+                await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
             timed_out = True
-            logger.error("[%s] hard timeout reached (%ss), terminating process", prefix, timeout_sec)
+            logger.error("[%s] process wait timed out after termination, forcing close", prefix)
             await self._terminate_process_tree(proc, prefix)
         finally:
             try:
@@ -515,10 +584,13 @@ class EngineExecutionAdapter:
         raw_stderr = "".join(stderr_chunks)
         returncode = proc.returncode if proc.returncode is not None else 1
         failure_reason: str | None = None
-        # Legacy fallback only: the canonical auth classification path now lives in
-        # runtime auth_detection and orchestration. Keep this to avoid regressing
-        # existing adapters while rules migrate to the detector/rule-pack stack.
-        if self._looks_like_auth_required(raw_stdout, raw_stderr) and (timed_out or returncode != 0):
+        if auth_early_exit:
+            failure_reason = "AUTH_REQUIRED"
+        elif (
+            isinstance(auth_signal, dict)
+            and bool(auth_signal.get("required"))
+            and returncode != 0
+        ):
             failure_reason = "AUTH_REQUIRED"
         elif timed_out:
             failure_reason = "TIMEOUT"
@@ -532,6 +604,7 @@ class EngineExecutionAdapter:
             raw_stdout=raw_stdout,
             raw_stderr=raw_stderr,
             failure_reason=failure_reason,
+            auth_signal_snapshot=auth_signal,
         )
 
     async def cancel_run_process(self, run_id: str) -> bool:
@@ -652,9 +725,46 @@ class EngineExecutionAdapter:
             )
         return default_timeout
 
-    def _looks_like_auth_required(self, stdout: str, stderr: str) -> bool:
-        combined = f"{stdout}\n{stderr}"
-        return any(pattern.search(combined) for pattern in AUTH_REQUIRED_PATTERNS)
+    def _resolve_auth_detection_idle_grace_seconds(self) -> float:
+        raw = getattr(config.SYSTEM, "AUTH_DETECTION_IDLE_GRACE_SECONDS", 3)
+        try:
+            parsed = float(raw)
+            if parsed > 0:
+                return parsed
+        except (TypeError, ValueError, OverflowError):
+            pass
+        return 3.0
+
+    def _resolve_auth_detection_engine(self, options: dict[str, Any]) -> str | None:
+        engine_obj = options.get("__engine_name")
+        if not isinstance(engine_obj, str):
+            return None
+        engine = engine_obj.strip().lower()
+        return engine if engine else None
+
+    def _parse_runtime_stream_for_auth_detection(
+        self,
+        *,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> dict[str, Any] | None:
+        parser = getattr(self, "parse_runtime_stream", None)
+        if not callable(parser):
+            return None
+        try:
+            parsed = parser(
+                stdout_raw=raw_stdout.encode("utf-8", errors="replace"),
+                stderr_raw=raw_stderr.encode("utf-8", errors="replace"),
+                pty_raw=b"",
+            )
+        except (OSError, RuntimeError, TypeError, ValueError, LookupError):
+            logger.debug(
+                "[%s] parse_runtime_stream failed during auth detection probe",
+                self.__class__.__name__,
+                exc_info=True,
+            )
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _resolve_execution_mode(self, options: dict[str, Any]) -> str:
         mode_raw = options.get("execution_mode", "auto")

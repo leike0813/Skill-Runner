@@ -43,12 +43,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Upgrade a single engine",
     )
     parser.add_argument(
-        "--import-credentials",
-        type=str,
-        default="",
-        help="Import authentication credentials from source root (engine-named subdirectories)",
-    )
-    parser.add_argument(
         "--status-file",
         type=str,
         default="",
@@ -221,10 +215,6 @@ def main() -> int:
 
     manager = AgentCliManager()
     manager.ensure_layout()
-
-    if args.import_credentials:
-        imported = manager.import_credentials(Path(args.import_credentials))
-        logger.info("Imported credentials: %s", imported)
 
     if args.check_auth:
         _write_auth_status(manager, Path(args.status_file).resolve() if args.status_file else None)

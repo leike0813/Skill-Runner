@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import jsonschema  # type: ignore[import-untyped]
 from server.config_registry import keys
@@ -24,6 +24,16 @@ CredentialPolicyMode = Literal["all_of_sources", "any_of_sources"]
 SettingsValidator = Literal["iflow_oauth_settings"]
 BootstrapFormat = Literal["json", "text"]
 NormalizeStrategy = Literal["iflow_settings_v1"]
+ImportValidatorName = Literal[
+    "json_object",
+    "codex_auth_json",
+    "gemini_google_accounts_json",
+    "gemini_oauth_creds_json",
+    "iflow_accounts_json",
+    "iflow_oauth_creds_json",
+    "opencode_auth_json",
+    "opencode_antigravity_accounts_json",
+]
 
 
 @dataclass(frozen=True)
@@ -81,6 +91,8 @@ class ModelCatalogProfile:
 class CredentialImportProfile:
     source: str
     target_relpath: str
+    import_validator: ImportValidatorName | None
+    aliases: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -115,6 +127,11 @@ class CliManagementProfile:
 
 
 @dataclass(frozen=True)
+class ParserAuthPatternsProfile:
+    rules: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
 class AdapterProfile:
     engine: str
     profile_path: Path
@@ -124,6 +141,7 @@ class AdapterProfile:
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
     cli_management: CliManagementProfile
+    parser_auth_patterns: ParserAuthPatternsProfile
 
     def _resolve_profile_relative_path(self, path_value: str | None) -> Path | None:
         if not isinstance(path_value, str) or not path_value.strip():
@@ -243,6 +261,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
     cli_management_raw = payload["cli_management"]
+    parser_auth_patterns_raw = payload["parser_auth_patterns"]
 
     _validate_resolved_path(
         profile_path=profile_path,
@@ -306,6 +325,23 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             raise RuntimeError(
                 f"Adapter profile invalid cli_management.credential_imports[{index}].target_relpath: must be relative ({profile_path})"
             )
+        import_validator_raw = item.get("import_validator")
+        if import_validator_raw is not None and (
+            not isinstance(import_validator_raw, str) or not import_validator_raw.strip()
+        ):
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}].import_validator: invalid ({profile_path})"
+            )
+        aliases_raw = item.get("aliases", [])
+        if aliases_raw is not None and not isinstance(aliases_raw, list):
+            raise RuntimeError(
+                f"Adapter profile invalid cli_management.credential_imports[{index}].aliases: expected array ({profile_path})"
+            )
+        for alias_index, alias_value in enumerate(aliases_raw or []):
+            if not isinstance(alias_value, str) or not alias_value.strip():
+                raise RuntimeError(
+                    f"Adapter profile invalid cli_management.credential_imports[{index}].aliases[{alias_index}]: empty ({profile_path})"
+                )
 
     for index, raw_dir in enumerate(cli_management_raw.get("layout", {}).get("extra_dirs", [])):
         if not isinstance(raw_dir, str) or not raw_dir.strip():
@@ -401,6 +437,16 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 CredentialImportProfile(
                     source=str(item["source"]),
                     target_relpath=str(item["target_relpath"]),
+                    import_validator=(
+                        cast(ImportValidatorName, str(item["import_validator"]))
+                        if isinstance(item.get("import_validator"), str) and item.get("import_validator")
+                        else None
+                    ),
+                    aliases=tuple(
+                        str(alias).strip()
+                        for alias in item.get("aliases", [])
+                        if isinstance(alias, str) and alias.strip()
+                    ),
                 )
                 for item in cli_management_raw["credential_imports"]
             ),
@@ -431,6 +477,12 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 bootstrap_format=cli_management_raw["layout"]["bootstrap_format"],
                 normalize_strategy=cli_management_raw["layout"]["normalize_strategy"],
             ),
+        ),
+        parser_auth_patterns=ParserAuthPatternsProfile(
+            rules=tuple(
+                cast(dict[str, Any], dict(rule))
+                for rule in parser_auth_patterns_raw.get("rules", [])
+            )
         ),
     )
 

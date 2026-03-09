@@ -361,10 +361,25 @@ class RunAuditService:
             return
         confidence = auth_detection.get("confidence")
         classification = auth_detection.get("classification")
-        if classification != "auth_required" or confidence not in {"medium", "high"}:
+        if classification != "auth_required" or confidence not in {"high", "low"}:
             return
         seq = self._next_jsonl_seq(path)
-        confidence_score = 1.0 if confidence == "high" else 0.6
+        confidence_score = 1.0 if confidence == "high" else 0.3
+        matched_rule_ids = auth_detection.get("matched_rule_ids", [])
+        matched_pattern_id = None
+        if isinstance(matched_rule_ids, list) and matched_rule_ids:
+            first = matched_rule_ids[0]
+            if isinstance(first, str) and first.strip():
+                matched_pattern_id = first.strip()
+        details_obj = auth_detection.get("details")
+        reason_code = (
+            details_obj.get("reason_code")
+            if isinstance(details_obj, dict) and isinstance(details_obj.get("reason_code"), str)
+            else None
+        )
+        provider_id = auth_detection.get("provider_id")
+        provider_id_value = provider_id if isinstance(provider_id, str) and provider_id else None
+        code = "AUTH_SIGNAL_MATCHED_HIGH" if confidence == "high" else "AUTH_SIGNAL_MATCHED_LOW"
         payload = {
             "protocol_version": "rasp/1.0",
             "run_id": run_id,
@@ -372,7 +387,7 @@ class RunAuditService:
             "ts": datetime.utcnow().isoformat(),
             "source": {
                 "engine": engine_name,
-                "parser": "auth_detection",
+                "parser": "auth_signal",
                 "confidence": confidence_score,
             },
             "event": {
@@ -380,11 +395,13 @@ class RunAuditService:
                 "type": "diagnostic.warning",
             },
             "data": {
-                "code": "AUTH_DETECTION_MATCHED",
-                "classification": classification,
-                "subcategory": auth_detection.get("subcategory"),
-                "confidence": confidence,
-                "matched_rule_ids": auth_detection.get("matched_rule_ids", []),
+                "code": code,
+                "auth_signal": {
+                    "matched_pattern_id": matched_pattern_id,
+                    "confidence": confidence,
+                    "provider_id": provider_id_value,
+                    "reason_code": reason_code,
+                },
             },
             "correlation": {},
             "attempt_number": attempt_number,

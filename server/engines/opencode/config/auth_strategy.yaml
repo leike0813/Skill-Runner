@@ -21,6 +21,7 @@ providers:
       methods:
         - callback
         - device_auth
+        - import
   google:
     transports:
       oauth_proxy:
@@ -44,6 +45,7 @@ providers:
     in_conversation:
       methods:
         - callback
+        - import
   deepseek:
     transports:
       oauth_proxy:

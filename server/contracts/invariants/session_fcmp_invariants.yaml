@@ -296,3 +296,11 @@ ordering_rules:
     rule: single_method_auth_busy_reprojects_existing_challenge
   - id: OR-53
     rule: terminal_failed_should_include_error_summary_when_available
+  - id: OR-54
+    rule: auth_signal_sources_single_source
+  - id: OR-55
+    rule: lifecycle_consumes_auth_signal_snapshot_only
+  - id: OR-56
+    rule: low_confidence_auth_signal_must_not_enter_waiting_auth
+  - id: OR-57
+    rule: rasp_auth_signal_diagnostic_payload_structured

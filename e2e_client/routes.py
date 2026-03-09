@@ -526,6 +526,38 @@ async def post_run_reply_api(
     return reply
 
 
+@router.post("/api/runs/{request_id}/auth/import")
+async def post_run_auth_import_api(
+    request_id: str,
+    request: Request,
+    source: str | None = None,
+    backend: BackendClient = Depends(get_backend_client),
+):
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+    form = await request.form()
+    provider_raw = form.get("provider_id")
+    provider_id = str(provider_raw).strip() if provider_raw is not None else None
+    uploaded_files: list[tuple[str, bytes]] = []
+    for item in form.getlist("files"):
+        filename = getattr(item, "filename", None)
+        if not isinstance(filename, str) or not filename.strip():
+            continue
+        reader = getattr(item, "read", None)
+        if not callable(reader):
+            continue
+        content = await reader()
+        uploaded_files.append((filename.strip(), content))
+    try:
+        return await backend.post_run_auth_import(
+            request_id,
+            files=uploaded_files,
+            provider_id=provider_id,
+            run_source=run_source,
+        )
+    except Exception as exc:
+        raise _to_http_exception(exc)
+
+
 @router.get("/api/runs/{request_id}/events")
 async def stream_run_events_api(
     request_id: str,
@@ -1397,4 +1429,3 @@ def _normalize_bundle_request_path(path: str) -> str:
     if not normalized:
         raise ValueError("invalid path")
     return normalized
-

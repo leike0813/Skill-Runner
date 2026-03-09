@@ -773,6 +773,38 @@ async def test_v1_jobs_interaction_routes_available():
 
 
 @pytest.mark.asyncio
+async def test_v1_jobs_interaction_auth_import_route(monkeypatch):
+    submit_import = AsyncMock(
+        return_value={
+            "request_id": "req-1",
+            "status": "queued",
+            "accepted": True,
+            "mode": "auth",
+        }
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_interaction_service.submit_auth_import",
+        submit_import,
+    )
+
+    response = await _request(
+        "POST",
+        "/v1/jobs/req-1/interaction/auth/import",
+        data={"provider_id": "google"},
+        files=[("files", ("auth.json", b"{\"tokens\":{}}", "application/json"))],
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["request_id"] == "req-1"
+    assert body["mode"] == "auth"
+    submit_import.assert_awaited_once()
+    kwargs = submit_import.await_args.kwargs
+    assert kwargs["request_id"] == "req-1"
+    assert kwargs["provider_id"] == "google"
+    assert kwargs["files"]["auth.json"] == b"{\"tokens\":{}}"
+
+
+@pytest.mark.asyncio
 async def test_v1_jobs_cancel_route_available():
     response = await _request("POST", "/v1/jobs/does-not-exist/cancel")
     assert response.status_code == 404

@@ -24,7 +24,6 @@ services:
       # UI_BASIC_AUTH_PASSWORD: "change-me"
     volumes:
       - ./skills:/app/skills
-      - ./agent_config:/opt/config
       - skillrunner_cache:/opt/cache
       # Optional: persist run/request data for debugging
       # - ./data:/data

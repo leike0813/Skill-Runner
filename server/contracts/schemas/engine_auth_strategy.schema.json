@@ -53,6 +53,7 @@
         "callback",
         "device_auth",
         "authorization_code",
+        "import",
         "api_key"
       ]
     },

@@ -45,8 +45,16 @@
     "package": "@iflow-ai/iflow-cli",
     "binary_candidates": ["iflow", "iflow.cmd", "iflow.exe"],
     "credential_imports": [
-      { "source": "iflow_accounts.json", "target_relpath": ".iflow/iflow_accounts.json" },
-      { "source": "oauth_creds.json", "target_relpath": ".iflow/oauth_creds.json" }
+      {
+        "source": "iflow_accounts.json",
+        "target_relpath": ".iflow/iflow_accounts.json",
+        "import_validator": "iflow_accounts_json"
+      },
+      {
+        "source": "oauth_creds.json",
+        "target_relpath": ".iflow/oauth_creds.json",
+        "import_validator": "iflow_oauth_creds_json"
+      }
     ],
     "credential_policy": {
       "mode": "all_of_sources",
@@ -63,5 +71,37 @@
       "bootstrap_format": "json",
       "normalize_strategy": "iflow_settings_v1"
     }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "iflow_server_oauth2_required",
+        "enabled": true,
+        "priority": 900,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "SERVER_OAUTH2_REQUIRED"
+            }
+          ]
+        }
+      },
+      {
+        "id": "iflow_oauth_token_expired_text",
+        "enabled": true,
+        "priority": 800,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "OAuth2.*令牌已过期|token已过期|需要重新认证|需要使用服务器OAuth2流程"
+            }
+          ]
+        }
+      }
+    ]
   }
 }
