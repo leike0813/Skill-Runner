@@ -113,5 +113,11 @@
         }
       }
     ]
+  },
+  "parser_structured_extract": {
+    "event_type": "parsed.json",
+    "session_id_key": "session_id",
+    "response_key": "response",
+    "summary_max_chars": 220
   }
 }

@@ -6,9 +6,12 @@ import pytest
 
 from server.runtime.protocol.event_protocol import write_jsonl
 from server.runtime.protocol.factories import make_fcmp_event, make_fcmp_state_changed
+from server.runtime.protocol.factories import make_rasp_event
+from server.models import RuntimeEventCategory, RuntimeEventRef, RuntimeEventSource
 from server.services.orchestration.run_recovery_service import run_recovery_service
 from server.services.orchestration.run_store import RunStore
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
+from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.observability.run_observability import RunObservabilityService
 
 
@@ -518,6 +521,143 @@ async def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
         )
 
 
+@pytest.mark.asyncio
+async def test_list_protocol_history_rasp_terminal_uses_audit_only(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-terminal-rasp"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "succeeded")
+    write_jsonl(
+        audit_dir / "events.1.jsonl",
+        [
+            make_rasp_event(
+                run_id=run_dir.name,
+                seq=1,
+                source=RuntimeEventSource(engine="gemini", parser="gemini_json", confidence=0.8),
+                category=RuntimeEventCategory.RAW,
+                type_name="raw.stderr",
+                data={"line": "audit-block"},
+                attempt_number=1,
+                raw_ref=RuntimeEventRef(
+                    attempt_number=1,
+                    stream="stderr",
+                    byte_from=0,
+                    byte_to=10,
+                    encoding="utf-8",
+                ),
+            ).model_dump(mode="json")
+        ],
+    )
+    write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
+
+    rasp_live_journal.clear(run_dir.name)
+    rasp_live_journal.publish(
+        run_id=run_dir.name,
+        row=make_rasp_event(
+            run_id=run_dir.name,
+            seq=1,
+            source=RuntimeEventSource(engine="gemini", parser="live_raw", confidence=1.0),
+            category=RuntimeEventCategory.RAW,
+            type_name="raw.stderr",
+            data={"line": "live-fragment"},
+            attempt_number=1,
+            raw_ref=RuntimeEventRef(
+                attempt_number=1,
+                stream="stderr",
+                byte_from=0,
+                byte_to=12,
+                encoding="utf-8",
+            ),
+        ).model_dump(mode="json"),
+    )
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(
+        service,
+        "_resolve_attempt_number",
+        AsyncMock(side_effect=[1, 1]),
+    )
+    flush_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.flush_live_audit_mirrors",
+        flush_mock,
+    )
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id="req-terminal",
+        stream="rasp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=None,
+        limit=200,
+    )
+
+    assert payload["source"] == "audit"
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["data"]["line"] == "audit-block"
+    flush_mock.assert_awaited_once_with(run_id=run_dir.name)
+
+
+@pytest.mark.asyncio
+async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-no-materialize"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="queued",
+                    target_state="running",
+                    trigger="turn.started",
+                    updated_at="2026-03-10T00:00:00Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json")
+        ],
+    )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    materialize_mock = AsyncMock(return_value={"rasp_events": [], "fcmp_events": []})
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(
+        service,
+        "_resolve_attempt_number",
+        AsyncMock(side_effect=[1, 1]),
+    )
+    monkeypatch.setattr(service, "_materialize_protocol_stream", materialize_mock)
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id=None,
+        stream="fcmp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=None,
+        limit=200,
+    )
+
+    assert payload["events"]
+    materialize_mock.assert_not_awaited()
+
+
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -551,11 +691,36 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
     run_dir = tmp_path / "run-protocol"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (audit_dir / "stdout.1.log").write_text(
-        '{"type":"thread.started","thread_id":"thread-1"}\n'
-        '{"type":"item.completed","item":{"type":"agent_message","text":"hello from codex"}}\n',
-        encoding="utf-8",
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="codex",
+                type_name="assistant.message.final",
+                data={"message_id": "m-1", "text": "hello from codex"},
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=2,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="succeeded",
+                    trigger="turn.succeeded",
+                    updated_at="2026-03-10T00:00:01Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+        ],
     )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     _write_state_file(run_dir, "succeeded")
@@ -590,6 +755,35 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
     run_dir = tmp_path / "run-wait"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="codex",
+                type_name="user.input.required",
+                data={"interaction_id": 7, "kind": "open_text", "prompt": "请继续输入"},
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=2,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="waiting_user",
+                    trigger="interaction.user_input.required",
+                    updated_at="2026-03-10T00:00:01Z",
+                    pending_interaction_id=7,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+        ],
+    )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
@@ -783,6 +977,47 @@ async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Pat
     run_dir = tmp_path / "run-auth-wait"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="opencode",
+                type_name="auth.required",
+                data={
+                    "auth_session_id": "auth-1",
+                    "engine": "opencode",
+                    "provider_id": "google",
+                    "challenge_kind": "api_key",
+                    "phase": "challenge_active",
+                    "prompt": "API key is required.",
+                    "instructions": "Paste API key into chat.",
+                    "accepts_chat_input": True,
+                    "input_kind": "api_key",
+                    "source_attempt": 1,
+                },
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=2,
+                engine="opencode",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="waiting_auth",
+                    trigger="auth.required",
+                    updated_at="2026-03-10T00:00:01Z",
+                    pending_interaction_id=None,
+                    pending_auth_session_id="auth-1",
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+        ],
+    )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
@@ -854,11 +1089,36 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
     run_dir = tmp_path / "run-cursor"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (audit_dir / "stdout.1.log").write_text(
-        '{"type":"thread.started","thread_id":"thread-2"}\n'
-        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n',
-        encoding="utf-8",
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="codex",
+                type_name="assistant.message.final",
+                data={"message_id": "m-1", "text": "first"},
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=2,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="succeeded",
+                    trigger="turn.succeeded",
+                    updated_at="2026-03-10T00:00:01Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+        ],
     )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     _write_state_file(run_dir, "succeeded")
@@ -897,11 +1157,58 @@ async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Pat
     run_dir = tmp_path / "run-history"
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (audit_dir / "stdout.1.log").write_text(
-        '{"type":"thread.started","thread_id":"thread-h"}\n'
-        '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}\n',
-        encoding="utf-8",
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="queued",
+                    target_state="running",
+                    trigger="turn.started",
+                    updated_at="2026-03-10T00:00:00Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=2,
+                engine="codex",
+                type_name="assistant.message.final",
+                data={"message_id": "m-1", "text": "hello"},
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=3,
+                engine="codex",
+                type_name="diagnostic.warning",
+                data={"code": "X"},
+                attempt_number=1,
+            ).model_dump(mode="json"),
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=4,
+                engine="codex",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="running",
+                    target_state="succeeded",
+                    trigger="turn.succeeded",
+                    updated_at="2026-03-10T00:00:01Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json"),
+        ],
     )
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     _write_state_file(run_dir, "succeeded")
@@ -917,11 +1224,6 @@ async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Pat
     assert rows
     assert all(2 <= row["seq"] <= 4 for row in rows)
     assert all(row["protocol_version"] == "fcmp/1.0" for row in rows)
-
-    metrics_path = run_dir / ".audit" / "protocol_metrics.1.json"
-    assert metrics_path.exists()
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    assert metrics["event_count"] >= 1
 
 
 @pytest.mark.asyncio
@@ -1092,6 +1394,7 @@ async def test_list_timeline_history_merges_protocol_chat_and_client(monkeypatch
     async def _list_protocol_history(**kwargs):
         stream = kwargs["stream"]
         attempt = kwargs["attempt"]
+        assert kwargs["limit"] == 300
         if stream == "orchestrator" and attempt == 1:
             return {
                 "attempt": 1,
@@ -1174,3 +1477,41 @@ async def test_list_timeline_history_merges_protocol_chat_and_client(monkeypatch
         limit=100,
     )
     assert incremental["events"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_timeline_history_reuses_cache_when_audit_signature_unchanged(
+    monkeypatch, tmp_path: Path
+) -> None:
+    run_dir = tmp_path / "run-timeline-cache"
+    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    service = RunObservabilityService()
+    calls = {"count": 0}
+
+    async def _resolve_attempt_number(**_kwargs):
+        return 1
+
+    async def _list_protocol_history(**kwargs):
+        calls["count"] += 1
+        stream = kwargs["stream"]
+        return {
+            "attempt": 1,
+            "available_attempts": [1],
+            "events": [{"seq": 1, "ts": "2026-03-06T10:00:00Z", "type": f"{stream}.event"}],
+        }
+
+    async def _get_chat_history_payload(**_kwargs):
+        return {"events": [], "cursor_floor": 0, "cursor_ceiling": 0, "source": "audit"}
+
+    monkeypatch.setattr(service, "_list_available_attempts", lambda _run_dir: [1])
+    monkeypatch.setattr(service, "_resolve_attempt_number", _resolve_attempt_number)
+    monkeypatch.setattr(service, "list_protocol_history", _list_protocol_history)
+    monkeypatch.setattr(service, "get_chat_history_payload", _get_chat_history_payload)
+
+    first = await service.list_timeline_history(run_dir=run_dir, request_id="req-cache", cursor=0, limit=100)
+    assert calls["count"] == 3
+    second = await service.list_timeline_history(run_dir=run_dir, request_id="req-cache", cursor=0, limit=100)
+    assert calls["count"] == 3
+    assert first["events"] == second["events"]
+    assert second["source"] == "cached"

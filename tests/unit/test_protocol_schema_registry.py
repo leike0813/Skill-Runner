@@ -85,6 +85,28 @@ def test_validate_fcmp_event_accepts_local_seq_meta() -> None:
     assert validate_fcmp_event(payload) == payload
 
 
+def test_validate_rasp_event_accepts_parsed_json_payload() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 3,
+        "ts": "2026-03-10T00:00:03Z",
+        "source": {"engine": "gemini", "parser": "gemini_json", "confidence": 0.9},
+        "event": {"category": "agent", "type": "parsed.json"},
+        "data": {
+            "stream": "stdout",
+            "session_id": "sess-1",
+            "response": "hello",
+            "summary": "hello",
+            "details": {"stats": {"ok": True}},
+        },
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": {"attempt_number": 1, "stream": "stdout", "byte_from": 0, "byte_to": 32, "encoding": "utf-8"},
+    }
+    assert validate_rasp_event(payload) == payload
+
+
 def test_validate_fcmp_event_accepts_optional_correlation() -> None:
     payload = {
         "protocol_version": "fcmp/1.0",

@@ -499,3 +499,62 @@ Engine model refresh actions in UI MUST route through a unified catalog lifecycl
 - **THEN** UI MUST 在 provider 三级菜单提供导入入口
 - **AND** provider=google 时 MUST 显示高风险提示
 
+### Requirement: management auth import spec MUST use ask_user upload_files payload
+管理端导入规格接口 MUST 返回统一 `ask_user` 形状，不再返回旧 `required_files/optional_files` 双列表。
+
+#### Scenario: import spec response shape
+- **WHEN** 客户端调用 `GET /v1/management/engines/{engine}/auth/import/spec`
+- **THEN** response MUST include `ask_user.kind=upload_files`
+- **AND** `ask_user.files[]` MUST include `name` and optional `required/hint/accept`
+
+### Requirement: management UI MUST render import dialog from ask_user.files
+管理 UI MUST 基于后端 `ask_user` 提示渲染文件选择对话框。
+
+#### Scenario: google high-risk notice
+- **WHEN** `ask_user.ui_hints.risk_notice_required=true`
+- **THEN** UI MUST show high-risk warning in import dialog
+
+### Requirement: run detail RASP summary MUST render parsed JSON events
+管理 UI Run Detail 的 RASP 摘要视图 MUST 能识别并渲染 `parsed.json` 事件。
+
+#### Scenario: parsed json bubble summary
+- **WHEN** RASP 行中存在 `event.type = parsed.json`
+- **THEN** 页面摘要 MUST 展示至少 `stream` 与响应摘要（`response` 或 `summary`）
+- **AND** 若存在 `session_id`，摘要 SHOULD 显示该值以便追踪会话
+
+### Requirement: Run Detail timeline/protocol panels MUST remain stable across running-to-terminal transition
+管理 UI 在 run 从 running 切换到 terminal 时，timeline 与 protocol 面板 MUST 不出现因观测口径切换导致的事件回退。
+
+#### Scenario: user observes protocol panel across terminal transition
+- **GIVEN** 用户在 Run Detail 页面持续观察同一 run
+- **WHEN** run 状态从 running 变为 terminal
+- **THEN** 面板数据源切换 MUST 保持事件集合稳定（除 limit 裁剪）
+- **AND** MUST NOT 因 terminal 收敛而出现明显事件数量突降。
+
+### Requirement: run detail timeline MUST be lazy-loaded and collapse-aware
+管理 UI Run Detail 的 timeline 面板 MUST 在默认折叠状态下不初始化历史拉取，也不参与周期刷新。
+
+#### Scenario: collapsed timeline on page load
+- **WHEN** 用户打开 Run Detail 页面且 timeline 默认折叠
+- **THEN** 页面 MUST NOT 发起 timeline 初始化请求
+
+#### Scenario: expanded timeline
+- **WHEN** 用户展开 timeline
+- **THEN** 页面 MUST 拉取历史并进入增量刷新
+- **AND** 折叠后 MUST 停止 timeline 刷新
+
+### Requirement: protocol panel polling MUST use bounded queries
+Run Detail 三流面板轮询 MUST 采用有界历史查询，避免全量拉取。
+
+#### Scenario: protocol polling request
+- **WHEN** 页面轮询 `protocol/history`
+- **THEN** 请求 MUST include `limit` 参数（默认 200）
+
+### Requirement: RASP panel MUST converge to audit view after terminal
+Run Detail 在 run 进入 terminal 后，RASP 面板 MUST 以 audit 结果为最终渲染基线。
+
+#### Scenario: terminal status arrives while RASP panel is open
+- **WHEN** 前端收到 terminal 状态并刷新 RASP 历史
+- **THEN** 面板 MUST 触发全量重取并替换临时 live 缓存
+- **AND** 最终显示结果 MUST 与 audit history 一致
+

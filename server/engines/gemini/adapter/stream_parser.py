@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult, RuntimeStreamRawRow
+from server.runtime.adapter.types import (
+    LiveParserEmission,
+    RuntimeAssistantMessage,
+    RuntimeStreamParseResult,
+    RuntimeStreamRawRow,
+    RuntimeStructuredPayload,
+)
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
 )
@@ -17,9 +23,12 @@ from server.runtime.protocol.parse_utils import (
     stream_lines_with_offsets,
     strip_runtime_script_envelope,
 )
+from server.runtime.protocol.raw_row_coalescer import coalesce_raw_rows
 
 if TYPE_CHECKING:
     from .execution_adapter import GeminiExecutionAdapter
+
+GEMINI_RAW_COALESCE_MIN_ROWS = 48
 
 
 class GeminiStreamParser:
@@ -51,6 +60,14 @@ class GeminiStreamParser:
         if latest_index is not None:
             return [records[latest_index]]
         return [records[-1]]
+
+    def _structured_extract_profile(self) -> tuple[str, str, str, int]:
+        profile = getattr(self._adapter.profile, "parser_structured_extract", None)
+        event_type = str(getattr(profile, "event_type", "parsed.json") or "parsed.json")
+        session_id_key = str(getattr(profile, "session_id_key", "session_id") or "session_id")
+        response_key = str(getattr(profile, "response_key", "response") or "response")
+        summary_max_chars = int(getattr(profile, "summary_max_chars", 220) or 220)
+        return event_type, session_id_key, response_key, max(32, min(summary_max_chars, 2000))
 
     def parse(self, raw_stdout: str) -> dict[str, object]:
         response_text = raw_stdout
@@ -99,11 +116,13 @@ class GeminiStreamParser:
         stdout_text = stdout_raw.decode("utf-8", errors="replace")
         stderr_text = stderr_raw.decode("utf-8", errors="replace")
         pty_text = pty_raw.decode("utf-8", errors="replace")
+        parsed_event_type, session_id_key, response_key, summary_max_chars = self._structured_extract_profile()
 
         assistant_messages: list[RuntimeAssistantMessage] = []
         diagnostics: list[str] = []
         session_id: str | None = None
         structured_types: list[str] = []
+        structured_payloads: list[RuntimeStructuredPayload] = []
         confidence = 0.5
         consumed_ranges: dict[str, list[tuple[int, int]]] = {
             "stdout": [],
@@ -132,15 +151,52 @@ class GeminiStreamParser:
                 return False
             if structured_type:
                 structured_types.append(structured_type)
-            consumed = False
-            row_session_id = find_session_id(payload)
+            details: dict[str, Any] = dict(payload)
+
+            session_candidate = details.pop(session_id_key, None)
+            row_session_id = session_candidate if isinstance(session_candidate, str) and session_candidate.strip() else None
+            if not row_session_id:
+                row_session_id = find_session_id(payload)
             if row_session_id and not session_id:
                 session_id = row_session_id
-            response = payload.get("response")
-            if isinstance(response, str) and response.strip():
+
+            response_obj = details.pop(response_key, None)
+            response_text: str | None = None
+            if isinstance(response_obj, str):
+                normalized_response = response_obj.strip()
+                if normalized_response:
+                    response_text = normalized_response
+            elif response_obj is not None:
+                response_text = json.dumps(response_obj, ensure_ascii=False)
+
+            summary_source = response_text
+            if not summary_source:
+                summary_source = json.dumps(details, ensure_ascii=False) if details else ""
+            summary = summary_source.strip() if isinstance(summary_source, str) else ""
+            if len(summary) > summary_max_chars:
+                summary = f"{summary[:summary_max_chars]}..."
+
+            structured_payloads.append(
+                {
+                    "type": parsed_event_type,
+                    "stream": stream,
+                    "session_id": row_session_id,
+                    "response": response_text,
+                    "summary": summary or None,
+                    "details": details,
+                    "raw_ref": {
+                        "stream": stream,
+                        "byte_from": byte_from,
+                        "byte_to": byte_to,
+                    },
+                }
+            )
+            confidence = max(confidence, 0.9 if stream == "stderr" else 0.85)
+
+            if isinstance(response_text, str) and response_text.strip():
                 assistant_messages.append(
                     {
-                        "text": response,
+                        "text": response_text,
                         "raw_ref": {
                             "stream": stream,
                             "byte_from": byte_from,
@@ -148,26 +204,9 @@ class GeminiStreamParser:
                         },
                     }
                 )
-                confidence = max(confidence, 0.9 if stream == "stderr" else 0.8)
-                consumed = True
-            elif response is not None:
-                assistant_messages.append(
-                    {
-                        "text": json.dumps(response, ensure_ascii=False),
-                        "raw_ref": {
-                            "stream": stream,
-                            "byte_from": byte_from,
-                            "byte_to": byte_to,
-                        },
-                    }
-                )
-                confidence = max(confidence, 0.8 if stream == "stderr" else 0.75)
-                consumed = True
-            if row_session_id:
-                consumed = True
-            if consumed:
-                _mark_consumed(stream, byte_from, byte_to)
-            return consumed
+
+            _mark_consumed(stream, byte_from, byte_to)
+            return True
 
         def _consume_stream_records(records: list[dict[str, Any]]) -> bool:
             consumed_any = False
@@ -197,6 +236,8 @@ class GeminiStreamParser:
             )
 
         used_stream_json_fallback = False
+        consumed_from_stdout = False
+        consumed_from_stderr = False
         if stderr_text.strip():
             stderr_used = _document_json_fallback(stream="stderr", text=stderr_text, raw_size=len(stderr_raw))
             if not stderr_used:
@@ -211,13 +252,17 @@ class GeminiStreamParser:
                     )
                 if not stderr_used:
                     diagnostics.append("GEMINI_STDERR_JSON_PARSE_FAILED")
+            if stderr_used:
+                consumed_from_stderr = True
+                used_stream_json_fallback = True
 
-        if not assistant_messages and stdout_text.strip():
+        if stdout_text.strip():
             stdout_used = _document_json_fallback(stream="stdout", text=stdout_text, raw_size=len(stdout_raw))
             if not stdout_used:
                 stdout_records, _ = collect_json_parse_errors(stdout_rows)
                 stdout_used = _consume_stream_records(stdout_records)
             if stdout_used:
+                consumed_from_stdout = True
                 used_stream_json_fallback = True
 
         pty_used = False
@@ -257,9 +302,24 @@ class GeminiStreamParser:
         if pty_used:
             raw_candidates.extend(pty_rows)
         raw_rows = [row for row in raw_candidates if not _row_overlaps_consumed(row)]
+        raw_rows, coalesce_stats = coalesce_raw_rows(
+            raw_rows,
+            min_rows=GEMINI_RAW_COALESCE_MIN_ROWS,
+        )
+        if coalesce_stats["coalesced"] < coalesce_stats["original"]:
+            diagnostics.append("GEMINI_RAW_ROWS_COALESCED")
+        if int(coalesce_stats.get("structured_blocks", 0)) > 0:
+            diagnostics.append("GEMINI_RAW_STRUCTURED_BLOCK_COALESCED")
+        if int(coalesce_stats.get("error_context_blocks", 0)) > 0:
+            diagnostics.append("GEMINI_ERROR_CONTEXT_BLOCK_COALESCED")
 
         if any(row["stream"] == "stdout" for row in raw_rows):
             diagnostics.append("GEMINI_STDOUT_NOISE")
+
+        if consumed_from_stdout:
+            diagnostics.append("GEMINI_STDOUT_BATCH_JSON_PARSED")
+        if consumed_from_stderr:
+            diagnostics.append("GEMINI_STDERR_BATCH_JSON_PARSED")
 
         auth_signal = detect_auth_signal_from_patterns(
             engine="gemini",
@@ -275,6 +335,10 @@ class GeminiStreamParser:
                 "extracted": {},
             },
         )
+        if isinstance(auth_signal, dict):
+            reason_obj = auth_signal.get("reason_code")
+            if isinstance(reason_obj, str) and reason_obj:
+                diagnostics.append(reason_obj)
 
         result: RuntimeStreamParseResult = {
             "parser": "gemini_json",
@@ -285,6 +349,8 @@ class GeminiStreamParser:
             "diagnostics": list(dict.fromkeys(diagnostics)),
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if structured_payloads:
+            result["structured_payloads"] = structured_payloads
         if auth_signal is not None:
             result["auth_signal"] = auth_signal
         return result

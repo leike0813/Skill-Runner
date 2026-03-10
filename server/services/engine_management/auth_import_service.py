@@ -206,23 +206,31 @@ class AuthImportService:
         profile = self._load_profile(engine)
         selection = self._select_rules(engine=engine, provider_id=provider_id)
         normalized_provider = self._normalize_provider(provider_id)
-        required_items: list[dict[str, Any]] = []
-        optional_items: list[dict[str, Any]] = []
+        file_items: list[dict[str, Any]] = []
 
-        def _build_item(rule: CredentialImportProfile) -> dict[str, Any]:
-            default_hint = f"$HOME/{rule.target_relpath}" if rule.target_relpath.startswith(".") else rule.target_relpath
-            return {
-                "filename": rule.source,
-                "aliases": list(rule.aliases),
-                "default_path_hint": default_hint,
-                "target_relpath": rule.target_relpath,
-                "import_validator": rule.import_validator,
-            }
+        def _default_hint(rule: CredentialImportProfile) -> str:
+            if rule.target_relpath.startswith("."):
+                return f"$HOME/{rule.target_relpath}"
+            return rule.target_relpath
 
         for rule in selection.required:
-            required_items.append(_build_item(rule))
+            file_items.append(
+                {
+                    "name": rule.source,
+                    "required": True,
+                    "hint": _default_hint(rule),
+                    "accept": ".json",
+                }
+            )
         for rule in selection.optional:
-            optional_items.append(_build_item(rule))
+            file_items.append(
+                {
+                    "name": rule.source,
+                    "required": False,
+                    "hint": _default_hint(rule),
+                    "accept": ".json",
+                }
+            )
 
         supported = True
         if profile.engine == "opencode":
@@ -232,13 +240,21 @@ class AuthImportService:
                 provider = opencode_auth_provider_registry.get(normalized_provider)
                 supported = provider.auth_mode == "oauth"
 
+        ui_hints: dict[str, Any] = {}
+        if profile.engine == "opencode" and normalized_provider == "google":
+            ui_hints["risk_notice_required"] = True
+
         return {
             "engine": profile.engine,
             "provider_id": normalized_provider,
             "supported": supported,
-            "required_files": required_items,
-            "optional_files": optional_items,
-            "risk_notice_required": profile.engine == "opencode" and normalized_provider == "google",
+            "ask_user": {
+                "kind": "upload_files",
+                "prompt": "Upload credential files to complete authentication.",
+                "hint": "Select required files and submit to continue.",
+                "files": file_items,
+                "ui_hints": ui_hints,
+            },
         }
 
     def import_auth_files(

@@ -15,6 +15,14 @@
 - [x] 文档对齐
 - [x] 重写 readme
 - [x] 容器化配置更新，构建新版镜像
+- [ ] 四 engine 整体升级 parse 事件
+- [ ] 前端新增“思考过程”相关功能
+- [ ] 管理 UI 增加下载 bundle 和 debug bundle 的按钮（成功终态可用），E2E前端增加下载 debug bundle 的按钮，并且将两个下载按钮改为成功终态可用
+- [ ] 文件树的动态刷新（或添加手动刷新按钮）
+- [ ] Timeline attempt 分割符
+- [ ] 移除 debug 模式
+- [ ] Timezone 问题
+- [ ] agent harness 功能确认与容器内增强
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
 - [ ] 进一步拆分 god object，重构 run store
 - [ ] 对单元测试进行全面审查、规范化、去重

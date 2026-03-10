@@ -9,6 +9,7 @@ ask_user:
       - open_text
       - choose_one
       - confirm
+      - upload_files
     default: open_text
   prompt:
     required: false
@@ -19,6 +20,14 @@ ask_user:
     item:
       label: string
       value: any
+  files:
+    required_when_kind:
+      - upload_files
+    item:
+      name: string
+      required: boolean
+      hint: string
+      accept: string
   hint:
     required: false
     type: string
@@ -34,3 +43,4 @@ rules:
   - keep_the_block_short_and_optional
   - include_only_fields_you_can_produce_stably
   - parsing_failure_must_not_block_core_runtime_flow
+  - prefer_upload_files_for_file-selection-ux

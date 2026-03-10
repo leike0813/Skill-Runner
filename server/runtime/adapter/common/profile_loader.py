@@ -132,6 +132,14 @@ class ParserAuthPatternsProfile:
 
 
 @dataclass(frozen=True)
+class ParserStructuredExtractProfile:
+    event_type: str
+    session_id_key: str
+    response_key: str
+    summary_max_chars: int
+
+
+@dataclass(frozen=True)
 class AdapterProfile:
     engine: str
     profile_path: Path
@@ -142,6 +150,7 @@ class AdapterProfile:
     model_catalog: ModelCatalogProfile
     cli_management: CliManagementProfile
     parser_auth_patterns: ParserAuthPatternsProfile
+    parser_structured_extract: ParserStructuredExtractProfile | None
 
     def _resolve_profile_relative_path(self, path_value: str | None) -> Path | None:
         if not isinstance(path_value, str) or not path_value.strip():
@@ -262,6 +271,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     model_catalog_raw = payload["model_catalog"]
     cli_management_raw = payload["cli_management"]
     parser_auth_patterns_raw = payload["parser_auth_patterns"]
+    parser_structured_extract_raw = payload.get("parser_structured_extract")
 
     _validate_resolved_path(
         profile_path=profile_path,
@@ -483,6 +493,16 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 cast(dict[str, Any], dict(rule))
                 for rule in parser_auth_patterns_raw.get("rules", [])
             )
+        ),
+        parser_structured_extract=(
+            ParserStructuredExtractProfile(
+                event_type=str(parser_structured_extract_raw["event_type"]),
+                session_id_key=str(parser_structured_extract_raw["session_id_key"]),
+                response_key=str(parser_structured_extract_raw["response_key"]),
+                summary_max_chars=int(parser_structured_extract_raw["summary_max_chars"]),
+            )
+            if isinstance(parser_structured_extract_raw, dict)
+            else None
         ),
     )
 

@@ -206,3 +206,32 @@ table button.btn {
     justify-content: flex-start;
   }
 }
+
+.sr-loading-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neutral-500);
+  margin-top: 8px;
+}
+
+.sr-spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--neutral-200);
+  border-top-color: var(--primary-500);
+  border-radius: 50%;
+  animation: sr-spin 0.8s linear infinite;
+}
+
+@keyframes sr-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

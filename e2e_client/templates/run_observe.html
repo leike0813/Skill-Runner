@@ -611,57 +611,21 @@
         }
     }
 
-    function resolveAuthImportSpec(engine, providerId) {
-        const engineKey = safeText(engine).trim().toLowerCase();
-        const providerKey = safeText(providerId).trim().toLowerCase();
-        if (engineKey === "codex") {
-            return {
-                required: [{ filename: "auth.json", defaultPathHint: "$HOME/.codex/auth.json" }],
-                optional: [],
-                riskNotice: false,
-            };
+    function normalizeUploadFileSpecs(raw) {
+        if (!Array.isArray(raw)) return [];
+        const files = [];
+        for (const item of raw) {
+            if (!item || typeof item !== "object") continue;
+            const name = safeText(item.name).trim();
+            if (!name) continue;
+            files.push({
+                name,
+                required: item.required === true,
+                hint: safeText(item.hint).trim(),
+                accept: safeText(item.accept).trim(),
+            });
         }
-        if (engineKey === "gemini") {
-            return {
-                required: [
-                    { filename: "oauth_creds.json", defaultPathHint: "$HOME/.gemini/oauth_creds.json" },
-                    { filename: "google_accounts.json", defaultPathHint: "$HOME/.gemini/google_accounts.json" },
-                ],
-                optional: [],
-                riskNotice: false,
-            };
-        }
-        if (engineKey === "iflow") {
-            return {
-                required: [
-                    { filename: "oauth_creds.json", defaultPathHint: "$HOME/.iflow/oauth_creds.json" },
-                    { filename: "iflow_accounts.json", defaultPathHint: "$HOME/.iflow/iflow_accounts.json" },
-                ],
-                optional: [],
-                riskNotice: false,
-            };
-        }
-        if (engineKey === "opencode" && providerKey === "openai") {
-            return {
-                required: [
-                    { filename: "auth.json", defaultPathHint: "$HOME/.local/share/opencode/auth.json" },
-                ],
-                optional: [],
-                riskNotice: false,
-            };
-        }
-        if (engineKey === "opencode" && providerKey === "google") {
-            return {
-                required: [
-                    { filename: "auth.json", defaultPathHint: "$HOME/.local/share/opencode/auth.json" },
-                ],
-                optional: [
-                    { filename: "antigravity-accounts.json", defaultPathHint: "$HOME/.config/opencode/antigravity-accounts.json" },
-                ],
-                riskNotice: true,
-            };
-        }
-        return null;
+        return files;
     }
 
     function clearAuthImportPanel() {
@@ -681,17 +645,21 @@
 
     function renderAuthImportPanel(payload, hintText) {
         if (!authImportPanelEl || !authImportFilesEl || !authImportHintEl) return false;
-        const spec = resolveAuthImportSpec(payload.engine, payload.provider_id);
-        if (!spec) return false;
+        const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
+        if (!askUser || safeText(askUser.kind).trim() !== "upload_files") return false;
+        const files = normalizeUploadFileSpecs(askUser.files);
+        if (!files.length) return false;
+        const uiHints = askUser.ui_hints && typeof askUser.ui_hints === "object" ? askUser.ui_hints : {};
         currentAuthImportSpec = {
             engine: safeText(payload.engine).trim().toLowerCase(),
             providerId: safeText(payload.provider_id).trim().toLowerCase(),
-            ...spec,
+            files,
+            riskNotice: uiHints.risk_notice_required === true,
         };
         authImportPanelEl.classList.remove("hidden");
-        authImportHintEl.textContent = hintText || I18N.authImportHintDefault;
+        authImportHintEl.textContent = hintText || safeText(askUser.hint).trim() || I18N.authImportHintDefault;
         if (authImportRiskEl) {
-            if (spec.riskNotice) {
+            if (currentAuthImportSpec.riskNotice) {
                 authImportRiskEl.textContent = I18N.authImportRiskNotice;
                 authImportRiskEl.classList.remove("hidden");
             } else {
@@ -704,20 +672,20 @@
             const row = document.createElement("div");
             row.className = "auth-import-file-item";
             const label = document.createElement("label");
-            label.textContent = `${item.filename} (${required ? I18N.authImportRequired : I18N.authImportOptional})`;
+            label.textContent = `${item.name} (${required ? I18N.authImportRequired : I18N.authImportOptional})`;
             row.appendChild(label);
             const input = document.createElement("input");
             input.type = "file";
-            input.setAttribute("data-import-filename", item.filename);
+            if (item.accept) input.accept = item.accept;
+            input.setAttribute("data-import-filename", item.name);
             input.required = required;
             row.appendChild(input);
             const hint = document.createElement("small");
-            hint.textContent = item.defaultPathHint;
+            hint.textContent = item.hint || "";
             row.appendChild(hint);
             authImportFilesEl.appendChild(row);
         };
-        spec.required.forEach((item) => appendItem(item, true));
-        spec.optional.forEach((item) => appendItem(item, false));
+        files.forEach((item) => appendItem(item, item.required));
         return true;
     }
 
@@ -729,17 +697,17 @@
             form.append("provider_id", currentAuthImportSpec.providerId);
         }
         let hasAnyFile = false;
-        for (const item of [...currentAuthImportSpec.required, ...currentAuthImportSpec.optional]) {
-            const input = authImportFilesEl.querySelector(`input[data-import-filename="${item.filename}"]`);
+        for (const item of currentAuthImportSpec.files) {
+            const input = authImportFilesEl.querySelector(`input[data-import-filename="${item.name}"]`);
             if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
-                if (currentAuthImportSpec.required.some((required) => required.filename === item.filename)) {
-                    showReplyError(`${I18N.authImportNoFile} (${item.filename})`);
+                if (item.required) {
+                    showReplyError(`${I18N.authImportNoFile} (${item.name})`);
                     return;
                 }
                 continue;
             }
             hasAnyFile = true;
-            form.append("files", input.files[0], item.filename);
+            form.append("files", input.files[0], item.name);
         }
         if (!hasAnyFile) {
             showReplyError(I18N.authImportNoFile);
@@ -1240,6 +1208,14 @@
             phase,
             available_methods: selectionOptions.map((item) => safeText(item.value).trim()),
             hint,
+            ask_user_kind: safeText(askUser && askUser.kind).trim(),
+            ask_user_files: normalizeUploadFileSpecs(askUser && askUser.files).map((item) => item.name),
+            ask_user_risk: (
+                askUser
+                && askUser.ui_hints
+                && typeof askUser.ui_hints === "object"
+                && askUser.ui_hints.risk_notice_required === true
+            ),
         });
         if (signature && signature === lastAuthRenderSignature && !authCardEl.classList.contains("hidden")) {
             return;
@@ -1258,7 +1234,11 @@
         const acceptsChatInput = payload.accepts_chat_input === true;
         const inputKind = safeText(payload.input_kind).trim();
         const isMethodSelection = phase === "method_selection";
-        const isImportChallenge = inputKind === "import_files" || challengeKind === "import_files";
+        const isImportChallenge = (
+            inputKind === "import_files"
+            || challengeKind === "import_files"
+            || (askUser && safeText(askUser.kind).trim() === "upload_files")
+        );
 
         authTextEl.textContent = prompt;
         authHintEl.textContent = "";
@@ -1482,6 +1462,7 @@
             indentPx: 14,
             i18n: {
                 fileTreeLoading: I18N.fileTreeLoading,
+                filePreviewLoading: I18N.fileTreeLoading,
                 fileTreeNoFiles: I18N.fileTreeNoFiles,
                 fileTreeUnavailable: I18N.fileTreeUnavailable,
                 fileTreeSelectHint: I18N.fileTreeSelectHint,

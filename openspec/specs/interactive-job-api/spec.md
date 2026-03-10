@@ -617,3 +617,73 @@ Interactive run auth gating MUST only treat `auth_signal.confidence=high` as wai
 - **WHEN** backend evaluates terminal mapping for interactive run
 - **THEN** backend MUST keep the signal as diagnostic-only and MUST NOT transition to `waiting_auth` from it.
 
+### Requirement: ask_user MUST support upload_files as a first-class kind
+交互提示模型 MUST 支持 `kind=upload_files`，并通过统一 `files[]` 描述文件选择需求。
+
+#### Scenario: pending_auth import challenge carries upload_files hint
+- **GIVEN** run 处于 `waiting_auth`
+- **AND** challenge kind 为 `import_files`
+- **WHEN** 客户端查询 pending 交互
+- **THEN** `pending_auth.ask_user.kind` MUST be `upload_files`
+- **AND** `pending_auth.ask_user.files` MUST describe required/optional file items
+
+### Requirement: upload_files parse failure MUST NOT block core runtime flow
+`ask_user` 仅作为 UI hint；即使 `upload_files` hint 解析失败，核心运行状态机 MUST 保持可恢复，不得因此崩溃。
+
+#### Scenario: malformed upload_files hint
+- **WHEN** 前端无法正确解析 `ask_user.files`
+- **THEN** 服务端核心状态机仍保持 `waiting_auth` 可恢复
+
+### Requirement: protocol history MUST allow Gemini parsed JSON events
+管理端协议历史中的 RASP 流 MUST 支持 `parsed.json` 事件类型，用于承载 Gemini 的整段 JSON 解析结果。
+
+#### Scenario: parsed JSON event in RASP history
+- **WHEN** Gemini parser 从 stdout/stderr 成功解析出整段 JSON
+- **THEN** `GET /v1/management/runs/{request_id}/protocol/history?stream=rasp` 返回中 MAY 包含 `event.type = parsed.json`
+- **AND** 该事件 `data` MUST 至少包含 `stream`
+
+### Requirement: raw line payload MUST remain string-compatible after parser coalescing
+Gemini parser 归并后的 `raw.stdout/raw.stderr` 事件 `data.line` MUST 仍保持字符串（可多行）。
+
+#### Scenario: coalesced stderr block
+- **WHEN** 连续 stderr 行被归并为块
+- **THEN** 事件类型仍为 `raw.stderr`
+- **AND** `data.line` MUST be a string containing newline-separated content
+
+### Requirement: protocol history behavior MUST remain wire-compatible under single-source publishing
+收敛到 live publisher 单源后，`protocol/history` 的外部接口 MUST 保持兼容。
+
+#### Scenario: client polls protocol history during and after run completion
+- **GIVEN** 客户端在 running 与 terminal 阶段轮询 `protocol/history`
+- **WHEN** 读取 `stream=fcmp|rasp`
+- **THEN** 响应字段形状 MUST 与既有接口兼容
+- **AND** terminal 阶段 `source` 仍表示 `audit` 口径。
+
+### Requirement: management protocol history MUST support bounded result windows
+管理端协议历史查询 MUST 支持可选 `limit` 参数以限制返回事件数量。
+
+#### Scenario: default bounded window
+- **WHEN** 客户端调用 `GET /v1/management/runs/{request_id}/protocol/history` 且不传 `limit`
+- **THEN** 服务端 MUST 返回最近窗口（默认 200 条）
+
+#### Scenario: incremental bounded window
+- **GIVEN** 客户端传入 `from_seq`
+- **WHEN** 同时传入 `limit`
+- **THEN** 服务端 MUST 保持增量语义并按 `limit` 进行上限截断
+
+### Requirement: raw event payload MUST remain string-compatible after coalescing
+RASP `raw.stdout/raw.stderr` 的 `data.line` 字段 MUST 保持 `string` 类型，允许多行块文本。
+
+#### Scenario: coalesced raw stderr block
+- **WHEN** 后端将多条连续 stderr 行归并
+- **THEN** 事件类型仍为 `raw.stderr`
+- **AND** `data.line` MUST be a string containing newline-separated content
+
+### Requirement: live and audit raw transformations MUST share one canonicalization rule
+运行期 live 发布与终态审计重建在 raw 分块上 MUST 复用同一 canonicalization 规则，避免前后观测结果漂移。
+
+#### Scenario: same raw input observed in live and terminal views
+- **WHEN** 同一 run 在运行期和终态分别读取 RASP raw 事件
+- **THEN** raw 分块边界规则 MUST 一致
+- **AND** 不得出现“仅 live 逐行拆分、终态分块”的双轨行为
+

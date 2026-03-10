@@ -57,6 +57,7 @@
             "confirm",
             "fill_fields",
             "open_text",
+            "upload_files",
             "risk_ack"
           ]
         },
@@ -122,7 +123,8 @@
           "enum": [
             "open_text",
             "choose_one",
-            "confirm"
+            "confirm",
+            "upload_files"
           ]
         },
         "prompt": {
@@ -152,6 +154,39 @@
             "required": [
               "label",
               "value"
+            ]
+          },
+          "default": []
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              },
+              "hint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "accept": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name"
             ]
           },
           "default": []
@@ -282,6 +317,16 @@
             "null"
           ],
           "format": "date-time"
+        },
+        "ask_user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ask_user_hint_payload"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1696,6 +1741,7 @@
                 "lifecycle.run.status",
                 "lifecycle.completion.state",
                 "agent.message.final",
+                "parsed.json",
                 "diagnostic.warning",
                 "raw.stdout",
                 "raw.stderr",
@@ -1742,6 +1788,61 @@
         "attempt_number"
       ],
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "parsed.json"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "stream": {
+                    "type": "string",
+                    "enum": [
+                      "stdout",
+                      "stderr",
+                      "pty"
+                    ]
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "response": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "summary": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "details": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "stream"
+                ]
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {

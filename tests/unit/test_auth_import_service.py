@@ -28,11 +28,14 @@ def test_get_import_spec_gemini_uses_profile_required_files(tmp_path: Path) -> N
 
     assert spec["engine"] == "gemini"
     assert spec["supported"] is True
-    assert [item["filename"] for item in spec["required_files"]] == [
+    ask_user = spec["ask_user"]
+    assert ask_user["kind"] == "upload_files"
+    assert [item["name"] for item in ask_user["files"] if item["required"] is True] == [
         "google_accounts.json",
         "oauth_creds.json",
     ]
-    assert spec["optional_files"] == []
+    assert "required_files" not in spec
+    assert "optional_files" not in spec
 
 
 def test_import_auth_files_opencode_openai_accepts_codex_auth_json(tmp_path: Path) -> None:

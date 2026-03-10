@@ -55,6 +55,16 @@ class RuntimeAuthSignal(TypedDict, total=False):
     matched_pattern_id: str | None
 
 
+class RuntimeStructuredPayload(TypedDict, total=False):
+    type: str
+    stream: str
+    session_id: str | None
+    response: str | None
+    summary: str | None
+    details: dict[str, Any]
+    raw_ref: RuntimeStreamRawRef | None
+
+
 class LiveParserEmission(TypedDict):
     kind: Literal["assistant_message", "diagnostic"]
     text: NotRequired[str]
@@ -72,7 +82,7 @@ class RuntimeStreamParseResult(TypedDict):
     raw_rows: list[RuntimeStreamRawRow]
     diagnostics: list[str]
     structured_types: list[str]
-    structured_payloads: NotRequired[list[dict[str, Any]]]
+    structured_payloads: NotRequired[list[RuntimeStructuredPayload]]
     auth_signal: NotRequired[RuntimeAuthSignal]
 
 

@@ -7,6 +7,7 @@ from server.runtime.protocol import event_protocol as runtime_event_protocol
 from server.runtime.protocol.event_protocol import (
     build_fcmp_events,
     build_rasp_events,
+    read_jsonl,
     translate_orchestrator_event_to_fcmp_specs,
 )
 from server.runtime.protocol.schema_registry import (
@@ -62,8 +63,8 @@ def test_fcmp_suppresses_duplicate_raw_echo_blocks(tmp_path: Path):
         for event in rasp_events
         if event.event.type in {"raw.stdout", "raw.stderr"}
     ]
-    assert '"x": 100,' in raw_rasp_lines
-    assert '"y": 50,' in raw_rasp_lines
+    assert '"x": 100,' not in raw_rasp_lines
+    assert '"y": 50,' not in raw_rasp_lines
 
     fcmp_events = build_fcmp_events(rasp_events, suppression_threshold=3)
     raw_fcmp_lines = [
@@ -75,7 +76,7 @@ def test_fcmp_suppresses_duplicate_raw_echo_blocks(tmp_path: Path):
     assert "Loaded cached credentials." in raw_fcmp_lines
     assert '"x": 100,' not in raw_fcmp_lines
     assert '"y": 50,' not in raw_fcmp_lines
-    assert len(raw_rasp_lines) > len(raw_fcmp_lines)
+    assert len(raw_rasp_lines) == len(raw_fcmp_lines)
 
     suppression_diagnostics = [
         event
@@ -83,7 +84,89 @@ def test_fcmp_suppresses_duplicate_raw_echo_blocks(tmp_path: Path):
         if event.type == "diagnostic.warning"
         and event.data.get("code") == "RAW_DUPLICATE_SUPPRESSED"
     ]
-    assert suppression_diagnostics
+    assert not suppression_diagnostics
+
+
+def test_build_rasp_events_coalesces_large_stderr_bursts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-coalesced"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    stderr_lines = [f"gemini overload retry line {idx}" for idx in range(260)]
+    (logs_dir / "stderr.txt").write_text("\n".join(stderr_lines) + "\n", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-coalesced",
+        engine="unknown",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    raw_stderr_events = [event for event in rasp_events if event.event.type == "raw.stderr"]
+    assert len(raw_stderr_events) < 260
+    assert any("\n" in str(event.data.get("line", "")) for event in raw_stderr_events)
+    assert any(
+        event.event.type == "diagnostic.warning" and event.data.get("code") == "RAW_STDERR_COALESCED"
+        for event in rasp_events
+    )
+
+
+def test_build_rasp_events_coalesces_pretty_json_blocks_below_min_threshold(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-pretty-json"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text(
+        "\n".join(
+            [
+                "prefix warning",
+                "{",
+                '  "error": {',
+                '    "code": 429,',
+                '    "message": "rate limit"',
+                "  },",
+                '  "retry_after": 12',
+                "}",
+                "suffix warning",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rasp_events = build_rasp_events(
+        run_id="run-pretty-json",
+        engine="unknown",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    raw_stderr_lines = [
+        str(event.data.get("line", ""))
+        for event in rasp_events
+        if event.event.type == "raw.stderr"
+    ]
+    assert len(raw_stderr_lines) == 3
+    assert raw_stderr_lines[1].startswith("{\n")
+    assert '"retry_after": 12' in raw_stderr_lines[1]
+
+
+def test_read_jsonl_recovers_concatenated_json_objects_on_single_line(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        '{"seq":1,"event":{"type":"raw.stderr"}}{"seq":2,"event":{"type":"diagnostic.warning"}}\n',
+        encoding="utf-8",
+    )
+    rows = read_jsonl(path)
+    assert len(rows) == 2
+    assert rows[0]["seq"] == 1
+    assert rows[1]["seq"] == 2
 
 
 def test_codex_parser_uses_pty_fallback_when_stdout_incomplete(tmp_path: Path):
@@ -202,6 +285,54 @@ def test_build_rasp_events_delegates_parsing_to_adapter(monkeypatch, tmp_path: P
         event.event.type == "diagnostic.warning" and event.data.get("code") == "DELEGATED_PARSE"
         for event in events
     )
+
+
+def test_build_rasp_events_emits_parsed_json_from_structured_payload(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-parsed-json"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("{}", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    class _FakeAdapter:
+        def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+            return {
+                "parser": "gemini_json",
+                "confidence": 0.9,
+                "session_id": "sess-structured",
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": ["gemini.stream_response"],
+                "structured_payloads": [
+                    {
+                        "type": "parsed.json",
+                        "stream": "stdout",
+                        "session_id": "sess-structured",
+                        "response": "hello",
+                        "summary": "hello",
+                        "details": {"stats": {"ok": True}},
+                        "raw_ref": {"stream": "stdout", "byte_from": 0, "byte_to": 32},
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(runtime_event_protocol.engine_adapter_registry, "get", lambda _engine: _FakeAdapter())
+
+    rasp_events = build_rasp_events(
+        run_id="run-parsed-json",
+        engine="gemini",
+        attempt_number=1,
+        status="succeeded",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    parsed_event = next(event for event in rasp_events if event.event.type == "parsed.json")
+    assert parsed_event.data["stream"] == "stdout"
+    assert parsed_event.data["session_id"] == "sess-structured"
+    assert parsed_event.data["response"] == "hello"
+    assert isinstance(parsed_event.data.get("details"), dict)
 
 
 def test_soft_completion_reason_and_warning_propagate_to_fcmp(tmp_path: Path):

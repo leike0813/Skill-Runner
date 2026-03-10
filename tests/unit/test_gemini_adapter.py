@@ -273,6 +273,14 @@ def test_parse_runtime_stream_parses_pretty_json_from_stdout(adapter):
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from pretty stdout"
     assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
+    structured = parsed.get("structured_payloads", [])
+    assert isinstance(structured, list) and structured
+    parsed_event = structured[0]
+    assert parsed_event["type"] == "parsed.json"
+    assert parsed_event["stream"] == "stdout"
+    assert parsed_event["session_id"] == "sess_pretty"
+    assert parsed_event["response"] == "hello from pretty stdout"
+    assert isinstance(parsed_event.get("details"), dict)
 
 
 def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate(adapter):
@@ -314,6 +322,19 @@ def test_parse_runtime_stream_falls_back_to_pty_json_lines(adapter):
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from pty"
     assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
+
+
+def test_parse_runtime_stream_coalesces_large_raw_stderr_blocks(adapter):
+    stderr_lines = "\n".join(f"429 line {idx}" for idx in range(120)) + "\n"
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b"",
+        stderr_raw=stderr_lines.encode("utf-8"),
+        pty_raw=b"",
+    )
+    raw_rows = parsed.get("raw_rows", [])
+    assert isinstance(raw_rows, list)
+    assert len(raw_rows) < 120
+    assert "GEMINI_RAW_ROWS_COALESCED" in parsed["diagnostics"]
 
 
 def test_parse_runtime_stream_uses_latest_response_frame(adapter):

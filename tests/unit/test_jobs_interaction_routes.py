@@ -346,7 +346,7 @@ async def test_reply_interaction_accepts_and_transitions_to_queued(monkeypatch, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "kind",
-    ["choose_one", "confirm", "fill_fields", "open_text", "risk_ack"],
+    ["choose_one", "confirm", "fill_fields", "open_text", "upload_files", "risk_ack"],
 )
 async def test_reply_interaction_accepts_free_text_for_all_supported_kinds(
     monkeypatch,

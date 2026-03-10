@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from server.runtime.adapter.types import RuntimeStreamParseResult
+from server.runtime.adapter.types import RuntimeStreamParseResult, RuntimeStreamRawRow
 from server.runtime.common.ask_user_text import normalize_interaction_text
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
 from server.models import (
@@ -32,6 +32,7 @@ from .factories import (
 )
 from .schema_registry import validate_fcmp_event, validate_rasp_event
 from .parse_utils import stream_lines_with_offsets, strip_runtime_script_envelope
+from .rasp_canonicalizer import coalesce_rasp_raw_rows
 
 
 class _EngineAdapterRegistryShim:
@@ -48,7 +49,6 @@ class _EngineAdapterRegistryShim:
 
 
 engine_adapter_registry = _EngineAdapterRegistryShim()
-
 
 def configure_runtime_parser_resolver(resolver: RuntimeParserResolverPort | None) -> None:
     engine_adapter_registry.configure(resolver)
@@ -247,7 +247,71 @@ def build_rasp_events(
             correlation=correlation,
         )
 
-    for row in parsed.get("raw_rows", []):
+    structured_payloads = parsed.get("structured_payloads", [])
+    if isinstance(structured_payloads, list):
+        for structured_payload in structured_payloads:
+            if not isinstance(structured_payload, dict):
+                continue
+            type_name_obj = structured_payload.get("type")
+            if not isinstance(type_name_obj, str) or not type_name_obj.strip():
+                continue
+            type_name = type_name_obj.strip()
+            stream_obj = structured_payload.get("stream")
+            if not isinstance(stream_obj, str) or not stream_obj.strip():
+                continue
+            raw_ref_obj = structured_payload.get("raw_ref")
+            structured_data: dict[str, Any] = {"stream": stream_obj}
+            for key in ("session_id", "response", "summary"):
+                value = structured_payload.get(key)
+                if value is None or isinstance(value, str):
+                    structured_data[key] = value
+            details_obj = structured_payload.get("details")
+            if isinstance(details_obj, dict):
+                structured_data["details"] = details_obj
+            push(
+                RuntimeEventCategory.AGENT,
+                type_name,
+                data=structured_data,
+                raw_row=raw_ref_obj if isinstance(raw_ref_obj, dict) else None,
+                correlation=correlation,
+            )
+
+    raw_rows_obj = parsed.get("raw_rows", [])
+    raw_rows_input: list[RuntimeStreamRawRow] = []
+    if isinstance(raw_rows_obj, list):
+        for row in raw_rows_obj:
+            if not isinstance(row, dict):
+                continue
+            stream_obj = row.get("stream")
+            line_obj = row.get("line")
+            byte_from_obj = row.get("byte_from")
+            byte_to_obj = row.get("byte_to")
+            if not isinstance(stream_obj, str) or not isinstance(line_obj, str):
+                continue
+            if not isinstance(byte_from_obj, int) or not isinstance(byte_to_obj, int):
+                continue
+            raw_rows_input.append(
+                {
+                    "stream": stream_obj,
+                    "line": line_obj,
+                    "byte_from": byte_from_obj,
+                    "byte_to": byte_to_obj,
+                }
+            )
+    coalesced_rows, coalesce_stats = coalesce_rasp_raw_rows(raw_rows_input)
+    if coalesce_stats["coalesced"] < coalesce_stats["original"]:
+        push(
+            RuntimeEventCategory.DIAGNOSTIC,
+            "diagnostic.warning",
+            data={
+                "code": "RAW_STDERR_COALESCED",
+                "original_rows": coalesce_stats["original"],
+                "coalesced_rows": coalesce_stats["coalesced"],
+            },
+            correlation=correlation,
+        )
+
+    for row in coalesced_rows:
         if not isinstance(row, dict):
             continue
         stream = str(row.get("stream", "stdout"))
@@ -1509,15 +1573,32 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     if not path.exists() or not path.is_file():
         return []
     rows: List[Dict[str, Any]] = []
+    decoder = json.JSONDecoder()
+
+    def _decode_dicts_best_effort(text: str) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+        index = 0
+        text_len = len(text)
+        while index < text_len:
+            while index < text_len and text[index].isspace():
+                index += 1
+            if index >= text_len:
+                break
+            try:
+                payload, end_index = decoder.raw_decode(text, index)
+            except json.JSONDecodeError:
+                break
+            if isinstance(payload, dict):
+                parsed.append(payload)
+            index = end_index
+        return parsed
+
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            rows.append(payload)
+        decoded = _decode_dicts_best_effort(line)
+        if decoded:
+            rows.extend(decoded)
     return rows
 
 

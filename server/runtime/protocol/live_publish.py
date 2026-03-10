@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from server.models import (
     ConversationEventEnvelope,
@@ -22,10 +22,12 @@ from server.runtime.chat_replay.publisher import chat_replay_publisher
 from server.runtime.adapter.types import LiveParserEmission
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
+from server.runtime.adapter.types import RuntimeStreamRawRow
 
 from .contracts import LiveRuntimeEmitter, LiveStreamParserSession
 from .factories import make_fcmp_event, make_rasp_event
 from .ordering_gate import OrderingPrerequisite, RuntimeEventCandidate, RuntimeEventOrderingGate
+from .rasp_canonicalizer import coalesce_rasp_raw_rows
 from .schema_registry import validate_fcmp_event, validate_rasp_event
 
 logger = logging.getLogger(__name__)
@@ -35,18 +37,35 @@ def _read_jsonl(path: Path) -> List[dict[str, Any]]:
     if not path.exists() or not path.is_file():
         return []
     rows: List[dict[str, Any]] = []
+    decoder = json.JSONDecoder()
+
+    def _decode_dicts_best_effort(text: str) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+        index = 0
+        text_len = len(text)
+        while index < text_len:
+            while index < text_len and text[index].isspace():
+                index += 1
+            if index >= text_len:
+                break
+            try:
+                payload, end_index = decoder.raw_decode(text, index)
+            except json.JSONDecodeError:
+                break
+            if isinstance(payload, dict):
+                parsed.append(payload)
+            index = end_index
+        return parsed
+
     try:
         with path.open("r", encoding="utf-8") as fp:
             for line in fp:
                 text = line.strip()
                 if not text:
                     continue
-                try:
-                    payload = json.loads(text)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(payload, dict):
-                    rows.append(payload)
+                decoded = _decode_dicts_best_effort(text)
+                if decoded:
+                    rows.extend(decoded)
     except OSError:
         return []
     return rows
@@ -60,31 +79,109 @@ def _append_jsonl_sync(path: Path, row: dict[str, Any]) -> None:
 
 
 class FcmpAuditMirrorWriter:
+    def __init__(self) -> None:
+        self._pending_tasks_by_run: dict[str, Set[asyncio.Task[Any]]] = defaultdict(set)
+        self._path_locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for_path(self, path: Path) -> asyncio.Lock:
+        key = str(path.resolve(strict=False))
+        lock = self._path_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._path_locks[key] = lock
+        return lock
+
     async def append_row(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
         path = run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl"
-        await asyncio.to_thread(_append_jsonl_sync, path, row)
+        lock = self._lock_for_path(path)
+        async with lock:
+            _append_jsonl_sync(path, row)
 
     def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+        run_id_obj = row.get("run_id")
+        run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             _append_jsonl_sync(run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl", row)
             return
-        loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
+        task = loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
+        pending = self._pending_tasks_by_run[run_id]
+        pending.add(task)
+
+        def _on_done(done_task: asyncio.Task[Any]) -> None:
+            task_set = self._pending_tasks_by_run.get(run_id)
+            if task_set is None:
+                return
+            task_set.discard(done_task)
+            if not task_set:
+                self._pending_tasks_by_run.pop(run_id, None)
+
+        task.add_done_callback(_on_done)
+
+    async def drain(self, *, run_id: Optional[str] = None) -> None:
+        tasks: list[asyncio.Task[Any]] = []
+        if run_id is None:
+            for task_set in self._pending_tasks_by_run.values():
+                tasks.extend(task_set)
+        else:
+            tasks.extend(self._pending_tasks_by_run.get(run_id, set()))
+        if not tasks:
+            return
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class RaspAuditMirrorWriter:
+    def __init__(self) -> None:
+        self._pending_tasks_by_run: dict[str, Set[asyncio.Task[Any]]] = defaultdict(set)
+        self._path_locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for_path(self, path: Path) -> asyncio.Lock:
+        key = str(path.resolve(strict=False))
+        lock = self._path_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._path_locks[key] = lock
+        return lock
+
     async def append_row(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
         path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
-        await asyncio.to_thread(_append_jsonl_sync, path, row)
+        lock = self._lock_for_path(path)
+        async with lock:
+            _append_jsonl_sync(path, row)
 
     def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+        run_id_obj = row.get("run_id")
+        run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             _append_jsonl_sync(run_dir / ".audit" / f"events.{attempt_number}.jsonl", row)
             return
-        loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
+        task = loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
+        pending = self._pending_tasks_by_run[run_id]
+        pending.add(task)
+
+        def _on_done(done_task: asyncio.Task[Any]) -> None:
+            task_set = self._pending_tasks_by_run.get(run_id)
+            if task_set is None:
+                return
+            task_set.discard(done_task)
+            if not task_set:
+                self._pending_tasks_by_run.pop(run_id, None)
+
+        task.add_done_callback(_on_done)
+
+    async def drain(self, *, run_id: Optional[str] = None) -> None:
+        tasks: list[asyncio.Task[Any]] = []
+        if run_id is None:
+            for task_set in self._pending_tasks_by_run.values():
+                tasks.extend(task_set)
+        else:
+            tasks.extend(self._pending_tasks_by_run.get(run_id, set()))
+        if not tasks:
+            return
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class FcmpEventPublisher:
@@ -256,6 +353,11 @@ class FcmpEventPublisher:
         self._release_ready(run_dir=run_dir, run_id=run_id)
         return published
 
+    async def drain_mirror(self, *, run_id: Optional[str] = None) -> None:
+        drain = getattr(self._mirror_writer, "drain", None)
+        if callable(drain):
+            await drain(run_id=run_id)
+
 
 class RaspEventPublisher:
     def __init__(self, *, mirror_writer: RaspAuditMirrorWriter | None = None) -> None:
@@ -357,6 +459,11 @@ class RaspEventPublisher:
         self._release_ready(run_dir=run_dir, run_id=run_id)
         return published
 
+    async def drain_mirror(self, *, run_id: Optional[str] = None) -> None:
+        drain = getattr(self._mirror_writer, "drain", None)
+        if callable(drain):
+            await drain(run_id=run_id)
+
 
 class _BufferedLiveParserSession:
     def __init__(self, *, stream_parser: Any) -> None:
@@ -446,6 +553,8 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         else:
             self._parser_session = _BufferedLiveParserSession(stream_parser=stream_parser)
         self._line_buffers: dict[str, str] = {"stdout": "", "stderr": "", "pty": ""}
+        self._line_buffer_start: dict[str, int | None] = {"stdout": None, "stderr": None, "pty": None}
+        self._pending_raw_rows: dict[str, list[RuntimeStreamRawRow]] = {"stdout": [], "stderr": [], "pty": []}
         self._session_id: str | None = None
         self._message_count = 0
 
@@ -473,14 +582,18 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         failure_reason: str | None,
     ) -> None:
         self._flush_partial_lines()
+        self._flush_pending_raw_rows()
         emissions = self._parser_session.finish(exit_code=exit_code, failure_reason=failure_reason)
         self._publish_emissions(emissions)
 
     def _publish_raw_lines(self, *, stream: str, text: str, byte_from: int, byte_to: int) -> None:
         buffer = self._line_buffers.get(stream, "")
+        buffer_start = self._line_buffer_start.get(stream)
+        combined_start = buffer_start if buffer and isinstance(buffer_start, int) else byte_from
         combined = f"{buffer}{text}"
         if "\n" not in combined:
             self._line_buffers[stream] = combined
+            self._line_buffer_start[stream] = combined_start
             return
         pieces = combined.splitlines(keepends=True)
         emit_lines = pieces[:-1]
@@ -489,60 +602,90 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             emit_lines.append(tail)
             tail = ""
         self._line_buffers[stream] = tail
+        self._line_buffer_start[stream] = combined_start + len("".join(emit_lines).encode("utf-8", errors="replace")) if tail else None
         if not emit_lines:
             return
-        line_end = byte_to
+        line_start = combined_start
+        buffered_rows = self._pending_raw_rows.setdefault(stream, [])
         for line in emit_lines:
             encoded = line.encode("utf-8", errors="replace")
-            line_start = max(byte_from, line_end - len(encoded))
             line_end = line_start + len(encoded)
             clean_line = line.rstrip("\n")
-            raw_ref = RuntimeEventRef(
-                attempt_number=self._attempt_number,
-                stream=stream,
-                byte_from=line_start,
-                byte_to=line_end,
-                encoding="utf-8",
+            buffered_rows.append(
+                {
+                    "stream": stream,
+                    "line": clean_line,
+                    "byte_from": line_start,
+                    "byte_to": line_end,
+                }
             )
-            rasp = make_rasp_event(
-                run_id=self._run_id,
-                seq=1,
-                source=RuntimeEventSource(engine=self._engine, parser="live_raw", confidence=1.0),
-                category=RuntimeEventCategory.RAW,
-                type_name="raw.stderr" if stream == "stderr" else "raw.stdout",
-                data={"line": clean_line},
-                attempt_number=self._attempt_number,
-                raw_ref=raw_ref,
-                correlation={},
-                ts=datetime.utcnow(),
-            )
-            self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
+            line_start = line_end
+        self._drain_pending_raw_rows(stream=stream, flush_all=False)
 
     def _flush_partial_lines(self) -> None:
         for stream, text in list(self._line_buffers.items()):
             if not text:
                 continue
-            raw_ref = RuntimeEventRef(
-                attempt_number=self._attempt_number,
-                stream=stream,
-                byte_from=0,
-                byte_to=len(text.encode("utf-8", errors="replace")),
-                encoding="utf-8",
+            start = self._line_buffer_start.get(stream)
+            byte_from = start if isinstance(start, int) else 0
+            byte_to = byte_from + len(text.encode("utf-8", errors="replace"))
+            self._pending_raw_rows.setdefault(stream, []).append(
+                {
+                    "stream": stream,
+                    "line": text,
+                    "byte_from": byte_from,
+                    "byte_to": byte_to,
+                }
             )
-            rasp = make_rasp_event(
-                run_id=self._run_id,
-                seq=1,
-                source=RuntimeEventSource(engine=self._engine, parser="live_raw", confidence=1.0),
-                category=RuntimeEventCategory.RAW,
-                type_name="raw.stderr" if stream == "stderr" else "raw.stdout",
-                data={"line": text},
-                attempt_number=self._attempt_number,
-                raw_ref=raw_ref,
-                correlation={},
-                ts=datetime.utcnow(),
-            )
-            self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
             self._line_buffers[stream] = ""
+            self._line_buffer_start[stream] = None
+
+    def _flush_pending_raw_rows(self) -> None:
+        for stream in ("stdout", "stderr", "pty"):
+            self._drain_pending_raw_rows(stream=stream, flush_all=True)
+
+    def _drain_pending_raw_rows(self, *, stream: str, flush_all: bool) -> None:
+        pending = self._pending_raw_rows.get(stream, [])
+        if not pending:
+            return
+        coalesced_rows, _stats = coalesce_rasp_raw_rows(pending, min_rows=1)
+        if not coalesced_rows:
+            self._pending_raw_rows[stream] = []
+            return
+        if flush_all:
+            rows_to_publish = coalesced_rows
+            remaining_rows: list[RuntimeStreamRawRow] = []
+        else:
+            rows_to_publish = coalesced_rows[:-1]
+            remaining_rows = coalesced_rows[-1:]
+        for row in rows_to_publish:
+            self._publish_raw_row(row)
+        self._pending_raw_rows[stream] = remaining_rows
+
+    def _publish_raw_row(self, row: RuntimeStreamRawRow) -> None:
+        stream = str(row.get("stream") or "stdout")
+        byte_from = max(0, int(row.get("byte_from") or 0))
+        byte_to = max(byte_from, int(row.get("byte_to") or byte_from))
+        raw_ref = RuntimeEventRef(
+            attempt_number=self._attempt_number,
+            stream=stream,
+            byte_from=byte_from,
+            byte_to=byte_to,
+            encoding="utf-8",
+        )
+        rasp = make_rasp_event(
+            run_id=self._run_id,
+            seq=1,
+            source=RuntimeEventSource(engine=self._engine, parser="live_raw", confidence=1.0),
+            category=RuntimeEventCategory.RAW,
+            type_name="raw.stderr" if stream == "stderr" else "raw.stdout",
+            data={"line": str(row.get("line") or "")},
+            attempt_number=self._attempt_number,
+            raw_ref=raw_ref,
+            correlation={},
+            ts=datetime.utcnow(),
+        )
+        self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
 
     def _publish_emissions(self, emissions: list[LiveParserEmission]) -> None:
         for emission in emissions:
@@ -633,3 +776,10 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
 
 fcmp_event_publisher = FcmpEventPublisher()
 rasp_event_publisher = RaspEventPublisher()
+
+
+async def flush_live_audit_mirrors(*, run_id: Optional[str] = None) -> None:
+    await asyncio.gather(
+        fcmp_event_publisher.drain_mirror(run_id=run_id),
+        rasp_event_publisher.drain_mirror(run_id=run_id),
+    )

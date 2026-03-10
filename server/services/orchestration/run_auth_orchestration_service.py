@@ -1097,7 +1097,11 @@ class RunAuthOrchestrationService:
             run_id=run_id,
             attempt=source_attempt,
             auth_session_id=pending_auth.auth_session_id,
-            auth_method=pending_auth.auth_method.value,
+            auth_method=(
+                pending_auth.auth_method.value
+                if pending_auth.auth_method is not None
+                else None
+            ),
             provider_id=pending_auth.provider_id,
             engine=engine,
         )
@@ -1472,16 +1476,20 @@ class RunAuthOrchestrationService:
         provider_id: str | None,
         source_attempt: int,
     ) -> PendingAuth:
+        ask_user = self._build_import_ask_user_hint(
+            engine=engine,
+            provider_id=provider_id,
+        )
         return PendingAuth(
             auth_session_id=f"import::{request_id}",
             engine=engine,
             provider_id=provider_id,
             auth_method=AuthMethod.IMPORT,
             challenge_kind=AuthChallengeKind.IMPORT_FILES,
-            prompt="Upload credential files to complete authentication.",
+            prompt=self._normalize_string(ask_user.get("prompt")) or "Upload credential files to complete authentication.",
             auth_url=None,
             user_code=None,
-            instructions="Use the import action and upload required auth files.",
+            instructions=self._normalize_string(ask_user.get("hint")) or "Use the import action and upload required auth files.",
             accepts_chat_input=False,
             input_kind=None,
             last_error=None,
@@ -1490,7 +1498,32 @@ class RunAuthOrchestrationService:
             timeout_sec=None,
             created_at=_utc_iso(),
             expires_at=None,
+            ask_user=ask_user,
         )
+
+    def _build_import_ask_user_hint(
+        self,
+        *,
+        engine: str,
+        provider_id: str | None,
+    ) -> dict[str, Any]:
+        try:
+            payload = auth_import_service.get_import_spec(
+                engine=engine,
+                provider_id=provider_id,
+            )
+        except (AuthImportError, AuthImportValidationError):
+            payload = None
+        ask_user = payload.get("ask_user") if isinstance(payload, dict) else None
+        if isinstance(ask_user, dict):
+            return ask_user
+        return {
+            "kind": "upload_files",
+            "prompt": "Upload credential files to complete authentication.",
+            "hint": "Upload required auth files to continue.",
+            "files": [],
+            "ui_hints": {},
+        }
 
     def _build_auth_resume_context(
         self,

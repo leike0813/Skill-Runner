@@ -32,6 +32,7 @@ async def test_management_protocol_history_streams(monkeypatch, tmp_path: Path, 
 
     async def _list_protocol_history(**kwargs):
         assert kwargs["stream"] == stream_name
+        assert kwargs["limit"] == 200
         return {
             "attempt": 2,
             "available_attempts": [1, 2],
@@ -78,6 +79,7 @@ async def test_management_protocol_history_filters(monkeypatch, tmp_path: Path):
         assert kwargs["from_ts"] == "2026-02-24T00:00:00"
         assert kwargs["to_ts"] == "2026-02-24T00:10:00"
         assert kwargs["attempt"] == 3
+        assert kwargs["limit"] == 500
         return {
             "attempt": 3,
             "available_attempts": [1, 2, 3],
@@ -94,7 +96,7 @@ async def test_management_protocol_history_filters(monkeypatch, tmp_path: Path):
         "/v1/management/runs/req-1/protocol/history"
         "?stream=fcmp&from_seq=10&to_seq=20"
         "&from_ts=2026-02-24T00:00:00&to_ts=2026-02-24T00:10:00"
-        "&attempt=3",
+        "&attempt=3&limit=500",
     )
     assert response.status_code == 200
     payload = response.json()

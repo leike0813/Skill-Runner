@@ -87,6 +87,28 @@
     targetEl.appendChild(meta);
   }
 
+  function renderPreviewLoading(targetEl, relativePath, options = {}) {
+    if (!targetEl) return;
+    const i18n = options.i18n || {};
+    targetEl.textContent = "";
+
+    const titleEl = document.createElement("div");
+    titleEl.className = options.titleClass || "preview-title";
+    titleEl.textContent = safeText(relativePath);
+    targetEl.appendChild(titleEl);
+
+    const wrap = document.createElement("div");
+    wrap.className = "sr-loading-wrap";
+    const spinner = document.createElement("span");
+    spinner.className = "sr-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    wrap.appendChild(spinner);
+    const text = document.createElement("span");
+    text.textContent = safeText(i18n.filePreviewLoading) || "Loading preview...";
+    wrap.appendChild(text);
+    targetEl.appendChild(wrap);
+  }
+
   function mountFileExplorer(options) {
     const treeEl = options.treeEl;
     const previewEl = options.previewEl;
@@ -119,9 +141,21 @@
       }
     }
 
+    function waitForPaint() {
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+      }
+      return Promise.resolve();
+    }
+
     async function onFileClick(entry) {
       if (typeof options.onOpenFile !== "function") return;
       try {
+        renderPreviewLoading(previewEl, safeText(entry && entry.path), {
+          ...options.previewOptions,
+          i18n,
+        });
+        await waitForPaint();
         const result = await options.onOpenFile(entry);
         if (!result) return;
         if (result.kind === "html") {

@@ -2,7 +2,6 @@
 
 ## Purpose
 定义 waiting_user 的可观测状态暴露和日志轮询建议区分策略。
-
 ## Requirements
 ### Requirement: 系统 MUST 暴露 waiting_user 的可观测状态
 系统 MUST 在状态接口中明确体现 run 是否处于等待用户输入阶段。
@@ -60,4 +59,65 @@
 - **WHEN** 历史文件中存在不合规行
 - **THEN** 该行被跳过
 - **AND** 合规行继续对外返回
+
+### Requirement: Gemini parser MUST prefer batch JSON parse for runtime streams
+Gemini runtime parser MUST 先尝试将当前 stdout/stderr 批次作为整段 JSON 解析，再回退到行级/fenced JSON 路径。
+
+#### Scenario: stdout batch JSON detected
+- **WHEN** stdout 包含可解析 JSON 文档
+- **THEN** parser MUST 提取 `session_id` 与 `response`（若存在）
+- **AND** parser MUST 产出结构化 payload 供 RASP `parsed.json` 事件使用
+
+### Requirement: Gemini raw rows MUST be coalesced before RASP emission
+Gemini parser 输出的 raw 行 MUST 在进入 RASP 构建前执行归并，避免逐行爆炸。
+
+#### Scenario: large stderr burst
+- **GIVEN** Gemini stderr 在单次 attempt 中产生大量连续文本行
+- **WHEN** parser 输出 raw 行
+- **THEN** raw 行 MUST 被归并为有限数量的块
+- **AND** 行归并后的上下文顺序 MUST 保持稳定
+
+### Requirement: FCMP/RASP protocol history MUST NOT trigger query-time rematerialization
+`protocol/history` 的 FCMP/RASP 查询 MUST 不再在查询路径重建并覆盖审计事件文件。
+
+#### Scenario: fetch protocol history for running run
+- **GIVEN** run 正在运行
+- **WHEN** 客户端请求 `protocol/history`（`stream=fcmp|rasp`）
+- **THEN** 服务 MUST 仅消费 live journal 与已有 audit 镜像
+- **AND** MUST NOT 在该查询路径调用 stdout/stderr 重算写盘。
+
+### Requirement: terminal FCMP/RASP history MUST flush mirror before audit-only read
+run 进入 terminal 后，服务 MUST 在读取 audit-only 历史前完成 live mirror drain。
+
+#### Scenario: terminal transition with pending mirror writes
+- **GIVEN** run 已进入 terminal，且镜像落盘任务仍在进行
+- **WHEN** 客户端请求 `protocol/history`（`stream=fcmp|rasp`）
+- **THEN** 服务 MUST 先等待 mirror flush 完成
+- **AND** 再返回 audit-only 结果。
+
+### Requirement: RASP raw rows MUST be coalesced for high-volume stderr bursts
+在高频错误输出场景中，RASP raw 行 MUST 进行分块归并以降低事件数量与聚合成本。
+
+#### Scenario: repeated stderr stack traces
+- **GIVEN** 同 attempt 的 stderr 连续输出大量行
+- **WHEN** 生成 RASP 事件
+- **THEN** 服务端 MUST 将连续行归并为有限数量 `raw.stderr` 事件块
+- **AND** 事件顺序 MUST 保持稳定
+
+### Requirement: timeline aggregation MUST reuse cache when audit files are unchanged
+`timeline/history` MUST 在审计文件未变更时复用已聚合结果，避免重复全量解析与排序。
+
+#### Scenario: repeated polling without file changes
+- **WHEN** 客户端在短周期内重复调用 `timeline/history`
+- **AND** run 审计文件签名未变化
+- **THEN** 服务端 MUST 复用缓存聚合结果
+
+### Requirement: terminal protocol history MUST converge to audit-only source
+在 run 进入 terminal 后，RASP/FCMP 历史查询 MUST 以审计文件为唯一来源，避免 live 增量残留造成终态漂移。
+
+#### Scenario: terminal run protocol history
+- **GIVEN** run 状态已是 `succeeded|failed|canceled`
+- **WHEN** 客户端查询 `protocol/history`（`stream=rasp|fcmp`）
+- **THEN** 返回 MUST NOT 混合 live journal 事件
+- **AND** `source` MUST 为 `audit`
 

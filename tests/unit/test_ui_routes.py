@@ -275,6 +275,16 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "protocolExpandedRowKey" in content
     assert "protocol-bubble-detail" in content
     assert "extractProtocolRawRef(row)" in content
+    assert 'if (type === "parsed.json") {' in content
+    assert 'query.set("limit", "200")' in content
+    assert "if (!timelineCollapsed) {" in content
+    assert "if (timelineCollapsed || timelineRequestInFlight) return;" in content
+    assert "function replaceTimelineFromPayload(payload) {" in content
+    assert "if (nextCeiling > 0 && nextCeiling < timelineCursor) {" in content
+    assert "const reloadedPayload = await fetchTimelineHistory(0, timelineRenderLimit);" in content
+    assert "replaceTimelineFromPayload(payload);" in content
+    assert "reconcileTimelineRowsWithCeiling();" in content
+    assert "bootstrapTimelineHistory().catch(() => {});" not in content
 
 
 def test_ui_core_pages_use_shared_page_header_partial():

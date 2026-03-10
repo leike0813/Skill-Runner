@@ -72,6 +72,44 @@ def test_challenge_profile_appends_high_risk_notice_for_opencode_google() -> Non
     assert "High risk!" in prompt
 
 
+def test_build_import_pending_auth_embeds_upload_files_ask_user(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.auth_import_service.get_import_spec",
+        lambda **_kwargs: {
+            "engine": "gemini",
+            "provider_id": None,
+            "supported": True,
+            "ask_user": {
+                "kind": "upload_files",
+                "prompt": "Upload credential files to complete authentication.",
+                "hint": "Select required files and submit to continue.",
+                "files": [
+                    {
+                        "name": "oauth_creds.json",
+                        "required": True,
+                        "hint": "$HOME/.gemini/oauth_creds.json",
+                        "accept": ".json",
+                    }
+                ],
+                "ui_hints": {},
+            },
+        },
+    )
+    service = RunAuthOrchestrationService()
+
+    pending = service._build_import_pending_auth(  # noqa: SLF001
+        request_id="req-1",
+        engine="gemini",
+        provider_id=None,
+        source_attempt=1,
+    )
+
+    assert pending.challenge_kind.value == "import_files"
+    assert pending.ask_user is not None
+    assert pending.ask_user.kind == "upload_files"
+    assert pending.ask_user.files[0].name == "oauth_creds.json"
+
+
 @pytest.mark.asyncio
 async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-selection"

@@ -83,6 +83,10 @@ def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
     assert "submitPayload(" in content
     assert "API key submitted" not in content
     assert "Authorization code submitted" not in content
+    assert "normalizeUploadFileSpecs" in content
+    assert "askUser.kind).trim() === \"upload_files\"" in content
+    assert "askUser.files" in content
+    assert "resolveAuthImportSpec" not in content
 
 
 def test_run_observe_auth_import_panel_not_cleared_before_signature_early_return():
@@ -185,6 +189,7 @@ def test_run_observe_template_supports_markdown_and_json_preview_modes() -> None
     content = _read_template()
     assert "SkillRunnerFileExplorer" in content
     assert "mountFileExplorer" in content
+    assert "filePreviewLoading" in content
     assert "fileFormatMarkdown" in content
     assert "fileFormatJson" in content
     assert "fileFormatYaml" in content

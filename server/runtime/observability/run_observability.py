@@ -27,6 +27,7 @@ from server.runtime.protocol.schema_registry import (
 )
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
+from server.runtime.protocol.live_publish import flush_live_audit_mirrors
 from server.runtime.observability.contracts import (
     QueuedResumeRedriver,
     RunStorePort,
@@ -74,6 +75,8 @@ TIMELINE_LANE_BY_STREAM: Dict[str, str] = {
     "chat": "chat_history",
     "client": "client",
 }
+TIMELINE_PROTOCOL_WINDOW_LIMIT = 300
+TIMELINE_CACHE_MAX_ENTRIES = 32
 
 class _UnconfiguredRunStore:
     def get_request(self, request_id: str):
@@ -155,6 +158,10 @@ def _resolve_conversation_mode(client_metadata: dict[str, Any] | None) -> str:
 
 
 class RunObservabilityService:
+    def __init__(self) -> None:
+        self._timeline_cache: Dict[str, Dict[str, Any]] = {}
+        self._timeline_cache_order: list[str] = []
+
     def _run_store(self):
         return run_store
 
@@ -830,6 +837,7 @@ class RunObservabilityService:
         from_ts: Optional[str] = None,
         to_ts: Optional[str] = None,
         attempt: Optional[int] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         normalized_stream = stream.strip().lower()
         if normalized_stream not in {"fcmp", "rasp", "orchestrator"}:
@@ -838,55 +846,55 @@ class RunObservabilityService:
         status_payload = self._read_status_payload(run_dir)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
-        runtime_attempt = await self._resolve_attempt_number(
-            request_id=request_id,
-            status=status,
-            run_dir=run_dir,
-            requested_attempt=None,
-        )
+        terminal_status = status in TERMINAL_STATUSES
         selected_attempt = await self._resolve_attempt_number(
             request_id=request_id,
             status=status,
             run_dir=run_dir,
             requested_attempt=attempt,
         )
-        live_payload = self._get_live_protocol_payload(
-            run_dir=run_dir,
-            stream=normalized_stream,
-            attempt_number=selected_attempt,
-            from_seq=from_seq,
-            to_seq=to_seq,
-            from_ts=from_ts,
-            to_ts=to_ts,
-        )
-        live_rows = live_payload.get("events", [])
-        live_floor = int(live_payload.get("cursor_floor") or 0)
+        live_payload: Dict[str, Any]
+        live_rows: List[Dict[str, Any]]
+        live_floor = 0
+        live_ceiling = 0
+        if terminal_status and normalized_stream in {"fcmp", "rasp"}:
+            await flush_live_audit_mirrors(run_id=run_dir.name)
+            live_payload = {"events": [], "cursor_floor": 0, "cursor_ceiling": 0}
+            live_rows = []
+        else:
+            live_payload = self._get_live_protocol_payload(
+                run_dir=run_dir,
+                stream=normalized_stream,
+                attempt_number=selected_attempt,
+                from_seq=from_seq,
+                to_seq=to_seq,
+                from_ts=from_ts,
+                to_ts=to_ts,
+            )
+            live_rows_obj = live_payload.get("events")
+            live_rows = live_rows_obj if isinstance(live_rows_obj, list) else []
+            live_floor_obj = live_payload.get("cursor_floor")
+            live_ceiling_obj = live_payload.get("cursor_ceiling")
+            try:
+                live_floor = int(live_floor_obj or 0)
+            except (TypeError, ValueError):
+                live_floor = 0
+            try:
+                live_ceiling = int(live_ceiling_obj or 0)
+            except (TypeError, ValueError):
+                live_ceiling = 0
         requested_from = int(from_seq) if from_seq is not None else None
         paths = self._protocol_paths(run_dir, selected_attempt)
         needs_audit = normalized_stream == "orchestrator"
         if normalized_stream in {"fcmp", "rasp"}:
-            if requested_from is None:
+            if terminal_status:
+                needs_audit = True
+            elif requested_from is None:
                 needs_audit = True
             elif live_floor > 0 and requested_from < live_floor:
                 needs_audit = True
             elif not live_rows:
                 needs_audit = True
-        should_materialize = normalized_stream in {"fcmp", "rasp"}
-        if not should_materialize:
-            should_materialize = selected_attempt == runtime_attempt
-        if not should_materialize:
-            should_materialize = not (
-                paths["events"].exists()
-                and paths["fcmp"].exists()
-                and paths["orchestrator"].exists()
-            )
-        if should_materialize and needs_audit:
-            await self._materialize_protocol_stream(
-                run_dir=run_dir,
-                request_id=request_id,
-                status_payload=status_payload,
-                attempt_number=selected_attempt,
-            )
         context = f"history:{normalized_stream}:{request_id or run_dir.name}"
         if normalized_stream == "fcmp":
             self.reindex_fcmp_global_seq(run_dir)
@@ -913,20 +921,53 @@ class RunObservabilityService:
             from_ts=from_ts,
             to_ts=to_ts,
         )
-        if normalized_stream in {"fcmp", "rasp"}:
-            filtered = self._merge_protocol_rows(filtered, live_rows)
+        if normalized_stream in {"fcmp", "rasp"} and not terminal_status:
+            filtered = self._merge_protocol_rows(
+                stream=normalized_stream,
+                audit_rows=filtered,
+                live_rows=live_rows,
+            )
+        filtered = self._apply_protocol_limit(
+            rows=filtered,
+            limit=limit,
+            from_seq=from_seq,
+            to_seq=to_seq,
+        )
         return {
             "attempt": selected_attempt,
             "available_attempts": self._list_available_attempts(run_dir),
             "events": filtered,
             "source": (
-                "mixed"
-                if filtered and live_rows and needs_audit
-                else ("live" if live_rows and not needs_audit else "audit")
+                "audit"
+                if terminal_status and normalized_stream in {"fcmp", "rasp"}
+                else (
+                    "mixed"
+                    if filtered and live_rows and needs_audit
+                    else ("live" if live_rows and not needs_audit else "audit")
+                )
             ),
-            "cursor_floor": int(live_payload.get("cursor_floor") or 0),
-            "cursor_ceiling": int(live_payload.get("cursor_ceiling") or 0),
+            "cursor_floor": live_floor,
+            "cursor_ceiling": live_ceiling,
         }
+
+    def _apply_protocol_limit(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        limit: Optional[int],
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+    ) -> list[dict[str, Any]]:
+        if limit is None:
+            return rows
+        safe_limit = max(1, min(1000, int(limit)))
+        if not rows:
+            return rows
+        if from_seq is not None:
+            return rows[:safe_limit]
+        if to_seq is not None:
+            return rows[-safe_limit:]
+        return rows[-safe_limit:]
 
     async def list_timeline_history(
         self,
@@ -954,11 +995,26 @@ class RunObservabilityService:
         if not attempts:
             attempts = [runtime_attempt] if runtime_attempt > 0 else [1]
 
-        protocol_rows: Dict[str, Dict[int, List[Dict[str, Any]]]] = {
-            "orchestrator": {},
-            "rasp": {},
-            "fcmp": {},
-        }
+        signature = self._timeline_cache_signature(run_dir=run_dir, attempts=attempts)
+        cache_key = str(run_dir.resolve(strict=False))
+        cached = self._timeline_cache.get(cache_key)
+        if cached is not None and cached.get("signature") == signature:
+            all_events_obj = cached.get("events")
+            all_events = all_events_obj if isinstance(all_events_obj, list) else []
+            if safe_cursor <= 0:
+                events = all_events[-safe_limit:]
+            else:
+                events = [event for event in all_events if int(event.get("timeline_seq") or 0) > safe_cursor][:safe_limit]
+            cursor_ceiling = int(all_events[-1]["timeline_seq"]) if all_events else 0
+            cursor_floor = int(events[0]["timeline_seq"]) if events else 0
+            return {
+                "events": events,
+                "cursor_floor": cursor_floor,
+                "cursor_ceiling": cursor_ceiling,
+                "source": "cached",
+            }
+
+        protocol_rows: Dict[str, Dict[int, List[Dict[str, Any]]]] = {"orchestrator": {}, "rasp": {}, "fcmp": {}}
         for stream in ("orchestrator", "rasp", "fcmp"):
             for attempt in attempts:
                 payload = await self.list_protocol_history(
@@ -970,6 +1026,7 @@ class RunObservabilityService:
                     from_ts=None,
                     to_ts=None,
                     attempt=attempt,
+                    limit=TIMELINE_PROTOCOL_WINDOW_LIMIT,
                 )
                 rows_obj = payload.get("events")
                 protocol_rows[stream][attempt] = rows_obj if isinstance(rows_obj, list) else []
@@ -1113,6 +1170,7 @@ class RunObservabilityService:
             item["event"]["timeline_seq"] = index
 
         all_events = [item["event"] for item in collected]
+        self._set_timeline_cache(cache_key=cache_key, signature=signature, events=all_events)
         if safe_cursor <= 0:
             events = all_events[-safe_limit:]
         else:
@@ -1125,6 +1183,34 @@ class RunObservabilityService:
             "cursor_ceiling": cursor_ceiling,
             "source": "mixed",
         }
+
+    def _timeline_cache_signature(self, *, run_dir: Path, attempts: list[int]) -> tuple[Any, ...]:
+        parts: list[tuple[str, int, int]] = []
+        for attempt in attempts:
+            paths = self._protocol_paths(run_dir, attempt)
+            for key in ("orchestrator", "events", "fcmp"):
+                path = paths[key]
+                if path.exists() and path.is_file():
+                    stat = path.stat()
+                    parts.append((path.name, int(stat.st_size), int(stat.st_mtime_ns)))
+                else:
+                    parts.append((path.name, -1, -1))
+        chat_path = run_dir / AUDIT_DIR_NAME / "chat_replay.jsonl"
+        if chat_path.exists() and chat_path.is_file():
+            stat = chat_path.stat()
+            parts.append((chat_path.name, int(stat.st_size), int(stat.st_mtime_ns)))
+        else:
+            parts.append((chat_path.name, -1, -1))
+        return tuple(parts)
+
+    def _set_timeline_cache(self, *, cache_key: str, signature: tuple[Any, ...], events: list[dict[str, Any]]) -> None:
+        self._timeline_cache[cache_key] = {"signature": signature, "events": events}
+        if cache_key in self._timeline_cache_order:
+            self._timeline_cache_order.remove(cache_key)
+        self._timeline_cache_order.append(cache_key)
+        while len(self._timeline_cache_order) > TIMELINE_CACHE_MAX_ENTRIES:
+            stale = self._timeline_cache_order.pop(0)
+            self._timeline_cache.pop(stale, None)
 
     def _timeline_ts_text(self, value: Any) -> str:
         if isinstance(value, str) and value.strip():
@@ -1330,21 +1416,60 @@ class RunObservabilityService:
             "cursor_ceiling": payload.get("cursor_ceiling", 0),
         }
 
+    def _protocol_row_stable_key(self, *, stream: str, row: Dict[str, Any]) -> str:
+        if stream == "rasp":
+            attempt_obj = row.get("attempt_number")
+            attempt = int(attempt_obj) if isinstance(attempt_obj, int) else 0
+            event_obj = row.get("event")
+            event = event_obj if isinstance(event_obj, dict) else {}
+            type_name = str(event.get("type") or row.get("type") or "")
+            category = str(event.get("category") or row.get("category") or "")
+            raw_ref_obj = row.get("raw_ref")
+            raw_ref = raw_ref_obj if isinstance(raw_ref_obj, dict) else {}
+            stream_name = str(raw_ref.get("stream") or "")
+            byte_from = raw_ref.get("byte_from")
+            byte_to = raw_ref.get("byte_to")
+            if stream_name and isinstance(byte_from, int) and isinstance(byte_to, int):
+                return (
+                    f"rasp:{attempt}:{category}:{type_name}:{stream_name}:"
+                    f"{byte_from}:{byte_to}"
+                )
+            seq_obj = row.get("seq")
+            seq = int(seq_obj) if isinstance(seq_obj, int) else 0
+            ts = str(row.get("ts") or "")
+            return f"rasp:fallback:{attempt}:{category}:{type_name}:{seq}:{ts}"
+        seq_obj = row.get("seq")
+        if isinstance(seq_obj, int):
+            return f"{stream}:seq:{seq_obj}"
+        ts = str(row.get("ts") or "")
+        type_name = str(row.get("type") or "")
+        try:
+            fingerprint = json.dumps(row, sort_keys=True, ensure_ascii=False)
+        except TypeError:
+            fingerprint = repr(row)
+        return f"{stream}:fallback:{type_name}:{ts}:{fingerprint}"
+
+    def _protocol_sort_key(self, row: Dict[str, Any]) -> tuple[int, str]:
+        seq_obj = row.get("seq")
+        seq = int(seq_obj) if isinstance(seq_obj, int) else 0
+        ts = str(row.get("ts") or "")
+        return (seq, ts)
+
     def _merge_protocol_rows(
         self,
+        *,
+        stream: str,
         audit_rows: List[Dict[str, Any]],
         live_rows: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        merged: Dict[int, Dict[str, Any]] = {}
+        merged: Dict[str, Dict[str, Any]] = {}
         for row in audit_rows:
-            seq_obj = row.get("seq")
-            if isinstance(seq_obj, int):
-                merged[seq_obj] = row
+            merged[self._protocol_row_stable_key(stream=stream, row=row)] = row
         for row in live_rows:
-            seq_obj = row.get("seq")
-            if isinstance(seq_obj, int):
-                merged[seq_obj] = row
-        return [merged[key] for key in sorted(merged)]
+            key = self._protocol_row_stable_key(stream=stream, row=row)
+            if key not in merged:
+                merged[key] = row
+        return sorted(merged.values(), key=self._protocol_sort_key)
 
     def reindex_fcmp_global_seq(self, run_dir: Path) -> None:
         attempts = self._list_available_attempts(run_dir)

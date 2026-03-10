@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .common import RecoveryState, RunStatus
 from .engine import EngineModelInfo
+from .interaction import AskUserHintPayload
 
 
 class ManagementSkillSummary(BaseModel):
@@ -144,25 +145,13 @@ class ManagementSystemLogQueryResponse(BaseModel):
     total_matched: int = Field(default=0, ge=0)
 
 
-class ManagementEngineAuthImportFileSpec(BaseModel):
-    """Per-file import requirement for engine auth import."""
-
-    filename: str
-    aliases: List[str] = Field(default_factory=list)
-    default_path_hint: str
-    target_relpath: str
-    import_validator: Optional[str] = None
-
-
 class ManagementEngineAuthImportSpecResponse(BaseModel):
     """Auth import capability spec for one engine/provider."""
 
     engine: str
     provider_id: Optional[str] = None
     supported: bool = True
-    required_files: List[ManagementEngineAuthImportFileSpec] = Field(default_factory=list)
-    optional_files: List[ManagementEngineAuthImportFileSpec] = Field(default_factory=list)
-    risk_notice_required: bool = False
+    ask_user: Optional[AskUserHintPayload] = None
 
 
 class ManagementEngineAuthImportSubmitResponse(BaseModel):

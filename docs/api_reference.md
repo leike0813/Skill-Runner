@@ -45,7 +45,7 @@
 - `GET /v1/management/runs/{request_id}/events/history`：结构化历史事件（支持 `from_seq/to_seq/from_ts/to_ts`）
 - `GET /v1/management/runs/{request_id}/chat`：SSE 对话事件流（复用 jobs chat 语义）
 - `GET /v1/management/runs/{request_id}/chat/history`：结构化对话历史（支持 `from_seq/to_seq/from_ts/to_ts`）
-- `GET /v1/management/runs/{request_id}/protocol/history`：协议级事件历史（FCMP/RASP/Orchestrator，支持 `attempt`）
+- `GET /v1/management/runs/{request_id}/protocol/history`：协议级事件历史（FCMP/RASP/Orchestrator，支持 `attempt` 与 `limit`）
 - `GET /v1/management/runs/{request_id}/timeline/history`：Run 级时序历史（五泳道聚合，支持 `cursor/limit`）
 - `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳，支持 `attempt`）
 - `GET /v1/management/runs/{request_id}/pending`：查询待决交互
@@ -205,6 +205,7 @@
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
 - `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
 - `attempt`（可选，`>=1`）：指定恢复尝试轮次
+- `limit`（可选，默认 `200`，最大 `1000`）：返回窗口上限
 
 **Response**:
 ```json
@@ -222,7 +223,11 @@
 - `400`: `stream` 值非法。
 - `404`: `request_id` 或 run 不存在。
 
-说明：该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
+说明：
+- 该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
+- `raw.stdout/raw.stderr` 事件仍保持原类型，`data.line` 可能为多行归并文本（string，向后兼容）。
+- Gemini 解析器在命中整批 JSON 时可产出 `parsed.json` 事件（RASP），用于呈现 `stream/session_id/response/summary/details` 结构化信息。
+- run 进入 terminal（`succeeded/failed/canceled`）后，`stream=rasp|fcmp` 的历史查询按审计文件口径返回（不混 live journal 增量）。
 
 ### Run 级时序历史
 `GET /v1/management/runs/{request_id}/timeline/history`
@@ -788,24 +793,28 @@
   "engine": "gemini",
   "provider_id": null,
   "supported": true,
-  "required_files": [
-    {
-      "filename": "google_accounts.json",
-      "aliases": [],
-      "default_path_hint": "$HOME/.gemini/google_accounts.json",
-      "target_relpath": ".gemini/google_accounts.json",
-      "import_validator": "gemini_google_accounts_json"
-    },
-    {
-      "filename": "oauth_creds.json",
-      "aliases": [],
-      "default_path_hint": "$HOME/.gemini/oauth_creds.json",
-      "target_relpath": ".gemini/oauth_creds.json",
-      "import_validator": "gemini_oauth_creds_json"
+  "ask_user": {
+    "kind": "upload_files",
+    "prompt": "Upload credential files to complete authentication.",
+    "hint": "Select required files and submit to continue.",
+    "files": [
+      {
+        "name": "google_accounts.json",
+        "required": true,
+        "hint": "$HOME/.gemini/google_accounts.json",
+        "accept": ".json"
+      },
+      {
+        "name": "oauth_creds.json",
+        "required": true,
+        "hint": "$HOME/.gemini/oauth_creds.json",
+        "accept": ".json"
+      }
+    ],
+    "ui_hints": {
+      "risk_notice_required": false
     }
-  ],
-  "optional_files": [],
-  "risk_notice_required": false
+  }
 }
 ```
 

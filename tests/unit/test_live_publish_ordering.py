@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -5,7 +6,7 @@ import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
-from server.runtime.protocol.live_publish import FcmpEventPublisher, fcmp_event_publisher
+from server.runtime.protocol.live_publish import FcmpEventPublisher, RaspAuditMirrorWriter, fcmp_event_publisher
 from server.services.orchestration.job_orchestrator import JobOrchestrator
 
 
@@ -154,6 +155,89 @@ def test_fcmp_publisher_buffers_success_terminal_until_assistant_message_is_publ
         "conversation.state.changed",
     ]
     assert replay["events"][1]["data"]["terminal"]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_fcmp_publisher_drain_mirror_flushes_audit_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "run-drain-mirror"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    drain_calls: list[str | None] = []
+
+    class _DrainAwareMirrorWriter:
+        def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict) -> None:
+            path = run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fp:
+                fp.write(json.dumps(row, ensure_ascii=False))
+                fp.write("\n")
+
+        async def drain(self, *, run_id: str | None = None) -> None:
+            drain_calls.append(run_id)
+
+    monkeypatch.setattr(
+        "server.runtime.protocol.live_publish.chat_replay_publisher.publish_from_fcmp",
+        lambda **_kwargs: None,
+    )
+    publisher = FcmpEventPublisher(mirror_writer=_DrainAwareMirrorWriter())
+
+    publisher.publish(
+        run_dir=run_dir,
+        event=_fcmp_row(
+            run_id=run_id,
+            type_name="assistant.message.final",
+            data={"message_id": "m-1", "text": "done"},
+        ),
+    )
+    await publisher.drain_mirror(run_id=run_id)
+
+    audit_path = run_dir / ".audit" / "fcmp_events.1.jsonl"
+    assert audit_path.exists()
+    rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["type"] == "assistant.message.final"
+    assert drain_calls == [run_id]
+
+
+@pytest.mark.asyncio
+async def test_rasp_audit_mirror_writer_persists_jsonl_rows(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-rasp-writer"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    writer = RaspAuditMirrorWriter()
+    attempt_number = 1
+    rows = [
+        {
+            "protocol_version": "rasp/1.0",
+            "run_id": run_dir.name,
+            "seq": index + 1,
+            "ts": datetime.utcnow().isoformat(),
+            "source": {"engine": "gemini", "parser": "live_raw", "confidence": 1.0},
+            "event": {"category": "raw", "type": "raw.stderr"},
+            "data": {"line": f"line-{index}"},
+            "correlation": {},
+            "attempt_number": attempt_number,
+            "raw_ref": {
+                "attempt_number": attempt_number,
+                "stream": "stderr",
+                "byte_from": index * 10,
+                "byte_to": index * 10 + 6,
+                "encoding": "utf-8",
+            },
+        }
+        for index in range(8)
+    ]
+
+    for row in rows:
+        await writer.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row)
+
+    path = run_dir / ".audit" / "events.1.jsonl"
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == len(rows)
+    decoded = [json.loads(line) for line in lines]
+    assert {item["seq"] for item in decoded} == set(range(1, 9))
 
 
 @pytest.mark.asyncio

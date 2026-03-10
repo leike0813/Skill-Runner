@@ -587,6 +587,8 @@
     const protocolRawMode = { fcmp: false, rasp: false, orchestrator: false };
     const protocolExpandedRowKey = { fcmp: null, rasp: null, orchestrator: null };
     const protocolAutoFollow = { fcmp: true, rasp: true, orchestrator: true };
+    const protocolRequestInFlight = { fcmp: false, rasp: false, orchestrator: false };
+    let timelineRequestInFlight = false;
     const availableAttempts = [];
     const DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC = 1200;
     const WATCHDOG_RETRY_INTERVAL_MS = 2000;
@@ -597,6 +599,7 @@
     let source = null;
     let reconnectTimer = null;
     let terminal = terminalStatuses.has(statusEl.textContent || "");
+    let terminalProtocolReloadDone = terminal;
     let currentAttempt = 1;
     let interactiveAutoReplyEnabled = false;
     let interactiveReplyTimeoutSec = DEFAULT_INTERACTIVE_REPLY_TIMEOUT_SEC;
@@ -696,6 +699,7 @@
     }
 
     function extractRaspKindLabel(type) {
+        if (type === "parsed.json") return "parsed-json";
         if (type.startsWith("raw.")) return I18N.protocolTagToolOutput;
         if (type.startsWith("lifecycle.")) return I18N.protocolTagLifecycle;
         if (type.startsWith("interaction.")) return I18N.protocolTagInteraction;
@@ -718,6 +722,19 @@
         const data = protocolData(row);
         const message = typeof data.message === "string" ? data.message.trim() : "";
         if (streamName === "rasp") {
+            if (type === "parsed.json") {
+                const stream = typeof data.stream === "string" && data.stream ? data.stream : "unknown";
+                const sessionText = typeof data.session_id === "string" && data.session_id
+                    ? ` · session=${data.session_id}`
+                    : "";
+                const preview = toSummaryText(
+                    typeof data.response === "string" && data.response.trim()
+                        ? data.response
+                        : (typeof data.summary === "string" ? data.summary : ""),
+                );
+                const previewText = preview ? ` · ${preview}` : "";
+                return `parsed.json · ${stream}${sessionText}${previewText}`;
+            }
             const source = protocolSource(row);
             const engine = typeof source.engine === "string" && source.engine ? source.engine : "unknown";
             const parser = typeof source.parser === "string" && source.parser ? source.parser : "unknown";
@@ -807,7 +824,8 @@
 
     function updateTimelineHeader() {
         if (!timelineCountEl) return;
-        timelineCountEl.textContent = `${timelineRows.length}/${timelineCeiling}`;
+        const visibleCount = timelineCeiling > 0 ? Math.min(timelineRows.length, timelineCeiling) : timelineRows.length;
+        timelineCountEl.textContent = `${visibleCount}/${timelineCeiling}`;
     }
 
     function setTimelineCollapsed(collapsed) {
@@ -961,6 +979,49 @@
         }
     }
 
+    function rebuildTimelineIndex() {
+        timelineBySeq.clear();
+        for (let idx = 0; idx < timelineRows.length; idx += 1) {
+            const event = timelineRows[idx];
+            const seq = Number(event && event.timeline_seq);
+            const key = Number.isFinite(seq) && seq > 0 ? `seq:${Math.floor(seq)}` : timelineRowKey(event, idx);
+            timelineBySeq.set(key, true);
+        }
+    }
+
+    function reconcileTimelineRowsWithCeiling() {
+        if (!(timelineCeiling > 0) || !timelineRows.length) return;
+        const bounded = timelineRows.filter((event) => {
+            const seq = Number(event && event.timeline_seq);
+            return !Number.isFinite(seq) || seq <= timelineCeiling;
+        });
+        if (bounded.length !== timelineRows.length) {
+            timelineRows.length = 0;
+            timelineRows.push(...bounded);
+        }
+        if (timelineRows.length > timelineCeiling) {
+            timelineRows.splice(0, timelineRows.length - timelineCeiling);
+        }
+        rebuildTimelineIndex();
+    }
+
+    function replaceTimelineFromPayload(payload) {
+        timelineRows.length = 0;
+        timelineBySeq.clear();
+        const events = Array.isArray(payload && payload.events) ? payload.events : [];
+        mergeTimelineEvents(events);
+        timelineCeiling = Number((payload && payload.cursor_ceiling) || 0);
+        if (timelineCeiling <= 0) {
+            const maxSeq = timelineRows.reduce((maxValue, event) => {
+                const seq = Number(event && event.timeline_seq);
+                return Number.isFinite(seq) ? Math.max(maxValue, seq) : maxValue;
+            }, 0);
+            timelineCeiling = maxSeq;
+        }
+        reconcileTimelineRowsWithCeiling();
+        timelineCursor = timelineCeiling;
+    }
+
     async function fetchTimelineHistory(cursor = 0, limit = 100) {
         const query = new URLSearchParams({
             cursor: String(Math.max(0, Number(cursor) || 0)),
@@ -972,47 +1033,62 @@
     }
 
     async function refreshTimelineHistory() {
-        const payload = await fetchTimelineHistory(timelineCursor, 100);
-        if (!payload) return;
-        timelineCeiling = Number(payload.cursor_ceiling || timelineCeiling || 0);
-        const events = Array.isArray(payload.events) ? payload.events : [];
-        mergeTimelineEvents(events);
-        if (timelineCeiling <= 0) {
-            const maxSeq = timelineRows.reduce((maxValue, event) => {
-                const seq = Number(event && event.timeline_seq);
-                return Number.isFinite(seq) ? Math.max(maxValue, seq) : maxValue;
-            }, 0);
-            timelineCeiling = maxSeq;
-        }
-        if (timelineCeiling > timelineCursor) {
-            timelineCursor = timelineCeiling;
-        }
-        if (!timelineCollapsed) {
-            renderTimeline();
-            if (timelineWindowEl && isNearBottom(timelineWindowEl)) {
-                timelineWindowEl.scrollTop = timelineWindowEl.scrollHeight;
+        if (timelineCollapsed || timelineRequestInFlight) return;
+        timelineRequestInFlight = true;
+        try {
+            const payload = await fetchTimelineHistory(timelineCursor, 100);
+            if (!payload) return;
+            const nextCeiling = Number(payload.cursor_ceiling || timelineCeiling || 0);
+            if (nextCeiling > 0 && nextCeiling < timelineCursor) {
+                const reloadedPayload = await fetchTimelineHistory(0, timelineRenderLimit);
+                if (!reloadedPayload) return;
+                replaceTimelineFromPayload(reloadedPayload);
+            } else {
+                timelineCeiling = nextCeiling;
+                const events = Array.isArray(payload.events) ? payload.events : [];
+                mergeTimelineEvents(events);
+                if (timelineCeiling <= 0) {
+                    const maxSeq = timelineRows.reduce((maxValue, event) => {
+                        const seq = Number(event && event.timeline_seq);
+                        return Number.isFinite(seq) ? Math.max(maxValue, seq) : maxValue;
+                    }, 0);
+                    timelineCeiling = maxSeq;
+                }
+                reconcileTimelineRowsWithCeiling();
+                if (timelineCeiling > timelineCursor) {
+                    timelineCursor = timelineCeiling;
+                }
             }
-        } else {
-            updateTimelineHeader();
+            if (!timelineCollapsed) {
+                renderTimeline();
+                if (timelineWindowEl && isNearBottom(timelineWindowEl)) {
+                    timelineWindowEl.scrollTop = timelineWindowEl.scrollHeight;
+                }
+            } else {
+                updateTimelineHeader();
+            }
+        } finally {
+            timelineRequestInFlight = false;
         }
     }
 
     async function bootstrapTimelineHistory() {
-        const payload = await fetchTimelineHistory(0, timelineRenderLimit);
-        if (!payload) {
-            if (timelineEventsEl) timelineEventsEl.textContent = I18N.timelineReadFailed;
-            return;
-        }
-        timelineRows.length = 0;
-        timelineBySeq.clear();
-        const events = Array.isArray(payload.events) ? payload.events : [];
-        mergeTimelineEvents(events);
-        timelineCeiling = Number(payload.cursor_ceiling || 0);
-        timelineCursor = timelineCeiling;
-        if (!timelineCollapsed) {
-            renderTimeline();
-        } else {
-            updateTimelineHeader();
+        if (timelineRequestInFlight) return;
+        timelineRequestInFlight = true;
+        try {
+            const payload = await fetchTimelineHistory(0, timelineRenderLimit);
+            if (!payload) {
+                if (timelineEventsEl) timelineEventsEl.textContent = I18N.timelineReadFailed;
+                return;
+            }
+            replaceTimelineFromPayload(payload);
+            if (!timelineCollapsed) {
+                renderTimeline();
+            } else {
+                updateTimelineHeader();
+            }
+        } finally {
+            timelineRequestInFlight = false;
         }
     }
 
@@ -1327,6 +1403,7 @@
             indentPx: 16,
             i18n: {
                 fileTreeLoading: I18N.fileTreeLoading,
+                filePreviewLoading: I18N.fileTreeLoading,
                 fileTreeNoFiles: I18N.fileTreeNoFiles,
                 fileTreeUnavailable: I18N.fileTreeUnavailable,
                 fileTreeSelectHint: I18N.fileTreeSelectHint,
@@ -1477,6 +1554,7 @@
 
     function updateStatus(payload) {
         if (!payload || typeof payload !== "object") return;
+        const wasTerminal = terminal;
         if (typeof payload.interactive_auto_reply === "boolean") {
             interactiveAutoReplyEnabled = payload.interactive_auto_reply;
         }
@@ -1492,6 +1570,9 @@
         if (typeof payload.status === "string" && payload.status) {
             statusEl.textContent = payload.status;
             terminal = terminalStatuses.has(payload.status);
+            if (!wasTerminal && terminal) {
+                terminalProtocolReloadDone = false;
+            }
             if (terminal) {
                 clearWaitingUserWatchdog();
                 clearWaitingAuthWatchdog();
@@ -1529,6 +1610,14 @@
         } else {
             clearWaitingAuthWatchdog();
         }
+        if (terminal && !terminalProtocolReloadDone) {
+            terminalProtocolReloadDone = true;
+            Promise.all([
+                loadProtocolPanel("fcmp", fcmpAuditEl),
+                loadProtocolPanel("rasp", raspAuditEl),
+                loadProtocolPanel("orchestrator", orchestratorAuditEl),
+            ]).catch(() => {});
+        }
     }
 
     async function refreshState() {
@@ -1556,6 +1645,7 @@
 
     async function fetchProtocolHistory(streamName, attempt, fromSeq = null) {
         const query = new URLSearchParams({ stream: streamName });
+        query.set("limit", "200");
         if (attempt !== null && attempt !== undefined) {
             query.set("attempt", String(attempt));
         }
@@ -1586,6 +1676,9 @@
     }
 
     async function refreshProtocolHistory(streamName, targetEl) {
+        if (protocolRequestInFlight[streamName]) return;
+        protocolRequestInFlight[streamName] = true;
+        try {
         const fromSeq = auditCursor[streamName] > 0 ? auditCursor[streamName] + 1 : null;
         const payload = await fetchProtocolHistory(streamName, currentAttempt, fromSeq);
         if (!payload) return;
@@ -1602,9 +1695,15 @@
         }
         mergeProtocolRows(streamName, rows);
         renderProtocolRows(streamName, targetEl);
+        } finally {
+            protocolRequestInFlight[streamName] = false;
+        }
     }
 
     async function loadProtocolPanel(streamName, targetEl) {
+        if (protocolRequestInFlight[streamName]) return;
+        protocolRequestInFlight[streamName] = true;
+        try {
         targetEl.textContent = "";
         protocolRows[streamName] = [];
         protocolExpandedRowKey[streamName] = null;
@@ -1623,6 +1722,9 @@
             if (Number.isFinite(seq)) {
                 auditCursor[streamName] = Math.max(auditCursor[streamName], Math.floor(seq));
             }
+        }
+        } finally {
+            protocolRequestInFlight[streamName] = false;
         }
     }
 
@@ -1835,12 +1937,7 @@
             timelineRenderLimit = Math.min(500, timelineRenderLimit + 100);
             const payload = await fetchTimelineHistory(0, timelineRenderLimit);
             if (!payload) return;
-            timelineRows.length = 0;
-            timelineBySeq.clear();
-            const events = Array.isArray(payload.events) ? payload.events : [];
-            mergeTimelineEvents(events);
-            timelineCeiling = Number(payload.cursor_ceiling || timelineCeiling || 0);
-            timelineCursor = timelineCeiling;
+            replaceTimelineFromPayload(payload);
             renderTimeline();
         });
     }
@@ -1851,13 +1948,13 @@
         refreshProtocolHistory("fcmp", fcmpAuditEl).catch(() => {});
         refreshProtocolHistory("rasp", raspAuditEl).catch(() => {});
         refreshProtocolHistory("orchestrator", orchestratorAuditEl).catch(() => {});
-        refreshTimelineHistory().catch(() => {});
+        if (!timelineCollapsed) {
+            refreshTimelineHistory().catch(() => {});
+        }
     }, 3000);
 
     initRunFileExplorer().catch(() => {});
     bootstrapAttemptsAndPanels().catch(() => {});
-    bootstrapTimelineHistory().catch(() => {});
-
     if (!terminal) {
         connectEvents();
     }

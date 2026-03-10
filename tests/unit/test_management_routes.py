@@ -245,24 +245,26 @@ async def test_management_engine_auth_import_spec_route(monkeypatch):
             "engine": "gemini",
             "provider_id": None,
             "supported": True,
-            "required_files": [
-                {
-                    "filename": "google_accounts.json",
-                    "aliases": [],
-                    "default_path_hint": "$HOME/.gemini/google_accounts.json",
-                    "target_relpath": ".gemini/google_accounts.json",
-                    "import_validator": "gemini_google_accounts_json",
-                },
-                {
-                    "filename": "oauth_creds.json",
-                    "aliases": [],
-                    "default_path_hint": "$HOME/.gemini/oauth_creds.json",
-                    "target_relpath": ".gemini/oauth_creds.json",
-                    "import_validator": "gemini_oauth_creds_json",
-                },
-            ],
-            "optional_files": [],
-            "risk_notice_required": False,
+            "ask_user": {
+                "kind": "upload_files",
+                "prompt": "Upload credential files to complete authentication.",
+                "hint": "Select required files and submit to continue.",
+                "files": [
+                    {
+                        "name": "google_accounts.json",
+                        "required": True,
+                        "hint": "$HOME/.gemini/google_accounts.json",
+                        "accept": ".json",
+                    },
+                    {
+                        "name": "oauth_creds.json",
+                        "required": True,
+                        "hint": "$HOME/.gemini/oauth_creds.json",
+                        "accept": ".json",
+                    },
+                ],
+                "ui_hints": {"risk_notice_required": False},
+            },
         },
     )
     response = await _request("GET", "/v1/management/engines/gemini/auth/import/spec")
@@ -270,7 +272,8 @@ async def test_management_engine_auth_import_spec_route(monkeypatch):
     body = response.json()
     assert body["engine"] == "gemini"
     assert body["supported"] is True
-    assert [item["filename"] for item in body["required_files"]] == [
+    assert body["ask_user"]["kind"] == "upload_files"
+    assert [item["name"] for item in body["ask_user"]["files"]] == [
         "google_accounts.json",
         "oauth_creds.json",
     ]

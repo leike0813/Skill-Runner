@@ -685,23 +685,27 @@
         }
         clearAuthImportError();
         const { engine, providerId, spec } = authImportDialogState;
-        const requestFiles = [...(spec.required_files || []), ...(spec.optional_files || [])];
+        const askUser = spec && typeof spec.ask_user === "object" ? spec.ask_user : null;
+        const requestFiles = askUser && Array.isArray(askUser.files) ? askUser.files : [];
         const formData = new FormData();
         if (providerId) {
             formData.append("provider_id", providerId);
         }
         let hasSelectedFile = false;
         for (const fileSpec of requestFiles) {
-            const inputEl = authImportFileListEl.querySelector(`input[data-spec-name="${fileSpec.filename}"]`);
+            const fileName = String(fileSpec && fileSpec.name ? fileSpec.name : "").trim();
+            if (!fileName) continue;
+            const required = fileSpec && fileSpec.required === true;
+            const inputEl = authImportFileListEl.querySelector(`input[data-spec-name="${fileName}"]`);
             if (!(inputEl instanceof HTMLInputElement) || !inputEl.files || inputEl.files.length === 0) {
-                if (spec.required_files.some((required) => required.filename === fileSpec.filename)) {
-                    showAuthImportError(`${I18N.importNoFileSelected} (${fileSpec.filename})`);
+                if (required) {
+                    showAuthImportError(`${I18N.importNoFileSelected} (${fileName})`);
                     return;
                 }
                 continue;
             }
             const selected = inputEl.files[0];
-            formData.append("files", selected, fileSpec.filename);
+            formData.append("files", selected, fileName);
             hasSelectedFile = true;
         }
         if (!hasSelectedFile) {
@@ -759,6 +763,12 @@
                 showAuthError(I18N.errorProviderNoMethod);
                 return;
             }
+            const askUser = payload.ask_user && typeof payload.ask_user === "object" ? payload.ask_user : null;
+            const fileSpecs = askUser && Array.isArray(askUser.files) ? askUser.files : [];
+            if (!askUser || askUser.kind !== "upload_files" || fileSpecs.length === 0) {
+                showAuthError(I18N.errorNoMethodForEngine);
+                return;
+            }
             authImportDialogState = {
                 engine: normalizedEngine,
                 providerId: provider,
@@ -773,7 +783,8 @@
                 authImportSubtitleEl.textContent = `${engineLabel}${providerLabel} · ${I18N.importDialogSubtitle}`;
             }
             if (authImportRiskEl) {
-                if (payload.risk_notice_required === true) {
+                const uiHints = askUser && typeof askUser.ui_hints === "object" ? askUser.ui_hints : {};
+                if (uiHints.risk_notice_required === true) {
                     authImportRiskEl.style.display = "block";
                     authImportRiskEl.textContent = I18N.highRiskNotice;
                 } else {
@@ -782,28 +793,29 @@
                 }
             }
             authImportFileListEl.innerHTML = "";
-            const renderItem = (fileSpec, required) => {
+            const renderItem = (fileSpec) => {
+                const fileName = String(fileSpec && fileSpec.name ? fileSpec.name : "").trim();
+                if (!fileName) return;
+                const required = fileSpec && fileSpec.required === true;
                 const container = document.createElement("div");
                 container.className = "auth-import-file-item";
                 const label = document.createElement("label");
-                label.textContent = `${fileSpec.filename} (${required ? I18N.importRequired : I18N.importOptional})`;
+                label.textContent = `${fileName} (${required ? I18N.importRequired : I18N.importOptional})`;
                 container.appendChild(label);
                 const hint = document.createElement("small");
-                hint.textContent = `${I18N.importDefaultPath}: ${fileSpec.default_path_hint}`;
+                const fileHint = String(fileSpec && fileSpec.hint ? fileSpec.hint : "").trim();
+                hint.textContent = fileHint ? `${I18N.importDefaultPath}: ${fileHint}` : I18N.importDefaultPath;
                 container.appendChild(hint);
                 const input = document.createElement("input");
                 input.type = "file";
-                input.setAttribute("data-spec-name", fileSpec.filename);
+                const accept = String(fileSpec && fileSpec.accept ? fileSpec.accept : "").trim();
+                if (accept) input.accept = accept;
+                input.setAttribute("data-spec-name", fileName);
                 input.required = required;
                 container.appendChild(input);
                 authImportFileListEl.appendChild(container);
             };
-            (payload.required_files || []).forEach((fileSpec) => renderItem(fileSpec, true));
-            (payload.optional_files || []).forEach((fileSpec) => renderItem(fileSpec, false));
-            if (!payload.required_files?.length && !payload.optional_files?.length) {
-                showAuthError(I18N.errorNoMethodForEngine);
-                return;
-            }
+            fileSpecs.forEach((fileSpec) => renderItem(fileSpec));
             authImportModalEl.classList.add("show");
             authImportModalEl.setAttribute("aria-hidden", "false");
             hideAuthMenu();

@@ -294,6 +294,17 @@
           }
         }
       }
+    },
+    "parser_structured_extract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_type", "session_id_key", "response_key", "summary_max_chars"],
+      "properties": {
+        "event_type": { "type": "string", "minLength": 1 },
+        "session_id_key": { "type": "string", "minLength": 1 },
+        "response_key": { "type": "string", "minLength": 1 },
+        "summary_max_chars": { "type": "integer", "minimum": 32, "maximum": 2000 }
+      }
     }
   },
   "$defs": {

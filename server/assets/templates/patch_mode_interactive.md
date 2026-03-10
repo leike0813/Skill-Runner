@@ -18,6 +18,7 @@ Rules for `<ASK_USER_YAML>`:
    - `open_text`: free-form text input
    - `choose_one`: choose one from `options` list
    - `confirm`: yes/no confirmation
+   - `upload_files`: upload one or more files from `files` list
 4. User replies are free-form text. Do NOT require users to respond in JSON or any structured format.
 5. Keep the YAML block as concise as possible. Only include fields that provide meaningful guidance.
 6. If the block is missing or malformed, runtime will fall back to a short generic prompt. This does not block execution.

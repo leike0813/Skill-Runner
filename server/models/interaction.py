@@ -20,6 +20,7 @@ class InteractionKind(str, Enum):
     CONFIRM = "confirm"
     FILL_FIELDS = "fill_fields"
     OPEN_TEXT = "open_text"
+    UPLOAD_FILES = "upload_files"
     RISK_ACK = "risk_ack"
 
 
@@ -30,13 +31,23 @@ class InteractionOption(BaseModel):
     value: Any
 
 
+class AskUserUploadFileItem(BaseModel):
+    """One file selector item for upload_files ask_user hint."""
+
+    name: str
+    required: bool = False
+    hint: Optional[str] = None
+    accept: Optional[str] = None
+
+
 class AskUserHintPayload(BaseModel):
     """Lightweight optional ask_user hint payload for UI rendering."""
 
-    kind: Literal["open_text", "choose_one", "confirm"] = "open_text"
+    kind: Literal["open_text", "choose_one", "confirm", "upload_files"] = "open_text"
     prompt: Optional[str] = None
     hint: Optional[str] = None
     options: List[InteractionOption] = Field(default_factory=list)
+    files: List[AskUserUploadFileItem] = Field(default_factory=list)
     ui_hints: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -182,6 +193,7 @@ class PendingAuth(BaseModel):
     timeout_sec: Optional[int] = Field(default=None, ge=1)
     created_at: Optional[str] = None
     expires_at: Optional[str] = None
+    ask_user: Optional[AskUserHintPayload] = None
 
 
 class InteractionPendingResponse(BaseModel):

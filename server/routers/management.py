@@ -502,6 +502,7 @@ async def list_management_run_protocol_history(
     from_ts: str | None = Query(default=None),
     to_ts: str | None = Query(default=None),
     attempt: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=200, ge=1, le=1000),
 ):
     request_record = await run_store.get_request(request_id)
     if not request_record:
@@ -527,6 +528,7 @@ async def list_management_run_protocol_history(
             from_ts=from_ts,
             to_ts=to_ts,
             attempt=attempt,
+            limit=limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
