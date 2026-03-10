@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -8,8 +9,9 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...config import config
 from ...models import (
@@ -69,7 +71,6 @@ class EngineExecutionAdapter:
         options: dict[str, Any],
         live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> EngineRunResult:
-        is_interactive_reply_turn = "__interactive_reply_payload" in options
         if (
             self.config_composer is None
             or self.run_folder_validator is None
@@ -79,15 +80,14 @@ class EngineExecutionAdapter:
             or self.session_codec is None
         ):
             raise RuntimeError("execution adapter components are not initialized")
-        if not is_interactive_reply_turn:
-            bootstrap_ctx = AdapterExecutionContext(
-                skill=skill,
-                run_dir=run_dir,
-                input_data={},
-                options=options,
-            )
-            config_path = self.config_composer.compose(bootstrap_ctx)
-            self.run_folder_validator.validate(bootstrap_ctx, config_path)
+        bootstrap_ctx = AdapterExecutionContext(
+            skill=skill,
+            run_dir=run_dir,
+            input_data={},
+            options=options,
+        )
+        config_path = self.config_composer.compose(bootstrap_ctx)
+        self.run_folder_validator.validate(bootstrap_ctx, config_path)
 
         render_ctx = AdapterExecutionContext(
             skill=skill,
@@ -134,7 +134,7 @@ class EngineExecutionAdapter:
             repair_level=repair_level,
             turn_result=turn_result,
             runtime_warnings=process_result.runtime_warnings,
-            auth_signal_snapshot=process_result.auth_signal_snapshot,
+            auth_signal_snapshot=cast(RuntimeAuthSignal | None, process_result.auth_signal_snapshot),
         )
 
     def build_start_command(
@@ -429,8 +429,13 @@ class EngineExecutionAdapter:
         audit_dir.mkdir(parents=True, exist_ok=True)
         stdout_log_path = audit_dir / f"stdout.{attempt_number}.log"
         stderr_log_path = audit_dir / f"stderr.{attempt_number}.log"
+        io_chunks_path = audit_dir / f"io_chunks.{attempt_number}.jsonl"
         stdout_log = stdout_log_path.open("w", encoding="utf-8")
         stderr_log = stderr_log_path.open("w", encoding="utf-8")
+        io_chunks_log = io_chunks_path.open("w", encoding="utf-8")
+        io_chunks_lock = asyncio.Lock()
+        io_chunk_seq = 0
+        io_chunks_write_failed = False
 
         async def _probe_auth_detection(force: bool = False) -> None:
             nonlocal auth_signal, auth_detection_armed, last_probe_monotonic
@@ -474,7 +479,7 @@ class EngineExecutionAdapter:
             log_file: Any,
             stream_name: str,
         ) -> None:
-            nonlocal last_output_monotonic
+            nonlocal last_output_monotonic, io_chunk_seq, io_chunks_write_failed
             if stream is None:
                 return
             offset = 0
@@ -486,6 +491,29 @@ class EngineExecutionAdapter:
                 chunks.append(decoded_chunk)
                 log_file.write(decoded_chunk)
                 log_file.flush()
+                if not io_chunks_write_failed:
+                    try:
+                        async with io_chunks_lock:
+                            io_chunk_seq += 1
+                            io_chunks_log.write(
+                                json.dumps(
+                                    {
+                                        "seq": io_chunk_seq,
+                                        "ts": datetime.utcnow().isoformat(),
+                                        "stream": stream_name,
+                                        "byte_from": offset,
+                                        "byte_to": offset + len(chunk),
+                                        "payload_b64": base64.b64encode(chunk).decode("ascii"),
+                                        "encoding": "base64",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            )
+                            io_chunks_log.write("\n")
+                            io_chunks_log.flush()
+                    except OSError:
+                        io_chunks_write_failed = True
+                        logger.exception("[%s] failed to append io_chunks journal", prefix)
                 last_output_monotonic = time.monotonic()
                 if live_runtime_emitter is not None:
                     await live_runtime_emitter.on_stream_chunk(
@@ -531,6 +559,8 @@ class EngineExecutionAdapter:
         timeout_sec = self._resolve_hard_timeout(options)
         timed_out = False
         try:
+            if live_runtime_emitter is not None:
+                await live_runtime_emitter.on_process_started()
             started_monotonic = time.monotonic()
             while True:
                 if proc.returncode is not None:
@@ -576,6 +606,7 @@ class EngineExecutionAdapter:
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
             stdout_log.close()
             stderr_log.close()
+            io_chunks_log.close()
             if run_id:
                 self._active_processes().pop(run_id, None)
             process_supervisor.release(lease_id, reason="run_attempt_finalized")

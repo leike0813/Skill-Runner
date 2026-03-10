@@ -1,7 +1,10 @@
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import re
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -11,12 +14,15 @@ from server.config import config
 from server.runtime.chat_replay.factories import derive_chat_replay_rows_from_fcmp
 from server.runtime.chat_replay.live_journal import chat_replay_live_journal
 from server.runtime.protocol.event_protocol import (
+    RebuildMode,
     build_fcmp_events,
     build_rasp_events,
     compute_protocol_metrics,
     read_jsonl,
+    translate_orchestrator_event_to_fcmp_specs,
     write_jsonl,
 )
+from server.runtime.protocol.factories import make_fcmp_event
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
@@ -27,7 +33,12 @@ from server.runtime.protocol.schema_registry import (
 )
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
-from server.runtime.protocol.live_publish import flush_live_audit_mirrors
+from server.runtime.protocol.live_publish import (
+    FcmpEventPublisher,
+    LiveRuntimeEmitterImpl,
+    RaspEventPublisher,
+    flush_live_audit_mirrors,
+)
 from server.runtime.observability.contracts import (
     QueuedResumeRedriver,
     RunStorePort,
@@ -52,11 +63,13 @@ PARSER_DIAGNOSTICS_FILE_PREFIX = "parser_diagnostics"
 FCMP_EVENTS_FILE_PREFIX = "fcmp_events"
 PROTOCOL_METRICS_FILE_PREFIX = "protocol_metrics"
 ORCHESTRATOR_EVENTS_FILE_PREFIX = "orchestrator_events"
+IO_CHUNKS_FILE_PREFIX = "io_chunks"
 ATTEMPT_FILE_PATTERNS = (
     re.compile(r"^meta\.(\d+)\.json$"),
     re.compile(r"^events\.(\d+)\.jsonl$"),
     re.compile(r"^fcmp_events\.(\d+)\.jsonl$"),
     re.compile(r"^orchestrator_events\.(\d+)\.jsonl$"),
+    re.compile(r"^io_chunks\.(\d+)\.jsonl$"),
     re.compile(r"^stdout\.(\d+)\.log$"),
     re.compile(r"^stderr\.(\d+)\.log$"),
     re.compile(r"^pty-output\.(\d+)\.log$"),
@@ -1571,6 +1584,430 @@ class RunObservabilityService:
             "fcmp": audit_dir / f"{FCMP_EVENTS_FILE_PREFIX}{suffix}.jsonl",
             "metrics": audit_dir / f"{PROTOCOL_METRICS_FILE_PREFIX}{suffix}.json",
             "orchestrator": audit_dir / f"{ORCHESTRATOR_EVENTS_FILE_PREFIX}{suffix}.jsonl",
+            "io_chunks": audit_dir / f"{IO_CHUNKS_FILE_PREFIX}{suffix}.jsonl",
+        }
+
+    def _decode_io_chunks(
+        self,
+        *,
+        io_chunks_path: Path,
+    ) -> Dict[str, Any]:
+        if not io_chunks_path.exists() or not io_chunks_path.is_file():
+            return {"used": False, "reason": "missing", "stdout_raw": None, "stderr_raw": None, "diagnostics": []}
+        rows = read_jsonl(io_chunks_path)
+        if not rows:
+            return {"used": False, "reason": "empty", "stdout_raw": None, "stderr_raw": None, "diagnostics": []}
+        ordered: list[dict[str, Any]] = []
+        for index, row in enumerate(rows):
+            if isinstance(row, dict):
+                row_copy = dict(row)
+                row_copy["_index"] = index
+                ordered.append(row_copy)
+        if not ordered:
+            return {"used": False, "reason": "invalid_rows", "stdout_raw": None, "stderr_raw": None, "diagnostics": []}
+        ordered.sort(
+            key=lambda item: (
+                int(item["seq"]) if isinstance(item.get("seq"), int) and int(item["seq"]) > 0 else 10**12,
+                int(item.get("_index") or 0),
+            )
+        )
+        stdout = bytearray()
+        stderr = bytearray()
+        diagnostics: list[str] = []
+        decode_count = 0
+        for row in ordered:
+            stream_obj = row.get("stream")
+            if stream_obj not in {"stdout", "stderr"}:
+                diagnostics.append("IO_CHUNK_UNKNOWN_STREAM")
+                continue
+            payload_b64_obj = row.get("payload_b64")
+            if not isinstance(payload_b64_obj, str) or not payload_b64_obj:
+                diagnostics.append("IO_CHUNK_MISSING_PAYLOAD")
+                continue
+            try:
+                payload = base64.b64decode(payload_b64_obj, validate=True)
+            except (binascii.Error, ValueError):
+                diagnostics.append("IO_CHUNK_INVALID_BASE64")
+                continue
+            target = stdout if stream_obj == "stdout" else stderr
+            byte_from_obj = row.get("byte_from")
+            if isinstance(byte_from_obj, int) and byte_from_obj >= 0 and byte_from_obj != len(target):
+                diagnostics.append("IO_CHUNK_OFFSET_MISMATCH")
+            byte_to_obj = row.get("byte_to")
+            if isinstance(byte_from_obj, int) and isinstance(byte_to_obj, int):
+                expected = byte_from_obj + len(payload)
+                if byte_to_obj != expected:
+                    diagnostics.append("IO_CHUNK_RANGE_MISMATCH")
+            target.extend(payload)
+            decode_count += 1
+        if decode_count <= 0:
+            return {"used": False, "reason": "decode_failed", "stdout_raw": None, "stderr_raw": None, "diagnostics": diagnostics}
+        return {
+            "used": True,
+            "reason": "io_chunks",
+            "stdout_raw": bytes(stdout),
+            "stderr_raw": bytes(stderr),
+            "diagnostics": diagnostics,
+        }
+
+    def _backup_protocol_attempt_files(
+        self,
+        *,
+        paths: Dict[str, Path],
+        backup_attempt_dir: Path,
+    ) -> None:
+        backup_attempt_dir.mkdir(parents=True, exist_ok=True)
+        for key in ("events", "fcmp", "diagnostics", "metrics", "orchestrator"):
+            source = paths.get(key)
+            if source is None or not source.exists() or not source.is_file():
+                continue
+            shutil.copy2(source, backup_attempt_dir / source.name)
+
+    def _atomic_write_jsonl(self, *, path: Path, rows: list[dict[str, Any]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f"{path.name}.tmp")
+        write_jsonl(temp_path, rows)
+        temp_path.replace(path)
+
+    def _atomic_write_text(self, *, path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(f"{path.name}.tmp")
+        temp_path.write_text(text, encoding="utf-8")
+        temp_path.replace(path)
+
+    def _load_io_chunks_for_strict_replay(
+        self,
+        *,
+        io_chunks_path: Path,
+    ) -> Dict[str, Any]:
+        if not io_chunks_path.exists() or not io_chunks_path.is_file():
+            return {"used": False, "reason": "missing", "rows": [], "diagnostics": []}
+        rows = read_jsonl(io_chunks_path)
+        if not rows:
+            return {"used": False, "reason": "empty", "rows": [], "diagnostics": []}
+        ordered: list[dict[str, Any]] = []
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            row_copy = dict(row)
+            row_copy["_index"] = index
+            ordered.append(row_copy)
+        if not ordered:
+            return {"used": False, "reason": "invalid_rows", "rows": [], "diagnostics": []}
+        ordered.sort(
+            key=lambda item: (
+                int(item["seq"]) if isinstance(item.get("seq"), int) and int(item["seq"]) > 0 else 10**12,
+                int(item.get("_index") or 0),
+            )
+        )
+        diagnostics: list[str] = []
+        replay_rows: list[dict[str, Any]] = []
+        for row in ordered:
+            seq_obj = row.get("seq")
+            seq = seq_obj if isinstance(seq_obj, int) and seq_obj > 0 else None
+            stream_obj = row.get("stream")
+            stream = stream_obj if isinstance(stream_obj, str) and stream_obj in {"stdout", "stderr"} else None
+            payload_b64_obj = row.get("payload_b64")
+            payload_b64 = payload_b64_obj if isinstance(payload_b64_obj, str) and payload_b64_obj else None
+            if seq is None or stream is None or payload_b64 is None:
+                diagnostics.append("IO_CHUNK_ROW_INVALID")
+                continue
+            try:
+                payload = base64.b64decode(payload_b64, validate=True)
+            except (binascii.Error, ValueError):
+                diagnostics.append("IO_CHUNK_INVALID_BASE64")
+                continue
+            byte_from_obj = row.get("byte_from")
+            byte_to_obj = row.get("byte_to")
+            byte_from = byte_from_obj if isinstance(byte_from_obj, int) and byte_from_obj >= 0 else 0
+            expected_to = byte_from + len(payload)
+            if isinstance(byte_to_obj, int) and byte_to_obj >= byte_from:
+                byte_to = byte_to_obj
+                if byte_to != expected_to:
+                    diagnostics.append("IO_CHUNK_RANGE_MISMATCH")
+            else:
+                byte_to = expected_to
+            ts_obj = row.get("ts")
+            ts = ts_obj if isinstance(ts_obj, str) and ts_obj else None
+            replay_rows.append(
+                {
+                    "seq": seq,
+                    "ts": ts,
+                    "stream": stream,
+                    "byte_from": byte_from,
+                    "byte_to": byte_to,
+                    "text": payload.decode("utf-8", errors="replace"),
+                }
+            )
+        if not replay_rows:
+            return {"used": False, "reason": "decode_failed", "rows": [], "diagnostics": diagnostics}
+        return {
+            "used": True,
+            "reason": "io_chunks",
+            "rows": replay_rows,
+            "diagnostics": diagnostics,
+        }
+
+    async def _strict_replay_attempt(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+        engine_name: str,
+        attempt_number: int,
+        paths: Dict[str, Path],
+        attempt_meta: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        io_chunks_decode = self._load_io_chunks_for_strict_replay(io_chunks_path=paths["io_chunks"])
+        if not bool(io_chunks_decode.get("used")):
+            reason_obj = io_chunks_decode.get("reason")
+            reason = reason_obj if isinstance(reason_obj, str) and reason_obj else "unknown"
+            return {
+                "success": False,
+                "written": False,
+                "reason": f"IO_CHUNKS_REQUIRED:{reason}",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        if not paths["orchestrator"].exists() or not paths["orchestrator"].is_file():
+            return {
+                "success": False,
+                "written": False,
+                "reason": "ORCHESTRATOR_REQUIRED:missing",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        if not attempt_meta:
+            return {
+                "success": False,
+                "written": False,
+                "reason": "META_REQUIRED:missing",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        if parser_resolver is None:
+            return {
+                "success": False,
+                "written": False,
+                "reason": "PARSER_RESOLVER_REQUIRED:missing",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        adapter = parser_resolver.resolve(engine_name)
+        if adapter is None or not hasattr(adapter, "stream_parser"):
+            return {
+                "success": False,
+                "written": False,
+                "reason": "ENGINE_ADAPTER_REQUIRED:missing",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        stream_parser = getattr(adapter, "stream_parser", None)
+        if stream_parser is None:
+            return {
+                "success": False,
+                "written": False,
+                "reason": "ENGINE_STREAM_PARSER_REQUIRED:missing",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+
+        replay_chunks = list(io_chunks_decode.get("rows") or [])
+        orchestrator_rows = self._filter_valid_orchestrator_rows(
+            rows=read_jsonl(paths["orchestrator"]),
+            context=f"strict-replay:{request_id or run_dir.name}:a{attempt_number}",
+        )
+        process_obj = attempt_meta.get("process")
+        process_payload = process_obj if isinstance(process_obj, dict) else {}
+        exit_code_obj = process_payload.get("exit_code")
+        exit_code = exit_code_obj if isinstance(exit_code_obj, int) else 0
+        failure_reason_obj = process_payload.get("failure_reason")
+        failure_reason = (
+            failure_reason_obj if isinstance(failure_reason_obj, str) and failure_reason_obj else None
+        )
+        started_at = self._parse_optional_ts(attempt_meta.get("started_at"))
+        finished_at = (
+            self._parse_optional_ts(attempt_meta.get("finished_at"))
+            or self._parse_optional_ts(attempt_meta.get("updated_at"))
+        )
+        if started_at is None and replay_chunks:
+            started_at = self._parse_optional_ts(replay_chunks[0].get("ts"))
+        if finished_at is None and replay_chunks:
+            finished_at = self._parse_optional_ts(replay_chunks[-1].get("ts"))
+
+        temp_root = run_dir / AUDIT_DIR_NAME / ".strict_replay_tmp"
+        temp_run_dir = temp_root / f"attempt-{attempt_number}"
+        temp_audit_dir = temp_run_dir / AUDIT_DIR_NAME
+        temp_audit_dir.mkdir(parents=True, exist_ok=True)
+
+        fcmp_publisher = FcmpEventPublisher()
+        rasp_publisher = RaspEventPublisher()
+        emitter = LiveRuntimeEmitterImpl(
+            run_id=run_dir.name,
+            run_dir=temp_run_dir,
+            engine=engine_name,
+            attempt_number=attempt_number,
+            stream_parser=stream_parser,
+            fcmp_publisher=fcmp_publisher,
+            rasp_publisher=rasp_publisher,
+            run_handle_consumer=None,
+        )
+
+        fallback_ts = started_at or finished_at
+        timeline: list[tuple[datetime, int, int, str, dict[str, Any]]] = []
+        for index, chunk in enumerate(replay_chunks):
+            ts = self._parse_optional_ts(chunk.get("ts")) or fallback_ts
+            if ts is None:
+                shutil.rmtree(temp_root, ignore_errors=True)
+                return {
+                    "success": False,
+                    "written": False,
+                    "reason": "TIMESTAMP_EVIDENCE_REQUIRED:io_chunks",
+                    "source": "io_chunks",
+                    "event_count": 0,
+                    "fcmp_count": 0,
+                    "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+                }
+            timeline.append((ts, 1, index, "chunk", chunk))
+        for index, row in enumerate(orchestrator_rows):
+            ts = self._parse_optional_ts(row.get("ts")) or fallback_ts
+            if ts is None:
+                shutil.rmtree(temp_root, ignore_errors=True)
+                return {
+                    "success": False,
+                    "written": False,
+                    "reason": "TIMESTAMP_EVIDENCE_REQUIRED:orchestrator",
+                    "source": "io_chunks",
+                    "event_count": 0,
+                    "fcmp_count": 0,
+                    "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+                }
+            timeline.append((ts, 0, index, "orchestrator", row))
+        if started_at is None and timeline:
+            started_at = timeline[0][0]
+        if finished_at is None and timeline:
+            finished_at = timeline[-1][0]
+        if started_at is None or finished_at is None:
+            shutil.rmtree(temp_root, ignore_errors=True)
+            return {
+                "success": False,
+                "written": False,
+                "reason": "TIMESTAMP_EVIDENCE_REQUIRED:meta",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+        timeline.sort(key=lambda item: (item[0], item[1], item[2]))
+
+        await emitter.on_process_started(event_ts=started_at)
+        for ts, _priority, _index, item_kind, payload in timeline:
+            if item_kind == "orchestrator":
+                type_name_obj = payload.get("type")
+                row_data_obj = payload.get("data")
+                if not isinstance(type_name_obj, str):
+                    continue
+                row_data = row_data_obj if isinstance(row_data_obj, dict) else {}
+                specs = translate_orchestrator_event_to_fcmp_specs(
+                    engine=engine_name,
+                    type_name=type_name_obj,
+                    data=row_data,
+                    updated_at=payload.get("ts") if isinstance(payload.get("ts"), str) else None,
+                    default_attempt_number=attempt_number,
+                )
+                for spec in specs:
+                    spec_type_obj = spec.get("type_name")
+                    spec_data_obj = spec.get("data")
+                    if not isinstance(spec_type_obj, str) or not isinstance(spec_data_obj, dict):
+                        continue
+                    fcmp_event = make_fcmp_event(
+                        run_id=run_dir.name,
+                        seq=1,
+                        engine=engine_name,
+                        type_name=spec_type_obj,
+                        data=spec_data_obj,
+                        attempt_number=attempt_number,
+                        raw_ref=None,
+                        ts=ts,
+                    )
+                    fcmp_publisher.publish(run_dir=temp_run_dir, event=fcmp_event)
+                continue
+            await emitter.on_stream_chunk(
+                stream=str(payload.get("stream") or "stdout"),
+                text=str(payload.get("text") or ""),
+                byte_from=max(0, int(payload.get("byte_from") or 0)),
+                byte_to=max(0, int(payload.get("byte_to") or 0)),
+                event_ts=ts,
+            )
+        await emitter.on_process_exit(
+            exit_code=exit_code,
+            failure_reason=failure_reason,
+            event_ts=finished_at,
+        )
+        await asyncio.gather(
+            fcmp_publisher.drain_mirror(run_id=run_dir.name),
+            rasp_publisher.drain_mirror(run_id=run_dir.name),
+        )
+
+        temp_events_path = temp_audit_dir / f"{RASP_EVENTS_FILE_PREFIX}.{attempt_number}.jsonl"
+        temp_fcmp_path = temp_audit_dir / f"{FCMP_EVENTS_FILE_PREFIX}.{attempt_number}.jsonl"
+        if not temp_events_path.exists() or not temp_fcmp_path.exists():
+            shutil.rmtree(temp_root, ignore_errors=True)
+            return {
+                "success": False,
+                "written": False,
+                "reason": "STRICT_REPLAY_OUTPUT_MISSING",
+                "source": "io_chunks",
+                "event_count": 0,
+                "fcmp_count": 0,
+                "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
+            }
+
+        rasp_rows = self._filter_valid_rasp_rows(
+            rows=read_jsonl(temp_events_path),
+            context=f"strict-replay:rasp:{request_id or run_dir.name}:a{attempt_number}",
+        )
+        fcmp_rows = self._filter_valid_fcmp_rows(
+            rows=read_jsonl(temp_fcmp_path),
+            context=f"strict-replay:fcmp:{request_id or run_dir.name}:a{attempt_number}",
+        )
+        diagnostics_rows = [
+            row
+            for row in rasp_rows
+            if isinstance(row.get("event"), dict) and row["event"].get("category") == "diagnostic"
+        ]
+        from server.models import RuntimeEventEnvelope  # local import to avoid runtime cycles
+
+        rasp_models = [RuntimeEventEnvelope.model_validate(row) for row in rasp_rows]
+        metrics_payload = compute_protocol_metrics(rasp_models)
+
+        metrics_text = json.dumps(metrics_payload, ensure_ascii=False, indent=2)
+        self._atomic_write_jsonl(path=paths["events"], rows=rasp_rows)
+        self._atomic_write_jsonl(path=paths["fcmp"], rows=fcmp_rows)
+        self._atomic_write_jsonl(path=paths["diagnostics"], rows=diagnostics_rows)
+        self._atomic_write_text(path=paths["metrics"], text=metrics_text)
+        self.reindex_fcmp_global_seq(run_dir)
+        shutil.rmtree(temp_root, ignore_errors=True)
+        return {
+            "success": True,
+            "written": True,
+            "reason": "OK",
+            "source": "io_chunks",
+            "event_count": len(rasp_rows),
+            "fcmp_count": len(fcmp_rows),
+            "diagnostics": list(io_chunks_decode.get("diagnostics") or []),
         }
 
     async def _resolve_engine_name(self, request_id: Optional[str]) -> str:
@@ -1647,6 +2084,88 @@ class RunObservabilityService:
         interaction_count = await maybe_await(self._run_store().get_interaction_count(request_id))
         return max(1, int(interaction_count) + 1)
 
+    async def rebuild_protocol_history(
+        self,
+        *,
+        run_dir: Path,
+        request_id: Optional[str],
+    ) -> Dict[str, Any]:
+        rebuild_mode = "strict_replay"
+        attempts = self._list_available_attempts(run_dir)
+        if not attempts:
+            attempts = [1]
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+        backup_root = run_dir / AUDIT_DIR_NAME / "rebuild_backups" / timestamp
+        engine_name = await self._resolve_engine_name(request_id)
+        attempt_results: list[dict[str, Any]] = []
+        success = True
+        for attempt_number in attempts:
+            paths = self._protocol_paths(run_dir, attempt_number)
+            backup_attempt_dir = backup_root / f"attempt-{attempt_number}"
+            self._backup_protocol_attempt_files(
+                paths=paths,
+                backup_attempt_dir=backup_attempt_dir,
+            )
+            attempt_meta = self._read_attempt_meta(paths["audit_dir"], attempt_number)
+            attempt_engine_obj = attempt_meta.get("engine")
+            attempt_engine = (
+                attempt_engine_obj
+                if isinstance(attempt_engine_obj, str) and attempt_engine_obj.strip()
+                else engine_name
+            )
+            try:
+                replay_result = await self._strict_replay_attempt(
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    engine_name=attempt_engine,
+                    attempt_number=attempt_number,
+                    paths=paths,
+                    attempt_meta=attempt_meta,
+                )
+                success = success and bool(replay_result.get("success"))
+                attempt_results.append(
+                    {
+                        "attempt": attempt_number,
+                        "source": str(replay_result.get("source") or "io_chunks"),
+                        "written": bool(replay_result.get("written")),
+                        "reason": str(replay_result.get("reason") or "UNKNOWN"),
+                        "event_count": int(replay_result.get("event_count") or 0),
+                        "fcmp_count": int(replay_result.get("fcmp_count") or 0),
+                        "diagnostics": list(replay_result.get("diagnostics") or []),
+                        "mode": rebuild_mode,
+                        "success": bool(replay_result.get("success")),
+                    }
+                )
+            except (OSError, RuntimeError, ValueError, ProtocolSchemaViolation, json.JSONDecodeError) as exc:
+                success = False
+                attempt_results.append(
+                    {
+                        "attempt": attempt_number,
+                        "source": "failed",
+                        "written": False,
+                        "reason": f"STRICT_REPLAY_FAILED:{type(exc).__name__}",
+                        "event_count": 0,
+                        "fcmp_count": 0,
+                        "diagnostics": [f"REBUILD_FAILED:{type(exc).__name__}"],
+                        "mode": rebuild_mode,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                )
+                logger.exception(
+                    "protocol rebuild failed run=%s attempt=%s",
+                    run_dir.name,
+                    attempt_number,
+                )
+        return {
+            "request_id": request_id,
+            "run_id": run_dir.name,
+            "mode": rebuild_mode,
+            "success": success,
+            "backup_dir": str(backup_root),
+            "attempts": attempt_results,
+        }
+
     async def _materialize_protocol_stream(
         self,
         *,
@@ -1654,7 +2173,10 @@ class RunObservabilityService:
         request_id: Optional[str],
         status_payload: Dict[str, Any],
         attempt_number: Optional[int] = None,
-    ) -> Dict[str, List[Dict[str, Any]]]:
+        force_rebuild: bool = False,
+        prefer_io_chunks: bool = False,
+        rebuild_mode: RebuildMode = "canonical",
+    ) -> Dict[str, Any]:
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         run_id = run_dir.name
@@ -1669,21 +2191,36 @@ class RunObservabilityService:
         audit_dir = run_dir / AUDIT_DIR_NAME
         attempt_meta = self._read_attempt_meta(audit_dir, attempt_number)
         attempt_status_obj = attempt_meta.get("status")
-        attempt_status = (
-            attempt_status_obj
-            if isinstance(attempt_status_obj, str) and attempt_status_obj
-            else status
-        )
+        if isinstance(attempt_status_obj, str) and attempt_status_obj:
+            attempt_status = attempt_status_obj
+        elif rebuild_mode == "forensic":
+            attempt_status = ""
+        else:
+            attempt_status = status
 
         attempted_stdout = audit_dir / f"stdout.{attempt_number}.log"
         attempted_stderr = audit_dir / f"stderr.{attempt_number}.log"
         attempted_pty = audit_dir / f"pty-output.{attempt_number}.log"
+        paths = self._protocol_paths(run_dir, attempt_number)
         stdout_path = attempted_stdout
         stderr_path = attempted_stderr
         pty_path = attempted_pty if attempted_pty.exists() else None
+        io_chunks_decode = (
+            self._decode_io_chunks(io_chunks_path=paths["io_chunks"])
+            if prefer_io_chunks
+            else {"used": False, "reason": "disabled", "stdout_raw": None, "stderr_raw": None, "diagnostics": []}
+        )
+        io_chunks_used = bool(io_chunks_decode.get("used"))
+        source_mode = "io_chunks" if io_chunks_used else "logs"
+        fallback_used = prefer_io_chunks and not io_chunks_used
+        rebuild_diagnostics: list[str] = list(io_chunks_decode.get("diagnostics") or [])
+        if fallback_used:
+            reason_obj = io_chunks_decode.get("reason")
+            reason = reason_obj if isinstance(reason_obj, str) and reason_obj else "unknown"
+            rebuild_diagnostics.append(f"IO_CHUNKS_FALLBACK:{reason}")
 
         # Strict audit-only mode: never fallback to legacy run_dir/logs.
-        if not stdout_path.exists() and not stderr_path.exists() and pty_path is None:
+        if not io_chunks_used and not stdout_path.exists() and not stderr_path.exists() and pty_path is None:
             warning_payload = {
                 "ts": datetime.utcnow().isoformat(),
                 "event": {"category": "diagnostic", "type": "diagnostic.warning"},
@@ -1692,7 +2229,6 @@ class RunObservabilityService:
                     "attempt_number": attempt_number,
                 },
             }
-            paths = self._protocol_paths(run_dir, attempt_number)
             write_jsonl(paths["events"], [])
             write_jsonl(paths["fcmp"], [])
             write_jsonl(paths["diagnostics"], [warning_payload])
@@ -1719,7 +2255,13 @@ class RunObservabilityService:
                 request_id or run_id,
                 attempt_number,
             )
-            return {"rasp_events": [], "fcmp_events": []}
+            return {
+                "rasp_events": [],
+                "fcmp_events": [],
+                "source_mode": source_mode,
+                "fallback_used": fallback_used,
+                "rebuild_diagnostics": rebuild_diagnostics,
+            }
         completion_obj = attempt_meta.get("completion")
         completion_payload: Optional[Dict[str, Any]] = (
             completion_obj if isinstance(completion_obj, dict) else None
@@ -1747,9 +2289,13 @@ class RunObservabilityService:
             rows=read_jsonl(self._protocol_paths(run_dir, attempt_number)["orchestrator"]),
             context=f"materialize:{request_id or run_id}",
         )
-        existing_fcmp_rows = self._filter_valid_fcmp_rows(
-            rows=read_jsonl(self._protocol_paths(run_dir, attempt_number)["fcmp"]),
-            context=f"materialize-existing:{request_id or run_id}",
+        existing_fcmp_rows = (
+            []
+            if force_rebuild
+            else self._filter_valid_fcmp_rows(
+                rows=read_jsonl(paths["fcmp"]),
+                context=f"materialize-existing:{request_id or run_id}",
+            )
         )
         status_updated_at_obj = (
             attempt_meta.get("finished_at")
@@ -1776,8 +2322,11 @@ class RunObservabilityService:
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             pty_path=pty_path,
+            stdout_raw=io_chunks_decode.get("stdout_raw"),
+            stderr_raw=io_chunks_decode.get("stderr_raw"),
             completion=completion_payload,
             parser_resolver=parser_resolver,
+            rebuild_mode=rebuild_mode,
         )
         rasp_rows = [model.model_dump(mode="json") for model in rasp_models]
         for row in rasp_rows:
@@ -1796,13 +2345,13 @@ class RunObservabilityService:
                 orchestrator_events=orchestrator_events,
                 effective_session_timeout_sec=effective_session_timeout_sec,
                 completion=completion_payload,
+                rebuild_mode=rebuild_mode,
             )
             fcmp_rows = [model.model_dump(mode="json") for model in fcmp_models]
             for row in fcmp_rows:
                 validate_fcmp_event(row)
         metrics_payload = compute_protocol_metrics(rasp_models)
 
-        paths = self._protocol_paths(run_dir, attempt_number)
         write_jsonl(paths["events"], rasp_rows)
         write_jsonl(
             paths["diagnostics"],
@@ -1813,7 +2362,7 @@ class RunObservabilityService:
                 and row["event"].get("category") == "diagnostic"
             ],
         )
-        if not existing_fcmp_rows:
+        if force_rebuild or not existing_fcmp_rows:
             write_jsonl(paths["fcmp"], fcmp_rows)
         self.reindex_fcmp_global_seq(run_dir)
         paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
@@ -1821,7 +2370,14 @@ class RunObservabilityService:
             json.dumps(metrics_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        return {"rasp_events": rasp_rows, "fcmp_events": fcmp_rows}
+        return {
+            "rasp_events": rasp_rows,
+            "fcmp_events": fcmp_rows,
+            "source_mode": source_mode,
+            "fallback_used": fallback_used,
+            "rebuild_diagnostics": rebuild_diagnostics,
+            "mode": rebuild_mode,
+        }
 
     def _read_attempt_meta(self, audit_dir: Path, attempt_number: int) -> Dict[str, Any]:
         meta_path = audit_dir / f"meta.{attempt_number}.json"

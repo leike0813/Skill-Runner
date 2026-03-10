@@ -32,6 +32,7 @@ class RunAuditContract(BaseModel):
     stdin_path: str | None = None
     stdout_path: str
     stderr_path: str
+    io_chunks_path: str
     pty_output_path: str
     fs_before_path: str | None = None
     fs_after_path: str | None = None

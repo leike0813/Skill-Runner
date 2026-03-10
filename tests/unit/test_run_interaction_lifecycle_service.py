@@ -1,10 +1,9 @@
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from server.models import EngineInteractiveProfile, EngineSessionHandle, EngineSessionHandleType
+from server.models import EngineInteractiveProfile
 from server.services.orchestration.run_interaction_lifecycle_service import (
     RunInteractionLifecycleService,
 )
@@ -75,17 +74,6 @@ class _CaptureStore:
         return [row for row in self.history if row["request_id"] == request_id]
 
 
-class _AdapterWithSessionHandle:
-    def extract_session_handle(self, raw_stdout: str, turn_index: int):
-        _ = raw_stdout
-        return EngineSessionHandle(
-            engine="codex",
-            handle_type=EngineSessionHandleType.SESSION_ID,
-            handle_value=f"thread-{turn_index}",
-            created_at_turn=turn_index,
-        )
-
-
 @pytest.mark.asyncio
 async def test_persist_waiting_interaction_preserves_current_attempt_as_source_attempt(tmp_path: Path):
     service = RunInteractionLifecycleService()
@@ -104,9 +92,17 @@ async def test_persist_waiting_interaction_preserves_current_attempt_as_source_a
         "default_decision_policy": "engine_judgement",
         "required_fields": [],
     }
+    await store.set_engine_session_handle(
+        "req-1",
+        {
+            "engine": "codex",
+            "handle_type": "session_id",
+            "handle_value": "thread-existing",
+            "created_at_turn": 1,
+        },
+    )
 
     status = await service.persist_waiting_interaction(
-        adapter=_AdapterWithSessionHandle(),
         run_id="run-1",
         run_dir=run_dir,
         request_id="req-1",
@@ -114,7 +110,6 @@ async def test_persist_waiting_interaction_preserves_current_attempt_as_source_a
         profile=profile,
         interactive_auto_reply=False,
         pending_interaction=pending_interaction,
-        raw_runtime_output=json.dumps({"ask_user": {"prompt": "Please provide more information."}}),
         run_store_backend=store,
         append_internal_schema_warning=lambda **kwargs: warnings.append(kwargs),
         append_orchestrator_event=lambda **kwargs: orchestrator_events.append(kwargs),
@@ -131,9 +126,41 @@ async def test_persist_waiting_interaction_preserves_current_attempt_as_source_a
     assert ask_user_row["source_attempt"] == 2
     assert ask_user_row["payload"]["source_attempt"] == 2
     assert store.engine_session_handle is not None
-    assert store.engine_session_handle["payload"]["handle_value"] == "thread-1"
+    assert store.engine_session_handle["payload"]["handle_value"] == "thread-existing"
     assert orchestrator_events
     assert orchestrator_events[0]["attempt_number"] == 2
+
+
+@pytest.mark.asyncio
+async def test_persist_waiting_interaction_fails_when_handle_missing(tmp_path: Path) -> None:
+    service = RunInteractionLifecycleService()
+    run_dir = tmp_path / "run-no-handle"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    store = _CaptureStore()
+    profile = EngineInteractiveProfile(reason="probe_ok", session_timeout_sec=900)
+    pending_interaction = {
+        "interaction_id": 1,
+        "kind": "open_text",
+        "prompt": "Please provide more information.",
+        "options": [],
+        "ui_hints": {},
+        "default_decision_policy": "engine_judgement",
+        "required_fields": [],
+    }
+
+    status = await service.persist_waiting_interaction(
+        run_id="run-1",
+        run_dir=run_dir,
+        request_id="req-1",
+        attempt_number=1,
+        profile=profile,
+        interactive_auto_reply=False,
+        pending_interaction=pending_interaction,
+        run_store_backend=store,
+        append_internal_schema_warning=lambda **kwargs: None,
+        append_orchestrator_event=lambda **kwargs: None,
+    )
+    assert status == "SESSION_RESUME_FAILED"
 
 
 def test_infer_pending_interaction_fallback_uses_generic_prompt() -> None:

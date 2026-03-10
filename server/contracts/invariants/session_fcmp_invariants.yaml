@@ -304,3 +304,9 @@ ordering_rules:
     rule: low_confidence_auth_signal_must_not_enter_waiting_auth
   - id: OR-57
     rule: rasp_auth_signal_diagnostic_payload_structured
+  - id: OR-58
+    rule: rasp_turn_marker_per_attempt_unique
+  - id: OR-59
+    rule: rasp_turn_marker_ordered
+  - id: OR-60
+    rule: fcmp_must_not_emit_assistant_turn_markers

@@ -33,6 +33,7 @@ class RuntimeStreamRawRow(TypedDict):
     line: str
     byte_from: int
     byte_to: int
+    ts: NotRequired[str | None]
 
 
 class RuntimeStreamRawRef(TypedDict):
@@ -42,6 +43,7 @@ class RuntimeStreamRawRef(TypedDict):
 
 
 class RuntimeAssistantMessage(TypedDict):
+    message_id: NotRequired[str]
     text: str
     raw_ref: NotRequired[RuntimeStreamRawRef | None]
 
@@ -65,13 +67,49 @@ class RuntimeStructuredPayload(TypedDict, total=False):
     raw_ref: RuntimeStreamRawRef | None
 
 
+class RuntimeProcessEvent(TypedDict, total=False):
+    process_type: Literal["reasoning", "tool_call", "command_execution"]
+    message_id: str
+    text: str | None
+    summary: str
+    details: dict[str, Any]
+    classification: str
+    raw_ref: RuntimeStreamRawRef | None
+
+
+class RuntimeTurnMarker(TypedDict, total=False):
+    marker: Literal["start", "complete"]
+    raw_ref: RuntimeStreamRawRef | None
+    data: dict[str, Any]
+
+
+class RuntimeRunHandle(TypedDict, total=False):
+    handle_id: str
+    raw_ref: RuntimeStreamRawRef | None
+
+
 class LiveParserEmission(TypedDict):
-    kind: Literal["assistant_message", "diagnostic"]
+    kind: Literal[
+        "assistant_message",
+        "diagnostic",
+        "process_event",
+        "turn_completed",
+        "turn_marker",
+        "run_handle",
+    ]
+    message_id: NotRequired[str]
     text: NotRequired[str]
     code: NotRequired[str]
+    marker: NotRequired[Literal["start", "complete"]]
+    process_type: NotRequired[Literal["reasoning", "tool_call", "command_execution"]]
+    summary: NotRequired[str]
+    details: NotRequired[dict[str, Any]]
+    classification: NotRequired[str]
     raw_ref: NotRequired[RuntimeStreamRawRef | None]
     session_id: NotRequired[str | None]
     structured_type: NotRequired[str | None]
+    handle_id: NotRequired[str]
+    turn_complete_data: NotRequired[dict[str, Any]]
 
 
 class RuntimeStreamParseResult(TypedDict):
@@ -83,6 +121,12 @@ class RuntimeStreamParseResult(TypedDict):
     diagnostics: list[str]
     structured_types: list[str]
     structured_payloads: NotRequired[list[RuntimeStructuredPayload]]
+    process_events: NotRequired[list[RuntimeProcessEvent]]
+    turn_markers: NotRequired[list[RuntimeTurnMarker]]
+    run_handle: NotRequired[RuntimeRunHandle]
+    turn_started: NotRequired[bool]
+    turn_completed: NotRequired[bool]
+    turn_complete_data: NotRequired[dict[str, Any]]
     auth_signal: NotRequired[RuntimeAuthSignal]
 
 

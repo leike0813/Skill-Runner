@@ -139,6 +139,11 @@ sequenceDiagram
 - `turn.succeeded` -> terminal `conversation.state.changed(... to=succeeded, data.terminal.status=succeeded)`
 - `turn.failed` / `run.canceled` -> terminal `conversation.state.changed(... to=failed|canceled, data.terminal.status=failed|canceled)`
 - failed/canceled terminal SHOULD 在 `data.terminal.error.code/message` 中携带错误摘要（message 为长度受控摘要）。
+- 过程语义映射：`agent.reasoning/tool_call/command_execution` 必须映射为 `assistant.reasoning/tool_call/command_execution`。
+- `agent.turn_start/agent.turn_complete` 仅属于 RASP 审计层，不映射到 FCMP（FCMP 不允许 `assistant.turn_*`）。
+- `agent.turn_complete.data` 允许承载结构化统计信息，但该数据不参与 FCMP 状态机映射。
+- `lifecycle.run_handle` 仅属于 RASP 审计层，用于承载 run 句柄（`data.handle_id`），不映射到 FCMP/chat。
+- 同一 `message_id` 的收敛顺序固定为 `assistant.message.promoted -> assistant.message.final`。
 
 ## 6) 会话中鉴权流（waiting_auth -> queued -> running）
 

@@ -888,7 +888,9 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in response.text
-    assert "event: chat_event" in response.text
+    assert '"status": "succeeded"' in response.text
+    assert '"replay_source": "audit"' in response.text
+    assert "event: chat_event" not in response.text
     assert "event: stdout" not in response.text
     assert "event: stderr" not in response.text
     assert "event: end" not in response.text
@@ -975,8 +977,9 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
 
     first = await _request("GET", "/v1/jobs/req-2/events")
     assert first.status_code == 200
-    assert "event: chat_event" in first.text
-    assert "\"user.input.required\"" in first.text
+    assert "event: chat_event" not in first.text
+    assert '"status": "waiting_user"' in first.text
+    assert '"pending_interaction_id": 1' in first.text
 
     stdout_path.write_text("part-1\npart-2\n", encoding="utf-8")
     _write_state_file(run_dir, request_id="req-2", status="succeeded")
@@ -1025,9 +1028,9 @@ async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch
 
     response = await _request("GET", "/v1/jobs/req-canceled/events")
     assert response.status_code == 200
-    assert "\"conversation.state.changed\"" in response.text
-    assert "\"to\": \"canceled\"" in response.text
-    assert "\"CANCELED\"" in response.text
+    assert "event: snapshot" in response.text
+    assert '"status": "canceled"' in response.text
+    assert "event: chat_event" not in response.text
 
 
 @pytest.mark.asyncio

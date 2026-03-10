@@ -107,6 +107,38 @@ def test_validate_rasp_event_accepts_parsed_json_payload() -> None:
     assert validate_rasp_event(payload) == payload
 
 
+def test_validate_rasp_event_accepts_run_handle_payload() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 4,
+        "ts": "2026-03-10T00:00:04Z",
+        "source": {"engine": "codex", "parser": "live_semantic", "confidence": 0.95},
+        "event": {"category": "lifecycle", "type": "lifecycle.run_handle"},
+        "data": {"handle_id": "thread-123"},
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": {"attempt_number": 1, "stream": "stdout", "byte_from": 0, "byte_to": 32, "encoding": "utf-8"},
+    }
+    assert validate_rasp_event(payload) == payload
+
+
+def test_validate_rasp_event_accepts_turn_complete_structured_payload() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 5,
+        "ts": "2026-03-10T00:00:05Z",
+        "source": {"engine": "codex", "parser": "live_semantic", "confidence": 0.95},
+        "event": {"category": "agent", "type": "agent.turn_complete"},
+        "data": {"usage": {"input_tokens": 100, "output_tokens": 12}},
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": None,
+    }
+    assert validate_rasp_event(payload) == payload
+
+
 def test_validate_fcmp_event_accepts_optional_correlation() -> None:
     payload = {
         "protocol_version": "fcmp/1.0",

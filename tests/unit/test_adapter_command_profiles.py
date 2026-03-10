@@ -110,7 +110,7 @@ def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
     assert without_profile == ["/usr/bin/gemini", "hello"]
 
 
-def test_codex_resume_command_filters_profile_flags(monkeypatch) -> None:
+def test_codex_resume_command_preserves_profile_flags(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 
     adapter = CodexExecutionAdapter()
@@ -136,14 +136,17 @@ def test_codex_resume_command_filters_profile_flags(monkeypatch) -> None:
     assert command == [
         "/usr/bin/codex",
         "exec",
+        "-p",
+        "skill-runner",
+        "--profile=other",
         "resume",
         "--json",
         "--full-auto",
         "sess-codex",
         "next turn",
     ]
-    assert "-p" not in command
-    assert "--profile=other" not in command
+    assert "-p" in command
+    assert "--profile=other" in command
 
 
 def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None:

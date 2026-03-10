@@ -87,6 +87,7 @@ class ChatReplayKind(str, Enum):
 
     INTERACTION_REPLY = "interaction_reply"
     AUTH_SUBMISSION = "auth_submission"
+    ASSISTANT_PROCESS = "assistant_process"
     ASSISTANT_FINAL = "assistant_final"
     ORCHESTRATION_NOTICE = "orchestration_notice"
 
@@ -109,6 +110,10 @@ class FcmpEventType(str, Enum):
     """Canonical FCMP event type names for public stream contracts."""
 
     CONVERSATION_STATE_CHANGED = "conversation.state.changed"
+    ASSISTANT_REASONING = "assistant.reasoning"
+    ASSISTANT_TOOL_CALL = "assistant.tool_call"
+    ASSISTANT_COMMAND_EXECUTION = "assistant.command_execution"
+    ASSISTANT_MESSAGE_PROMOTED = "assistant.message.promoted"
     ASSISTANT_MESSAGE_FINAL = "assistant.message.final"
     USER_INPUT_REQUIRED = "user.input.required"
     AUTH_REQUIRED = "auth.required"

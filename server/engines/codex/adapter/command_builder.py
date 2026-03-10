@@ -23,14 +23,34 @@ class CodexCommandBuilder:
             return flags
         return self._adapter._apply_landlock_flag_fallback(flags)  # noqa: SLF001
 
-    def _strip_resume_profile_flags(self, flags: list[str]) -> list[str]:
-        return self._adapter._strip_resume_profile_flags(flags)  # noqa: SLF001
-
     def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
         return self._adapter._resolve_profile_flags(  # noqa: SLF001
             action=action,
             use_profile_defaults=use_profile_defaults,
         )
+
+    @staticmethod
+    def _split_exec_and_resume_flags(flags: list[str]) -> tuple[list[str], list[str]]:
+        exec_flags: list[str] = []
+        resume_flags: list[str] = []
+        idx = 0
+        while idx < len(flags):
+            token = flags[idx]
+            if token in {"-p", "--profile"}:
+                exec_flags.append(token)
+                if idx + 1 < len(flags):
+                    exec_flags.append(flags[idx + 1])
+                    idx += 2
+                    continue
+                idx += 1
+                continue
+            if token.startswith("--profile="):
+                exec_flags.append(token)
+                idx += 1
+                continue
+            resume_flags.append(token)
+            idx += 1
+        return exec_flags, resume_flags
 
     def build_start_with_options(
         self,
@@ -90,14 +110,14 @@ class CodexCommandBuilder:
             ]
             defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=False)
             merged = merge_cli_args(defaults, flags)
-            merged = self._strip_resume_profile_flags(merged)
             merged = self._apply_landlock_flag_fallback(merged)
-            return [executable, "exec", "resume", *merged, thread_id, prompt]
+            exec_flags, resume_flags = self._split_exec_and_resume_flags(merged)
+            return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]
         defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=profile_defaults)
         merged = merge_cli_args(defaults, [])
-        merged = self._strip_resume_profile_flags(merged)
         merged = self._apply_landlock_flag_fallback(merged)
-        return [executable, "exec", "resume", *merged, thread_id, prompt]
+        exec_flags, resume_flags = self._split_exec_and_resume_flags(merged)
+        return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]
 
     def build_resume(
         self,

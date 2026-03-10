@@ -17,4 +17,4 @@ def test_agent_messages_are_not_filtered_by_legacy_done_message_guard() -> None:
     content = _template()
     assert "function isStructuredDoneMessage(text)" not in content
     assert "if (cleaned && !isStructuredDoneMessage(cleaned))" not in content
-    assert "function appendChatBubble(role, text, key)" in content
+    assert "function appendChatBubble(role, text, key, event = null)" in content

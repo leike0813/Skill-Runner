@@ -83,6 +83,10 @@ stateDiagram-v2
 - `queued -> running` 表示新 attempt 已 materialize；callback 完成本身不等价于 started
 - `pending_auth_method_selection` 与 `pending_auth` 是 `waiting_auth` 的互斥 read-model，不允许并存为两个当前 owner
 - `waiting_user` 与 `waiting_auth` 都必须满足 single-owner / single-resume-winner
+- `assistant.reasoning/tool_call/command_execution` 等过程事件只属于观测层，不得触发状态迁移
+- `agent.turn_start/agent.turn_complete` 为 RASP 审计锚点，不属于 FCMP 状态迁移事件
+- `agent.turn_complete.data` 可携带引擎结构化统计信息（例如 usage/tokens/cost/stats），不得影响状态迁移判定
+- 无回合结束信号时，仅 `succeeded|waiting_user` 允许 fallback 提升为 final；`failed|canceled` 禁止 fallback 提升
 - `waiting_auth -> queued` 的唯一合法触发是 canonical `auth.completed`
 - `auth.completed` 的唯一合法来源是 auth session terminal success 或显式 callback/submission completion
 - `waiting_auth` 内部必须区分两条子路径：

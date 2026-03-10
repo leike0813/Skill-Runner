@@ -54,6 +54,56 @@
         .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
         .chat-item.system { background: #f3f4f6; }
         .chat-item.user { background: #e8f5ec; }
+        .chat-item.thinking { border-style: dashed; border-color: #bfdbfe; background: #eff6ff; cursor: pointer; }
+        .chat-thinking-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .chat-thinking-title {
+            color: #1e3a8a;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .chat-thinking-arrow {
+            color: #1e3a8a;
+            font-size: 12px;
+            line-height: 1;
+            user-select: none;
+        }
+        .chat-thinking-latest {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #1f2937;
+            white-space: pre-wrap;
+        }
+        .chat-thinking-meta {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #64748b;
+        }
+        .chat-thinking-list {
+            margin-top: 8px;
+            display: grid;
+            gap: 6px;
+        }
+        .chat-thinking-item {
+            border: 1px solid #dbeafe;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 6px 8px;
+        }
+        .chat-thinking-item-meta {
+            font-size: 11px;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+        .chat-thinking-item-body {
+            font-size: 12px;
+            color: #0f172a;
+            white-space: pre-wrap;
+        }
         .stderr-window {
             max-height: 220px;
             overflow: auto;
@@ -366,9 +416,11 @@
         {% set header_back_href = "/ui/runs" %}
         {% set header_back_label = t("ui.run_detail.back_runs", default="← Back to Runs") %}
         {% include "ui/partials/page_header.html" %}
-        <div style="display:flex; justify-content:flex-end; margin:6px 0 0;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin:6px 0 0;">
+            <button id="rebuild-protocol-btn" type="button">{{ t("ui.run_detail.rebuild_protocol", default="重构协议") }}</button>
             <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
         </div>
+        <div id="protocol-rebuild-result" class="meta"></div>
         <div class="meta">{{ t("ui.run_detail.meta_run_id", default="run_id:") }} {{ detail.run_id }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_skill", default="skill:") }} {{ detail.skill_id or "-" }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_engine", default="engine:") }} {{ detail.engine or "-" }}</div>
@@ -490,6 +542,7 @@
 
 {% block extra_scripts %}
 <script src="/static/js/file_explorer.js"></script>
+<script src="/static/js/chat_thinking_core.js"></script>
 <script>
 (function () {
     const I18N = {
@@ -505,6 +558,13 @@
         roleAgent: {{ t("ui.run_detail.role_agent", default="Agent") | tojson }},
         roleUser: {{ t("ui.run_detail.role_user", default="User") | tojson }},
         roleSystem: {{ t("ui.run_detail.role_system", default="System") | tojson }},
+        roleThinking: {{ t("ui.run_detail.role_thinking", default="Agent Thinking") | tojson }},
+        thinkingCollapsedPrefix: {{ t("ui.run_detail.thinking_collapsed_prefix", default="Thinking (latest)") | tojson }},
+        thinkingExpand: {{ t("ui.run_detail.thinking_expand", default="Expand") | tojson }},
+        thinkingCollapse: {{ t("ui.run_detail.thinking_collapse", default="Collapse") | tojson }},
+        processReasoning: {{ t("ui.run_detail.process_reasoning", default="Reasoning") | tojson }},
+        processToolCall: {{ t("ui.run_detail.process_tool_call", default="Tool call") | tojson }},
+        processCommandExecution: {{ t("ui.run_detail.process_command_execution", default="Command execution") | tojson }},
         metaAttemptPrefix: {{ t("ui.run_detail.meta_attempt_prefix", default="attempt") | tojson }},
         metaSeqPrefix: {{ t("ui.run_detail.meta_seq_prefix", default="seq") | tojson }},
         rawRefLabel: {{ t("ui.run_detail.raw_ref_label", default="raw_ref") | tojson }},
@@ -546,6 +606,9 @@
         timelineLoadMore: {{ t("ui.run_detail.timeline_load_more", default="Load earlier") | tojson }},
         timelineDetailTitle: {{ t("ui.run_detail.timeline_detail_title", default="Details") | tojson }},
         timelineReadFailed: {{ t("ui.run_detail.timeline_read_failed", default="Timeline refresh failed") | tojson }},
+        rebuildProtocolRunning: {{ t("ui.run_detail.rebuild_protocol_running", default="Rebuilding protocol...") | tojson }},
+        rebuildProtocolFailed: {{ t("ui.run_detail.rebuild_protocol_failed", default="Protocol rebuild failed") | tojson }},
+        rebuildProtocolDone: {{ t("ui.run_detail.rebuild_protocol_done", default="Protocol rebuild finished") | tojson }},
     };
     const requestId = {{ detail.request_id | tojson }};
     const runFileEntries = {{ detail.entries | tojson }};
@@ -578,10 +641,15 @@
     const attemptPrevBtn = document.getElementById("attempt-prev-btn");
     const attemptNextBtn = document.getElementById("attempt-next-btn");
     const attemptLabelEl = document.getElementById("attempt-label");
+    const rebuildProtocolBtn = document.getElementById("rebuild-protocol-btn");
+    const rebuildProtocolResultEl = document.getElementById("protocol-rebuild-result");
     const cancelBtn = document.getElementById("cancel-run-btn");
 
     const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
     const renderedChatSeq = new Set();
+    let chatModel = window.SkillRunnerThinkingChatCore
+        ? window.SkillRunnerThinkingChatCore.createThinkingChatModel()
+        : null;
     const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
     const protocolRows = { fcmp: [], rasp: [], orchestrator: [] };
     const protocolRawMode = { fcmp: false, rasp: false, orchestrator: false };
@@ -650,7 +718,25 @@
         }
     }
 
+    function resetConversationRenderState() {
+        renderedChatSeq.clear();
+        if (window.SkillRunnerThinkingChatCore) {
+            chatModel = window.SkillRunnerThinkingChatCore.createThinkingChatModel();
+        } else {
+            chatModel = null;
+        }
+        if (stdoutEl) {
+            stdoutEl.textContent = "";
+        }
+    }
+
     function protocolType(row) {
+        if (row && row.event && typeof row.event === "object") {
+            const nestedType = row.event.type;
+            if (typeof nestedType === "string" && nestedType.trim()) {
+                return nestedType.trim();
+            }
+        }
         const type = row && (row.type || row.event_type || row.event || row.kind);
         return typeof type === "string" && type ? type : "event";
     }
@@ -735,19 +821,25 @@
                 const previewText = preview ? ` · ${preview}` : "";
                 return `parsed.json · ${stream}${sessionText}${previewText}`;
             }
-            const source = protocolSource(row);
-            const engine = typeof source.engine === "string" && source.engine ? source.engine : "unknown";
-            const parser = typeof source.parser === "string" && source.parser ? source.parser : "unknown";
-            const toolType = extractRaspKindLabel(type);
             const line = toSummaryText(
                 typeof data.line === "string" && data.line.trim()
                     ? data.line
                     : message,
             );
-            const code = typeof data.code === "string" && data.code ? ` code=${data.code}` : "";
-            const status = typeof data.status === "string" && data.status ? ` status=${data.status}` : "";
-            const text = line ? ` · ${line}` : "";
-            return `${toolType} · ${category}/${type} · ${engine}/${parser}${code}${status}${text}`;
+            if (type.startsWith("raw.")) {
+                return line || "";
+            }
+            if (type.startsWith("agent.")) {
+                const summary = toSummaryText(
+                    typeof data.summary === "string" && data.summary.trim()
+                        ? data.summary
+                        : (typeof data.text === "string" && data.text.trim() ? data.text : ""),
+                );
+                return summary || line || "";
+            }
+            const code = typeof data.code === "string" && data.code ? `code=${data.code}` : "";
+            const status = typeof data.status === "string" && data.status ? `status=${data.status}` : "";
+            return [category, type, code, status, line].filter(Boolean).join(" · ");
         }
         if (message) {
             return message;
@@ -1150,7 +1242,9 @@
             meta.className = "protocol-bubble-meta";
             const seq = Number(row && row.seq);
             const seqText = Number.isFinite(seq) ? `#${Math.floor(seq)} · ` : "";
-            meta.textContent = `${seqText}${protocolType(row)}`;
+            meta.textContent = streamName === "rasp"
+                ? `${seqText}${protocolCategory(row)}/event`
+                : `${seqText}${protocolType(row)}`;
             const body = document.createElement("div");
             body.className = "protocol-bubble-body";
             body.textContent = summarizeProtocolRow(streamName, row);
@@ -1161,7 +1255,7 @@
                 tags.className = "protocol-bubble-tags";
                 const tagKind = document.createElement("span");
                 tagKind.className = "protocol-tag";
-                tagKind.textContent = extractRaspKindLabel(protocolType(row));
+                tagKind.textContent = protocolType(row);
                 tags.appendChild(tagKind);
                 const tagSource = document.createElement("span");
                 tagSource.className = "protocol-tag";
@@ -1316,15 +1410,170 @@
         return Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : currentAttempt;
     }
 
+    function processTypeLabel(processType) {
+        const normalized = safeText(processType).trim().toLowerCase();
+        if (normalized === "tool_call") return I18N.processToolCall;
+        if (normalized === "command_execution") return I18N.processCommandExecution;
+        return I18N.processReasoning;
+    }
+
+    function renderChatModel(options = {}) {
+        if (!stdoutEl || !chatModel) return;
+        const shouldStickToBottom = options.forceScroll === true || (options.preserveScroll !== true && isNearBottom(stdoutEl));
+        const previousScrollTop = stdoutEl.scrollTop;
+        const previousScrollHeight = stdoutEl.scrollHeight;
+        stdoutEl.textContent = "";
+        const entries = chatModel.getEntries();
+        for (const entry of entries) {
+            if (!entry || typeof entry !== "object") continue;
+            if (entry.type === "message") {
+                const event = entry.event && typeof entry.event === "object" ? entry.event : {};
+                const role = safeText(event.role).trim() || "assistant";
+                const text = safeText(event.text);
+                const item = document.createElement("div");
+                item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
+                const header = document.createElement("div");
+                const title = document.createElement("strong");
+                title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
+                header.appendChild(title);
+                item.appendChild(header);
+                const pre = document.createElement("pre");
+                pre.textContent = text || "";
+                item.appendChild(pre);
+                const seq = Number(event && event.seq);
+                const localSeqObj = event && event.meta && event.meta.local_seq;
+                const localSeq = Number(localSeqObj || 0);
+                const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : (Number.isFinite(seq) ? Math.floor(seq) : 0);
+                const attempt = eventAttempt(event);
+                const meta = document.createElement("div");
+                meta.className = "meta";
+                meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
+                item.appendChild(meta);
+                const rawRef = extractRawRef(event);
+                if (rawRef) {
+                    const refMeta = document.createElement("div");
+                    refMeta.className = "meta";
+                    const btn = document.createElement("button");
+                    btn.className = "link-btn";
+                    btn.type = "button";
+                    btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+                    btn.addEventListener("click", () => previewRawRef(rawRef));
+                    refMeta.appendChild(btn);
+                    item.appendChild(refMeta);
+                }
+                stdoutEl.appendChild(item);
+                continue;
+            }
+            if (entry.type === "thinking") {
+                const items = Array.isArray(entry.items) ? entry.items : [];
+                if (!items.length) continue;
+                const latest = items[items.length - 1];
+                const item = document.createElement("div");
+                item.className = "chat-item thinking";
+                item.setAttribute("role", "button");
+                item.setAttribute("tabindex", "0");
+                const header = document.createElement("div");
+                header.className = "chat-thinking-header";
+                const title = document.createElement("strong");
+                title.className = "chat-thinking-title";
+                title.textContent = processTypeLabel(latest.processType);
+                const arrow = document.createElement("span");
+                arrow.className = "chat-thinking-arrow";
+                arrow.textContent = entry.collapsed ? "◀" : "▼";
+                header.appendChild(title);
+                header.appendChild(arrow);
+                item.appendChild(header);
+                const toggleThinking = () => {
+                    chatModel.toggleThinking(entry.id);
+                    renderChatModel({ preserveScroll: true });
+                };
+                item.addEventListener("click", toggleThinking);
+                item.addEventListener("keydown", (evt) => {
+                    if (evt.key === "Enter" || evt.key === " ") {
+                        evt.preventDefault();
+                        toggleThinking();
+                    }
+                });
+                const seqValues = items
+                    .map((thinkingItem) => Number(thinkingItem && thinkingItem.seq))
+                    .filter((seq) => Number.isFinite(seq) && seq > 0)
+                    .map((seq) => Math.floor(seq));
+                const attemptValues = items
+                    .map((thinkingItem) => Number(thinkingItem && thinkingItem.attempt))
+                    .filter((attempt) => Number.isFinite(attempt) && attempt > 0)
+                    .map((attempt) => Math.floor(attempt));
+                const attemptMeta = attemptValues.length ? attemptValues[0] : eventAttempt(latest.sourceEvent || {});
+                const seqMeta = seqValues.length
+                    ? (seqValues.length === 1 ? String(seqValues[0]) : `${Math.min(...seqValues)}-${Math.max(...seqValues)}`)
+                    : "-";
+                const thinkingMeta = document.createElement("div");
+                thinkingMeta.className = "chat-thinking-meta";
+                thinkingMeta.textContent = `${I18N.metaAttemptPrefix} ${attemptMeta} · ${I18N.metaSeqPrefix} ${seqMeta}`;
+                item.appendChild(thinkingMeta);
+                if (entry.collapsed) {
+                    const latestLine = document.createElement("div");
+                    latestLine.className = "chat-thinking-latest";
+                    latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                    item.appendChild(latestLine);
+                } else {
+                    const list = document.createElement("div");
+                    list.className = "chat-thinking-list";
+                    for (const thinkingItem of items) {
+                        const child = document.createElement("div");
+                        child.className = "chat-thinking-item";
+                        const meta = document.createElement("div");
+                        meta.className = "chat-thinking-item-meta";
+                        meta.textContent = processTypeLabel(thinkingItem.processType);
+                        child.appendChild(meta);
+                        const body = document.createElement("div");
+                        body.className = "chat-thinking-item-body";
+                        body.textContent = safeText(thinkingItem.text || thinkingItem.summary);
+                        child.appendChild(body);
+                        const rawRef = thinkingItem && typeof thinkingItem.rawRef === "object" ? thinkingItem.rawRef : null;
+                        if (rawRef) {
+                            const refLine = document.createElement("div");
+                            refLine.className = "meta";
+                            const btn = document.createElement("button");
+                            btn.className = "link-btn";
+                            btn.type = "button";
+                            btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+                            btn.addEventListener("click", (event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                previewRawRef(rawRef);
+                            });
+                            refLine.appendChild(btn);
+                            child.appendChild(refLine);
+                        }
+                        list.appendChild(child);
+                    }
+                    item.appendChild(list);
+                }
+                stdoutEl.appendChild(item);
+            }
+        }
+        if (shouldStickToBottom) {
+            stdoutEl.scrollTop = stdoutEl.scrollHeight;
+        } else if (options.preserveScroll === true) {
+            const delta = stdoutEl.scrollHeight - previousScrollHeight;
+            stdoutEl.scrollTop = Math.max(0, previousScrollTop + delta);
+        }
+    }
+
     function appendChatEvent(role, text, event, rawRef) {
         const seq = typeof event?.seq === "number" ? event.seq : 0;
         const localSeqObj = event && event.meta && event.meta.local_seq;
         const localSeq = Number(localSeqObj || 0);
         const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : seq;
         const attempt = eventAttempt(event);
-        const key = `${attempt}:${seq}:${event?.type || ""}:${role}:${text || ""}`;
+        const key = `${attempt}:${seq}:${event?.type || ""}:${safeText(event?.kind)}:${role}:${text || ""}`;
         if (renderedChatSeq.has(key)) return;
         renderedChatSeq.add(key);
+        if (chatModel && event && typeof event === "object") {
+            chatModel.consume(event);
+            renderChatModel();
+            return;
+        }
         const item = document.createElement("div");
         item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
         const header = document.createElement("div");
@@ -1747,8 +1996,7 @@
     }
 
     async function loadConversationHistory() {
-        stdoutEl.textContent = "";
-        renderedChatSeq.clear();
+        resetConversationRenderState();
         const res = await fetch(`/v1/management/runs/${requestId}/chat/history`);
         if (!res.ok) return;
         const payload = await res.json();
@@ -1871,6 +2119,44 @@
             await fetch(`/v1/management/runs/${requestId}/cancel`, { method: "POST" });
             await refreshState();
             closeStream();
+        });
+    }
+
+    if (rebuildProtocolBtn) {
+        rebuildProtocolBtn.addEventListener("click", async () => {
+            rebuildProtocolBtn.disabled = true;
+            if (rebuildProtocolResultEl) {
+                rebuildProtocolResultEl.textContent = I18N.rebuildProtocolRunning;
+            }
+            try {
+                const res = await fetch(`/v1/management/runs/${requestId}/protocol/rebuild`, { method: "POST" });
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = typeof payload.detail === "string" ? payload.detail : `HTTP ${res.status}`;
+                    if (rebuildProtocolResultEl) {
+                        rebuildProtocolResultEl.textContent = `${I18N.rebuildProtocolFailed}: ${detail}`;
+                    }
+                    return;
+                }
+                const attempts = Array.isArray(payload.attempts) ? payload.attempts : [];
+                const writtenCount = attempts.filter((item) => item && item.written).length;
+                const backupDir = safeText(payload.backup_dir || "");
+                if (rebuildProtocolResultEl) {
+                    rebuildProtocolResultEl.textContent = `${I18N.rebuildProtocolDone}: attempts=${attempts.length}, written=${writtenCount}${backupDir ? `, backup=${backupDir}` : ""}`;
+                }
+                await loadProtocolPanel("fcmp", fcmpAuditEl);
+                await loadProtocolPanel("rasp", raspAuditEl);
+                await loadProtocolPanel("orchestrator", orchestratorAuditEl);
+                if (!timelineCollapsed) {
+                    await bootstrapTimelineHistory();
+                }
+            } catch (error) {
+                if (rebuildProtocolResultEl) {
+                    rebuildProtocolResultEl.textContent = `${I18N.rebuildProtocolFailed}: ${String(error)}`;
+                }
+            } finally {
+                rebuildProtocolBtn.disabled = false;
+            }
         });
     }
 

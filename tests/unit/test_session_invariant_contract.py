@@ -118,4 +118,7 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "lifecycle_consumes_auth_signal_snapshot_only",
         "low_confidence_auth_signal_must_not_enter_waiting_auth",
         "rasp_auth_signal_diagnostic_payload_structured",
+        "rasp_turn_marker_per_attempt_unique",
+        "rasp_turn_marker_ordered",
+        "fcmp_must_not_emit_assistant_turn_markers",
     }

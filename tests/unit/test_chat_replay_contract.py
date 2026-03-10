@@ -16,6 +16,7 @@ def test_chat_replay_contract_defines_roles_kinds_and_invariants() -> None:
     assert payload["order_source"]["scope"] == "run"
     assert payload["roles"] == ["user", "assistant", "system"]
     assert "interaction_reply" in payload["kinds"]
+    assert "assistant_process" in payload["kinds"]
     assert "assistant_final" in payload["kinds"]
     assert "no_local_render" in payload["invariants"]
     assert "live_history_consistent" in payload["invariants"]

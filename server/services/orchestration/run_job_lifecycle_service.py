@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from server.models import (
     DispatchPhase,
+    EngineSessionHandle,
+    EngineSessionHandleType,
     EngineInteractiveProfile,
     ExecutionMode,
     InteractiveErrorCode,
@@ -144,6 +146,65 @@ def _summarize_terminal_error_message(message: Any) -> str | None:
     if len(normalized) > _TERMINAL_ERROR_SUMMARY_MAX_CHARS:
         return normalized[: _TERMINAL_ERROR_SUMMARY_MAX_CHARS - 3] + "..."
     return normalized
+
+
+async def _persist_run_handle_immediate(
+    *,
+    run_store_backend: Any,
+    request_id: str | None,
+    engine_name: str,
+    attempt_number: int,
+    handle_id: str,
+) -> dict[str, Any]:
+    normalized_handle = handle_id.strip()
+    if not normalized_handle:
+        return {"status": "skipped"}
+    if not isinstance(request_id, str) or not request_id.strip():
+        return {"status": "skipped"}
+
+    existing = await maybe_await(run_store_backend.get_engine_session_handle(request_id))
+    existing_handle_value = (
+        str(existing.get("handle_value")).strip()
+        if isinstance(existing, dict) and isinstance(existing.get("handle_value"), str)
+        else None
+    )
+    if isinstance(existing_handle_value, str) and existing_handle_value == normalized_handle:
+        return {"status": "unchanged"}
+
+    handle = EngineSessionHandle(
+        engine=engine_name,
+        handle_type=EngineSessionHandleType.SESSION_ID,
+        handle_value=normalized_handle,
+        created_at_turn=max(1, int(attempt_number)),
+    )
+    await maybe_await(
+        run_store_backend.set_engine_session_handle(
+            request_id,
+            handle.model_dump(mode="json"),
+        )
+    )
+    if isinstance(existing_handle_value, str) and existing_handle_value:
+        logger.warning(
+            "run_handle_changed request_id=%s attempt=%s engine=%s previous=%s current=%s",
+            request_id,
+            attempt_number,
+            engine_name,
+            existing_handle_value,
+            normalized_handle,
+        )
+        return {
+            "status": "changed",
+            "previous_handle_id": existing_handle_value,
+            "current_handle_id": normalized_handle,
+        }
+    logger.info(
+        "run_handle_persisted request_id=%s attempt=%s engine=%s handle_id=%s",
+        request_id,
+        attempt_number,
+        engine_name,
+        normalized_handle,
+    )
+    return {"status": "stored"}
 
 
 class RunCanceled(Exception):
@@ -527,12 +588,21 @@ class _RunJobLifecyclePipeline:
 
                 # 5. Execute
                 adapter_stream_parser = getattr(adapter, "stream_parser", adapter)
+                async def _consume_run_handle(handle_id: str) -> dict[str, Any]:
+                    return await _persist_run_handle_immediate(
+                        run_store_backend=run_store,
+                        request_id=request_id,
+                        engine_name=engine_name,
+                        attempt_number=attempt_number,
+                        handle_id=handle_id,
+                    )
                 live_runtime_emitter = LiveRuntimeEmitterImpl(
                     run_id=run_id,
                     run_dir=run_dir,
                     engine=engine_name,
                     attempt_number=attempt_number,
                     stream_parser=adapter_stream_parser,
+                    run_handle_consumer=_consume_run_handle,
                 )
                 try:
                     logger.info(
@@ -915,11 +985,7 @@ class _RunJobLifecyclePipeline:
                     and request_id
                     and interactive_profile
                 ):
-                    raw_runtime_output = "\n".join(
-                        part for part in [result.raw_stdout, result.raw_stderr] if isinstance(part, str)
-                    )
                     wait_status = await self._persist_waiting_interaction(
-                        adapter=adapter,
                         run_id=run_id,
                         run_dir=run_dir,
                         request_id=request_id,
@@ -927,7 +993,6 @@ class _RunJobLifecyclePipeline:
                         profile=interactive_profile,
                         interactive_auto_reply=interactive_auto_reply,
                         pending_interaction=pending_interaction,
-                        raw_runtime_output=raw_runtime_output,
                     )
                     if wait_status is not None:
                         forced_failure_reason = wait_status

@@ -152,6 +152,56 @@
         opacity: 0.72;
         letter-spacing: 0.02em;
     }
+    .thinking-bubble {
+        border-style: dashed;
+        border-color: #b8e1c8;
+        background: #f6fbf8;
+        cursor: pointer;
+    }
+    .thinking-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .thinking-header-title {
+        font-size: 12px;
+        color: #1f5139;
+        font-weight: 600;
+    }
+    .thinking-arrow {
+        color: #1f5139;
+        font-size: 12px;
+        line-height: 1;
+        user-select: none;
+    }
+    .thinking-latest {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #2b4c3d;
+        white-space: pre-wrap;
+    }
+    .thinking-list {
+        margin-top: 8px;
+        display: grid;
+        gap: 6px;
+    }
+    .thinking-item {
+        border: 1px solid #d7e8de;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 6px 8px;
+    }
+    .thinking-item-meta {
+        font-size: 11px;
+        color: #6b7280;
+        margin-bottom: 4px;
+    }
+    .thinking-item-text {
+        font-size: 12px;
+        color: #1f2937;
+        white-space: pre-wrap;
+    }
     .prompt-card {
         margin-top: 12px;
         border: 1px solid #c7dece;
@@ -405,6 +455,7 @@
 </style>
 
 <script src="/static/js/file_explorer.js"></script>
+<script src="/static/js/chat_thinking_core.js"></script>
 <script>
 (() => {
     const I18N = {
@@ -414,6 +465,13 @@
         roleUser: {{ t("client.observe_role_user", default="You") | tojson }},
         roleAssistant: {{ t("client.observe_role_assistant", default="Agent") | tojson }},
         roleSystem: {{ t("client.observe_role_system", default="System") | tojson }},
+        roleThinking: {{ t("client.observe_role_thinking", default="Agent Thinking") | tojson }},
+        thinkingCollapsedPrefix: {{ t("client.observe_thinking_collapsed_prefix", default="Thinking (latest)") | tojson }},
+        thinkingExpand: {{ t("client.observe_thinking_expand", default="Expand") | tojson }},
+        thinkingCollapse: {{ t("client.observe_thinking_collapse", default="Collapse") | tojson }},
+        processReasoning: {{ t("client.observe_process_reasoning", default="Reasoning") | tojson }},
+        processToolCall: {{ t("client.observe_process_tool_call", default="Tool call") | tojson }},
+        processCommandExecution: {{ t("client.observe_process_command_execution", default="Command execution") | tojson }},
         submitFailedHttpPrefix: {{ t("client.observe_submit_failed_http", default="Submit failed: HTTP") | tojson }},
         submitFailedNetwork: {{ t("client.observe_submit_failed_network", default="Backend unreachable.") | tojson }},
         authRequiredPrompt: {{ t("client.observe_auth_required_prompt", default="Authentication is required to continue.") | tojson }},
@@ -520,6 +578,9 @@
     let fileTreeLoaded = false;
     let fileTreeExpanded = false;
     const renderedChatKeys = new Set();
+    let chatModel = window.SkillRunnerThinkingChatCore
+        ? window.SkillRunnerThinkingChatCore.createThinkingChatModel()
+        : null;
     const renderedPromptKeys = new Set();
     let lastPromptRenderSignature = "";
     let lastAuthRenderSignature = "";
@@ -544,6 +605,23 @@
 
     function safeText(value) {
         return typeof value === "string" ? value : "";
+    }
+
+    function isNearBottom(targetEl, thresholdPx = 24) {
+        if (!targetEl) return true;
+        return targetEl.scrollTop + targetEl.clientHeight >= targetEl.scrollHeight - thresholdPx;
+    }
+
+    function resetConversationRenderState() {
+        renderedChatKeys.clear();
+        if (window.SkillRunnerThinkingChatCore) {
+            chatModel = window.SkillRunnerThinkingChatCore.createThinkingChatModel();
+        } else {
+            chatModel = null;
+        }
+        if (chatEl) {
+            chatEl.textContent = "";
+        }
     }
 
     function normalizeList(raw) {
@@ -930,26 +1008,134 @@
         thinkingCardEl.classList.toggle("hidden", !show);
     }
 
-    function appendChatBubble(role, text, key) {
+    function processTypeLabel(processType) {
+        const normalized = safeText(processType).trim().toLowerCase();
+        if (normalized === "tool_call") return I18N.processToolCall;
+        if (normalized === "command_execution") return I18N.processCommandExecution;
+        return I18N.processReasoning;
+    }
+
+    function renderChatModel(options = {}) {
+        if (!chatEl || !chatModel) return;
+        const shouldStickToBottom = options.forceScroll === true || (options.preserveScroll !== true && isNearBottom(chatEl));
+        const previousScrollTop = chatEl.scrollTop;
+        const previousScrollHeight = chatEl.scrollHeight;
+        chatEl.textContent = "";
+        const entries = chatModel.getEntries();
+        for (const entry of entries) {
+            if (!entry || typeof entry !== "object") continue;
+            if (entry.type === "message") {
+                const event = entry.event && typeof entry.event === "object" ? entry.event : {};
+                const role = safeText(event.role).trim() || "assistant";
+                const normalizedText = safeText(event.text).trim();
+                if (!normalizedText) continue;
+                const row = document.createElement("div");
+                row.className = `chat-row ${role}`;
+                const bubble = document.createElement("div");
+                bubble.className = `chat-bubble ${role}`;
+                const roleEl = document.createElement("span");
+                roleEl.className = "chat-role";
+                roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
+                bubble.appendChild(roleEl);
+                const content = document.createElement("div");
+                content.textContent = normalizedText;
+                bubble.appendChild(content);
+                row.appendChild(bubble);
+                chatEl.appendChild(row);
+                continue;
+            }
+            if (entry.type === "thinking") {
+                const items = Array.isArray(entry.items) ? entry.items : [];
+                if (!items.length) continue;
+                const latest = items[items.length - 1];
+                const row = document.createElement("div");
+                row.className = "chat-row agent";
+                const bubble = document.createElement("div");
+                bubble.className = "chat-bubble agent thinking-bubble";
+                bubble.setAttribute("role", "button");
+                bubble.setAttribute("tabindex", "0");
+                const roleEl = document.createElement("span");
+                roleEl.className = "chat-role";
+                roleEl.textContent = I18N.roleThinking;
+                bubble.appendChild(roleEl);
+                const header = document.createElement("div");
+                header.className = "thinking-header";
+                const title = document.createElement("span");
+                title.className = "thinking-header-title";
+                title.textContent = processTypeLabel(latest.processType);
+                const arrow = document.createElement("span");
+                arrow.className = "thinking-arrow";
+                arrow.textContent = entry.collapsed ? "◀" : "▼";
+                header.appendChild(title);
+                header.appendChild(arrow);
+                bubble.appendChild(header);
+                const toggleThinking = () => {
+                    chatModel.toggleThinking(entry.id);
+                    renderChatModel({ preserveScroll: true });
+                };
+                bubble.addEventListener("click", toggleThinking);
+                bubble.addEventListener("keydown", (evt) => {
+                    if (evt.key === "Enter" || evt.key === " ") {
+                        evt.preventDefault();
+                        toggleThinking();
+                    }
+                });
+                if (entry.collapsed) {
+                    const latestLine = document.createElement("div");
+                    latestLine.className = "thinking-latest";
+                    latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                    bubble.appendChild(latestLine);
+                } else {
+                    const list = document.createElement("div");
+                    list.className = "thinking-list";
+                    for (const item of items) {
+                        const itemEl = document.createElement("div");
+                        itemEl.className = "thinking-item";
+                        const meta = document.createElement("div");
+                        meta.className = "thinking-item-meta";
+                        meta.textContent = processTypeLabel(item.processType);
+                        itemEl.appendChild(meta);
+                        const textEl = document.createElement("div");
+                        textEl.className = "thinking-item-text";
+                        textEl.textContent = safeText(item.text || item.summary);
+                        itemEl.appendChild(textEl);
+                        list.appendChild(itemEl);
+                    }
+                    bubble.appendChild(list);
+                }
+                row.appendChild(bubble);
+                chatEl.appendChild(row);
+            }
+        }
+        if (shouldStickToBottom) {
+            chatEl.scrollTop = chatEl.scrollHeight;
+        } else if (options.preserveScroll === true) {
+            const delta = chatEl.scrollHeight - previousScrollHeight;
+            chatEl.scrollTop = Math.max(0, previousScrollTop + delta);
+        }
+    }
+
+    function appendChatBubble(role, text, key, event = null) {
         const normalizedText = safeText(text).trim();
         if (!normalizedText) return;
         if (key && renderedChatKeys.has(key)) return;
         if (key) renderedChatKeys.add(key);
+        if (chatModel && event && typeof event === "object") {
+            chatModel.consume(event);
+            renderChatModel();
+            return;
+        }
         const row = document.createElement("div");
         row.className = `chat-row ${role}`;
-
         const bubble = document.createElement("div");
         bubble.className = `chat-bubble ${role}`;
-
         const roleEl = document.createElement("span");
         roleEl.className = "chat-role";
         roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
         bubble.appendChild(roleEl);
-
         const content = document.createElement("div");
         content.textContent = normalizedText;
         bubble.appendChild(content);
-
         row.appendChild(bubble);
         chatEl.appendChild(row);
         chatEl.scrollTop = chatEl.scrollHeight;
@@ -1648,12 +1834,13 @@
         const role = safeText(event.role).trim();
         const text = safeText(event.text);
         if (!role || !text.trim()) return;
-        appendChatBubble(role, text, `chat:${event.seq || 0}:${role}:${text}`);
+        appendChatBubble(role, text, `chat:${event.seq || 0}:${role}:${safeText(event.kind)}:${text}`, event);
     }
 
     async function loadHistory() {
         if (historyLoaded) return;
         historyLoaded = true;
+        resetConversationRenderState();
         try {
             const res = await fetch(apiUrl(`/api/runs/${requestId}/chat/history`));
             if (!res.ok) return;

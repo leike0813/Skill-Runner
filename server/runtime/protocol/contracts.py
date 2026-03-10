@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from server.runtime.adapter.types import LiveParserEmission
@@ -34,6 +35,9 @@ class LiveStreamParserSession(Protocol):
 
 
 class LiveRuntimeEmitter(Protocol):
+    async def on_process_started(self, *, event_ts: datetime | None = None) -> None:
+        ...
+
     async def on_stream_chunk(
         self,
         *,
@@ -41,6 +45,7 @@ class LiveRuntimeEmitter(Protocol):
         text: str,
         byte_from: int,
         byte_to: int,
+        event_ts: datetime | None = None,
     ) -> None:
         ...
 
@@ -49,5 +54,6 @@ class LiveRuntimeEmitter(Protocol):
         *,
         exit_code: int,
         failure_reason: str | None,
+        event_ts: datetime | None = None,
     ) -> None:
         ...

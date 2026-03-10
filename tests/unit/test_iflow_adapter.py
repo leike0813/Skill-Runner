@@ -100,6 +100,12 @@ def test_parse_runtime_stream_extracts_session_id_from_execution_info_and_cleans
     assert parsed["session_id"] == "iflow-xyz"
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from iflow"
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "iflow-xyz"
+    turn_complete_data = parsed.get("turn_complete_data")
+    assert isinstance(turn_complete_data, dict)
+    assert turn_complete_data.get("assistantRounds") == 1
 
 
 def test_parse_runtime_stream_extracts_session_id_from_pty_when_stdout_missing():
@@ -114,6 +120,9 @@ def test_parse_runtime_stream_extracts_session_id_from_pty_when_stdout_missing()
         ),
     )
     assert parsed["session_id"] == "iflow-from-pty"
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "iflow-from-pty"
 
 
 def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate():
@@ -136,6 +145,9 @@ def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate():
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from iflow"
     assert "PTY_FALLBACK_USED" not in parsed["diagnostics"]
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "iflow-main"
 
 
 def test_parse_runtime_stream_uses_pty_fallback_when_split_empty():
@@ -168,6 +180,75 @@ def test_parse_runtime_stream_keeps_latest_round_text():
     )
     assert parsed["assistant_messages"]
     assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest round output"]
+
+
+def test_parse_runtime_stream_channel_drift_correction_diagnostics():
+    adapter = IFlowExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b"<Execution Info>\n"
+            b'{"session-id":"iflow-drift","assistantRounds":2}\n'
+            b"</Execution Info>\n"
+        ),
+        stderr_raw=b"message from stderr\n",
+        pty_raw=b"",
+    )
+    assert parsed["assistant_messages"]
+    assert parsed["assistant_messages"][0]["text"] == "message from stderr"
+    diagnostics = parsed.get("diagnostics", [])
+    assert "IFLOW_CHANNEL_DRIFT_OBSERVED" in diagnostics
+    assert "IFLOW_EXECUTION_INFO_CHANNEL_DRIFT_CORRECTED" in diagnostics
+    assert "IFLOW_MESSAGE_CHANNEL_DRIFT_CORRECTED" in diagnostics
+
+
+def test_live_session_assistant_message_keeps_raw_ref():
+    adapter = IFlowExecutionAdapter()
+    session = adapter.stream_parser.start_live_session()
+    payload = "hello from iflow live\n"
+    encoded = payload.encode("utf-8")
+    session.feed(stream="stdout", text=payload, byte_from=0, byte_to=len(encoded))
+    emissions = session.finish(exit_code=0, failure_reason=None)
+
+    assistant = next(
+        (item for item in emissions if isinstance(item, dict) and item.get("kind") == "assistant_message"),
+        None,
+    )
+    assert isinstance(assistant, dict)
+    raw_ref = assistant.get("raw_ref")
+    assert isinstance(raw_ref, dict)
+    assert raw_ref.get("stream") == "stdout"
+    assert int(raw_ref.get("byte_from", -1)) == 0
+    assert int(raw_ref.get("byte_to", -1)) == len(encoded)
+
+
+def test_parse_runtime_stream_keeps_resume_stderr_line_as_raw_when_execution_info_consumed():
+    adapter = IFlowExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=b"hello from iflow\n",
+        stderr_raw=(
+            b"\n"
+            b"\xe2\x84\xb9\xef\xb8\x8f  Resuming session session-4062bdd2-16d0-494a-8ce9-fff6f2142e69 "
+            b"(10 messages loaded)\n"
+            b"<Execution Info>\n"
+            b'{"session-id":"iflow-resume","assistantRounds":3}\n'
+            b"</Execution Info>\n"
+        ),
+        pty_raw=b"",
+    )
+
+    raw_rows = parsed.get("raw_rows", [])
+    assert any(
+        isinstance(row, dict)
+        and str(row.get("stream")) == "stderr"
+        and "Resuming session" in str(row.get("line", ""))
+        for row in raw_rows
+    )
+    assert not any(
+        isinstance(row, dict)
+        and str(row.get("stream")) == "stderr"
+        and "<Execution Info>" in str(row.get("line", ""))
+        for row in raw_rows
+    )
 
 
 def test_parse_output_valid_ask_user_envelope():

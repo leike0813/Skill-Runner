@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING, Any
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
 )
-from server.runtime.adapter.types import LiveParserEmission, RuntimeAssistantMessage, RuntimeStreamParseResult
+from server.runtime.adapter.types import (
+    LiveParserEmission,
+    RuntimeAssistantMessage,
+    RuntimeProcessEvent,
+    RuntimeStreamRawRef,
+    RuntimeStreamParseResult,
+    RuntimeTurnMarker,
+)
 from server.runtime.protocol.parse_utils import (
     collect_json_parse_errors,
     dedup_assistant_messages,
@@ -63,6 +70,108 @@ class OpencodeStreamParser:
             return text
         return None
 
+    def _is_turn_start(self, payload: dict[str, Any]) -> bool:
+        payload_type = payload.get("type")
+        return payload_type in {"step_start", "step.started"}
+
+    def _is_turn_complete(self, payload: dict[str, Any]) -> bool:
+        payload_type = payload.get("type")
+        return payload_type in {"step_finish", "step.completed"}
+
+    def _extract_turn_complete_data(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        if not self._is_turn_complete(payload):
+            return None
+        part = payload.get("part")
+        if not isinstance(part, dict):
+            return None
+        data: dict[str, Any] = {}
+        if "cost" in part and part.get("cost") is not None:
+            data["cost"] = part.get("cost")
+        tokens_obj = part.get("tokens")
+        if isinstance(tokens_obj, dict):
+            data["tokens"] = tokens_obj
+        return data or None
+
+    def _extract_process_event(
+        self,
+        *,
+        payload: dict[str, Any],
+        row: dict[str, Any],
+    ) -> RuntimeProcessEvent | None:
+        if payload.get("type") != "tool_use":
+            return None
+        part = payload.get("part")
+        if not isinstance(part, dict) or part.get("type") != "tool":
+            return None
+        tool_obj = part.get("tool")
+        if not isinstance(tool_obj, str) or not tool_obj.strip():
+            return None
+        tool = tool_obj.strip()
+        if tool in {"bash", "grep"}:
+            process_type: str = "command_execution"
+        elif tool == "apply_patch":
+            process_type = "tool_call"
+        else:
+            process_type = "tool_call"
+
+        state = part.get("state")
+        details: dict[str, Any] = {
+            "payload_type": payload.get("type"),
+            "item_type": "tool_use",
+            "tool": tool,
+        }
+        if isinstance(state, dict):
+            status = state.get("status")
+            if status is not None:
+                details["status"] = status
+            input_obj = state.get("input")
+            if input_obj is not None:
+                details["input"] = input_obj
+
+        summary = f"{tool} completed"
+        text_value: str | None = None
+        if isinstance(state, dict):
+            if process_type == "command_execution":
+                input_obj = state.get("input")
+                if isinstance(input_obj, dict):
+                    command_obj = input_obj.get("command")
+                    if isinstance(command_obj, str) and command_obj.strip():
+                        summary = command_obj.strip()
+                output_obj = state.get("output")
+                if isinstance(output_obj, str) and output_obj.strip():
+                    text_value = output_obj
+            else:
+                summary = tool
+                input_obj = state.get("input")
+                if input_obj is not None:
+                    if isinstance(input_obj, str):
+                        text_value = input_obj
+                    else:
+                        text_value = json.dumps(input_obj, ensure_ascii=False)
+
+        part_id = part.get("id")
+        if isinstance(part_id, str) and part_id.strip():
+            message_id = part_id
+        else:
+            byte_from = row.get("byte_from")
+            message_id = f"{tool}_{byte_from if isinstance(byte_from, int) else 0}"
+        raw_ref = {
+            "stream": row.get("stream"),
+            "byte_from": row.get("byte_from"),
+            "byte_to": row.get("byte_to"),
+        }
+        process_event: RuntimeProcessEvent = {
+            "process_type": process_type,  # type: ignore[typeddict-item]
+            "message_id": message_id,
+            "summary": summary,
+            "classification": process_type,
+            "details": details,
+            "raw_ref": raw_ref,  # type: ignore[typeddict-item]
+        }
+        if isinstance(text_value, str) and text_value.strip():
+            process_event["text"] = text_value
+        return process_event
+
     def parse(self, raw_stdout: str) -> dict[str, object]:
         parsed_rows: list[dict[str, Any]] = []
         for line in raw_stdout.splitlines():
@@ -108,9 +217,17 @@ class OpencodeStreamParser:
         records = self._slice_latest_step_rows(all_records)
         pty_records = self._slice_latest_step_rows(all_pty_records)
         assistant_messages: list[RuntimeAssistantMessage] = []
+        process_events: list[RuntimeProcessEvent] = []
         diagnostics: list[str] = []
         session_id: str | None = None
         structured_types: list[str] = []
+        turn_start_seen = False
+        turn_completed = False
+        turn_complete_data: dict[str, Any] | None = None
+        turn_start_raw_ref: RuntimeStreamRawRef | None = None
+        turn_complete_raw_ref: RuntimeStreamRawRef | None = None
+        run_handle_id: str | None = None
+        run_handle_raw_ref: RuntimeStreamRawRef | None = None
         extracted: dict[str, Any] = {
             "error_name": None,
             "status_code": None,
@@ -160,7 +277,8 @@ class OpencodeStreamParser:
                         ) + 1
 
         def _consume(parsed_rows: list[dict[str, Any]]) -> None:
-            nonlocal session_id
+            nonlocal session_id, turn_start_seen, turn_completed, turn_complete_data, turn_start_raw_ref, turn_complete_raw_ref
+            nonlocal run_handle_id, run_handle_raw_ref
             for row in parsed_rows:
                 payload = row["payload"]
                 row_session_id = find_session_id(payload)
@@ -171,6 +289,38 @@ class OpencodeStreamParser:
                     structured_types.append(payload_type)
                 if not isinstance(payload, dict):
                     continue
+                if self._is_turn_start(payload) and not turn_start_seen:
+                    turn_start_seen = True
+                    turn_start_raw_ref = {
+                        "stream": str(row["stream"]),
+                        "byte_from": int(row["byte_from"]),
+                        "byte_to": int(row["byte_to"]),
+                    }
+                if (
+                    self._is_turn_start(payload)
+                    and run_handle_id is None
+                    and isinstance(row_session_id, str)
+                    and row_session_id.strip()
+                ):
+                    run_handle_id = row_session_id.strip()
+                    run_handle_raw_ref = {
+                        "stream": str(row["stream"]),
+                        "byte_from": int(row["byte_from"]),
+                        "byte_to": int(row["byte_to"]),
+                    }
+                if self._is_turn_complete(payload):
+                    turn_completed = True
+                    turn_complete_raw_ref = {
+                        "stream": str(row["stream"]),
+                        "byte_from": int(row["byte_from"]),
+                        "byte_to": int(row["byte_to"]),
+                    }
+                    extracted_turn_data = self._extract_turn_complete_data(payload)
+                    if isinstance(extracted_turn_data, dict):
+                        turn_complete_data = extracted_turn_data
+                process_event = self._extract_process_event(payload=payload, row=row)
+                if process_event is not None:
+                    process_events.append(process_event)
                 text = self._extract_text_event(payload)
                 if isinstance(text, str) and text.strip():
                     assistant_messages.append(
@@ -218,15 +368,35 @@ class OpencodeStreamParser:
                 "extracted": extracted,
             },
         )
+        turn_markers: list[RuntimeTurnMarker] = []
+        if turn_start_seen:
+            turn_markers.append({"marker": "start", "raw_ref": turn_start_raw_ref})
+        if turn_completed:
+            marker_payload: RuntimeTurnMarker = {"marker": "complete", "raw_ref": turn_complete_raw_ref}
+            if isinstance(turn_complete_data, dict):
+                marker_payload["data"] = turn_complete_data
+            turn_markers.append(marker_payload)
+
         result: RuntimeStreamParseResult = {
             "parser": "opencode_ndjson",
             "confidence": 0.95 if assistant_messages else 0.6,
             "session_id": session_id,
             "assistant_messages": dedup_assistant_messages(assistant_messages),
+            "process_events": process_events,
+            "turn_started": turn_start_seen,
+            "turn_completed": turn_completed,
+            "turn_markers": turn_markers,
             "raw_rows": raw_rows,
             "diagnostics": diagnostics,
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if isinstance(turn_complete_data, dict):
+            result["turn_complete_data"] = turn_complete_data
+        if isinstance(run_handle_id, str) and run_handle_id.strip():
+            result["run_handle"] = {
+                "handle_id": run_handle_id.strip(),
+                "raw_ref": run_handle_raw_ref,
+            }
         if auth_signal is not None:
             result["auth_signal"] = auth_signal
         return result
@@ -239,7 +409,11 @@ class _OpencodeLiveSession:
     def __init__(self, parser: OpencodeStreamParser) -> None:
         self._parser = parser
         self._buffers: dict[str, str] = {"stdout": "", "pty": ""}
+        self._buffer_byte_start: dict[str, int] = {"stdout": 0, "pty": 0}
         self._last_text: str | None = None
+        self._turn_start_emitted = False
+        self._turn_complete_emitted = False
+        self._run_handle_emitted = False
 
     def feed(
         self,
@@ -251,9 +425,17 @@ class _OpencodeLiveSession:
     ) -> list[LiveParserEmission]:
         if stream not in {"stdout", "pty"}:
             return []
-        combined = f"{self._buffers.get(stream, '')}{text}"
+        previous_tail = self._buffers.get(stream, "")
+        previous_tail_start = self._buffer_byte_start.get(stream, int(byte_from))
+        if previous_tail:
+            combined = f"{previous_tail}{text}"
+            combined_start = previous_tail_start
+        else:
+            combined = text
+            combined_start = int(byte_from)
         if "\n" not in combined:
             self._buffers[stream] = combined
+            self._buffer_byte_start[stream] = combined_start
             return []
         lines = combined.splitlines(keepends=True)
         complete = lines[:-1]
@@ -262,14 +444,16 @@ class _OpencodeLiveSession:
             complete.append(tail)
             tail = ""
         self._buffers[stream] = tail
+        cursor = combined_start
+        self._buffer_byte_start[stream] = cursor
         emissions: list[LiveParserEmission] = []
-        cursor = max(0, int(byte_to) - len(text.encode("utf-8", errors="replace")))
         for line in complete:
             clean = line.strip()
             encoded = line.encode("utf-8", errors="replace")
             row_from = cursor
             row_to = cursor + len(encoded)
             cursor = row_to
+            self._buffer_byte_start[stream] = cursor
             if not clean:
                 continue
             try:
@@ -278,6 +462,83 @@ class _OpencodeLiveSession:
                 continue
             if not isinstance(payload, dict):
                 continue
+            if self._parser._is_turn_start(payload) and not self._turn_start_emitted:  # noqa: SLF001
+                self._turn_start_emitted = True
+                emissions.append(
+                    {
+                        "kind": "turn_marker",
+                        "marker": "start",
+                        "raw_ref": {
+                            "stream": stream,
+                            "byte_from": row_from,
+                            "byte_to": row_to,
+                        },
+                    }
+                )
+            session_id = find_session_id(payload)
+            if (
+                self._parser._is_turn_start(payload)  # noqa: SLF001
+                and not self._run_handle_emitted
+                and isinstance(session_id, str)
+                and session_id.strip()
+            ):
+                self._run_handle_emitted = True
+                emissions.append(
+                    {
+                        "kind": "run_handle",
+                        "handle_id": session_id.strip(),
+                        "raw_ref": {
+                            "stream": stream,
+                            "byte_from": row_from,
+                            "byte_to": row_to,
+                        },
+                    }
+                )
+            if self._parser._is_turn_complete(payload) and not self._turn_complete_emitted:  # noqa: SLF001
+                self._turn_complete_emitted = True
+                turn_complete_data = self._parser._extract_turn_complete_data(payload)  # noqa: SLF001
+                marker_emission: LiveParserEmission = {
+                    "kind": "turn_marker",
+                    "marker": "complete",
+                    "raw_ref": {
+                        "stream": stream,
+                        "byte_from": row_from,
+                        "byte_to": row_to,
+                    },
+                }
+                if isinstance(turn_complete_data, dict):
+                    marker_emission["turn_complete_data"] = turn_complete_data
+                emissions.append(marker_emission)
+                completion_emission: LiveParserEmission = {"kind": "turn_completed"}
+                if isinstance(turn_complete_data, dict):
+                    completion_emission["turn_complete_data"] = turn_complete_data
+                emissions.append(completion_emission)
+            row_for_process: dict[str, Any] = {
+                "stream": stream,
+                "byte_from": row_from,
+                "byte_to": row_to,
+            }
+            process_event = self._parser._extract_process_event(payload=payload, row=row_for_process)  # noqa: SLF001
+            if process_event is not None:
+                process_emission: LiveParserEmission = {
+                    "kind": "process_event",
+                    "process_type": process_event["process_type"],
+                    "summary": process_event["summary"],
+                    "classification": process_event.get("classification", process_event["process_type"]),
+                    "details": process_event.get("details", {}),
+                    "raw_ref": {
+                        "stream": stream,
+                        "byte_from": row_from,
+                        "byte_to": row_to,
+                    },
+                }
+                message_id_obj = process_event.get("message_id")
+                if isinstance(message_id_obj, str) and message_id_obj.strip():
+                    process_emission["message_id"] = message_id_obj
+                text_obj = process_event.get("text")
+                if isinstance(text_obj, str) and text_obj.strip():
+                    process_emission["text"] = text_obj
+                emissions.append(process_emission)
             extracted = self._parser._extract_text_event(payload)  # noqa: SLF001
             if not isinstance(extracted, str) or not extracted.strip() or extracted == self._last_text:
                 continue
@@ -291,10 +552,13 @@ class _OpencodeLiveSession:
                     "byte_to": row_to,
                 },
             }
-            session_id = find_session_id(payload)
             if session_id:
                 emission["session_id"] = session_id
             emissions.append(emission)
+        if tail:
+            self._buffer_byte_start[stream] = cursor
+        else:
+            self._buffer_byte_start[stream] = int(byte_to)
         return emissions
 
     def finish(

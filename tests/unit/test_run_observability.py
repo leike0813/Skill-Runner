@@ -1,4 +1,5 @@
 import json
+import base64
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -1379,6 +1380,73 @@ async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeyp
         "user.input.required",
         "conversation.state.changed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-rebuild"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "succeeded")
+    (audit_dir / "meta.1.json").write_text(
+        json.dumps({"engine": "unknown", "status": "succeeded", "completion": {"state": "completed"}}),
+        encoding="utf-8",
+    )
+    (audit_dir / "orchestrator_events.1.jsonl").write_text("", encoding="utf-8")
+    (audit_dir / "events.1.jsonl").write_text('{"legacy":"old"}\n', encoding="utf-8")
+    (audit_dir / "fcmp_events.1.jsonl").write_text('{"legacy":"old"}\n', encoding="utf-8")
+    (audit_dir / "parser_diagnostics.1.jsonl").write_text("", encoding="utf-8")
+    (audit_dir / "protocol_metrics.1.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "io_chunks.1.jsonl").write_text(
+        json.dumps(
+            {
+                "seq": 1,
+                "ts": "2026-03-10T00:00:00Z",
+                "stream": "stdout",
+                "byte_from": 0,
+                "byte_to": 6,
+                "payload_b64": base64.b64encode(b"hello\n").decode("ascii"),
+                "encoding": "base64",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value={"engine": "unknown", "runtime_options": {"execution_mode": "auto"}}),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+
+    service = RunObservabilityService()
+    strict_replay_mock = AsyncMock(
+        return_value={
+            "success": True,
+            "written": True,
+            "reason": "OK",
+            "source": "io_chunks",
+            "event_count": 3,
+            "fcmp_count": 2,
+            "diagnostics": [],
+        }
+    )
+    monkeypatch.setattr(service, "_strict_replay_attempt", strict_replay_mock)
+    payload = await service.rebuild_protocol_history(run_dir=run_dir, request_id="req-rebuild")
+
+    assert payload["success"] is True
+    assert payload["mode"] == "strict_replay"
+    assert payload["attempts"][0]["source"] == "io_chunks"
+    assert payload["attempts"][0]["written"] is True
+    assert payload["attempts"][0]["reason"] == "OK"
+    assert payload["attempts"][0]["mode"] == "strict_replay"
+    strict_replay_mock.assert_awaited_once()
+    backup_dir = Path(payload["backup_dir"]) / "attempt-1"
+    assert (backup_dir / "events.1.jsonl").exists()
+    assert (backup_dir / "fcmp_events.1.jsonl").exists()
 
 
 @pytest.mark.asyncio

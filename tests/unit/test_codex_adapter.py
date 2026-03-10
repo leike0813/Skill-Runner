@@ -104,6 +104,23 @@ def test_parse_runtime_stream_keeps_latest_turn_only():
     assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest turn"]
 
 
+def test_parse_runtime_stream_maps_turn_complete_usage_payload():
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"turn.started"}\n'
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}\n'
+            b'{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    turn_complete_data = parsed.get("turn_complete_data")
+    assert isinstance(turn_complete_data, dict)
+    assert turn_complete_data.get("input_tokens") == 10
+    assert turn_complete_data.get("output_tokens") == 2
+
+
 def test_construct_config_excludes_runtime_interactive_options(tmp_path):
     config_manager = MagicMock()
     config_path = tmp_path / ".codex" / "config.toml"
@@ -248,7 +265,7 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path):
+async def test_run_interactive_reply_rebuilds_config_and_environment_setup(tmp_path):
     adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -262,9 +279,19 @@ async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path
     process_result.raw_stderr = ""
     process_result.failure_reason = None
 
-    with patch.object(adapter, "_construct_config", autospec=True) as mock_construct, \
-         patch.object(adapter, "_setup_environment", autospec=True) as mock_setup, \
-         patch.object(adapter, "_build_prompt", autospec=True, return_value="reply prompt"), \
+    with patch.object(
+        adapter.config_composer,
+        "compose",
+        autospec=True,
+        return_value=run_dir / ".codex" / "config.toml",
+    ) as mock_compose, \
+         patch.object(
+             adapter.run_folder_validator,
+             "validate",
+             autospec=True,
+             return_value=run_dir,
+         ) as mock_validate, \
+         patch.object(adapter.prompt_builder, "render", autospec=True, return_value="reply prompt"), \
          patch.object(adapter, "_execute_process", new=AsyncMock(return_value=process_result)):
         await adapter.run(
             skill,
@@ -281,8 +308,8 @@ async def test_run_interactive_reply_skips_config_and_environment_setup(tmp_path
             },
         )
 
-    assert mock_construct.call_count == 0
-    assert mock_setup.call_count == 0
+    assert mock_compose.call_count == 1
+    assert mock_validate.call_count == 1
 
 
 @pytest.mark.asyncio

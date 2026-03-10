@@ -124,3 +124,79 @@ def test_assistant_final_derivation_keeps_raw_ref_in_correlation() -> None:
     assert len(rows) == 1
     assert rows[0]["correlation"]["raw_ref"]["stream"] == "stdout"
     assert rows[0]["correlation"]["raw_ref"]["byte_from"] == 10
+
+
+def test_assistant_process_derivation_maps_reasoning_tool_and_command() -> None:
+    reasoning_rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 12,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:04:00Z",
+            "type": "assistant.reasoning",
+            "data": {
+                "message_id": "m-12",
+                "summary": "Inspecting input structure",
+                "details": {"step": "inspect"},
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+    tool_rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 13,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:04:30Z",
+            "type": "assistant.tool_call",
+            "data": {
+                "message_id": "m-13",
+                "details": {
+                    "tool_name": "search",
+                    "args": "q=contract",
+                },
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+    command_rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 14,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:05:00Z",
+            "type": "assistant.command_execution",
+            "data": {
+                "message_id": "m-14",
+                "details": {
+                    "command": "python -m pytest -q tests/unit/test_chat_replay_derivation.py",
+                },
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+
+    assert reasoning_rows[0]["role"] == "assistant"
+    assert reasoning_rows[0]["kind"] == "assistant_process"
+    assert reasoning_rows[0]["correlation"]["process_type"] == "reasoning"
+    assert reasoning_rows[0]["correlation"]["message_id"] == "m-12"
+    assert tool_rows[0]["kind"] == "assistant_process"
+    assert tool_rows[0]["correlation"]["process_type"] == "tool_call"
+    assert tool_rows[0]["text"] == "search(q=contract)"
+    assert command_rows[0]["kind"] == "assistant_process"
+    assert command_rows[0]["correlation"]["process_type"] == "command_execution"
+    assert command_rows[0]["text"] == "python -m pytest -q tests/unit/test_chat_replay_derivation.py"
+
+
+def test_assistant_message_promoted_derivation_emits_no_chat_row() -> None:
+    rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 15,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:05:30Z",
+            "type": "assistant.message.promoted",
+            "data": {
+                "message_id": "m-15",
+                "summary": "Promoted to final",
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+    assert rows == []

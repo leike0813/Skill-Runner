@@ -546,6 +546,50 @@ async def test_management_run_log_range_delegate(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_management_run_protocol_rebuild_route(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-rebuild-route"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.routers.management.run_store.get_request",
+        AsyncMock(return_value={"request_id": "req-rebuild", "run_id": "run-rebuild-route"}),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.routers.management.run_observability_service.rebuild_protocol_history",
+        AsyncMock(
+            return_value={
+                "request_id": "req-rebuild",
+                "run_id": "run-rebuild-route",
+                "mode": "strict_replay",
+                "success": True,
+                "backup_dir": str(run_dir / ".audit" / "rebuild_backups" / "ts"),
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "mode": "strict_replay",
+                        "source": "io_chunks",
+                        "written": True,
+                        "reason": "OK",
+                        "success": True,
+                    }
+                ],
+            }
+        ),
+    )
+
+    response = await _request("POST", "/v1/management/runs/req-rebuild/protocol/rebuild")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["mode"] == "strict_replay"
+    assert payload["attempts"][0]["mode"] == "strict_replay"
+    assert payload["attempts"][0]["source"] == "io_chunks"
+
+
+@pytest.mark.asyncio
 async def test_management_run_pending_reply_cancel_delegate_to_jobs(monkeypatch):
     async def _pending(_request_id: str):
         return InteractionPendingResponse(

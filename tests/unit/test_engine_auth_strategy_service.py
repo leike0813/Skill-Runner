@@ -78,7 +78,7 @@ def test_strategy_service_supports_start_requires_explicit_provider_for_opencode
 def test_strategy_service_opencode_conversation_methods_use_provider_scope() -> None:
     service = EngineAuthStrategyService()
 
-    assert service.methods_for_conversation("opencode", "openai") == ("callback", "device_auth")
+    assert service.methods_for_conversation("opencode", "openai") == ("callback", "device_auth", "import")
     assert service.methods_for_conversation("opencode", "deepseek") == ("api_key",)
     assert service.methods_for_conversation("opencode", None) == ()
 

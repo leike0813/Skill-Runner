@@ -135,6 +135,21 @@ def test_run_observe_template_renders_all_assistant_messages_as_bubbles():
     assert "isStructuredDoneMessage" not in content
 
 
+def test_run_observe_template_supports_assistant_process_thinking_bubble() -> None:
+    content = _read_template()
+    assert "/static/js/chat_thinking_core.js" in content
+    assert "createThinkingChatModel()" in content
+    assert "chatModel.consume(event)" in content
+    assert "entry.type === \"thinking\"" in content
+    assert "processTypeLabel(" in content
+    assert "thinking-arrow" in content
+    assert "bubble.setAttribute(\"role\", \"button\")" in content
+    assert "renderChatModel({ preserveScroll: true })" in content
+    assert "function isNearBottom(targetEl, thresholdPx = 24)" in content
+    assert "if (entry.collapsed) {" in content
+    assert "thinking-item" in content
+
+
 def test_run_observe_template_keeps_stream_open_until_terminal_chat_event():
     content = _read_template()
     assert 'if (isTerminal(currentStatus)) {' in content

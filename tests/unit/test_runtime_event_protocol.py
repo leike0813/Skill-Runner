@@ -204,6 +204,120 @@ def test_codex_parser_uses_pty_fallback_when_stdout_incomplete(tmp_path: Path):
     )
 
 
+def test_process_events_promote_to_final_on_turn_completed(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-promote-turn-end"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"thread-promote"}',
+                '{"type":"turn.started"}',
+                '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"step message"}}',
+                '{"type":"turn.completed"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-promote-turn-end",
+        engine="codex",
+        attempt_number=1,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    types = [event.event.type for event in rasp_events]
+    assert "agent.reasoning" in types
+    assert "agent.message.promoted" in types
+    assert "agent.message.final" in types
+    assert types.index("agent.message.promoted") < types.index("agent.message.final")
+
+    fcmp_events = build_fcmp_events(rasp_events, status="running")
+    fcmp_types = [event.type for event in fcmp_events]
+    assert "assistant.reasoning" in fcmp_types
+    assert "assistant.message.promoted" in fcmp_types
+    assert "assistant.message.final" in fcmp_types
+
+
+def test_turn_markers_are_rasp_only_and_not_mapped_to_fcmp(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-turn-markers"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"thread-1"}',
+                '{"type":"turn.started"}',
+                '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"step message"}}',
+                '{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":3}}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-turn-markers",
+        engine="codex",
+        attempt_number=1,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    rasp_types = [event.event.type for event in rasp_events]
+    assert "lifecycle.run_handle" in rasp_types
+    assert "agent.turn_start" in rasp_types
+    assert "agent.turn_complete" in rasp_types
+    run_handle_event = next(event for event in rasp_events if event.event.type == "lifecycle.run_handle")
+    assert run_handle_event.data.get("handle_id") == "thread-1"
+    turn_complete_event = next(event for event in rasp_events if event.event.type == "agent.turn_complete")
+    assert turn_complete_event.data.get("input_tokens") == 11
+    assert turn_complete_event.data.get("output_tokens") == 3
+    assert rasp_types.index("agent.turn_start") < rasp_types.index("agent.turn_complete")
+
+    fcmp_events = build_fcmp_events(rasp_events, status="running")
+    fcmp_types = [event.type for event in fcmp_events]
+    assert not any(type_name.startswith("assistant.turn") for type_name in fcmp_types)
+
+
+def test_no_fallback_final_on_failed_without_turn_completed(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-no-fallback-final"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"thread-failed"}',
+                '{"type":"item.completed","item":{"id":"msg-fail","type":"agent_message","text":"intermediate"}}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-no-fallback-final",
+        engine="codex",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    types = [event.event.type for event in rasp_events]
+    assert "agent.reasoning" in types
+    assert "agent.message.final" not in types
+
+
 def test_completion_conflict_maps_to_failed_conversation(tmp_path: Path):
     run_dir = tmp_path / "run-conflict"
     logs_dir = run_dir / "logs"

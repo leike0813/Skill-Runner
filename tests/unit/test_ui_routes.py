@@ -284,6 +284,9 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "const reloadedPayload = await fetchTimelineHistory(0, timelineRenderLimit);" in content
     assert "replaceTimelineFromPayload(payload);" in content
     assert "reconcileTimelineRowsWithCeiling();" in content
+    assert 'id="rebuild-protocol-btn"' in content
+    assert "/v1/management/runs/${requestId}/protocol/rebuild" in content
+    assert "I18N.rebuildProtocolRunning" in content
     assert "bootstrapTimelineHistory().catch(() => {});" not in content
 
 
@@ -1204,6 +1207,16 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/timeline/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "SkillRunnerFileExplorer" in detail_res.text
+    assert "chat_thinking_core.js" in detail_res.text
+    assert "createThinkingChatModel()" in detail_res.text
+    assert "chatModel.consume(event)" in detail_res.text
+    assert "entry.type === \"thinking\"" in detail_res.text
+    assert "chat-thinking-arrow" in detail_res.text
+    assert "chat-thinking-meta" in detail_res.text
+    assert "thinkingItem.rawRef" in detail_res.text
+    assert "item.setAttribute(\"role\", \"button\")" in detail_res.text
+    assert "renderChatModel({ preserveScroll: true })" in detail_res.text
+    assert "resetConversationRenderState();" in detail_res.text
     assert "initRunFileExplorer()" in detail_res.text
     assert 'id="run-file-tree-panel"' in detail_res.text
     assert 'id="stderr-toggle-btn"' in detail_res.text

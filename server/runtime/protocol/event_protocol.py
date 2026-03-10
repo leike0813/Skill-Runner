@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple
 
 from server.runtime.adapter.types import RuntimeStreamParseResult, RuntimeStreamRawRow
 from server.runtime.common.ask_user_text import normalize_interaction_text
@@ -30,9 +30,12 @@ from .factories import (
     make_fcmp_terminal_payload,
     make_rasp_event,
 )
+from .final_promotion_coordinator import FinalPromotionCoordinator, build_process_payload
 from .schema_registry import validate_fcmp_event, validate_rasp_event
 from .parse_utils import stream_lines_with_offsets, strip_runtime_script_envelope
 from .rasp_canonicalizer import coalesce_rasp_raw_rows
+
+RebuildMode = Literal["canonical", "forensic"]
 
 
 class _EngineAdapterRegistryShim:
@@ -140,17 +143,26 @@ def build_rasp_events(
     stdout_path: Path,
     stderr_path: Path,
     pty_path: Optional[Path] = None,
+    stdout_raw: bytes | None = None,
+    stderr_raw: bytes | None = None,
+    pty_raw: bytes | None = None,
     completion: Optional[Dict[str, Any]] = None,
     parser_resolver: RuntimeParserResolverPort | None = None,
+    rebuild_mode: RebuildMode = "canonical",
 ) -> List[RuntimeEventEnvelope]:
-    stdout_raw = _read_bytes(stdout_path)
-    stderr_raw = _read_bytes(stderr_path)
-    pty_raw = _read_bytes(pty_path) if pty_path is not None else b""
+    forensic_mode = rebuild_mode == "forensic"
+    stdout_bytes = stdout_raw if isinstance(stdout_raw, (bytes, bytearray)) else _read_bytes(stdout_path)
+    stderr_bytes = stderr_raw if isinstance(stderr_raw, (bytes, bytearray)) else _read_bytes(stderr_path)
+    pty_bytes = (
+        pty_raw
+        if isinstance(pty_raw, (bytes, bytearray))
+        else (_read_bytes(pty_path) if pty_path is not None else b"")
+    )
     parsed = parse_engine_logs(
         engine=engine,
-        stdout_raw=stdout_raw,
-        stderr_raw=stderr_raw,
-        pty_raw=pty_raw,
+        stdout_raw=bytes(stdout_bytes),
+        stderr_raw=bytes(stderr_bytes),
+        pty_raw=bytes(pty_bytes),
         parser_resolver=parser_resolver,
     )
 
@@ -188,12 +200,13 @@ def build_rasp_events(
     if isinstance(session_id, str) and session_id:
         correlation["session_id"] = session_id
 
-    push(
-        RuntimeEventCategory.LIFECYCLE,
-        "lifecycle.run.status",
-        data={"status": status},
-        correlation=correlation,
-    )
+    if isinstance(status, str) and status:
+        push(
+            RuntimeEventCategory.LIFECYCLE,
+            "lifecycle.run.status",
+            data={"status": status},
+            correlation=correlation,
+        )
     if isinstance(completion, dict):
         state = completion.get("state")
         reason_code = completion.get("reason_code")
@@ -211,22 +224,181 @@ def build_rasp_events(
                 correlation=correlation,
             )
 
+    promotion = FinalPromotionCoordinator()
     latest_assistant_prompt = ""
+    latest_reasoning_text = ""
+    marker_types_seen: set[str] = set()
+
+    turn_markers_obj = parsed.get("turn_markers", [])
+    parsed_turn_complete_data = (
+        parsed.get("turn_complete_data")
+        if isinstance(parsed.get("turn_complete_data"), dict)
+        else None
+    )
+    if isinstance(turn_markers_obj, list):
+        for marker_item in turn_markers_obj:
+            if not isinstance(marker_item, dict):
+                continue
+            marker_obj = marker_item.get("marker")
+            marker = marker_obj if isinstance(marker_obj, str) else None
+            if marker == "start":
+                marker_type = "agent.turn_start"
+            elif marker == "complete":
+                marker_type = "agent.turn_complete"
+            else:
+                continue
+            marker_data_obj = marker_item.get("data")
+            if marker_type == "agent.turn_complete":
+                marker_data = (
+                    marker_data_obj
+                    if isinstance(marker_data_obj, dict)
+                    else (parsed_turn_complete_data or {})
+                )
+            else:
+                marker_data = {}
+            raw_ref_row = marker_item.get("raw_ref")
+            push(
+                RuntimeEventCategory.AGENT,
+                marker_type,
+                data=marker_data,
+                raw_row=raw_ref_row if isinstance(raw_ref_row, dict) else None,
+                correlation=correlation,
+            )
+            marker_types_seen.add(marker_type)
+
+    if bool(parsed.get("turn_started")) and "agent.turn_start" not in marker_types_seen:
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.turn_start",
+            data={},
+            correlation=correlation,
+        )
+        marker_types_seen.add("agent.turn_start")
+
+    run_handle_obj = parsed.get("run_handle")
+    if isinstance(run_handle_obj, dict):
+        handle_id_obj = run_handle_obj.get("handle_id")
+        if isinstance(handle_id_obj, str) and handle_id_obj.strip():
+            raw_ref_row = run_handle_obj.get("raw_ref")
+            push(
+                RuntimeEventCategory.LIFECYCLE,
+                "lifecycle.run_handle",
+                data={"handle_id": handle_id_obj.strip()},
+                raw_row=raw_ref_row if isinstance(raw_ref_row, dict) else None,
+                correlation=correlation,
+            )
+
+    process_events_obj = parsed.get("process_events", [])
+    if isinstance(process_events_obj, list):
+        for index, process_event in enumerate(process_events_obj, start=1):
+            if not isinstance(process_event, dict):
+                continue
+            process_type_obj = process_event.get("process_type")
+            process_type = process_type_obj if isinstance(process_type_obj, str) else None
+            if process_type not in {"reasoning", "tool_call", "command_execution"}:
+                continue
+            message_id_obj = process_event.get("message_id")
+            message_id = (
+                message_id_obj
+                if isinstance(message_id_obj, str) and message_id_obj.strip()
+                else f"{process_type}_{attempt_number}_{index}"
+            )
+            summary_obj = process_event.get("summary")
+            summary = summary_obj if isinstance(summary_obj, str) and summary_obj.strip() else process_type
+            classification_obj = process_event.get("classification")
+            classification = (
+                classification_obj
+                if isinstance(classification_obj, str) and classification_obj.strip()
+                else process_type
+            )
+            details_obj = process_event.get("details")
+            details = details_obj if isinstance(details_obj, dict) else {}
+            text_obj = process_event.get("text")
+            text = text_obj if isinstance(text_obj, str) and text_obj.strip() else None
+            if process_type == "reasoning" and isinstance(text, str) and text:
+                latest_reasoning_text = text
+            event_type_map = {
+                "reasoning": "agent.reasoning",
+                "tool_call": "agent.tool_call",
+                "command_execution": "agent.command_execution",
+            }
+            payload = build_process_payload(
+                message_id=message_id,
+                summary=summary,
+                classification=classification,
+                details=details,
+                text=text,
+            )
+            raw_ref_row = process_event.get("raw_ref")
+            push(
+                RuntimeEventCategory.AGENT,
+                event_type_map[process_type],
+                data=payload,
+                raw_row=raw_ref_row if isinstance(raw_ref_row, dict) else None,
+                correlation=correlation,
+            )
+
     for index, msg in enumerate(parsed.get("assistant_messages", []), start=1):
         text = str(msg.get("text", ""))
         text = _normalize_prompt_text(text) or text.strip()
         if not text.strip():
             continue
         latest_assistant_prompt = text.strip()
+        message_id_obj = msg.get("message_id") if isinstance(msg, dict) else None
+        message_id = (
+            message_id_obj
+            if isinstance(message_id_obj, str) and message_id_obj.strip()
+            else f"m_{attempt_number}_{index}"
+        )
+        candidate = promotion.register_reasoning_candidate(
+            message_id=message_id,
+            text=text,
+            raw_ref=(msg.get("raw_ref") if isinstance(msg, dict) else None),
+            details={"source": "build_rasp_events"},
+        )
         raw_ref_row = msg.get("raw_ref") if isinstance(msg, dict) else None
         push(
             RuntimeEventCategory.AGENT,
-            "agent.message.final",
-            data={
-                "message_id": f"m_{attempt_number}_{index}",
-                "text": text,
-            },
+            "agent.reasoning",
+            data=build_process_payload(
+                message_id=candidate.message_id,
+                summary=candidate.summary,
+                classification="reasoning",
+                details=candidate.details,
+                text=candidate.text,
+            ),
             raw_row=raw_ref_row if isinstance(raw_ref_row, dict) else None,
+            correlation=correlation,
+        )
+
+    turn_completed = bool(parsed.get("turn_completed")) or ("agent.turn_complete" in marker_types_seen)
+    if turn_completed and "agent.turn_complete" not in marker_types_seen:
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.turn_complete",
+            data=parsed_turn_complete_data or {},
+            correlation=correlation,
+        )
+        marker_types_seen.add("agent.turn_complete")
+    promoted_candidate = (
+        promotion.promote_on_turn_end()
+        if turn_completed
+        else promotion.fallback_promote_for_status(status)
+    )
+    if promoted_candidate is not None:
+        promoted_raw_ref = promoted_candidate.raw_ref
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.message.promoted",
+            data=FinalPromotionCoordinator.promoted_payload(promoted_candidate),
+            raw_row=promoted_raw_ref if isinstance(promoted_raw_ref, dict) else None,
+            correlation=correlation,
+        )
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.message.final",
+            data=FinalPromotionCoordinator.final_payload(promoted_candidate),
+            raw_row=promoted_raw_ref if isinstance(promoted_raw_ref, dict) else None,
             correlation=correlation,
         )
 
@@ -328,14 +500,18 @@ def build_rasp_events(
         prompt = ""
         interaction_id: Optional[int] = None
         if isinstance(pending_interaction, dict):
-            prompt_obj = pending_interaction.get("prompt")
-            if isinstance(prompt_obj, str):
-                prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
             interaction_id_obj = pending_interaction.get("interaction_id")
             if isinstance(interaction_id_obj, int):
                 interaction_id = interaction_id_obj
-        if not prompt:
-            prompt = latest_assistant_prompt
+        if forensic_mode:
+            prompt = latest_assistant_prompt or latest_reasoning_text
+        else:
+            if isinstance(pending_interaction, dict):
+                prompt_obj = pending_interaction.get("prompt")
+                if isinstance(prompt_obj, str):
+                    prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
+            if not prompt:
+                prompt = latest_assistant_prompt or latest_reasoning_text
         push(
             RuntimeEventCategory.INTERACTION,
             "interaction.user_input.required",
@@ -779,11 +955,12 @@ def translate_orchestrator_event_to_fcmp_specs(
 
     if type_name == OrchestratorEventType.ERROR_RUN_FAILED.value:
         message = data.get("message") if isinstance(data.get("message"), str) else None
-        code = data.get("code") if isinstance(data.get("code"), str) else "ORCHESTRATOR_ERROR"
+        code_obj = data.get("code")
+        failure_code: str = code_obj if isinstance(code_obj, str) else "ORCHESTRATOR_ERROR"
         push(
             FcmpEventType.DIAGNOSTIC_WARNING.value,
             make_diagnostic_warning_payload(
-                code=code,
+                code=failure_code,
                 detail=message,
             ),
         )
@@ -819,7 +996,9 @@ def build_fcmp_events(
     effective_session_timeout_sec: Optional[int] = None,
     completion: Optional[Dict[str, Any]] = None,
     suppression_threshold: int = 3,
+    rebuild_mode: RebuildMode = "canonical",
 ) -> List[ConversationEventEnvelope]:
+    forensic_mode = rebuild_mode == "forensic"
     if not rasp_events:
         return []
     run_id = rasp_events[0].run_id
@@ -847,22 +1026,84 @@ def build_fcmp_events(
         if isinstance(candidate, str) and candidate:
             session_id = candidate
             break
-    assistant_events = [event for event in rasp_events if event.event.type == "agent.message.final"]
     assistant_messages: List[str] = []
-    assistant_payloads: List[Tuple[str, str, Optional[RuntimeEventRef]]] = []
-    for event in assistant_events:
-        text = event.data.get("text")
-        if not isinstance(text, str) or not text.strip():
+    assistant_reasoning_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    assistant_tool_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    assistant_command_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    assistant_promoted_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    assistant_final_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    for event in rasp_events:
+        event_type = event.event.type
+        if event_type not in {
+            "agent.reasoning",
+            "agent.tool_call",
+            "agent.command_execution",
+            "agent.message.promoted",
+            "agent.message.final",
+        }:
             continue
-        normalized_text = _normalize_prompt_text(text) or text.strip()
-        assistant_messages.append(normalized_text)
         message_id_obj = event.data.get("message_id")
         message_id = (
             message_id_obj
             if isinstance(message_id_obj, str) and message_id_obj.strip()
-            else f"m_{attempt_number}_{len(assistant_messages)}"
+            else f"m_{attempt_number}_{len(assistant_final_payloads) + len(assistant_reasoning_payloads) + 1}"
         )
-        assistant_payloads.append((message_id, normalized_text, event.raw_ref))
+        summary_obj = event.data.get("summary")
+        summary = summary_obj if isinstance(summary_obj, str) and summary_obj.strip() else None
+        classification_obj = event.data.get("classification")
+        classification = (
+            classification_obj
+            if isinstance(classification_obj, str) and classification_obj.strip()
+            else None
+        )
+        details_obj = event.data.get("details")
+        details = details_obj if isinstance(details_obj, dict) else {}
+        text_obj = event.data.get("text")
+        text = (
+            (_normalize_prompt_text(text_obj) or text_obj.strip())
+            if isinstance(text_obj, str) and text_obj.strip()
+            else None
+        )
+        payload: dict[str, Any] = {
+            "message_id": message_id,
+            "summary": summary or (text if isinstance(text, str) else event_type),
+            "classification": classification or (
+                "final" if event_type == "agent.message.final" else event_type.split(".")[-1]
+            ),
+            "details": details,
+        }
+        if isinstance(text, str) and text:
+            payload["text"] = text
+        if event_type == "agent.reasoning":
+            assistant_reasoning_payloads.append((payload, event.raw_ref))
+        elif event_type == "agent.tool_call":
+            assistant_tool_payloads.append((payload, event.raw_ref))
+        elif event_type == "agent.command_execution":
+            assistant_command_payloads.append((payload, event.raw_ref))
+        elif event_type == "agent.message.promoted":
+            assistant_promoted_payloads.append((payload, event.raw_ref))
+        elif event_type == "agent.message.final":
+            if isinstance(text, str):
+                assistant_messages.append(text)
+            assistant_final_payloads.append((payload, event.raw_ref))
+
+    explicit_waiting_required: Optional[dict[str, Any]] = None
+    for event in rasp_events:
+        if event.event.type != "interaction.user_input.required":
+            continue
+        interaction_id_obj = event.data.get("interaction_id")
+        prompt_obj = event.data.get("prompt")
+        kind_obj = event.data.get("kind")
+        explicit_waiting_required = {
+            "interaction_id": interaction_id_obj if isinstance(interaction_id_obj, int) else None,
+            "kind": kind_obj if isinstance(kind_obj, str) and kind_obj.strip() else "free_text",
+            "prompt": (
+                (_normalize_prompt_text(prompt_obj) or prompt_obj.strip())
+                if isinstance(prompt_obj, str) and prompt_obj.strip()
+                else ""
+            ),
+        }
+        break
 
     for event in rasp_events:
         if event.event.type != "diagnostic.warning":
@@ -1398,7 +1639,11 @@ def build_fcmp_events(
                     ),
                 )
 
-    if state_transition_events_emitted == 0 and effective_status in {"running", "waiting_user", "waiting_auth"}:
+    if (
+        not forensic_mode
+        and state_transition_events_emitted == 0
+        and effective_status in {"running", "waiting_user", "waiting_auth"}
+    ):
         if effective_status == "running":
             source_state, trigger = ("queued", "turn.started")
         elif effective_status == "waiting_user":
@@ -1418,15 +1663,20 @@ def build_fcmp_events(
             ),
         )
 
-    for message_id, normalized_text, raw_ref in assistant_payloads:
-        push(
-            FcmpEventType.ASSISTANT_MESSAGE_FINAL.value,
-            {
-                "message_id": message_id,
-                "text": normalized_text,
-            },
-            raw_ref=raw_ref,
-        )
+    for payload, raw_ref in assistant_reasoning_payloads:
+        push(FcmpEventType.ASSISTANT_REASONING.value, payload, raw_ref=raw_ref)
+    for payload, raw_ref in assistant_tool_payloads:
+        push(FcmpEventType.ASSISTANT_TOOL_CALL.value, payload, raw_ref=raw_ref)
+    for payload, raw_ref in assistant_command_payloads:
+        push(FcmpEventType.ASSISTANT_COMMAND_EXECUTION.value, payload, raw_ref=raw_ref)
+    for payload, raw_ref in assistant_promoted_payloads:
+        push(FcmpEventType.ASSISTANT_MESSAGE_PROMOTED.value, payload, raw_ref=raw_ref)
+    for payload, raw_ref in assistant_final_payloads:
+        final_payload = dict(payload)
+        text_obj = final_payload.get("text")
+        if not isinstance(text_obj, str) or not text_obj.strip():
+            continue
+        push(FcmpEventType.ASSISTANT_MESSAGE_FINAL.value, final_payload, raw_ref=raw_ref)
 
     terminal_state_trigger_map = {
         "succeeded": "turn.succeeded",
@@ -1462,37 +1712,46 @@ def build_fcmp_events(
 
     if effective_status in {"failed", "canceled"}:
         if completion_state == "completed":
-            push(
-                FcmpEventType.DIAGNOSTIC_WARNING.value,
-                {"code": "TERMINAL_STATUS_COMPLETION_CONFLICT"},
-            )
-        for code in completion_diagnostics:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+            if not forensic_mode:
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    {"code": "TERMINAL_STATUS_COMPLETION_CONFLICT"},
+                )
+        if not forensic_mode:
+            for code in completion_diagnostics:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif effective_status == "succeeded":
-        for code in completion_diagnostics:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+        if not forensic_mode:
+            for code in completion_diagnostics:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif completion_state == "interrupted" and effective_status not in {"waiting_user", "waiting_auth"}:
-        push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code or "INTERRUPTED"})
-        for code in completion_diagnostics:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+        if not forensic_mode:
+            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code or "INTERRUPTED"})
+            for code in completion_diagnostics:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif completion_state == "awaiting_user_input" or effective_status == "waiting_user":
         prompt = ""
         waiting_interaction_id: Optional[int] = pending_interaction_id
-        if pending_payload is not None:
-            prompt_obj = pending_payload.get("prompt")
-            if isinstance(prompt_obj, str) and prompt_obj.strip():
-                prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
+        if forensic_mode:
+            if explicit_waiting_required is not None:
+                explicit_prompt_obj = explicit_waiting_required.get("prompt")
+                if isinstance(explicit_prompt_obj, str) and explicit_prompt_obj.strip():
+                    prompt = explicit_prompt_obj.strip()
+                explicit_interaction_id_obj = explicit_waiting_required.get("interaction_id")
+                if isinstance(explicit_interaction_id_obj, int):
+                    waiting_interaction_id = explicit_interaction_id_obj
         else:
-            for event in rasp_events:
-                if event.event.type != "interaction.user_input.required":
-                    continue
-                prompt_obj = event.data.get("prompt")
+            if pending_payload is not None:
+                prompt_obj = pending_payload.get("prompt")
                 if isinstance(prompt_obj, str) and prompt_obj.strip():
                     prompt = _normalize_prompt_text(prompt_obj) or prompt_obj.strip()
-                interaction_id_obj = event.data.get("interaction_id")
-                if isinstance(interaction_id_obj, int):
-                    waiting_interaction_id = interaction_id_obj
-                break
+            elif explicit_waiting_required is not None:
+                explicit_prompt_obj = explicit_waiting_required.get("prompt")
+                if isinstance(explicit_prompt_obj, str) and explicit_prompt_obj.strip():
+                    prompt = explicit_prompt_obj.strip()
+                explicit_interaction_id_obj = explicit_waiting_required.get("interaction_id")
+                if isinstance(explicit_interaction_id_obj, int):
+                    waiting_interaction_id = explicit_interaction_id_obj
         if not prompt and assistant_messages:
             latest_message = assistant_messages[-1]
             if isinstance(latest_message, str) and latest_message.strip():
@@ -1505,10 +1764,11 @@ def build_fcmp_events(
                 "prompt": prompt or "User input is required to continue.",
             },
         )
-        if completion_reason_code:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
-        for code in completion_diagnostics:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+        if not forensic_mode:
+            if completion_reason_code:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
+            for code in completion_diagnostics:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif effective_status == "waiting_auth":
         auth_waiting_payload = pending_auth_payload or pending_auth_selection_payload
         if auth_waiting_payload is not None and not auth_required_emitted:
@@ -1550,14 +1810,16 @@ def build_fcmp_events(
                     expires_at=auth_waiting_payload.get("expires_at") if isinstance(auth_waiting_payload.get("expires_at"), str) else None,
                 ),
             )
-        if completion_reason_code:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
-        for code in completion_diagnostics:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+        if not forensic_mode:
+            if completion_reason_code:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
+            for code in completion_diagnostics:
+                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
     elif effective_status in {"queued", "running"} or auth_completed_emitted or auth_failed_emitted:
         pass
     else:
-        push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": "INCOMPLETE_STATE_CLASSIFICATION"})
+        if not forensic_mode:
+            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": "INCOMPLETE_STATE_CLASSIFICATION"})
     return fcmp_events
 
 

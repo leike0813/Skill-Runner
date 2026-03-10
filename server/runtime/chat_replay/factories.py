@@ -34,6 +34,58 @@ def _safe_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _normalize_ws(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def _truncate_text(value: str, max_len: int = 160) -> str:
+    text = _normalize_ws(value)
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 1].rstrip()}…"
+
+
+def _summary_from_details(details: Any, keys: tuple[str, ...]) -> str:
+    if not isinstance(details, dict):
+        return ""
+    for key in keys:
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _assistant_process_text(type_name: str, data: Dict[str, Any]) -> tuple[str, str]:
+    summary = _safe_text(data.get("summary"))
+    text = normalize_interaction_text(data.get("text"))
+    details = data.get("details")
+    process_type = type_name.removeprefix("assistant.")
+
+    if process_type == "reasoning":
+        content = text or summary
+        return _truncate_text(content), _truncate_text(summary or content)
+
+    if process_type == "tool_call":
+        tool_name = _summary_from_details(details, ("tool_name", "name", "tool"))
+        tool_args = _summary_from_details(details, ("args", "arguments", "input"))
+        base = summary or text or ""
+        if tool_name:
+            base = f"{tool_name}{f'({tool_args})' if tool_args else ''}"
+        elif tool_args and not base:
+            base = tool_args
+        rendered = _truncate_text(base or "Tool call")
+        return rendered, _truncate_text(summary or rendered)
+
+    if process_type == "command_execution":
+        command = _summary_from_details(details, ("command", "cmd", "shell_command"))
+        base = command or summary or text or ""
+        rendered = _truncate_text(base or "Command execution")
+        return rendered, _truncate_text(summary or rendered)
+
+    content = text or summary
+    return _truncate_text(content), _truncate_text(summary or content)
+
+
 def _auth_submission_text(submission_kind: str) -> str:
     normalized = submission_kind.strip().lower()
     if normalized == "api_key":
@@ -130,6 +182,25 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
                     ChatReplayKind.ASSISTANT_FINAL.value,
                     text,
                     {"message_id": data.get("message_id"), "fcmp_seq": seq},
+                )
+            )
+    elif type_name in {"assistant.reasoning", "assistant.tool_call", "assistant.command_execution"}:
+        text, summary = _assistant_process_text(type_name, data)
+        if text:
+            process_type = type_name.removeprefix("assistant.")
+            specs.append(
+                (
+                    ChatReplayRole.ASSISTANT.value,
+                    ChatReplayKind.ASSISTANT_PROCESS.value,
+                    text,
+                    {
+                        "message_id": data.get("message_id"),
+                        "fcmp_seq": seq,
+                        "process_type": process_type,
+                        "summary": summary or None,
+                        "details": data.get("details"),
+                        "classification": data.get("classification"),
+                    },
                 )
             )
     elif type_name == "auth.completed":

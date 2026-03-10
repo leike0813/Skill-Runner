@@ -21,7 +21,10 @@ def test_initialize_attempt_audit_creates_service_log_skeleton(tmp_path: Path):
 
     run_service_log_path = run_dir / ".audit" / "service.run.log"
     service_log_path = run_dir / ".audit" / "service.1.log"
+    io_chunks_path = run_dir / ".audit" / "io_chunks.1.jsonl"
     assert run_service_log_path.exists()
     assert run_service_log_path.read_text(encoding="utf-8") == ""
     assert service_log_path.exists()
     assert service_log_path.read_text(encoding="utf-8") == ""
+    assert io_chunks_path.exists()
+    assert io_chunks_path.read_text(encoding="utf-8") == ""

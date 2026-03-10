@@ -82,3 +82,32 @@ def test_parse_runtime_stream_keeps_latest_step_only():
     )
     assert parsed["assistant_messages"]
     assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest step"]
+
+
+def test_parse_runtime_stream_emits_turn_markers_and_process_events() -> None:
+    adapter = OpencodeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"step_start","id":"s1","sessionID":"ses-op-1"}\n'
+            b'{"type":"tool_use","part":{"type":"tool","id":"p1","tool":"bash","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi"}}}\n'
+            b'{"type":"step_finish","id":"s1","part":{"reason":"stop","cost":0,"tokens":{"total":12,"input":9,"output":3}}}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+    turn_markers = parsed.get("turn_markers", [])
+    assert isinstance(turn_markers, list)
+    assert [item.get("marker") for item in turn_markers] == ["start", "complete"]
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "ses-op-1"
+    process_events = parsed.get("process_events", [])
+    assert isinstance(process_events, list) and process_events
+    assert process_events[0].get("process_type") == "command_execution"
+    assert process_events[0].get("summary") == "echo hi"
+    turn_complete_data = parsed.get("turn_complete_data")
+    assert isinstance(turn_complete_data, dict)
+    assert turn_complete_data.get("cost") == 0
+    tokens = turn_complete_data.get("tokens")
+    assert isinstance(tokens, dict)
+    assert tokens.get("total") == 12

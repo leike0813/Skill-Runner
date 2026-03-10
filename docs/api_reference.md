@@ -46,6 +46,7 @@
 - `GET /v1/management/runs/{request_id}/chat`：SSE 对话事件流（复用 jobs chat 语义）
 - `GET /v1/management/runs/{request_id}/chat/history`：结构化对话历史（支持 `from_seq/to_seq/from_ts/to_ts`）
 - `GET /v1/management/runs/{request_id}/protocol/history`：协议级事件历史（FCMP/RASP/Orchestrator，支持 `attempt` 与 `limit`）
+- `POST /v1/management/runs/{request_id}/protocol/rebuild`：手动重构该 run 的协议审计文件（全 attempts，覆盖写回并自动备份）
 - `GET /v1/management/runs/{request_id}/timeline/history`：Run 级时序历史（五泳道聚合，支持 `cursor/limit`）
 - `GET /v1/management/runs/{request_id}/logs/range`：按字节区间读取 `stdout/stderr/pty` 片段（供 `raw_ref` 回跳，支持 `attempt`）
 - `GET /v1/management/runs/{request_id}/pending`：查询待决交互
@@ -195,6 +196,17 @@
 
 **关联接口**: 该接口在 `/v1/jobs/{request_id}/chat/history` 和 `/v1/temp-skill-runs/{request_id}/chat/history` 同样可用。
 
+**事件 kind 说明（增量）**:
+- `assistant_process`：assistant 过程消息（由 FCMP 的 `assistant.reasoning` / `assistant.tool_call` / `assistant.command_execution` 派生）
+- `assistant_final`：assistant 最终答复
+- `interaction_reply`：用户交互回复
+- `auth_submission`：用户鉴权输入
+- `orchestration_notice`：系统编排提示
+
+说明：
+- `assistant.message.promoted` 不会单独派生 chat 正文事件，仅作为收敛边界语义。
+- `assistant_process` 事件可在 `correlation` 中包含 `process_type`、`message_id`、`fcmp_seq`、`summary`、`details`。
+
 ### 协议级事件历史
 `GET /v1/management/runs/{request_id}/protocol/history`
 
@@ -225,9 +237,58 @@
 
 说明：
 - 该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
+- FCMP 过程事件已扩展为通用类型：`assistant.reasoning` / `assistant.tool_call` / `assistant.command_execution` / `assistant.message.promoted`（保留 `assistant.message.final`）。
+- RASP 过程事件对应为 `agent.reasoning` / `agent.tool_call` / `agent.command_execution` / `agent.message.promoted`（保留 `agent.message.final`）。
+- RASP 额外包含回合标记：`agent.turn_start` / `agent.turn_complete`（仅审计，不映射 FCMP）。
+- `agent.turn_complete.data` 可直接包含结构化统计信息（例如 Gemini `stats`、Codex `usage`、OpenCode `cost/tokens`、iFlow execution metrics）。
+- RASP 生命周期扩展事件：`lifecycle.run_handle`（`data.handle_id`，仅审计，不映射 FCMP/chat）。
+- FCMP 不允许 `assistant.turn_*` 事件类型。
+- 同一 `message_id` 的收敛顺序为 `*.message.promoted` 先于 `*.message.final`。
 - `raw.stdout/raw.stderr` 事件仍保持原类型，`data.line` 可能为多行归并文本（string，向后兼容）。
 - Gemini 解析器在命中整批 JSON 时可产出 `parsed.json` 事件（RASP），用于呈现 `stream/session_id/response/summary/details` 结构化信息。
 - run 进入 terminal（`succeeded/failed/canceled`）后，`stream=rasp|fcmp` 的历史查询按审计文件口径返回（不混 live journal 增量）。
+
+### 手动重构协议审计
+`POST /v1/management/runs/{request_id}/protocol/rebuild`
+
+对指定 run 的全部 attempts 进行协议重构。  
+重构模式固定为 `strict_replay`：仅按真实运行链路回放（`io_chunks + orchestrator_events + meta`），关键证据缺失时该 attempt 失败且不覆写。  
+写回覆盖前会自动备份已有审计文件到 `.audit/rebuild_backups/<timestamp>/attempt-<N>/`。
+
+**Request Body**: 无
+
+**Response**:
+```json
+{
+  "request_id": "d290f1ee-...",
+  "run_id": "run-123",
+  "mode": "strict_replay",
+  "success": true,
+  "backup_dir": "/.../run-123/.audit/rebuild_backups/20260310T120000000000Z",
+  "attempts": [
+    {
+      "attempt": 1,
+      "mode": "strict_replay",
+      "source": "io_chunks",
+      "written": true,
+      "reason": "OK",
+      "event_count": 58,
+      "fcmp_count": 37,
+      "diagnostics": [],
+      "success": true
+    }
+  ]
+}
+```
+
+**错误码**:
+- `404`: `request_id` 不存在、run 不存在或 run 目录缺失。
+
+说明：
+- 此接口为人工运维动作，不会在页面访问或常规历史读取时自动触发。
+- 本次重构范围是“整个 run（全部 attempts）”，不会只重构单 attempt。
+- 重构不会做“运行态补偿重算注入”；仅允许真实回放链路自然产出事件。
+- 每个 attempt 单独执行：失败 attempt 不覆写，成功 attempt 可独立覆写。
 
 ### Run 级时序历史
 `GET /v1/management/runs/{request_id}/timeline/history`

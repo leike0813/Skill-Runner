@@ -458,7 +458,6 @@ class RunInteractionLifecycleService:
     async def persist_waiting_interaction(
         self,
         *,
-        adapter: Any,
         run_id: str,
         run_dir: Path,
         request_id: str,
@@ -466,7 +465,6 @@ class RunInteractionLifecycleService:
         profile: EngineInteractiveProfile,
         interactive_auto_reply: bool,
         pending_interaction: dict[str, Any],
-        raw_runtime_output: str,
         run_store_backend: Any,
         append_internal_schema_warning: Callable[..., None],
         append_orchestrator_event: Callable[..., None],
@@ -523,28 +521,9 @@ class RunInteractionLifecycleService:
         )
         _ = run_id
         _ = interactive_auto_reply
-        try:
-            handle = adapter.extract_session_handle(
-                raw_runtime_output,
-                turn_index=int(pending_interaction["interaction_id"]),
-            )
-        except Exception as exc:
-            # Adapter/session-handle extraction is engine-specific; map failure to stable error code.
-            logger.warning(
-                "interactive lifecycle session handle extraction failed",
-                extra={
-                    "component": "orchestration.run_interaction_lifecycle_service",
-                    "action": "persist_waiting_interaction.extract_session_handle",
-                    "error_type": type(exc).__name__,
-                    "fallback": "interactive_session_resume_failed",
-                },
-                exc_info=True,
-            )
+        handle = await maybe_await(run_store_backend.get_engine_session_handle(request_id))
+        if not isinstance(handle, dict) or not isinstance(handle.get("handle_value"), str) or not str(handle.get("handle_value")).strip():
             return InteractiveErrorCode.SESSION_RESUME_FAILED.value
-        await maybe_await(run_store_backend.set_engine_session_handle(
-            request_id,
-            handle.model_dump(mode="json"),
-        ))
         await self.write_interaction_mirror_files(
             run_dir=run_dir,
             request_id=request_id,

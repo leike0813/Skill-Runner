@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from server.runtime.adapter.types import (
     LiveParserEmission,
     RuntimeAssistantMessage,
     RuntimeStreamParseResult,
+    RuntimeStreamRawRef,
     RuntimeStreamRawRow,
     RuntimeStructuredPayload,
+    RuntimeTurnMarker,
 )
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
@@ -32,6 +34,8 @@ GEMINI_RAW_COALESCE_MIN_ROWS = 48
 
 
 class GeminiStreamParser:
+    live_semantic_on_finish_only = True
+
     def __init__(self, adapter: "GeminiExecutionAdapter") -> None:
         self._adapter = adapter
 
@@ -124,6 +128,11 @@ class GeminiStreamParser:
         structured_types: list[str] = []
         structured_payloads: list[RuntimeStructuredPayload] = []
         confidence = 0.5
+        turn_completed = False
+        turn_complete_data: dict[str, Any] | None = None
+        turn_complete_raw_ref: RuntimeStreamRawRef | None = None
+        run_handle_id: str | None = None
+        run_handle_raw_ref: RuntimeStreamRawRef | None = None
         consumed_ranges: dict[str, list[tuple[int, int]]] = {
             "stdout": [],
             "stderr": [],
@@ -146,7 +155,8 @@ class GeminiStreamParser:
             byte_to: int,
             structured_type: str,
         ) -> bool:
-            nonlocal session_id, confidence
+            nonlocal session_id, confidence, turn_completed, turn_complete_data, turn_complete_raw_ref
+            nonlocal run_handle_id, run_handle_raw_ref
             if not isinstance(payload, dict):
                 return False
             if structured_type:
@@ -159,8 +169,16 @@ class GeminiStreamParser:
                 row_session_id = find_session_id(payload)
             if row_session_id and not session_id:
                 session_id = row_session_id
+            if row_session_id and not run_handle_id:
+                run_handle_id = row_session_id
+                run_handle_raw_ref = {
+                    "stream": stream,
+                    "byte_from": byte_from,
+                    "byte_to": byte_to,
+                }
 
             response_obj = details.pop(response_key, None)
+            stats_obj = payload.get("stats")
             response_text: str | None = None
             if isinstance(response_obj, str):
                 normalized_response = response_obj.strip()
@@ -194,6 +212,17 @@ class GeminiStreamParser:
             confidence = max(confidence, 0.9 if stream == "stderr" else 0.85)
 
             if isinstance(response_text, str) and response_text.strip():
+                if not turn_completed:
+                    turn_completed = True
+                    turn_complete_raw_ref = {
+                        "stream": stream,
+                        "byte_from": byte_from,
+                        "byte_to": byte_to,
+                    }
+                    if isinstance(stats_obj, dict):
+                        turn_complete_data = dict(stats_obj)
+                    else:
+                        turn_complete_data = {}
                 assistant_messages.append(
                     {
                         "text": response_text,
@@ -284,6 +313,8 @@ class GeminiStreamParser:
                 or find_session_id_in_text(stdout_text)
                 or find_session_id_in_text(pty_text)
             )
+        if not run_handle_id and session_id:
+            run_handle_id = session_id
 
         combined_auth_prompt_text = "\n".join(part for part in (stdout_text, stderr_text, pty_text) if part)
 
@@ -340,15 +371,35 @@ class GeminiStreamParser:
             if isinstance(reason_obj, str) and reason_obj:
                 diagnostics.append(reason_obj)
 
+        turn_markers: list[RuntimeTurnMarker] = [{"marker": "start", "raw_ref": None}]
+        if turn_completed:
+            complete_marker: RuntimeTurnMarker = {
+                "marker": "complete",
+                "raw_ref": turn_complete_raw_ref,
+            }
+            if isinstance(turn_complete_data, dict):
+                complete_marker["data"] = turn_complete_data
+            turn_markers.append(complete_marker)
+
         result: RuntimeStreamParseResult = {
             "parser": "gemini_json",
             "confidence": confidence,
             "session_id": session_id,
             "assistant_messages": dedup_assistant_messages(assistant_messages),
+            "turn_started": True,
+            "turn_completed": turn_completed,
+            "turn_markers": turn_markers,
             "raw_rows": raw_rows,
             "diagnostics": list(dict.fromkeys(diagnostics)),
             "structured_types": list(dict.fromkeys(structured_types)),
         }
+        if isinstance(turn_complete_data, dict):
+            result["turn_complete_data"] = turn_complete_data
+        if isinstance(run_handle_id, str) and run_handle_id.strip():
+            result["run_handle"] = {
+                "handle_id": run_handle_id.strip(),
+                "raw_ref": run_handle_raw_ref,
+            }
         if structured_payloads:
             result["structured_payloads"] = structured_payloads
         if auth_signal is not None:
@@ -400,6 +451,58 @@ class _GeminiLiveSession:
         )
         emissions: list[LiveParserEmission] = []
         session_id = parsed.get("session_id")
+        parsed_turn_complete_data = (
+            parsed.get("turn_complete_data")
+            if isinstance(parsed.get("turn_complete_data"), dict)
+            else None
+        )
+        run_handle_obj = parsed.get("run_handle")
+        if isinstance(run_handle_obj, dict):
+            handle_id_obj = run_handle_obj.get("handle_id")
+            if isinstance(handle_id_obj, str) and handle_id_obj.strip():
+                run_handle_emission: LiveParserEmission = {
+                    "kind": "run_handle",
+                    "handle_id": handle_id_obj.strip(),
+                }
+                raw_ref_obj = run_handle_obj.get("raw_ref")
+                if isinstance(raw_ref_obj, dict):
+                    run_handle_emission["raw_ref"] = raw_ref_obj
+                if isinstance(session_id, str) and session_id:
+                    run_handle_emission["session_id"] = session_id
+                emissions.append(run_handle_emission)
+        turn_markers_obj = parsed.get("turn_markers")
+        if isinstance(turn_markers_obj, list):
+            for marker_item in turn_markers_obj:
+                if not isinstance(marker_item, dict):
+                    continue
+                marker_obj = marker_item.get("marker")
+                marker = marker_obj if isinstance(marker_obj, str) else None
+                if marker not in {"start", "complete"}:
+                    continue
+                marker_literal: Literal["start", "complete"] = cast(Literal["start", "complete"], marker)
+                marker_emission: LiveParserEmission = {
+                    "kind": "turn_marker",
+                    "marker": marker_literal,
+                }
+                raw_ref_obj = marker_item.get("raw_ref")
+                if isinstance(raw_ref_obj, dict):
+                    marker_emission["raw_ref"] = raw_ref_obj
+                if marker == "complete":
+                    marker_data_obj = marker_item.get("data")
+                    if isinstance(marker_data_obj, dict):
+                        marker_emission["turn_complete_data"] = marker_data_obj
+                    elif isinstance(parsed_turn_complete_data, dict):
+                        marker_emission["turn_complete_data"] = parsed_turn_complete_data
+                if isinstance(session_id, str) and session_id:
+                    marker_emission["session_id"] = session_id
+                emissions.append(marker_emission)
+        if bool(parsed.get("turn_completed")):
+            completion_emission: LiveParserEmission = {"kind": "turn_completed"}
+            if isinstance(parsed_turn_complete_data, dict):
+                completion_emission["turn_complete_data"] = parsed_turn_complete_data
+            if isinstance(session_id, str) and session_id:
+                completion_emission["session_id"] = session_id
+            emissions.append(completion_emission)
         for item in parsed.get("assistant_messages", []):
             if not isinstance(item, dict):
                 continue
@@ -407,6 +510,9 @@ class _GeminiLiveSession:
             if not isinstance(text, str) or not text.strip():
                 continue
             emission: LiveParserEmission = {"kind": "assistant_message", "text": text}
+            raw_ref_obj = item.get("raw_ref")
+            if isinstance(raw_ref_obj, dict):
+                emission["raw_ref"] = raw_ref_obj
             if isinstance(session_id, str) and session_id:
                 emission["session_id"] = session_id
             emissions.append(emission)

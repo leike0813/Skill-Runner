@@ -15,12 +15,19 @@
 - [x] 文档对齐
 - [x] 重写 readme
 - [x] 容器化配置更新，构建新版镜像
-- [ ] 四 engine 整体升级 parse 事件
-- [ ] 前端新增“思考过程”相关功能
-- [ ] 管理 UI 增加下载 bundle 和 debug bundle 的按钮（成功终态可用），E2E前端增加下载 debug bundle 的按钮，并且将两个下载按钮改为成功终态可用
-- [ ] 文件树的动态刷新（或添加手动刷新按钮）
-- [ ] Timeline attempt 分割符
+- [x] 四 engine 整体升级 parse 事件
+- [x] agent.turn_start 和 agent.turn_complete 的 RASP 事件
+- [x] 前端新增“思考过程”相关功能
+- [x] stdin/out/err 结构化，按输出轮次分割，确保 stdin/out/err 可以在下游协议变动时完整重构审计数据
+- [ ] opencode 模型缓存在每次鉴权动作后刷新；手动刷新按钮按下后暂不可用直至刷新完毕，界面增加提示
+- [ ] 管理 UI 增加下载 bundle 和 debug bundle 的按钮（成功终态可用），E2E前端增加下载 debug bundle 的按钮，并且将两个下载按钮改为成功终态可用。重构协议按钮非终态不可用
 - [ ] 移除 debug 模式
+- [ ] 文件树的动态刷新（或添加手动刷新按钮）
+- [ ] 文件预览中显示行号，JSON渲染时背景灰色的问题
+- [ ] Timeline attempt 分割符（或者用浅色 color cycle 渲染背景并在分隔处加上 attempt 标识）
+- [ ] 前端 UI 消息气泡中文本换行位置问题（不在气泡边界而在对话窗口边界）
+- [ ] 前端和后端的 run 列表都应该有分页机制（20个一页就好），但是要确保进入 run 观测页面后再返回可以返回进入之前的分页
+- [ ] run 列表增加模型一列
 - [ ] Timezone 问题
 - [ ] agent harness 功能确认与容器内增强
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架

@@ -305,6 +305,39 @@
         "response_key": { "type": "string", "minLength": 1 },
         "summary_max_chars": { "type": "integer", "minimum": 32, "maximum": 2000 }
       }
+    },
+    "parser_process_extract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turn_start_payload_types", "turn_end_payload_types", "item_type_mappings"],
+      "properties": {
+        "turn_start_payload_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "turn_end_payload_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "item_type_mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["item_type", "process_type"],
+            "properties": {
+              "item_type": { "type": "string", "minLength": 1 },
+              "process_type": {
+                "type": "string",
+                "enum": ["reasoning", "tool_call", "command_execution"]
+              },
+              "summary_field": { "type": ["string", "null"] },
+              "text_field": { "type": ["string", "null"] },
+              "classification": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

@@ -10,6 +10,13 @@ ordering_domains:
 
 event_kinds:
   - conversation.state.changed
+  - assistant.reasoning
+  - assistant.tool_call
+  - assistant.command_execution
+  - assistant.message.promoted
+  - lifecycle.run_handle
+  - agent.turn_start
+  - agent.turn_complete
   - interaction.prompted
   - assistant.message.final
   - user.input.required
@@ -48,6 +55,9 @@ precedence_rules:
   - id: PR-07
     before: conversation.state.changed.canceled
     after: projection.terminal.result
+  - id: PR-08
+    before: agent.turn_start
+    after: agent.turn_complete
 
 gating_rules:
   - id: GR-01
@@ -120,6 +130,14 @@ buffer_policies:
     strategy: emission_order_buffered
     candidate_required: true
     direct_publish_forbidden: true
+
+payload_rules:
+  - id: PL-01
+    event_kind: agent.turn_start
+    data_shape: empty_object
+  - id: PL-02
+    event_kind: agent.turn_complete
+    data_shape: structured_object_allowed
 
 lifecycle_normalization_rules:
   remove:

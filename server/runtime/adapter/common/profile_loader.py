@@ -24,6 +24,7 @@ CredentialPolicyMode = Literal["all_of_sources", "any_of_sources"]
 SettingsValidator = Literal["iflow_oauth_settings"]
 BootstrapFormat = Literal["json", "text"]
 NormalizeStrategy = Literal["iflow_settings_v1"]
+ProcessEventType = Literal["reasoning", "tool_call", "command_execution"]
 ImportValidatorName = Literal[
     "json_object",
     "codex_auth_json",
@@ -140,6 +141,22 @@ class ParserStructuredExtractProfile:
 
 
 @dataclass(frozen=True)
+class ProcessItemMappingProfile:
+    item_type: str
+    process_type: ProcessEventType
+    summary_field: str | None
+    text_field: str | None
+    classification: str | None
+
+
+@dataclass(frozen=True)
+class ParserProcessExtractProfile:
+    turn_start_payload_types: tuple[str, ...]
+    turn_end_payload_types: tuple[str, ...]
+    item_type_mappings: tuple[ProcessItemMappingProfile, ...]
+
+
+@dataclass(frozen=True)
 class AdapterProfile:
     engine: str
     profile_path: Path
@@ -151,6 +168,7 @@ class AdapterProfile:
     cli_management: CliManagementProfile
     parser_auth_patterns: ParserAuthPatternsProfile
     parser_structured_extract: ParserStructuredExtractProfile | None
+    parser_process_extract: ParserProcessExtractProfile | None
 
     def _resolve_profile_relative_path(self, path_value: str | None) -> Path | None:
         if not isinstance(path_value, str) or not path_value.strip():
@@ -272,6 +290,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     cli_management_raw = payload["cli_management"]
     parser_auth_patterns_raw = payload["parser_auth_patterns"]
     parser_structured_extract_raw = payload.get("parser_structured_extract")
+    parser_process_extract_raw = payload.get("parser_process_extract")
 
     _validate_resolved_path(
         profile_path=profile_path,
@@ -502,6 +521,45 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 summary_max_chars=int(parser_structured_extract_raw["summary_max_chars"]),
             )
             if isinstance(parser_structured_extract_raw, dict)
+            else None
+        ),
+        parser_process_extract=(
+            ParserProcessExtractProfile(
+                turn_start_payload_types=tuple(
+                    str(item)
+                    for item in parser_process_extract_raw.get("turn_start_payload_types", [])
+                    if isinstance(item, str) and item
+                ),
+                turn_end_payload_types=tuple(
+                    str(item)
+                    for item in parser_process_extract_raw.get("turn_end_payload_types", [])
+                    if isinstance(item, str) and item
+                ),
+                item_type_mappings=tuple(
+                    ProcessItemMappingProfile(
+                        item_type=str(item["item_type"]),
+                        process_type=cast(ProcessEventType, str(item["process_type"])),
+                        summary_field=(
+                            str(item["summary_field"])
+                            if isinstance(item.get("summary_field"), str) and item.get("summary_field")
+                            else None
+                        ),
+                        text_field=(
+                            str(item["text_field"])
+                            if isinstance(item.get("text_field"), str) and item.get("text_field")
+                            else None
+                        ),
+                        classification=(
+                            str(item["classification"])
+                            if isinstance(item.get("classification"), str) and item.get("classification")
+                            else None
+                        ),
+                    )
+                    for item in parser_process_extract_raw.get("item_type_mappings", [])
+                    if isinstance(item, dict)
+                ),
+            )
+            if isinstance(parser_process_extract_raw, dict)
             else None
         ),
     )

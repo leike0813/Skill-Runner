@@ -250,6 +250,9 @@ def test_parse_runtime_stream_falls_back_to_stdout_json_lines(adapter):
         pty_raw=b"",
     )
     assert parsed["session_id"] == "sess_stdout"
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "sess_stdout"
     assert parsed["assistant_messages"]
     assert parsed["assistant_messages"][0]["text"] == "hello from stdout"
     assert "GEMINI_STREAM_JSON_FALLBACK_USED" in parsed["diagnostics"]
@@ -281,6 +284,12 @@ def test_parse_runtime_stream_parses_pretty_json_from_stdout(adapter):
     assert parsed_event["session_id"] == "sess_pretty"
     assert parsed_event["response"] == "hello from pretty stdout"
     assert isinstance(parsed_event.get("details"), dict)
+    run_handle = parsed.get("run_handle")
+    assert isinstance(run_handle, dict)
+    assert run_handle.get("handle_id") == "sess_pretty"
+    turn_complete_data = parsed.get("turn_complete_data")
+    assert isinstance(turn_complete_data, dict)
+    assert turn_complete_data.get("ok") is True
 
 
 def test_parse_runtime_stream_prefers_split_stream_over_pty_duplicate(adapter):
@@ -349,6 +358,27 @@ def test_parse_runtime_stream_uses_latest_response_frame(adapter):
     assert parsed["session_id"] == "sess_new"
     assert parsed["assistant_messages"]
     assert [msg["text"] for msg in parsed["assistant_messages"]] == ["latest response"]
+
+
+def test_live_session_assistant_message_keeps_raw_ref(adapter):
+    session = adapter.stream_parser.start_live_session()
+    payload = (
+        '{"session_id":"gemini-live","response":"hello from live","stats":{"tokens":{"total":1}}}\n'
+    )
+    encoded = payload.encode("utf-8")
+    session.feed(stream="stdout", text=payload, byte_from=0, byte_to=len(encoded))
+    emissions = session.finish(exit_code=0, failure_reason=None)
+
+    assistant = next(
+        (item for item in emissions if isinstance(item, dict) and item.get("kind") == "assistant_message"),
+        None,
+    )
+    assert isinstance(assistant, dict)
+    raw_ref = assistant.get("raw_ref")
+    assert isinstance(raw_ref, dict)
+    assert raw_ref.get("stream") == "stdout"
+    assert int(raw_ref.get("byte_from", -1)) == 0
+    assert int(raw_ref.get("byte_to", -1)) == len(encoded.rstrip(b"\n"))
 
 
 def test_parse_runtime_stream_detects_oauth_code_prompt(adapter):

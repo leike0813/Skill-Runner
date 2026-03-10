@@ -89,5 +89,32 @@
         }
       }
     ]
+  },
+  "parser_process_extract": {
+    "turn_start_payload_types": ["turn.started"],
+    "turn_end_payload_types": ["turn.completed"],
+    "item_type_mappings": [
+      {
+        "item_type": "command_execution",
+        "process_type": "command_execution",
+        "summary_field": "command",
+        "text_field": "aggregated_output",
+        "classification": "command_execution"
+      },
+      {
+        "item_type": "function_call",
+        "process_type": "tool_call",
+        "summary_field": "name",
+        "text_field": "arguments",
+        "classification": "tool_call"
+      },
+      {
+        "item_type": "tool_call",
+        "process_type": "tool_call",
+        "summary_field": "name",
+        "text_field": "arguments",
+        "classification": "tool_call"
+      }
+    ]
   }
 }

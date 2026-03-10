@@ -1739,7 +1739,14 @@
               "type": "string",
               "enum": [
                 "lifecycle.run.status",
+                "lifecycle.run_handle",
                 "lifecycle.completion.state",
+                "agent.reasoning",
+                "agent.tool_call",
+                "agent.command_execution",
+                "agent.turn_start",
+                "agent.turn_complete",
+                "agent.message.promoted",
                 "agent.message.final",
                 "parsed.json",
                 "diagnostic.warning",
@@ -1788,6 +1795,47 @@
         "attempt_number"
       ],
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "agent.turn_start"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "agent.turn_complete"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -1887,6 +1935,36 @@
               "event": {
                 "properties": {
                   "type": {
+                    "const": "lifecycle.run_handle"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "handle_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "handle_id"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
                     "const": "lifecycle.completion.state"
                   }
                 }
@@ -1934,7 +2012,12 @@
               "event": {
                 "properties": {
                   "type": {
-                    "const": "agent.message.final"
+                    "enum": [
+                      "agent.reasoning",
+                      "agent.tool_call",
+                      "agent.command_execution",
+                      "agent.message.promoted"
+                    ]
                   }
                 }
               }
@@ -1949,6 +2032,73 @@
                   "message_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": [
+                      "reasoning",
+                      "tool_call",
+                      "command_execution",
+                      "promoted",
+                      "final"
+                    ]
+                  },
+                  "details": {
+                    "type": "object"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message_id",
+                  "summary",
+                  "classification",
+                  "details"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "agent.message.final"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": [
+                      "reasoning",
+                      "tool_call",
+                      "command_execution",
+                      "promoted",
+                      "final"
+                    ]
+                  },
+                  "details": {
+                    "type": "object"
                   },
                   "text": {
                     "type": "string",
@@ -2196,6 +2346,7 @@
           "enum": [
             "interaction_reply",
             "auth_submission",
+            "assistant_process",
             "assistant_final",
             "orchestration_notice"
           ]
@@ -2281,6 +2432,10 @@
           "type": "string",
           "enum": [
             "conversation.state.changed",
+            "assistant.reasoning",
+            "assistant.tool_call",
+            "assistant.command_execution",
+            "assistant.message.promoted",
             "assistant.message.final",
             "user.input.required",
             "auth.required",
@@ -2506,7 +2661,12 @@
           "if": {
             "properties": {
               "type": {
-                "const": "assistant.message.final"
+                "enum": [
+                  "assistant.reasoning",
+                  "assistant.tool_call",
+                  "assistant.command_execution",
+                  "assistant.message.promoted"
+                ]
               }
             }
           },
@@ -2519,6 +2679,69 @@
                   "message_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": [
+                      "reasoning",
+                      "tool_call",
+                      "command_execution",
+                      "promoted",
+                      "final"
+                    ]
+                  },
+                  "details": {
+                    "type": "object"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message_id",
+                  "summary",
+                  "classification",
+                  "details"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assistant.message.final"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": [
+                      "reasoning",
+                      "tool_call",
+                      "command_execution",
+                      "promoted",
+                      "final"
+                    ]
+                  },
+                  "details": {
+                    "type": "object"
                   },
                   "text": {
                     "type": "string",

@@ -590,6 +590,24 @@ async def list_management_run_timeline_history(
     }
 
 
+@router.post("/runs/{request_id}/protocol/rebuild")
+async def rebuild_management_run_protocol_history(request_id: str):
+    request_record = await run_store.get_request(request_id)
+    if not request_record:
+        raise HTTPException(status_code=404, detail="Request not found")
+    run_id_obj = request_record.get("run_id")
+    if not isinstance(run_id_obj, str) or not run_id_obj:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    if not run_dir or not run_dir.exists():
+        raise HTTPException(status_code=404, detail="Run directory not found")
+    payload = await run_observability_service.rebuild_protocol_history(
+        run_dir=run_dir,
+        request_id=request_id,
+    )
+    return payload
+
+
 @router.get("/runs/{request_id}/logs/range")
 async def get_management_run_log_range(
     request_id: str,

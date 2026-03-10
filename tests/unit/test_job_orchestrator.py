@@ -1140,7 +1140,12 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
 
 
 class InteractiveAskAdapter:
-    async def run(self, skill, input_data, run_dir, options):
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
         return _ask_user_engine_result(
             interaction={
                 "interaction_id": 1,
@@ -1148,7 +1153,14 @@ class InteractiveAskAdapter:
                 "prompt": "continue?",
                 "options": [{"label": "Yes", "value": "yes"}],
             },
-            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
+            raw_stdout=raw_stdout,
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -1163,20 +1175,47 @@ class InteractiveAskAdapter:
 
 
 class InteractiveAskMissingHandleAdapter(InteractiveAskAdapter):
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = stdout_raw
+        _ = stderr_raw
+        _ = pty_raw
+        return {
+            "parser": "codex_ndjson_test",
+            "confidence": 0.6,
+            "assistant_messages": [],
+            "raw_rows": [],
+            "diagnostics": [],
+            "structured_types": [],
+        }
+
     def extract_session_handle(self, raw_stdout, turn_index):
         raise RuntimeError("SESSION_RESUME_FAILED: missing thread.started")
 
 
 class InteractiveAskSessionInStderrAdapter:
-    async def run(self, skill, input_data, run_dir, options):
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        raw_stdout = "assistant: please continue\n"
+        raw_stderr = '{"session-id":"iflow-session-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+        )
         return _ask_user_engine_result(
             interaction={
                 "interaction_id": 1,
                 "kind": "open_text",
                 "prompt": "continue?",
             },
-            raw_stdout="assistant: please continue\n",
-            raw_stderr='{"session-id":"iflow-session-1"}\n',
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -1194,10 +1233,15 @@ class InteractiveAskSessionInStderrAdapter:
 
 
 class InteractiveAskMissingIdAdapter:
-    async def run(self, skill, input_data, run_dir, options):
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
         return EngineRunResult(
             exit_code=0,
-            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
+            raw_stdout=raw_stdout,
             raw_stderr="",
             artifacts_created=[],
             turn_result=AdapterTurnResult(
@@ -1205,6 +1249,13 @@ class InteractiveAskMissingIdAdapter:
                 final_data={"code": "ADAPTER_TURN_ERROR", "message": "invalid ask_user payload: missing interaction_id"},
                 failure_reason="ADAPTER_TURN_ERROR",
             ),
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -2187,10 +2238,15 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
 
 
 class InteractiveDirectStringInteractionAdapter:
-    async def run(self, skill, input_data, run_dir, options):
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
         return EngineRunResult(
             exit_code=0,
-            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
+            raw_stdout=raw_stdout,
             raw_stderr="",
             artifacts_created=[],
             turn_result=AdapterTurnResult(
@@ -2201,6 +2257,13 @@ class InteractiveDirectStringInteractionAdapter:
                     "prompt": "Please share a short self-introduction.",
                 },
             ),
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -2291,12 +2354,22 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
 
 
 class InteractiveTwoTurnAdapter:
-    async def run(self, skill, input_data, run_dir, options):
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
         if "__interactive_reply_payload" in options:
+            raw_stdout = '{"type":"item.completed"}'
+            await _emit_live_runtime_output_for_interactive_test(
+                live_runtime_emitter=live_runtime_emitter,
+                raw_stdout=raw_stdout,
+            )
             return _final_engine_result(
                 final_data={"value": "ok", "__SKILL_DONE__": True},
-                raw_stdout='{"type":"item.completed"}',
+                raw_stdout=raw_stdout,
             )
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
         return _ask_user_engine_result(
             interaction={
                 "interaction_id": 1,
@@ -2304,7 +2377,14 @@ class InteractiveTwoTurnAdapter:
                 "prompt": "continue?",
                 "options": [{"label": "Yes", "value": "yes"}],
             },
-            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}',
+            raw_stdout=raw_stdout,
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
         )
 
     def extract_session_handle(self, raw_stdout, turn_index):
@@ -2316,6 +2396,113 @@ class InteractiveTwoTurnAdapter:
             handle_value="thread-1",
             created_at_turn=turn_index,
         )
+
+
+def _parse_interactive_runtime_stream_with_run_handle(
+    *,
+    stdout_raw: bytes,
+    stderr_raw: bytes,
+) -> dict[str, object]:
+    assistant_messages: list[dict[str, object]] = []
+    session_id: str | None = None
+    run_handle_raw_ref: dict[str, object] | None = None
+
+    for stream_name, raw in (("stdout", stdout_raw), ("stderr", stderr_raw)):
+        text = raw.decode("utf-8", errors="replace")
+        cursor = 0
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                cursor += len(line) + 1
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                cursor += len(line) + 1
+                continue
+            if not isinstance(payload, dict):
+                cursor += len(line) + 1
+                continue
+
+            if payload.get("type") == "thread.started":
+                thread_id = payload.get("thread_id")
+                if isinstance(thread_id, str) and thread_id.strip():
+                    session_id = thread_id.strip()
+                    run_handle_raw_ref = {
+                        "stream": stream_name,
+                        "byte_from": cursor,
+                        "byte_to": cursor + len(line),
+                    }
+            session_id_from_json = payload.get("session-id")
+            if isinstance(session_id_from_json, str) and session_id_from_json.strip():
+                session_id = session_id_from_json.strip()
+                run_handle_raw_ref = {
+                    "stream": stream_name,
+                    "byte_from": cursor,
+                    "byte_to": cursor + len(line),
+                }
+            if payload.get("type") == "item.completed":
+                item = payload.get("item")
+                if isinstance(item, dict) and item.get("type") == "agent_message":
+                    msg_text = item.get("text")
+                    if isinstance(msg_text, str) and msg_text.strip():
+                        assistant_messages.append(
+                            {
+                                "text": msg_text,
+                                "raw_ref": {
+                                    "stream": stream_name,
+                                    "byte_from": cursor,
+                                    "byte_to": cursor + len(line),
+                                },
+                            }
+                        )
+            cursor += len(line) + 1
+
+    result: dict[str, object] = {
+        "parser": "codex_ndjson_test",
+        "confidence": 0.9,
+        "assistant_messages": assistant_messages,
+        "raw_rows": [],
+        "diagnostics": [],
+        "structured_types": [],
+    }
+    if isinstance(session_id, str) and session_id.strip():
+        result["session_id"] = session_id.strip()
+        run_handle_obj: dict[str, object] = {"handle_id": session_id.strip()}
+        if isinstance(run_handle_raw_ref, dict):
+            run_handle_obj["raw_ref"] = run_handle_raw_ref
+        result["run_handle"] = run_handle_obj
+    return result
+
+
+async def _emit_live_runtime_output_for_interactive_test(
+    *,
+    live_runtime_emitter,
+    raw_stdout: str = "",
+    raw_stderr: str = "",
+    exit_code: int = 0,
+    failure_reason: str | None = None,
+) -> None:
+    if live_runtime_emitter is None:
+        return
+    await live_runtime_emitter.on_process_started()
+    if raw_stdout:
+        stdout_bytes = raw_stdout.encode("utf-8", errors="replace")
+        await live_runtime_emitter.on_stream_chunk(
+            stream="stdout",
+            text=raw_stdout,
+            byte_from=0,
+            byte_to=len(stdout_bytes),
+        )
+    if raw_stderr:
+        stderr_bytes = raw_stderr.encode("utf-8", errors="replace")
+        await live_runtime_emitter.on_stream_chunk(
+            stream="stderr",
+            text=raw_stderr,
+            byte_from=0,
+            byte_to=len(stderr_bytes),
+        )
+    await live_runtime_emitter.on_process_exit(exit_code=exit_code, failure_reason=failure_reason)
 
 
 def test_extract_pending_interaction_accepts_hint_without_prompt():
@@ -2461,6 +2648,7 @@ def test_load_skill_from_run_dir_reads_workspace_manifest(tmp_path):
 
 
 def _seed_run_dir_skill(run_dir: Path, skill: SkillManifest) -> None:
+    assert skill.path is not None
     skill_dir = run_dir / ".codex" / "skills" / skill.id
     assets_dir = skill_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)

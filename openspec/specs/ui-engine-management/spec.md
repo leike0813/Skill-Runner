@@ -558,3 +558,46 @@ Run Detail 在 run 进入 terminal 后，RASP 面板 MUST 以 audit 结果为最
 - **THEN** 面板 MUST 触发全量重取并替换临时 live 缓存
 - **AND** 最终显示结果 MUST 与 audit history 一致
 
+### Requirement: Run Observation MUST provide manual protocol rebuild action
+管理 UI Run Observation 页面 MUST 提供“重构协议”按钮，供人工触发审计重构。
+
+#### Scenario: user triggers protocol rebuild
+- **WHEN** 用户点击“重构协议”
+- **THEN** 页面调用管理 API 触发重构
+- **AND** 显示重构结果摘要（attempt 数、written 数、备份目录、mode）
+
+### Requirement: Run Observation default read path MUST stay replay-only
+管理 UI 常规加载 MUST 保持审计回放语义，不因该按钮能力而自动重构。
+
+#### Scenario: page load without click
+- **WHEN** 用户未触发“重构协议”
+- **THEN** 页面仅按现有方式读取协议历史
+- **AND** 不触发重构任务
+
+### Requirement: management run-detail chat MUST render assistant_process with collapsible thinking groups
+管理 UI run detail 对话区 MUST 支持 `assistant_process` 思考气泡分组渲染，且默认折叠。
+
+#### Scenario: management collapsible process group
+- **GIVEN** chat history 包含连续 `assistant_process`
+- **WHEN** 页面渲染对话区
+- **THEN** UI MUST 将其聚合为单个思考气泡
+- **AND** 点击后 MUST 展开显示全部过程条目
+
+### Requirement: management and E2E MUST share core state transition while keeping independent adapters
+管理 UI 与 E2E MUST 共享同一思考气泡状态机逻辑，并保留各自渲染适配器。
+
+#### Scenario: same event sequence produces same grouping boundaries
+- **GIVEN** 两端输入同一 chat replay 事件序列
+- **WHEN** 运行共享状态机
+- **THEN** 过程分组边界与 final 去重结果 MUST 一致
+- **AND** 两端可采用不同 DOM/CSS 呈现细节
+
+### Requirement: Management protocol history MUST expose RASP turn markers
+管理端协议历史查询在 `stream=rasp` 时 MUST 可见 turn marker 审计事件。
+
+#### Scenario: query rasp history after attempt execution
+- **GIVEN** 某次 attempt 已产生回合开始与结束
+- **WHEN** 调用 `GET /v1/management/runs/{request_id}/protocol/history?stream=rasp`
+- **THEN** 返回事件中 MUST 包含 `agent.turn_start` 与 `agent.turn_complete`
+- **AND** 事件顺序 MUST 满足 `agent.turn_start` 在 `agent.turn_complete` 之前
+

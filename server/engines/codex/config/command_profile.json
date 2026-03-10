@@ -9,7 +9,9 @@
   "resume": [
     "--skip-git-repo-check",
     "--json",
-    "--full-auto"
+    "--full-auto",
+    "-p",
+    "skill-runner"
   ],
   "ui_shell": [
     "--sandbox",

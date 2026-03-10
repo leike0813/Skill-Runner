@@ -771,7 +771,6 @@ class JobOrchestrator:
     async def _persist_waiting_interaction(
         self,
         *,
-        adapter: Any,
         run_id: str,
         run_dir: Path,
         request_id: str,
@@ -779,11 +778,9 @@ class JobOrchestrator:
         profile: EngineInteractiveProfile,
         interactive_auto_reply: bool,
         pending_interaction: Dict[str, Any],
-        raw_runtime_output: str,
     ) -> Optional[str]:
         run_store = self._run_store_backend()
         return await self.interaction_service.persist_waiting_interaction(
-            adapter=adapter,
             run_id=run_id,
             run_dir=run_dir,
             request_id=request_id,
@@ -791,7 +788,6 @@ class JobOrchestrator:
             profile=profile,
             interactive_auto_reply=interactive_auto_reply,
             pending_interaction=pending_interaction,
-            raw_runtime_output=raw_runtime_output,
             run_store_backend=run_store,
             append_internal_schema_warning=self._append_internal_schema_warning,
             append_orchestrator_event=self._append_orchestrator_event,

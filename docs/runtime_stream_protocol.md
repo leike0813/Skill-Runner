@@ -36,6 +36,10 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 ## 3. FCMP Event Types
 
 - `conversation.state.changed`
+- `assistant.reasoning`
+- `assistant.tool_call`
+- `assistant.command_execution`
+- `assistant.message.promoted`
 - `assistant.message.final`
 - `user.input.required`
 - `auth.required`
@@ -47,6 +51,16 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `interaction.auto_decide.timeout`
 - `diagnostic.warning`
 - `raw.stdout` / `raw.stderr`
+
+过程事件约束（通用，非引擎专属）：
+
+- RASP 使用 `agent.*`
+- FCMP 使用 `assistant.*`
+- Turn marker 仅在 RASP：`agent.turn_start` / `agent.turn_complete`
+- `agent.turn_complete.data` 可直接承载结构化统计信息（例如 usage/tokens/cost/stats）
+- Run 句柄事件仅在 RASP：`lifecycle.run_handle`（`data.handle_id`）
+- FCMP 明确不包含 `assistant.turn_*`
+- 同一 `message_id` 的收敛顺序：`*.message.promoted` 必须先于 `*.message.final`
 
 ### 3.1 `conversation.state.changed`
 
