@@ -11,3 +11,7 @@
 	path = skills/tag-regulator
 	url = https://github.com/leike0813/agent-skills
 	branch = skill/tag-regulator
+[submodule "skills/literature-explainer"]
+	path = skills/literature-explainer
+	url = https://github.com/leike0813/agent-skills
+	branch = skill/literature-explainer
