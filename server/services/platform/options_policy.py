@@ -10,6 +10,8 @@ from server.runtime.session.timeout import (
     resolve_interactive_reply_timeout,
 )
 
+HARD_TIMEOUT_SECONDS_KEY = "hard_timeout_seconds"
+
 
 class OptionsPolicy:
     def __init__(self) -> None:
@@ -31,6 +33,7 @@ class OptionsPolicy:
         self._validate_execution_mode(normalized)
         self._validate_interactive_auto_reply(normalized)
         self._validate_timeout_values(normalized)
+        self._validate_hard_timeout_seconds(normalized)
         timeout_resolution = resolve_interactive_reply_timeout(
             normalized,
             default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
@@ -39,6 +42,9 @@ class OptionsPolicy:
         normalized.setdefault("execution_mode", ExecutionMode.AUTO.value)
         normalized.setdefault("interactive_auto_reply", False)
         return normalized
+
+    def allowed_runtime_option_keys(self) -> set[str]:
+        return set(self._policy.get("runtime_options", []))
 
     def _validate_keys(self, options: Dict[str, Any], allowed: set[str], label: str) -> None:
         unknown = [key for key in options.keys() if key not in allowed]
@@ -83,6 +89,25 @@ class OptionsPolicy:
         if isinstance(value, bool):
             return
         raise ValueError("runtime_options.interactive_auto_reply must be a boolean")
+
+    def _validate_hard_timeout_seconds(self, runtime_options: Dict[str, Any]) -> None:
+        if HARD_TIMEOUT_SECONDS_KEY not in runtime_options:
+            return
+        value = runtime_options.get(HARD_TIMEOUT_SECONDS_KEY)
+        if value is None or isinstance(value, bool):
+            raise ValueError(
+                f"runtime_options.{HARD_TIMEOUT_SECONDS_KEY} must be a positive integer"
+            )
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"runtime_options.{HARD_TIMEOUT_SECONDS_KEY} must be a positive integer"
+            ) from exc
+        if parsed <= 0:
+            raise ValueError(
+                f"runtime_options.{HARD_TIMEOUT_SECONDS_KEY} must be a positive integer"
+            )
 
 
 options_policy = OptionsPolicy()

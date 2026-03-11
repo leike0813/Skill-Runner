@@ -2,15 +2,19 @@
 
 ## Purpose
 定义 skill 包校验合同的独立 schema 文件声明和安装/临时上传共用同一 manifest 合同的约束。
-
 ## Requirements
 ### Requirement: Skill package 校验合同 MUST 以独立 schema 文件声明
 系统 MUST 提供独立的 schema 文件来声明 skill package 与 `assets/runner.json` 的校验合同，而非仅依赖服务内硬编码规则。
 
-#### Scenario: 校验入口加载独立 schema
-- **WHEN** 系统启动安装或临时上传校验流程
-- **THEN** 系统从独立 schema 文件加载并执行结构化校验
-- **AND** 校验失败信息可映射为稳定的字段级错误
+#### Scenario: runner manifest 支持 runtime 默认选项声明
+- **WHEN** `runner.json` 包含 `runtime.default_options` 对象
+- **THEN** 合同校验 MUST 允许该字段通过
+- **AND** 其值用于运行时默认 option 合成
+
+#### Scenario: runtime 默认选项声明缺失
+- **WHEN** `runner.json` 未声明 `runtime.default_options`
+- **THEN** skill 包校验保持通过
+- **AND** 系统仅使用请求侧 runtime options
 
 ### Requirement: 安装与临时上传 MUST 复用同一 runner manifest 合同
 系统 MUST 在持久安装与临时 skill 上传两条路径复用同一份 `runner.json` 合同 schema，保证行为一致。
@@ -46,8 +50,8 @@
 - **WHEN** `parameter.schema.json` 不满足服务端要求的对象 schema 基本结构
 - **THEN** 系统在上传校验阶段拒绝该 skill 包
 
-### Requirement: runner.json asset declarations MAY fallback to canonical filenames
-Skill packages MAY omit or misdeclare schema asset paths in `runner.json`, as long as canonical fallback filenames are present and resolvable within the skill root.
+### Requirement: runner.json asset declarations MUST support canonical fallback filenames
+Skill package validation MUST accept omitted or misdeclared schema asset paths in `runner.json` when canonical fallback filenames are present and resolvable within the skill root.
 
 #### Scenario: schema declaration missing but fallback exists
 - **GIVEN** `runner.json.schemas.output` is missing
@@ -65,8 +69,8 @@ Skill packages MAY omit or misdeclare schema asset paths in `runner.json`, as lo
 - **AND** `assets/parameter.schema.json` does not exist
 - **THEN** validation MUST reject the skill package
 
-### Requirement: runner.json MAY declare engine-specific config assets
-Skill packages MAY declare engine-specific skill config files in `runner.json.engine_configs`.
+### Requirement: runner.json MUST support declaring engine-specific config assets
+Skill packages MUST be allowed to declare engine-specific skill config files in `runner.json.engine_configs`.
 
 #### Scenario: engine config declaration exists
 - **GIVEN** `runner.json.engine_configs.gemini` points to a valid skill-local file
@@ -89,3 +93,4 @@ Skill packages MAY declare engine-specific skill config files in `runner.json.en
 #### Scenario: auto 模式忽略 max_attempt
 - **WHEN** run 以 `auto` 模式执行且 manifest 声明 `max_attempt`
 - **THEN** 系统不以该字段触发自动失败
+

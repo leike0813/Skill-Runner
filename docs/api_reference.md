@@ -475,6 +475,10 @@
   - 当 `attempt_number >= max_attempt` 且当轮既无 `__SKILL_DONE__` 也无法通过 output schema 软完成时，run 失败并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
+- `runner.json.runtime.default_options` 可选；用于声明 skill 默认 runtime options：
+  - 仅 runtime option 白名单键参与合成；
+  - 请求体 `runtime_options` 同名键优先覆盖；
+  - 非法默认值会被忽略并记录 warning（不阻断执行）。
 - `runner.json` 必须包含可解析的 `version`。
 
 **更新规则**:
@@ -530,9 +534,12 @@
 - **运行时选项**:
   - `runtime_options.execution_mode` 支持 `auto`（默认）与 `interactive`。
   - 会话回复超时键：`runtime_options.interactive_reply_timeout_sec`（默认 `1200`）。
+  - `runtime_options.hard_timeout_seconds` 支持正整数，覆盖本次 run 的引擎硬超时。
   - `interactive` 下可设置 `runtime_options.interactive_auto_reply`：
     - `false`（默认）：严格等待用户回复，超时不自动继续。
     - `true`：等待超时后自动决策并继续执行。
+  - skill 若声明 `runner.json.runtime.default_options`，系统会先应用该默认值，再应用请求值覆盖。
+  - 非法 skill 默认 runtime options 会被忽略，并记录 lifecycle warning/diagnostic。
   - `interactive` 模式始终采用单一可恢复会话语义，内部保存会话句柄；对外不暴露 `interactive_profile.kind`。
   - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
   - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。

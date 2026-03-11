@@ -32,6 +32,12 @@
   },
   "engine_configs": {
     "gemini": "custom/gemini_settings.json"
+  },
+  "runtime": {
+    "default_options": {
+      "hard_timeout_seconds": 900,
+      "execution_mode": "interactive"
+    }
   }
 }
 ```
@@ -59,6 +65,10 @@
     - `iflow` -> `assets/iflow_settings.json`
     - `opencode` -> `assets/opencode_config.json`
 - schema 声明失败会 warning；engine config 声明失败仅后台日志，不做用户可见 warning。
+- `runtime.default_options` 为可选 skill 默认运行参数声明：
+  - 仅白名单 runtime option 键会生效；
+  - 请求体 `runtime_options` 同名键优先覆盖 skill 默认值；
+  - 非法默认值会被忽略，并记录 warning（不阻断执行）。
 
 ## 3. Schema 规范
 
@@ -110,6 +120,10 @@
   - file 路径必须是非空字符串、非绝对路径、且不得包含 `..`；
   - `inline` 的类型/required 按 input schema 校验。
 - 旧的 `uploads/<field_name>` 严格键匹配仍保留为兼容回退，但不再是主协议。
+- runtime options 合成顺序：
+  - 先应用 `runner.json.runtime.default_options`（若存在且合法）；
+  - 再应用请求体 `runtime_options` 覆盖；
+  - 最终结果写入 `effective_runtime_options`。
 
 ### 4.2 Upload 阶段（`POST /v1/jobs/{request_id}/upload`）
 

@@ -27,6 +27,7 @@ def _build_skill_zip(
     input_schema_override: dict[str, Any] | None = None,
     parameter_schema_override: dict[str, Any] | None = None,
     output_schema_override: dict[str, Any] | None = None,
+    runtime_override: dict[str, Any] | None = None,
 ) -> bytes:
     top = top_level or skill_id
     name = skill_name or skill_id
@@ -55,6 +56,8 @@ def _build_skill_zip(
         runner["schemas"] = schemas_override
     if engine_configs_override is not None:
         runner["engine_configs"] = engine_configs_override
+    if runtime_override is not None:
+        runner["runtime"] = runtime_override
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -269,6 +272,48 @@ def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
     with pytest.raises(ValueError, match="Invalid output schema"):
         validator.validate_skill_dir(
             tmp_path / "stage_invalid_output_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_accepts_runner_runtime_default_options_object(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "runtime_defaults_ok.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            runtime_override={
+                "default_options": {"hard_timeout_seconds": 120},
+                "dependencies": ["pydantic"],
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_runtime_defaults_ok")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_runtime_defaults_ok" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_rejects_runner_runtime_default_options_non_object(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "runtime_defaults_bad.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            runtime_override={
+                "default_options": "bad",
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_runtime_defaults_bad")
+    with pytest.raises(ValueError, match="Invalid runner.json manifest"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_runtime_defaults_bad" / top,
             top,
             require_version=False,
         )

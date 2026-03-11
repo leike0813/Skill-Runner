@@ -498,6 +498,24 @@ class RunStore:
             )
             await conn.commit()
 
+    async def update_request_effective_runtime_options(
+        self,
+        request_id: str,
+        effective_runtime_options: Dict[str, Any],
+    ) -> None:
+        await self._ensure_initialized()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
+                """
+                UPDATE requests
+                SET effective_runtime_options_json = ?
+                WHERE request_id = ?
+                """,
+                (json.dumps(effective_runtime_options, sort_keys=True), request_id),
+            )
+            await conn.commit()
+
     async def update_request_cache_key(self, request_id: str, cache_key: str, skill_fingerprint: str) -> None:
         await self._ensure_initialized()
         async with self._connect() as conn:

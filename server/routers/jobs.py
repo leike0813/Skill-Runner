@@ -77,6 +77,7 @@ from ..services.orchestration.run_execution_core import (
     ensure_skill_execution_mode_supported,
     is_cache_enabled,
     normalize_effective_runtime_policy,
+    resolve_runtime_options_with_skill_defaults,
     resolve_conversation_mode,
     validate_runtime_and_model_options,
 )
@@ -160,15 +161,23 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             model=request.model,
             runtime_options=request.runtime_options,
         )
+        _, runtime_opts_for_policy, runtime_default_option_warnings = (
+            resolve_runtime_options_with_skill_defaults(
+                skill=skill,
+                runtime_options=request.runtime_options,
+            )
+        )
         client_metadata = request.client_metadata.model_dump(mode="json")
-        declared_modes = declared_execution_modes(skill) if skill is not None else [ExecutionMode.AUTO.value]
+        declared_modes = (
+            declared_execution_modes(skill) if skill is not None else {ExecutionMode.AUTO.value}
+        )
         policy = normalize_effective_runtime_policy(
             declared_modes=declared_modes,
-            runtime_options=runtime_opts,
+            runtime_options=runtime_opts_for_policy,
             client_metadata=client_metadata,
         )
         effective_runtime_opts = build_effective_runtime_options(
-            runtime_options=runtime_opts,
+            runtime_options=runtime_opts_for_policy,
             policy=policy,
         )
         if skill is not None:
@@ -326,6 +335,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 run_store_backend=run_store,
             )
             merged_options = {**engine_opts, **effective_runtime_opts}
+            if runtime_default_option_warnings:
+                merged_options["__runtime_option_warnings"] = runtime_default_option_warnings
             admitted = await concurrency_manager.admit_or_reject()
             if not admitted:
                 raise HTTPException(status_code=429, detail="Job queue is full")
@@ -839,6 +850,23 @@ async def upload_file(
                 skill = skill_registry.get_skill(request_record["skill_id"])
                 if not skill:
                     raise ValueError(f"Skill '{request_record['skill_id']}' not found")
+            request_runtime_options = (
+                dict(runtime_options)
+                if isinstance(runtime_options, dict)
+                else {}
+            )
+            _, effective_runtime_options, runtime_default_option_warnings = (
+                resolve_runtime_options_with_skill_defaults(
+                    skill=skill,
+                    runtime_options=request_runtime_options,
+                )
+            )
+            await run_store.update_request_effective_runtime_options(
+                request_id,
+                effective_runtime_options,
+            )
+            request_record = await run_store.get_request(request_id) or request_record
+            runtime_options = request_record.get("runtime_options", {})
             log_event(
                 logger,
                 event="upload.payload.validated",
@@ -1076,6 +1104,8 @@ async def upload_file(
                     run_store_backend=run_store,
                 )
                 merged_options = {**request_record["engine_options"], **effective_runtime_options}
+                if runtime_default_option_warnings:
+                    merged_options["__runtime_option_warnings"] = runtime_default_option_warnings
                 admitted = await concurrency_manager.admit_or_reject()
                 if not admitted:
                     raise HTTPException(status_code=429, detail="Job queue is full")

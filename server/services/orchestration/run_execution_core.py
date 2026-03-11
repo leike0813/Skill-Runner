@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +11,9 @@ from server.services.engine_management.engine_policy import SkillEnginePolicy
 from server.services.engine_management.model_registry import model_registry
 from server.services.platform.options_policy import options_policy
 from server.runtime.session.timeout import resolve_interactive_reply_timeout
+
+RUNTIME_DEFAULT_OPTION_IGNORED_WARNING_CODE = "SKILL_RUNTIME_DEFAULT_OPTION_IGNORED"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,88 @@ def validate_runtime_and_model_options(
         if "model_reasoning_effort" in validated:
             engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
     return runtime_opts, engine_opts
+
+
+def resolve_runtime_options_with_skill_defaults(
+    *,
+    skill: Any | None,
+    runtime_options: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+    requested_runtime_opts = options_policy.validate_runtime_options(runtime_options)
+    defaults = _extract_runtime_default_options(skill)
+    if not defaults:
+        return requested_runtime_opts, requested_runtime_opts, []
+
+    warnings: list[dict[str, str]] = []
+    allowed = options_policy.allowed_runtime_option_keys()
+    filtered_defaults: dict[str, Any] = {}
+    for raw_key, default_value in defaults.items():
+        key = raw_key.strip() if isinstance(raw_key, str) else ""
+        if not key:
+            warnings.append(
+                _default_option_warning(
+                    skill_id=getattr(skill, "id", None),
+                    option_key=str(raw_key),
+                    reason="invalid default option key",
+                )
+            )
+            continue
+        if key not in allowed:
+            warnings.append(
+                _default_option_warning(
+                    skill_id=getattr(skill, "id", None),
+                    option_key=key,
+                    reason="unknown runtime option key",
+                )
+            )
+            continue
+        if key in runtime_options:
+            continue
+        try:
+            options_policy.validate_runtime_options({key: default_value})
+        except ValueError as exc:
+            warnings.append(
+                _default_option_warning(
+                    skill_id=getattr(skill, "id", None),
+                    option_key=key,
+                    reason=str(exc),
+                )
+            )
+            continue
+        filtered_defaults[key] = default_value
+
+    merged_raw_options = {**filtered_defaults, **runtime_options}
+    effective_runtime_opts = options_policy.validate_runtime_options(merged_raw_options)
+    for warning in warnings:
+        logger.warning(
+            "skill_runtime_default_option_ignored %s",
+            warning.get("detail", ""),
+        )
+    return requested_runtime_opts, effective_runtime_opts, warnings
+
+
+def _extract_runtime_default_options(skill: Any | None) -> dict[str, Any]:
+    if skill is None:
+        return {}
+    runtime_obj = getattr(skill, "runtime", None)
+    default_options_obj = getattr(runtime_obj, "default_options", None)
+    if isinstance(default_options_obj, dict):
+        return dict(default_options_obj)
+    return {}
+
+
+def _default_option_warning(
+    *,
+    skill_id: Any,
+    option_key: str,
+    reason: str,
+) -> dict[str, str]:
+    normalized_skill_id = str(skill_id).strip() if isinstance(skill_id, str) else ""
+    skill_fragment = normalized_skill_id if normalized_skill_id else "<unknown>"
+    return {
+        "code": RUNTIME_DEFAULT_OPTION_IGNORED_WARNING_CODE,
+        "detail": f"skill={skill_fragment} option={option_key} ignored: {reason}",
+    }
 
 
 def resolve_conversation_mode(client_metadata: dict[str, Any] | None) -> str:

@@ -3,6 +3,7 @@ import json
 import zipfile
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -45,6 +46,7 @@ def _create_skill(
     unsupported_engines: list[str] | None = None,
     include_engines: bool = True,
     execution_modes: list[str] | None = None,
+    runtime_default_options: dict[str, Any] | None = None,
 ) -> SkillManifest:
     skill_dir = base_dir / skill_id
     assets_dir = skill_dir / "assets"
@@ -64,6 +66,8 @@ def _create_skill(
         runner_payload["engines"] = engines
     if unsupported_engines:
         runner_payload["unsupported_engines"] = unsupported_engines
+    if runtime_default_options is not None:
+        runner_payload["runtime"] = {"default_options": runtime_default_options}
     (assets_dir / "runner.json").write_text(
         json.dumps(runner_payload)
     )
@@ -91,6 +95,7 @@ def _create_skill(
         engines=engines if include_engines else [],
         unsupported_engines=unsupported_engines,
         execution_modes=execution_modes,
+        runtime={"default_options": runtime_default_options or {}},
     )
 
 
@@ -171,6 +176,7 @@ def _build_skill_package_upload(
     *,
     skill_id: str = "temp-upload-skill",
     engine: str = "gemini",
+    runtime_default_options: dict[str, Any] | None = None,
 ) -> UploadFile:
     buffer = io.BytesIO()
     runner = {
@@ -183,6 +189,8 @@ def _build_skill_package_upload(
             "output": "assets/output.schema.json",
         },
     }
+    if runtime_default_options is not None:
+        runner["runtime"] = {"default_options": runtime_default_options}
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", f"---\nname: {skill_id}\n---\n")
         zf.writestr(f"{skill_id}/assets/runner.json", json.dumps(runner))
@@ -310,6 +318,122 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
     request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_run_applies_skill_runtime_default_options(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        runtime_default_options={"hard_timeout_seconds": 45},
+    )
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={},
+        ),
+        background_tasks,
+    )
+    assert response.cache_hit is False
+    assert len(background_tasks.tasks) == 1
+    task = background_tasks.tasks[0]
+    assert task.kwargs["options"]["hard_timeout_seconds"] == 45
+
+    request_record = await store.get_request(response.request_id)
+    assert request_record is not None
+    assert "hard_timeout_seconds" not in request_record["runtime_options"]
+    assert request_record["effective_runtime_options"]["hard_timeout_seconds"] == 45
+
+
+@pytest.mark.asyncio
+async def test_create_run_request_runtime_options_override_skill_defaults(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        runtime_default_options={"hard_timeout_seconds": 45},
+    )
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"hard_timeout_seconds": 9},
+        ),
+        background_tasks,
+    )
+    assert response.cache_hit is False
+    task = background_tasks.tasks[0]
+    assert task.kwargs["options"]["hard_timeout_seconds"] == 9
+
+    request_record = await store.get_request(response.request_id)
+    assert request_record is not None
+    assert request_record["runtime_options"]["hard_timeout_seconds"] == 9
+    assert request_record["effective_runtime_options"]["hard_timeout_seconds"] == 9
+
+
+@pytest.mark.asyncio
+async def test_create_run_invalid_skill_runtime_defaults_emit_warning_payload(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(
+        temp_config_dirs,
+        "demo-skill",
+        with_input_schema=False,
+        runtime_default_options={"unknown_key": 1},
+    )
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={},
+        ),
+        background_tasks,
+    )
+    assert response.cache_hit is False
+    task = background_tasks.tasks[0]
+    warning_payloads = task.kwargs["options"]["__runtime_option_warnings"]
+    assert isinstance(warning_payloads, list)
+    assert warning_payloads
+    assert warning_payloads[0]["code"] == "SKILL_RUNTIME_DEFAULT_OPTION_IGNORED"
 
 
 @pytest.mark.asyncio
@@ -721,6 +845,53 @@ async def test_upload_temp_skill_creates_run_without_installed_registry_lookup(m
     assert request_record["run_id"]
     run_dir = Path(config.SYSTEM.RUNS_DIR) / request_record["run_id"]
     assert run_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_temp_skill_applies_runtime_default_options(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+    monkeypatch.setattr(
+        jobs_router.concurrency_manager,
+        "admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_source=RequestSkillSource.TEMP_UPLOAD,
+            engine="gemini",
+            parameter={},
+            model="gemini-2.5-pro",
+            runtime_options={},
+        ),
+        BackgroundTasks(),
+    )
+    assert create_response.status is None
+
+    upload_tasks = BackgroundTasks()
+    await jobs_router.upload_file(
+        request_id=create_response.request_id,
+        background_tasks=upload_tasks,
+        file=None,
+        skill_package=_build_skill_package_upload(
+            skill_id="temp-upload-skill",
+            engine="gemini",
+            runtime_default_options={"hard_timeout_seconds": 66},
+        ),
+    )
+
+    request_record = await store.get_request(create_response.request_id)
+    assert request_record is not None
+    assert "hard_timeout_seconds" not in request_record["runtime_options"]
+    assert request_record["effective_runtime_options"]["hard_timeout_seconds"] == 66
+    task = upload_tasks.tasks[0]
+    assert task.kwargs["options"]["hard_timeout_seconds"] == 66
 
 
 @pytest.mark.asyncio

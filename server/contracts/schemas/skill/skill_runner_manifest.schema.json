@@ -80,6 +80,28 @@
       },
       "additionalProperties": false
     },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_options": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "artifacts": {
       "type": "array"
     }

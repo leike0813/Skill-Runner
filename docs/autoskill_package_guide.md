@@ -80,6 +80,10 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
     - `iflow` -> `assets/iflow_settings.json`
     - `opencode` -> `assets/opencode_config.json`
 - schema 声明失败会产生显式 warning；engine config 声明失败仅后台日志记录
+- `runtime.default_options` 是可选的 skill 默认 runtime options 声明：
+  - 仅系统允许的 runtime option 键会生效（例如 `execution_mode`、`no_cache`、`interactive_auto_reply`、`interactive_reply_timeout_sec`、`hard_timeout_seconds`）；
+  - 请求体 `runtime_options` 同名键会覆盖 skill 默认值；
+  - 非法默认值会被忽略并记录 warning，不阻断执行。
 
 ### 2.4 输入/参数/输出协议
 

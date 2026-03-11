@@ -655,10 +655,15 @@ class _RunJobLifecyclePipeline:
                 process_raw_stdout = result.raw_stdout or ""
                 process_raw_stderr = result.raw_stderr or ""
                 runtime_execution_warnings = (
-                    result.runtime_warnings
+                    list(result.runtime_warnings)
                     if isinstance(getattr(result, "runtime_warnings", None), list)
                     else []
                 )
+                runtime_option_warning_payloads = options.get("__runtime_option_warnings")
+                if isinstance(runtime_option_warning_payloads, list):
+                    for warning_payload in runtime_option_warning_payloads:
+                        if isinstance(warning_payload, dict):
+                            runtime_execution_warnings.append(dict(warning_payload))
                 runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
                     adapter=adapter,
                     raw_stdout=process_raw_stdout,

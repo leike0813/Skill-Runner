@@ -23,6 +23,7 @@ class RuntimeDefinition(BaseModel):
     language: str = "python"
     version: str = "3.11"
     dependencies: List[str] = []
+    default_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillManifest(BaseModel):

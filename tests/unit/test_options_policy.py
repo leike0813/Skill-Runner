@@ -97,3 +97,18 @@ def test_interactive_auto_reply_must_be_boolean():
                 "interactive_auto_reply": "yes",
             }
         )
+
+
+def test_hard_timeout_seconds_allowed():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options({"hard_timeout_seconds": 45})
+    assert runtime_opts["hard_timeout_seconds"] == 45
+
+
+@pytest.mark.parametrize("value", [0, -1, "bad", None])
+def test_hard_timeout_seconds_must_be_positive_integer(value):
+    policy = OptionsPolicy()
+    with pytest.raises(
+        ValueError, match="runtime_options.hard_timeout_seconds must be a positive integer"
+    ):
+        policy.validate_runtime_options({"hard_timeout_seconds": value})

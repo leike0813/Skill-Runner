@@ -3,6 +3,7 @@
     "no_cache",
     "execution_mode",
     "interactive_auto_reply",
-    "interactive_reply_timeout_sec"
+    "interactive_reply_timeout_sec",
+    "hard_timeout_seconds"
   ]
 }
