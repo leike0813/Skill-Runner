@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-if ! command -v conda >/dev/null 2>&1; then
-  echo "conda not found. Please install conda and ensure it is in PATH."
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not found. Please install uv first: https://docs.astral.sh/uv/"
   exit 1
 fi
 
@@ -17,11 +17,11 @@ export SKILL_RUNNER_E2E_CLIENT_PORT="${SKILL_RUNNER_E2E_CLIENT_PORT:-${PORT}}"
 export SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL="${SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL:-http://127.0.0.1:8000}"
 
 echo "=== Skill Runner E2E Example Client ==="
-echo "Root: ${ROOT_DIR}"
+echo "Project Root: ${PROJECT_ROOT}"
 echo "Host: ${SKILL_RUNNER_E2E_CLIENT_HOST}"
 echo "Port: ${SKILL_RUNNER_E2E_CLIENT_PORT}"
 echo "Backend: ${SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL}"
 echo "======================================="
 
-cd "${ROOT_DIR}"
-exec conda run --no-capture-output -n DataProcessing python -u -m e2e_client.app
+cd "${PROJECT_ROOT}"
+exec uv run python -m e2e_client.app
