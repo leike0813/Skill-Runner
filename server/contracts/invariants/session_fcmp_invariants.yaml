@@ -259,6 +259,14 @@ ordering_rules:
   - id: OR-39
     rule: fcmp_seq_assigned_at_publish_time
   - id: OR-40
+    rule: interactive_ask_user_evidence_blocks_soft_completion
+  - id: OR-41
+    rule: interactive_invalid_structured_output_waits_not_fails
+  - id: OR-42
+    rule: interactive_missing_structured_output_waits_not_fails
+  - id: OR-43
+    rule: repair_must_not_promote_ask_user_turn
+  - id: OR-40
     rule: auth_completion_requires_terminal_session_state
   - id: OR-41
     rule: auth_ready_must_not_drive_resume

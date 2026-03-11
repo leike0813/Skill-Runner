@@ -141,6 +141,55 @@ def test_skill_fingerprint_engine_specific_config(tmp_path):
     assert codex_fp != opencode_fp
 
 
+def test_skill_fingerprint_uses_declared_engine_config_override(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("base")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "demo",
+                "engine_configs": {"gemini": "custom/gemini_settings.json"},
+            }
+        )
+    )
+    custom_dir = skill_dir / "custom"
+    custom_dir.mkdir()
+    (custom_dir / "gemini_settings.json").write_text(json.dumps({"model": "declared"}))
+    (assets_dir / "gemini_settings.json").write_text(json.dumps({"model": "fallback"}))
+
+    skill = SkillManifest(
+        id="demo",
+        path=skill_dir,
+        schemas={},
+        engine_configs={"gemini": "custom/gemini_settings.json"},
+    )
+    original = compute_skill_fingerprint(skill, "gemini")
+
+    (custom_dir / "gemini_settings.json").write_text(json.dumps({"model": "declared-2"}))
+    updated = compute_skill_fingerprint(skill, "gemini")
+
+    assert original != updated
+
+
+def test_skill_fingerprint_uses_schema_fallback_assets(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("base")
+    (assets_dir / "runner.json").write_text(json.dumps({"id": "demo", "schemas": {}}))
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {"a": {"type": "string"}}}))
+
+    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+    original = compute_skill_fingerprint(skill, "gemini")
+
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {"b": {"type": "string"}}}))
+    updated = compute_skill_fingerprint(skill, "gemini")
+
+    assert original != updated
+
+
 def test_skill_fingerprint_without_path_returns_empty():
     skill = SkillManifest(id="demo", path=None, schemas={})
     assert compute_skill_fingerprint(skill, "gemini") == ""

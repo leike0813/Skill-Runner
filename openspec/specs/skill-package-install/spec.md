@@ -21,8 +21,19 @@ A skill package MUST contain exactly one top-level directory, and its name SHALL
 ### Requirement: Enforce AutoSkill Profile validation
 The system MUST validate the uploaded skill package against the Runner AutoSkill Profile before installation.
 
-#### Scenario: Missing required files
-- **WHEN** the package is missing any required file (`SKILL.md`, `assets/runner.json`, `assets/input.schema.json`, `assets/output.schema.json`)
+#### Scenario: Missing required structural files
+- **WHEN** the package is missing any required structural file (`SKILL.md`, `assets/runner.json`)
+- **THEN** the system rejects the package as invalid
+
+#### Scenario: Schema assets must be resolvable
+- **WHEN** one or more schema assets are omitted from `runner.json.schemas`
+- **AND** the corresponding canonical fallback files exist under `assets/`
+- **THEN** the system accepts the package
+- **AND** validation resolves those schemas via declaration-plus-fallback behavior
+
+#### Scenario: Schema declaration and fallback both missing
+- **WHEN** a required schema asset cannot be resolved from `runner.json.schemas`
+- **AND** the corresponding canonical fallback file does not exist
 - **THEN** the system rejects the package as invalid
 
 ### Requirement: Enforce identity consistency
@@ -130,4 +141,3 @@ The install workflow MUST determine whether an existing skill directory is a val
 #### Scenario: 安装包缺失 execution_modes
 - **WHEN** 上传包缺失 `execution_modes` 或声明非法值
 - **THEN** 系统拒绝安装并返回校验错误
-

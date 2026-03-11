@@ -50,6 +50,7 @@ from ..services.orchestration.job_orchestrator import job_orchestrator
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..services.platform.schema_validator import schema_validator
+from ..services.skill.skill_asset_resolver import resolve_schema_asset
 from ..services.engine_management.model_registry import model_registry
 from ..services.platform.cache_key_builder import (
     build_input_manifest,
@@ -191,7 +192,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_payload["effective_runtime_options"] = effective_runtime_opts
 
         has_required_file_inputs = (
-            bool(skill and skill.schemas and "input" in skill.schemas)
+            bool(skill and resolve_schema_asset(skill, "input").path is not None)
             and bool(skill and schema_validator.has_required_file_inputs(skill))
         )
         requires_upload = request.skill_source == RequestSkillSource.TEMP_UPLOAD or has_required_file_inputs

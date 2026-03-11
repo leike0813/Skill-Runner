@@ -212,3 +212,45 @@ def test_validate_input_for_execution_reports_missing_required_file(tmp_path):
     errors = validator.validate_input_for_execution(skill, run_dir, {"input": {"query": "hello"}})
     assert errors
     assert any("Missing required input files" in e for e in errors)
+
+
+def test_validate_schema_uses_assets_fallback_when_runner_schema_missing(tmp_path):
+    validator = SchemaValidator()
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    parameter_schema = {
+        "type": "object",
+        "properties": {"divisor": {"type": "integer"}},
+        "required": ["divisor"],
+    }
+    (assets_dir / "parameter.schema.json").write_text(json.dumps(parameter_schema), encoding="utf-8")
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={},
+    )
+
+    errors = validator.validate_schema(skill, {"divisor": 10}, "parameter")
+    assert errors == []
+
+
+def test_validate_schema_invalid_declared_path_falls_back_to_assets(tmp_path):
+    validator = SchemaValidator()
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    parameter_schema = {
+        "type": "object",
+        "properties": {"divisor": {"type": "integer"}},
+        "required": ["divisor"],
+    }
+    (assets_dir / "parameter.schema.json").write_text(json.dumps(parameter_schema), encoding="utf-8")
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        schemas={"parameter": "missing/parameter.schema.json"},
+    )
+
+    errors = validator.validate_schema(skill, {"divisor": 10}, "parameter")
+    assert errors == []

@@ -3,6 +3,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
+from server.models import SkillManifest
+from server.services.skill.skill_asset_resolver import resolve_schema_asset
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,14 +57,15 @@ def infer_manifest_artifacts(
     if data.get("artifacts"):
         return data
 
-    schemas = data.get("schemas")
-    if not isinstance(schemas, dict):
+    output_schema_path = resolve_schema_asset(
+        SkillManifest(
+            id=str(data.get("id") or skill_dir.name),
+            path=skill_dir,
+            schemas=data.get("schemas"),
+        ),
+        "output",
+    ).path
+    if output_schema_path is None:
         return data
-
-    output_rel = schemas.get("output")
-    if not isinstance(output_rel, str) or not output_rel.strip():
-        return data
-
-    output_schema_path = skill_dir / output_rel
     data["artifacts"] = scan_output_schema_artifacts(output_schema_path)
     return data

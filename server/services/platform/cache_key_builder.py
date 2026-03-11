@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 from server.config import config
 from server.models import SkillManifest
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
+from server.services.skill.skill_asset_resolver import resolve_engine_config_asset, resolve_schema_asset
 
 
 def _stable_json_dumps(data: Any) -> str:
@@ -42,11 +43,15 @@ def _load_profile(engine: str) -> AdapterProfile | None:
         return None
 
 
-def _resolve_engine_skill_defaults_path(skill_path: Path, engine: str) -> Path | None:
+def _resolve_engine_skill_defaults_path(skill: SkillManifest, engine: str) -> Path | None:
     profile = _load_profile(engine)
-    if profile is None:
+    if profile is None or skill.path is None:
         return None
-    return profile.resolve_skill_defaults_path(skill_path)
+    return resolve_engine_config_asset(
+        skill,
+        engine,
+        profile.config_assets.skill_defaults_path,
+    ).path
 
 
 def build_input_manifest(uploads_dir: Path) -> Dict[str, Any]:
@@ -87,13 +92,12 @@ def compute_skill_fingerprint(skill: SkillManifest, engine: str) -> str:
     if runner_json.exists():
         files.append(runner_json)
 
-    if skill.schemas:
-        for rel in skill.schemas.values():
-            schema_path = skill.path / rel
-            if schema_path.exists():
-                files.append(schema_path)
+    for schema_key in ("input", "parameter", "output"):
+        schema_path = resolve_schema_asset(skill, schema_key).path
+        if schema_path is not None:
+            files.append(schema_path)
 
-    engine_cfg = _resolve_engine_skill_defaults_path(skill.path, engine)
+    engine_cfg = _resolve_engine_skill_defaults_path(skill, engine)
     if engine_cfg is not None and engine_cfg.exists():
         files.append(engine_cfg)
 

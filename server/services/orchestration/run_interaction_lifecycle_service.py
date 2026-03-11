@@ -22,6 +22,7 @@ from server.models import (
 )
 from server.runtime.common.ask_user_text import (
     DEFAULT_INTERACTION_PROMPT,
+    contains_ask_user_yaml_block,
     normalize_interaction_text,
     strip_ask_user_yaml_blocks,
 )
@@ -317,6 +318,42 @@ class RunInteractionLifecycleService:
             "required_fields": [],
             "context": {"inferred_from": "runtime_stream_assistant_message"},
         }
+
+    def contains_ask_user_signal_in_stream(
+        self,
+        *,
+        adapter: Any,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> bool:
+        try:
+            parsed = adapter.parse_runtime_stream(
+                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
+                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
+                pty_raw=b"",
+            )
+            messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
+            if isinstance(messages, list):
+                for item in reversed(messages):
+                    if not isinstance(item, dict):
+                        continue
+                    text_obj = item.get("text")
+                    if contains_ask_user_yaml_block(text_obj):
+                        return True
+        except Exception as exc:
+            logger.warning(
+                "interactive lifecycle ask_user signal probe parse failed",
+                extra={
+                    "component": "orchestration.run_interaction_lifecycle_service",
+                    "action": "contains_ask_user_signal_in_stream.parse_runtime_stream",
+                    "error_type": type(exc).__name__,
+                    "fallback": "scan_raw_stdout_stderr",
+                },
+                exc_info=True,
+            )
+
+        stream_text = "\n".join(part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str))
+        return contains_ask_user_yaml_block(stream_text)
 
     def strip_prompt_yaml_blocks(self, text: str) -> str:
         return strip_ask_user_yaml_blocks(text)

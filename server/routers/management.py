@@ -45,6 +45,7 @@ from ..services.orchestration.runtime_protocol_ports import install_runtime_prot
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.orchestration.run_store import run_store
 from ..services.skill.skill_browser import list_skill_entries, resolve_skill_file_path
+from ..services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 from ..services.engine_management.engine_policy import resolve_skill_engine_policy
 from ..services.platform.data_reset_service import (
     DATA_RESET_CONFIRMATION_TEXT,
@@ -238,9 +239,9 @@ async def get_management_skill_schemas(skill_id: str):
     schemas = _normalize_schemas(skill.schemas)
     return ManagementSkillSchemasResponse(
         skill_id=skill_id,
-        input=_read_skill_schema_content(skill_root, schemas, "input"),
-        parameter=_read_skill_schema_content(skill_root, schemas, "parameter"),
-        output=_read_skill_schema_content(skill_root, schemas, "output"),
+        input=_read_skill_schema_content(skill, "input"),
+        parameter=_read_skill_schema_content(skill, "parameter"),
+        output=_read_skill_schema_content(skill, "output"),
     )
 
 
@@ -700,10 +701,9 @@ def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
         runner_path = skill_path / "assets" / "runner.json"
         if not runner_path.exists():
             issues.append("missing assets/runner.json")
-        schemas = _normalize_schemas(getattr(skill, "schemas", {}))
-        for schema_name, schema_path in schemas.items():
-            target = (skill_path / schema_path).resolve()
-            if not target.exists():
+        for schema_name in ("input", "parameter", "output"):
+            resolution = resolve_schema_asset(skill, schema_name)
+            if resolution.path is None:
                 issues.append(f"missing schema: {schema_name}")
     return ManagementSkillSummary(
         id=str(getattr(skill, "id", "")),
@@ -746,28 +746,19 @@ def _normalize_execution_modes(raw: Any) -> list[str]:
 
 
 def _read_skill_schema_content(
-    skill_root: Path,
-    schemas: dict[str, str],
+    skill: SkillManifest,
     schema_key: str,
 ) -> dict[str, Any] | None:
-    schema_path = schemas.get(schema_key)
-    if not schema_path:
+    resolution = resolve_schema_asset(skill, schema_key)
+    if resolution.path is None:
+        if resolution.issue_source == "declared":
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid {schema_key} schema",
+            )
         return None
-    try:
-        target = resolve_skill_file_path(skill_root, schema_path)
-    except (ValueError, FileNotFoundError):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid {schema_key} schema",
-        )
-    try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid {schema_key} schema",
-        )
-    if not isinstance(payload, dict):
+    payload = load_resolved_json(resolution.path)
+    if payload is None:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid {schema_key} schema",

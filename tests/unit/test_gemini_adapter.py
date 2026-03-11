@@ -112,6 +112,45 @@ def test_construct_config_includes_engine_default_layer(tmp_path):
     assert layers[2]["model"]["name"] == "gemini-runtime"
     assert layers[3]["sandbox"]["enabled"] is False
 
+
+def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
+    adapter = GeminiExecutionAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    custom_dir = skill_dir / "custom"
+    assets_dir.mkdir(parents=True)
+    custom_dir.mkdir()
+    (custom_dir / "gemini_settings.json").write_text(
+        json.dumps({"model": {"name": "gemini-declared"}}),
+        encoding="utf-8",
+    )
+    (assets_dir / "gemini_settings.json").write_text(
+        json.dumps({"model": {"name": "gemini-fallback"}}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engine_configs={"gemini": "custom/gemini_settings.json"},
+    )
+
+    captured: dict[str, object] = {}
+
+    def _capture_generate_config(schema_name: str, config_layers, output_path: Path):
+        captured["layers"] = config_layers
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("{}", encoding="utf-8")
+        return output_path
+
+    with patch("server.engines.gemini.adapter.config_composer.config_generator.generate_config", side_effect=_capture_generate_config):
+        adapter._construct_config(skill, run_dir, options={})
+
+    layers = captured["layers"]
+    assert isinstance(layers, list)
+    assert layers[1]["model"]["name"] == "gemini-declared"
+
 @pytest.mark.asyncio
 async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"

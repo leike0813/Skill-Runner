@@ -74,6 +74,8 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     skill_dir = tmp_path / "demo-skill"
     (skill_dir / "assets").mkdir(parents=True, exist_ok=True)
     (skill_dir / "assets" / "runner.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "assets" / "input.schema.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "assets" / "parameter.schema.json").write_text("{}", encoding="utf-8")
     (skill_dir / "assets" / "output.schema.json").write_text("{}", encoding="utf-8")
     manifest = SkillManifest(
         id="demo-skill",

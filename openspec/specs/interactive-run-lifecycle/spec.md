@@ -3,6 +3,39 @@
 ## Purpose
 定义 interactive 生命周期在单一可恢复范式下的状态流转、并发槽位和完成门控语义。
 ## Requirements
+### Requirement: interactive 终态门禁 MUST 先判 ask_user 再判 soft completion
+interactive 模式 MUST 先消费 done marker 与 ask-user 证据，再允许 structured output 走 soft completion。
+
+#### Scenario: ask_user 证据阻止 soft completion
+- **WHEN** 当前 attempt 未检测到 `__SKILL_DONE__`
+- **AND** 命中 `<ASK_USER_YAML>` 或显式 ask_user 证据
+- **THEN** run MUST 进入 `waiting_user`
+- **AND** 不得因为 output schema 通过而直接进入 `succeeded`
+
+#### Scenario: extracted JSON but schema invalid keeps waiting
+- **WHEN** 当前 attempt 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 成功提取标准化 JSON
+- **AND** output schema 校验失败
+- **THEN** run MUST 进入 `waiting_user`
+- **AND** 不得直接进入 `failed`
+
+#### Scenario: no ask_user and no JSON also keeps waiting
+- **WHEN** 当前 attempt 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 未提取到标准化 JSON
+- **THEN** run MUST 进入 `waiting_user`
+
+### Requirement: interactive soft completion MUST require valid structured output
+interactive 模式下的 soft completion MUST 仅在标准化 JSON、schema 校验和 artifact 修复同时成立时触发。
+
+#### Scenario: soft completion requires schema and artifact validation
+- **WHEN** 当前 attempt 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 提取到标准化 JSON
+- **AND** output schema 校验通过
+- **AND** best-effort artifact 路径修复后仍成立
+- **THEN** run MAY 进入 `succeeded`
 ### Requirement: 系统 MUST 支持可暂停交互生命周期
 系统 MUST 在 interactive 回合无完成证据时进入 `waiting_user`，且不依赖 ask_user 结构完整性；但高置信度 auth detection 必须优先于 generic `waiting_user` 推断。
 
@@ -63,9 +96,34 @@
 #### Scenario: interactive 模式软条件完成
 - **WHEN** run 处于 `interactive` 模式
 - **AND** 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 成功提取标准化 JSON
 - **AND** 输出通过 schema 校验
 - **THEN** run 进入 `succeeded`
 - **AND** 记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`
+
+#### Scenario: ask_user 证据阻止 soft completion
+- **WHEN** run 处于 `interactive` 模式
+- **AND** 未检测到 `__SKILL_DONE__`
+- **AND** 当前回合命中 `<ASK_USER_YAML>` 或其他 ask_user 证据
+- **THEN** run 进入 `waiting_user`
+- **AND** 不得因为 output schema 通过而直接进入 `succeeded`
+
+#### Scenario: 提取到 JSON 但 schema 无效时保持等待
+- **WHEN** run 处于 `interactive` 模式
+- **AND** 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 成功提取标准化 JSON
+- **AND** output schema 校验失败
+- **THEN** run 进入 `waiting_user`
+- **AND** 不得直接进入 `failed`
+
+#### Scenario: 无 ask_user 且无 JSON 时保持等待
+- **WHEN** run 处于 `interactive` 模式
+- **AND** 未检测到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 未提取到标准化 JSON
+- **THEN** run 进入 `waiting_user`
 
 ### Requirement: interactive MUST 支持最大回合限制
 系统 MUST 支持 `runner.json.max_attempt` 限制交互回合数。
@@ -161,4 +219,3 @@ When active auth session blocks new session creation, run state MUST remain `wai
 - **WHEN** a new auth session cannot be created due to an existing active session
 - **THEN** run state MUST remain `waiting_auth`
 - **AND** the client MUST receive an explicit error
-

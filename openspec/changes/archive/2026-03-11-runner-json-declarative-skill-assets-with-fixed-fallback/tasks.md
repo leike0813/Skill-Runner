@@ -1,0 +1,6 @@
+- [x] 1. Add OpenSpec delta specs for runner.json asset declaration and fallback behavior
+- [x] 2. Extend runner.json manifest schema and skill models with `engine_configs`
+- [x] 3. Introduce a shared skill asset resolver and switch schema/runtime/config callers to it
+- [x] 4. Update package validation, management schema reads, patching, artifact inference, and cache fingerprinting
+- [x] 5. Update engine config composers to use `runner.json.engine_configs` with fixed fallback
+- [x] 6. Update docs and tests for declarative override plus fixed fallback behavior

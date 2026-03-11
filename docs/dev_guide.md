@@ -211,6 +211,9 @@ skill-name/
     "parameter": "assets/parameter.schema.json",
     "output": "assets/output.schema.json"
   },
+  "engine_configs": {
+    "gemini": "custom/gemini_settings.json"
+  },
   "artifacts": [
     {
       "role": "notes_md",
@@ -234,7 +237,21 @@ skill-name/
 - `unsupported_engines` 可选；用于从允许集合中剔除。有效集合 = (engines 或全量) - unsupported_engines。
 - `execution_modes` 必填，值仅允许 `auto`/`interactive`。
 - `max_attempt` 可选正整数（≥1），仅作用于 interactive 模式。
+- `schemas` 是可选覆盖声明：
+  - 优先使用 `runner.json.schemas.<key>`
+  - 缺省/空值/非法/文件缺失时回退到固定文件名：
+    - `assets/input.schema.json`
+    - `assets/parameter.schema.json`
+    - `assets/output.schema.json`
+- `engine_configs` 是可选的引擎级配置覆盖入口：
+  - 优先使用 `runner.json.engine_configs.<engine>`
+  - 缺省/空值/非法/文件缺失时回退到固定文件名：
+    - `codex` -> `assets/codex_config.toml`
+    - `gemini` -> `assets/gemini_settings.json`
+    - `iflow` -> `assets/iflow_settings.json`
+    - `opencode` -> `assets/opencode_config.json`
 - Schema 文件在上传阶段执行 meta-schema 预检（如 `x-input-source`、`x-type` 扩展字段）。
+- schema 声明失败会记录显式 warning；engine config 声明失败仅后台日志记录，不阻断运行。
 
 ### 5.4 Skill 包安装与临时执行
 - **安装**：`POST /v1/skill-packages/install` 上传 zip/tar.gz → 解压、校验、注册到 `SkillRegistry`。
@@ -314,9 +331,10 @@ _parse_output(raw_stdout) → AdapterTurnResult
 - 自动回复开关：`runtime_options.interactive_auto_reply`（默认 `false`）。
 - Interactive 完成判定（双轨）：
   - 强条件：assistant 回复中检测到 `__SKILL_DONE__`。
-  - 软条件：未检测到 marker，但当轮输出通过 output schema（记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`）。
+  - 软条件：仅在未命中 ask_user 证据、且成功提取标准化 JSON 并通过 schema / artifact 校验时才允许完成（记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`）。
   - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
 - ask_user 提示建议采用 YAML 并包裹 `<ASK_USER_YAML>...</ASK_USER_YAML>`。
+- 若该回合输出了 `<ASK_USER_YAML>`，则同回合不得再输出 `__SKILL_DONE__`；命中 ask_user 证据后必须进入 `waiting_user`。
 - 超时：`runtime_options.interactive_reply_timeout_sec`（默认 1200 秒）。
 - `max_attempt`：当 `attempt_number >= max_attempt` 且未完成时，返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 

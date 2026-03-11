@@ -104,6 +104,20 @@
         .muted { color: var(--neutral-500); }
         .btn.btn-secondary { background: var(--neutral-100); color: var(--neutral-700); }
         .btn.btn-primary { background: var(--primary-600); color: #fff; }
+        .btn.disabled,
+        .btn[aria-disabled="true"],
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        .btn.disabled:hover,
+        .btn[aria-disabled="true"]:hover,
+        .btn:disabled:hover {
+            background: var(--neutral-100);
+            color: var(--neutral-700);
+            text-decoration: none;
+            transform: none;
+        }
         .row { display: flex; gap: 16px; flex-wrap: wrap; }
         .error {
             padding: 10px 12px;

@@ -1,0 +1,6 @@
+- [x] 1. 更新 OpenSpec delta specs，废止“ask_user 可被 soft completion 绕过”的旧语义
+- [x] 2. 更新 statechart、FCMP sequence、runtime contract 与 invariants，固定 interactive 终态门禁顺序
+- [x] 3. 重构 interactive lifecycle 判定链路，先判 done，再判 ask_user，再判 structured output / schema / artifact
+- [x] 4. 收紧 structured output 提取与 repair 边界，禁止正文内嵌 JSON 误提升为 final
+- [x] 5. 增加 permissive schema / schema invalid / ask_user suppression warnings，并接入 meta、RASP、FCMP
+- [x] 6. 更新并补充测试，覆盖 Gemini 同型场景和新的 waiting_user / soft completion 语义

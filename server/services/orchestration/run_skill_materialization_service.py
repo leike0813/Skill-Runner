@@ -10,6 +10,7 @@ from server.models import RunLocalSkillRef, RunLocalSkillSource, SkillManifest
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.skill.skill_package_validator import SkillPackageValidator
+from server.services.skill.skill_asset_resolver import resolve_schema_asset
 from server.services.skill.skill_patcher import skill_patcher
 
 
@@ -168,14 +169,11 @@ class RunFolderBootstrapper:
         snapshot_dir: Path,
         execution_mode: str,
     ) -> None:
-        output_schema_relpath = (
-            str(skill.schemas.get("output"))
-            if isinstance(skill.schemas, dict) and isinstance(skill.schemas.get("output"), str)
-            else None
-        )
+        snapshot_skill = skill.model_copy(update={"path": snapshot_dir})
+        output_schema_resolution = resolve_schema_asset(snapshot_skill, "output")
         output_schema = skill_patcher.load_output_schema(
             skill_path=snapshot_dir,
-            output_schema_relpath=output_schema_relpath,
+            output_schema_relpath=output_schema_resolution.declared_relpath,
         )
         skill_patcher.patch_skill_md(
             snapshot_dir,

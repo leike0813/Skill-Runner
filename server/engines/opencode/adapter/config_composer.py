@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.skill.skill_asset_resolver import (
+    load_resolved_json,
+    resolve_engine_config_asset,
+)
 
 if TYPE_CHECKING:
     from .execution_adapter import OpencodeExecutionAdapter
@@ -50,10 +54,22 @@ class OpencodeConfigComposer:
         layers.append(self._load_json_config(engine_default_path, label="opencode default"))
 
         skill_defaults: dict[str, Any] = {}
-        candidate = self._adapter.profile.resolve_skill_defaults_path(skill.path)
-        if candidate is not None:
-            if candidate.exists():
-                skill_defaults = self._load_json_config(candidate, label="opencode skill default")
+        skill_config_resolution = resolve_engine_config_asset(
+            skill,
+            "opencode",
+            self._adapter.profile.config_assets.skill_defaults_path,
+        )
+        if skill_config_resolution.used_fallback and skill_config_resolution.issue_source == "declared":
+            logger.warning(
+                "Opencode skill config declaration fallback: skill=%s declared=%s fallback=%s issue=%s",
+                skill.id,
+                skill_config_resolution.declared_relpath,
+                skill_config_resolution.fallback_relpath,
+                skill_config_resolution.issue_code,
+            )
+        payload = load_resolved_json(skill_config_resolution.path)
+        if payload is not None:
+            skill_defaults = payload
         layers.append(skill_defaults)
 
         runtime_override: dict[str, Any] = {}

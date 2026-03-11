@@ -49,6 +49,35 @@ def test_construct_config_auto_mode_uses_engine_default_and_enforced(tmp_path):
     assert payload["permission"]["skill"] == "allow"
 
 
+def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    custom_dir = skill_dir / "custom"
+    custom_dir.mkdir(parents=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (custom_dir / "opencode_config.json").write_text(
+        json.dumps({"model": "openai/gpt-5", "skill_setting": "declared"}),
+        encoding="utf-8",
+    )
+    (assets_dir / "opencode_config.json").write_text(
+        json.dumps({"model": "openai/gpt-5-mini", "skill_setting": "fallback"}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engine_configs={"opencode": "custom/opencode_config.json"},
+    )
+    adapter = OpencodeExecutionAdapter()
+
+    config_path = adapter._construct_config(skill, run_dir, options={"execution_mode": "auto"})
+    payload = _read_json(config_path)
+
+    assert payload["skill_setting"] == "declared"
+
+
 def test_construct_config_interactive_mode_sets_question_allow(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

@@ -1,10 +1,12 @@
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import jsonschema  # type: ignore[import-untyped]
 
 from server.models import SkillManifest
+from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 
 _SCHEMA_LOAD_EXCEPTIONS = (
     OSError,
@@ -20,6 +22,8 @@ _SCHEMA_VALIDATE_EXCEPTIONS = (
     ValueError,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class SchemaValidator:
     """
@@ -32,22 +36,47 @@ class SchemaValidator:
     """
 
     def _load_schema(self, skill: SkillManifest, schema_key: str) -> Optional[Dict[str, Any]]:
-        if not skill.path or not skill.schemas:
-            return None
+        resolution = resolve_schema_asset(skill, schema_key)
+        if resolution.issue_source == "declared" and resolution.used_fallback:
+            logger.warning(
+                "Schema declaration fallback used: skill=%s schema=%s declared=%s fallback=%s issue=%s",
+                skill.id,
+                schema_key,
+                resolution.declared_relpath,
+                resolution.fallback_relpath,
+                resolution.issue_code,
+            )
+        return load_resolved_json(resolution.path)
 
-        rel_path = skill.schemas.get(schema_key)
-        if not rel_path:
-            return None
+    def load_output_schema(self, skill: SkillManifest) -> Optional[Dict[str, Any]]:
+        return self._load_schema(skill, "output")
 
-        path = skill.path / rel_path
-        if not path.exists():
-            return None
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except _SCHEMA_LOAD_EXCEPTIONS:
-            return None
+    def is_output_schema_too_permissive(self, skill: SkillManifest) -> bool:
+        schema = self.load_output_schema(skill)
+        if not isinstance(schema, dict):
+            return False
+        if schema.get("type") != "object":
+            return False
+        required_obj = schema.get("required")
+        required_fields: List[str] = []
+        if isinstance(required_obj, list):
+            required_fields = [
+                field.strip()
+                for field in required_obj
+                if isinstance(field, str) and field.strip()
+            ]
+        if required_fields:
+            return False
+        properties = schema.get("properties")
+        if not isinstance(properties, dict) or not properties:
+            return True
+        for prop_schema in properties.values():
+            if not isinstance(prop_schema, dict):
+                return False
+            x_type = str(prop_schema.get("x-type") or "").strip().lower()
+            if x_type not in {"artifact", "file"}:
+                return False
+        return True
 
     def get_schema_keys(self, skill: SkillManifest, schema_key: str) -> List[str]:
         schema = self._load_schema(skill, schema_key)
@@ -96,20 +125,17 @@ class SchemaValidator:
 
     def validate_schema(self, skill: SkillManifest, data: Dict[str, Any], schema_key: str) -> List[str]:
         """Generic validator for 'input', 'parameter', or 'output' schema."""
-        if not skill.path or not skill.schemas:
-            return []
-
-        rel_path = skill.schemas.get(schema_key)
-        if not rel_path:
-            return []
-
-        path = skill.path / rel_path
-        if not path.exists():
-            return [f"Schema file not found: {rel_path}"]
+        resolution = resolve_schema_asset(skill, schema_key)
+        path = resolution.path
+        if path is None:
+            label = resolution.fallback_relpath or resolution.declared_relpath or schema_key
+            return [f"Schema file not found: {label}"]
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
+            schema = load_resolved_json(path)
+            if not isinstance(schema, dict):
+                label = path.relative_to(skill.path).as_posix() if skill.path else path.name
+                return [f"Schema file not found: {label}"]
             jsonschema.validate(instance=data, schema=schema)
             return []
         except jsonschema.ValidationError as e:
@@ -177,23 +203,16 @@ class SchemaValidator:
         """
         Legacy validator for input schema against supplied dict.
         """
-        if not skill.path:
-            return []
-
-        schema_path_rel = None
-        if skill.schemas and "input" in skill.schemas:
-            schema_path_rel = skill.schemas["input"]
-
-        if not schema_path_rel:
-            return []
-
-        schema_path = skill.path / schema_path_rel
-        if not schema_path.exists():
-            return [f"Schema file not found: {schema_path_rel}"]
+        resolution = resolve_schema_asset(skill, "input")
+        schema_path = resolution.path
+        if schema_path is None:
+            label = resolution.fallback_relpath or resolution.declared_relpath or "input"
+            return [f"Schema file not found: {label}"]
 
         try:
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
+            schema = load_resolved_json(schema_path)
+            if not isinstance(schema, dict):
+                return [f"Schema file not found: {schema_path.name}"]
 
             jsonschema.validate(instance=input_data, schema=schema)
             return []
@@ -210,21 +229,16 @@ class SchemaValidator:
         if not skill.path:
             return ["Output schema missing: skill path not set"]
 
-        schema_path_rel = None
-        if skill.schemas and "output" in skill.schemas:
-            schema_path_rel = skill.schemas["output"]
-
-        if not schema_path_rel:
-            return ["Output schema missing: schema entry not found"]
-
-        schema_path = skill.path / schema_path_rel
-        if not schema_path.exists():
-            return [f"Output schema file missing: {schema_path_rel}"]
+        resolution = resolve_schema_asset(skill, "output")
+        schema_path = resolution.path
+        if schema_path is None:
+            label = resolution.fallback_relpath or resolution.declared_relpath or "output"
+            return [f"Output schema file missing: {label}"]
 
         try:
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
-
+            schema = self.load_output_schema(skill)
+            if not isinstance(schema, dict):
+                return [f"Output schema file missing: {schema_path.relative_to(skill.path).as_posix()}"]
             jsonschema.validate(instance=output_data, schema=schema)
             return []
         except jsonschema.ValidationError as e:
@@ -246,7 +260,7 @@ class SchemaValidator:
         """
         input_ctx: Dict[str, Any] = {}
         missing_required_files: List[str] = []
-        if not skill.schemas or "input" not in skill.schemas:
+        if resolve_schema_asset(skill, "input").path is None:
             return input_ctx, missing_required_files
 
         inline_payload: Dict[str, Any] = {}
@@ -274,7 +288,7 @@ class SchemaValidator:
     def build_parameter_context(self, skill: SkillManifest, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve parameter values based on schema keys."""
         param_ctx: Dict[str, Any] = {}
-        if not skill.schemas or "parameter" not in skill.schemas:
+        if resolve_schema_asset(skill, "parameter").path is None:
             return param_ctx
 
         param_keys = self.get_schema_keys(skill, "parameter")

@@ -3,7 +3,7 @@ import tomlkit
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
+from server.engines.codex.adapter.toml_manager import CodexConfigManager
 
 # Mocks
 @pytest.fixture

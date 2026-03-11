@@ -22,6 +22,8 @@ def _build_skill_zip(
     include_runner_artifacts: bool = True,
     include_execution_modes: bool = True,
     max_attempt: Any = None,
+    schemas_override: dict[str, Any] | None = None,
+    engine_configs_override: dict[str, Any] | None = None,
     input_schema_override: dict[str, Any] | None = None,
     parameter_schema_override: dict[str, Any] | None = None,
     output_schema_override: dict[str, Any] | None = None,
@@ -49,6 +51,10 @@ def _build_skill_zip(
         runner["execution_modes"] = ["auto", "interactive"]
     if max_attempt is not None:
         runner["max_attempt"] = max_attempt
+    if schemas_override is not None:
+        runner["schemas"] = schemas_override
+    if engine_configs_override is not None:
+        runner["engine_configs"] = engine_configs_override
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -263,6 +269,68 @@ def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
     with pytest.raises(ValueError, match="Invalid output schema"):
         validator.validate_skill_dir(
             tmp_path / "stage_invalid_output_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_accepts_schema_fallback_when_runner_declaration_missing(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "fallback_missing_decl.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            schemas_override={},
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_fallback_missing_decl")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_fallback_missing_decl" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_accepts_schema_fallback_when_runner_declaration_invalid(tmp_path, caplog):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "fallback_invalid_decl.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            schemas_override={
+                "input": "",
+                "parameter": "missing/parameter.schema.json",
+                "output": "../bad-output.schema.json",
+            },
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_fallback_invalid_decl")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_fallback_invalid_decl" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+    assert "schema fallback used" in caplog.text
+
+
+def test_rejects_schema_when_declaration_invalid_and_fallback_missing(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "missing_after_fallback.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            schemas_override={"output": "missing/output.schema.json"},
+            include_output=False,
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_missing_after_fallback")
+    with pytest.raises(ValueError, match="output.schema.json|missing/output.schema.json"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_missing_after_fallback" / top,
             top,
             require_version=False,
         )

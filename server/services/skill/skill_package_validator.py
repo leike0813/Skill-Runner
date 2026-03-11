@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import re
 import shutil
 import zipfile
@@ -9,7 +10,9 @@ from typing import Any, Optional, Tuple
 import jsonschema  # type: ignore[import-untyped]
 import yaml  # type: ignore
 
+from server.models import SkillManifest
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
+from server.services.skill.skill_asset_resolver import resolve_schema_asset
 
 _packaging_version: Any = None
 try:
@@ -31,6 +34,7 @@ class SkillPackageValidator:
         "output": "skill_output_schema.schema.json",
     }
     CONTRACT_SCHEMAS_ROOT = Path(__file__).resolve().parents[2] / "contracts" / "schemas" / "skill"
+    _logger = logging.getLogger(__name__)
 
     def inspect_zip_top_level_from_bytes(self, payload: bytes) -> str:
         try:
@@ -118,16 +122,23 @@ class SkillPackageValidator:
         if skill_id != top_level_dir or skill_name != skill_id:
             raise ValueError("Skill identity mismatch: directory, runner.json id, and SKILL.md name must match")
 
-        schemas = runner.get("schemas")
-        if not isinstance(schemas, dict):
-            raise ValueError("runner.json must define schemas")
         for key in ("input", "parameter", "output"):
-            schema_rel = schemas.get(key)
-            if not isinstance(schema_rel, str) or not schema_rel.strip():
-                raise ValueError("runner.json schemas must define input, parameter and output")
-            schema_path = skill_dir / schema_rel
-            if not schema_path.exists():
-                missing.append(schema_rel)
+            resolution = resolve_schema_asset(
+                SkillManifest(id=skill_id, path=skill_dir, schemas=runner.get("schemas")),
+                key,
+            )
+            if resolution.issue_source == "declared" and resolution.used_fallback:
+                self._logger.warning(
+                    "Skill package schema fallback used: skill=%s schema=%s declared=%s fallback=%s issue=%s",
+                    skill_id,
+                    key,
+                    resolution.declared_relpath,
+                    resolution.fallback_relpath,
+                    resolution.issue_code,
+                )
+            schema_path = resolution.path
+            if schema_path is None:
+                missing.append(resolution.fallback_relpath or resolution.declared_relpath or key)
                 continue
             self._validate_skill_schema_file(schema_path, schema_key=key)
         if missing:

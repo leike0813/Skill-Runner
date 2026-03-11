@@ -4,7 +4,6 @@
   "type": "object",
   "required": [
     "id",
-    "schemas",
     "execution_modes"
   ],
   "properties": {
@@ -50,26 +49,36 @@
     },
     "schemas": {
       "type": "object",
-      "required": [
-        "input",
-        "parameter",
-        "output"
-      ],
       "properties": {
         "input": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "parameter": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "output": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       },
       "additionalProperties": true
+    },
+    "engine_configs": {
+      "type": "object",
+      "properties": {
+        "codex": {
+          "type": "string"
+        },
+        "gemini": {
+          "type": "string"
+        },
+        "iflow": {
+          "type": "string"
+        },
+        "opencode": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "artifacts": {
       "type": "array"

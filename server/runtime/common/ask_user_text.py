@@ -30,3 +30,9 @@ def normalize_interaction_text(raw_text: Any) -> str:
         return ""
     return strip_ask_user_yaml_blocks(raw_text).strip()
 
+
+def contains_ask_user_yaml_block(text: Any) -> bool:
+    if not isinstance(text, str):
+        return False
+    normalized = str(text or "")
+    return any(pattern.search(normalized) for pattern in ASK_USER_BLOCK_PATTERNS)

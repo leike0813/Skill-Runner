@@ -4,9 +4,9 @@ import logging
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
-
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.skill.skill_asset_resolver import resolve_engine_config_asset
+from .toml_manager import CodexConfigManager
 
 if TYPE_CHECKING:
     from .execution_adapter import CodexExecutionAdapter
@@ -63,7 +63,20 @@ class CodexConfigComposer:
         options = ctx.options
         skill_defaults: dict[str, Any] = {}
         if skill.path:
-            settings_path = self._adapter.profile.resolve_skill_defaults_path(skill.path)
+            settings_resolution = resolve_engine_config_asset(
+                skill,
+                "codex",
+                self._adapter.profile.config_assets.skill_defaults_path,
+            )
+            if settings_resolution.used_fallback and settings_resolution.issue_source == "declared":
+                logger.warning(
+                    "Codex skill config declaration fallback: skill=%s declared=%s fallback=%s issue=%s",
+                    skill.id,
+                    settings_resolution.declared_relpath,
+                    settings_resolution.fallback_relpath,
+                    settings_resolution.issue_code,
+                )
+            settings_path = settings_resolution.path
             if settings_path is not None and settings_path.exists():
                 try:
                     import tomlkit

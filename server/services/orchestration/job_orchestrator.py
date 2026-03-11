@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -57,6 +58,12 @@ from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.logging.structured_trace import log_event
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.config import config
+
+
+_STRICT_FENCED_JSON_RE = re.compile(
+    r"^```(?:json)?\s*(\{[\s\S]*\})\s*```$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -716,6 +723,19 @@ class JobOrchestrator:
             fallback_interaction_id=fallback_interaction_id,
         )
 
+    def _contains_ask_user_signal_in_stream(
+        self,
+        *,
+        adapter: Any,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> bool:
+        return self.interaction_service.contains_ask_user_signal_in_stream(
+            adapter=adapter,
+            raw_stdout=raw_stdout,
+            raw_stderr=raw_stderr,
+        )
+
     def _strip_done_marker_for_output_validation(
         self,
         payload: Dict[str, Any],
@@ -747,10 +767,35 @@ class JobOrchestrator:
         *,
         result: Any,
         runtime_parse_result: Dict[str, Any] | None,
+        execution_mode: str = "auto",
+    ) -> Dict[str, Any] | None:
+        candidate = self._resolve_structured_output_candidate(
+            result=result,
+            runtime_parse_result=runtime_parse_result,
+            execution_mode=execution_mode,
+        )
+        if isinstance(candidate, dict):
+            payload = candidate.get("payload")
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    def _resolve_structured_output_candidate(
+        self,
+        *,
+        result: Any,
+        runtime_parse_result: Dict[str, Any] | None,
+        execution_mode: str = "auto",
     ) -> Dict[str, Any] | None:
         payload = self._materialize_turn_result_payload(getattr(result, "turn_result", None))
         if isinstance(payload, dict):
-            return payload
+            outcome = getattr(getattr(result, "turn_result", None), "outcome", None)
+            source = "turn_result_final"
+            if outcome == AdapterTurnOutcome.ASK_USER:
+                source = "turn_result_ask_user"
+            elif outcome == AdapterTurnOutcome.ERROR:
+                source = "turn_result_error"
+            return {"payload": payload, "source": source}
 
         if not isinstance(runtime_parse_result, dict):
             return None
@@ -763,10 +808,33 @@ class JobOrchestrator:
             text = item.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
-            parsed = extract_fenced_or_plain_json(text)
+            parsed = (
+                self._extract_interactive_assistant_json_candidate(text)
+                if execution_mode == ExecutionMode.INTERACTIVE.value
+                else extract_fenced_or_plain_json(text)
+            )
             if isinstance(parsed, dict):
-                return parsed
+                return {"payload": parsed, "source": "assistant_message_json"}
         return None
+
+    def _extract_interactive_assistant_json_candidate(self, text: str) -> Dict[str, Any] | None:
+        stripped = text.strip()
+        if not stripped:
+            return None
+        fenced_match = _STRICT_FENCED_JSON_RE.fullmatch(stripped)
+        if fenced_match is not None:
+            try:
+                parsed = json.loads(fenced_match.group(1))
+            except json.JSONDecodeError:
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        if not (stripped.startswith("{") and stripped.endswith("}")):
+            return None
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     async def _persist_waiting_interaction(
         self,

@@ -91,6 +91,22 @@ a:hover {
   color: var(--neutral-700);
 }
 
+.btn.disabled,
+.btn[aria-disabled="true"],
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn.disabled:hover,
+.btn[aria-disabled="true"]:hover,
+.btn:disabled:hover {
+  background: var(--neutral-100);
+  color: var(--neutral-700);
+  text-decoration: none;
+  transform: none;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

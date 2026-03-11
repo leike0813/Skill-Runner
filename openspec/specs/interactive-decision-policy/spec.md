@@ -64,9 +64,24 @@ This requirement MUST be interpreted as optional enrichment: interactive patch M
 
 #### Scenario: soft evidence 可完成并告警
 - **WHEN** 未解析到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 当前回合成功提取标准化 JSON
 - **AND** 当前回合输出通过 schema 校验
 - **THEN** 系统可判定完成
 - **AND** 记录告警 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`
+
+#### Scenario: ask_user 证据优先于 soft evidence
+- **WHEN** 当前回合命中 `<ASK_USER_YAML>` 或其他 ask_user 证据
+- **THEN** 系统必须优先进入等待用户路径
+- **AND** generic JSON repair 不得将该回合改判为完成
+
+#### Scenario: 提取到 JSON 但 schema 无效时保持等待并告警
+- **WHEN** 未解析到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 当前回合成功提取标准化 JSON
+- **AND** output schema 校验失败
+- **THEN** 系统进入 `waiting_user`
+- **AND** 记录告警 `INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID`
 
 ### Requirement: interactive 决策策略 MUST 支持 max_attempt 终止条件
 系统 MUST 在 `max_attempt` 命中时以稳定错误终止交互回合。
@@ -76,3 +91,24 @@ This requirement MUST be interpreted as optional enrichment: interactive patch M
 - **AND** 当前回合无 strong/soft 完成证据
 - **THEN** 系统终止运行并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`
 
+### Requirement: ask_user 证据 MUST 高于 generic JSON repair
+interactive 模式下，ask_user 证据 MUST 作为最高优先级门禁，generic JSON repair 不得覆盖其判定。
+
+#### Scenario: ask_user yaml suppresses generic repair
+- **WHEN** assistant 文本同时包含 `<ASK_USER_YAML>` 与可提取 JSON
+- **THEN** 系统 MUST 优先判定为需要用户输入
+- **AND** generic repair MUST NOT 将该回合改判为 soft completion
+
+### Requirement: lifecycle MUST emit warnings for risky soft-completion inputs
+系统 MUST 对会导致误判风险的 structured output 条件输出稳定 warning。
+
+#### Scenario: permissive schema warning
+- **WHEN** interactive 模式通过 soft completion 完成
+- **AND** output schema 过宽松
+- **THEN** 系统 MUST 记录 `INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE`
+
+#### Scenario: extracted json invalid warning
+- **WHEN** interactive 模式提取到标准化 JSON
+- **AND** output schema 校验失败
+- **THEN** 系统 MUST 记录 `INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID`
+- **AND** run MUST 保持 `waiting_user`

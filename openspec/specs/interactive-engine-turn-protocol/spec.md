@@ -88,14 +88,26 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 #### Scenario: interactive 模式软条件判定完成
 - **WHEN** run 以 `interactive` 模式执行
 - **AND** 未解析到 `__SKILL_DONE__`
+- **AND** 未命中 ask_user 证据
+- **AND** 当前回合成功提取标准化 JSON
 - **AND** 当前回合输出通过 output schema 校验
 - **THEN** 系统可判定执行完成
 - **AND** 记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`
 
+#### Scenario: ask_user yaml 命中时禁止 assistant 文本 JSON 提升
+- **WHEN** run 以 `interactive` 模式执行
+- **AND** 当前回合 assistant 文本命中 `<ASK_USER_YAML>`
+- **THEN** 系统不得再从该文本提取 JSON 并提升为 final payload
+
+#### Scenario: assistant 正文内嵌 JSON 片段不得直接成为 final payload
+- **WHEN** assistant 文本包含正文、证据数组或示例 JSON 片段
+- **AND** 这些 JSON 不是最外层最终结果
+- **THEN** 系统不得将其直接视为 final payload
+
 #### Scenario: interactive 模式缺失 done marker 进入等待态
 - **WHEN** run 以 `interactive` 模式执行
 - **AND** 未解析到 `__SKILL_DONE__`
-- **AND** 当前回合输出未通过 output schema 校验
+- **AND** 当前回合未命中 soft completion
 - **AND** 进程未发生中断性失败
 - **THEN** 系统进入 `waiting_user`
 
@@ -133,3 +145,21 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 - **THEN** 仅注入 interactive mode patch
 - **AND** 不注入 auto mode patch
 
+### Requirement: assistant 文本 JSON 提取 MUST be constrained in interactive mode
+interactive 模式下从 assistant 文本提取标准化 JSON 必须受 ask-user 证据与候选边界约束。
+
+#### Scenario: embedded evidence json must not become final payload
+- **WHEN** assistant 文本包含正文、证据数组或示例 JSON 片段
+- **AND** 这些 JSON 不是最外层最终结果
+- **THEN** 系统 MUST NOT 将其提升为 final payload
+
+#### Scenario: assistant-text extraction only applies without ask_user evidence
+- **WHEN** 当前 attempt 命中 `<ASK_USER_YAML>`
+- **THEN** assistant 文本 JSON 提取 MUST NOT 参与 final/soft-completion 判定
+
+### Requirement: repair MUST NOT decide completion
+repair 只能修复已识别完成候选的 payload / artifact，不得负责提升当前回合为完成态。
+
+#### Scenario: repair cannot upgrade ask_user turn
+- **WHEN** 当前回合命中 ask_user 证据
+- **THEN** repair MUST NOT 将该回合转化为 final output

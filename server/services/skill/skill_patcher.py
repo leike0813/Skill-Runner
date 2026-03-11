@@ -12,6 +12,8 @@ from pydantic import ValidationError
 from server.config_registry import keys
 from server.config_registry.registry import config_registry
 from server.models import ManifestArtifact
+from server.models import SkillManifest
+from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER, generate_output_schema_patch
 from .skill_patch_templates import (
     ARTIFACT_REDIRECTION_TEMPLATE,
@@ -170,57 +172,31 @@ class SkillPatcher:
         skill_path: Optional[Path],
         output_schema_relpath: Optional[str],
     ) -> Optional[Dict[str, Any]]:
-        if not skill_path or not output_schema_relpath:
+        if not skill_path:
             return None
-        schema_path = skill_path / output_schema_relpath
-        if not schema_path.exists() or not schema_path.is_file():
-            logger.warning("Output schema file not found: %s", schema_path)
+        skill = SkillManifest(
+            id=skill_path.name,
+            path=skill_path,
+            schemas={"output": output_schema_relpath} if output_schema_relpath else {},
+        )
+        resolution = resolve_schema_asset(skill, "output")
+        schema_path = resolution.path
+        if schema_path is None:
+            logger.warning(
+                "Output schema file not found: skill=%s declared=%s fallback=%s",
+                skill_path,
+                resolution.declared_relpath,
+                resolution.fallback_relpath,
+            )
             return None
-        try:
-            payload = json.loads(schema_path.read_text(encoding="utf-8"))
-        except _JSON_PAYLOAD_EXCEPTIONS:
-            logger.warning("Failed to parse output schema: %s", schema_path, exc_info=True)
-            return None
+        payload = load_resolved_json(schema_path)
         if not isinstance(payload, dict):
             logger.warning("Output schema root is not an object: %s", schema_path)
             return None
         return payload
 
     def discover_output_schema(self, skill_dir: Path) -> Optional[Dict[str, Any]]:
-        candidates: List[Path] = []
-        runner_path = skill_dir / "assets" / "runner.json"
-        if runner_path.exists() and runner_path.is_file():
-            try:
-                runner_obj = json.loads(runner_path.read_text(encoding="utf-8"))
-                if isinstance(runner_obj, dict):
-                    schemas_obj = runner_obj.get("schemas")
-                    if isinstance(schemas_obj, dict):
-                        output_rel = schemas_obj.get("output")
-                        if isinstance(output_rel, str) and output_rel.strip():
-                            candidates.append(skill_dir / output_rel.strip())
-            except _JSON_PAYLOAD_EXCEPTIONS:
-                logger.warning("Failed to parse runner.json for output schema: %s", runner_path)
-        candidates.extend(
-            [
-                skill_dir / "assets" / "output.schema.json",
-                skill_dir / "output.schema.json",
-            ]
-        )
-        seen: set[Path] = set()
-        for path in candidates:
-            if path in seen:
-                continue
-            seen.add(path)
-            if not path.exists() or not path.is_file():
-                continue
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except _JSON_PAYLOAD_EXCEPTIONS:
-                logger.warning("Failed to parse output schema: %s", path, exc_info=True)
-                continue
-            if isinstance(payload, dict):
-                return payload
-        return None
+        return self.load_output_schema(skill_path=skill_dir, output_schema_relpath=None)
 
     def build_patch_plan(
         self,

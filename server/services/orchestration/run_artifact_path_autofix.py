@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from server.models import SkillManifest
+from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 
 WARNING_OUTPUT_ARTIFACT_PATH_REPAIRED = "OUTPUT_ARTIFACT_PATH_REPAIRED"
 WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS = (
@@ -196,17 +197,4 @@ def _load_artifact_output_field_mapping(skill: SkillManifest) -> Dict[str, str]:
 
 
 def _load_output_schema(skill: SkillManifest) -> Dict[str, Any] | None:
-    if not skill.path or not skill.schemas:
-        return None
-    output_schema_relpath = skill.schemas.get("output")
-    if not isinstance(output_schema_relpath, str) or not output_schema_relpath.strip():
-        return None
-    schema_path = skill.path / output_schema_relpath
-    if not schema_path.exists() or not schema_path.is_file():
-        return None
-    try:
-        payload = json.loads(schema_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError, TypeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
+    return load_resolved_json(resolve_schema_asset(skill, "output").path)

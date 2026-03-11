@@ -446,9 +446,22 @@
 - 必须包含以下文件：
   - `SKILL.md`
   - `assets/runner.json`
-  - `assets/input.schema.json`
-  - `assets/parameter.schema.json`
-  - `assets/output.schema.json`
+- schema 解析规则：
+  - 优先读取 `runner.json.schemas.input/parameter/output`
+  - 若声明缺失、为空、非法、越界或目标文件不存在，则回退到固定文件名：
+    - `assets/input.schema.json`
+    - `assets/parameter.schema.json`
+    - `assets/output.schema.json`
+  - 若 schema 声明失败但 fallback 存在：校验通过并记录 warning
+  - 若 schema 声明失败且 fallback 也不存在：技能包校验失败
+- engine config 解析规则：
+  - 可选声明 `runner.json.engine_configs.{engine}`
+  - 声明失败时静默回退到固定文件名：
+    - `codex` -> `assets/codex_config.toml`
+    - `gemini` -> `assets/gemini_settings.json`
+    - `iflow` -> `assets/iflow_settings.json`
+    - `opencode` -> `assets/opencode_config.json`
+  - 若声明和 fallback 都不存在：视为“未提供 skill-specific engine config”，不阻断运行
 - `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
   - `input.schema.json` 的 `x-input-source` 仅允许 `file` / `inline`；
   - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`；
@@ -616,10 +629,13 @@
 - `source_attempt` / `target_attempt`：恢复调度时的源/目标尝试轮次。
 - interactive 双轨完成说明：
   - 在 assistant 回复内容中解析到 `__SKILL_DONE__` 时按强条件完成；
-  - 未解析到 marker 但输出通过 schema 时按软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+  - 未解析到 marker 时，仅在未命中 ask_user 证据、且成功提取标准化 JSON 并通过 schema/artifact 校验时才允许软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
   - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
   - ask_user 提示建议使用非 JSON 结构化格式（YAML，示例：`<ASK_USER_YAML>...</ASK_USER_YAML>`），避免被结果 JSON 误判。
-  - ask_user 提示始终为可选 enrichment，不参与后端生命周期控制判定。
+  - 若某回合输出了 `<ASK_USER_YAML>`，则该回合不得同时输出 `__SKILL_DONE__`。
+  - 一旦命中 `<ASK_USER_YAML>` 或其他 ask_user 证据，后端必须进入 `waiting_user`，并禁止任何 soft completion / repair 改判完成。
+  - 若提取到 JSON 但 output schema 校验失败，run 进入 `waiting_user`，并产出 `INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID`。
+  - 若以 soft completion 完成且 output schema 过宽松，warnings/diagnostics 中会附带 `INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE`。
 
 ### 查询待决交互 (Get Pending Interaction)
 `GET /v1/jobs/{request_id}/interaction/pending`

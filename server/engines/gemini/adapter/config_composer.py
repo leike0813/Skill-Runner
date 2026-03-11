@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 
 from server.engines.common.config.json_layer_config_generator import config_generator
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.skill.skill_asset_resolver import (
+    load_resolved_json,
+    resolve_engine_config_asset,
+)
 
 if TYPE_CHECKING:
     from .execution_adapter import GeminiExecutionAdapter
@@ -47,18 +51,25 @@ class GeminiConfigComposer:
                 logger.exception("Failed to load Gemini engine defaults")
 
         skill_defaults: dict[str, object] = {}
-        gemini_settings_file = self._adapter.profile.resolve_skill_defaults_path(skill.path)
-        if gemini_settings_file is not None:
-            if gemini_settings_file.exists():
-                try:
-                    with open(gemini_settings_file, "r", encoding="utf-8") as f:
-                        payload = json.load(f)
-                    if not isinstance(payload, dict):
-                        raise ValueError("Gemini skill defaults must be a JSON object")
-                    skill_defaults = payload
-                    logger.info("Loaded skill defaults from %s", gemini_settings_file)
-                except _JSON_LOAD_EXCEPTIONS:
-                    logger.exception("Failed to load skill defaults")
+        skill_config_resolution = resolve_engine_config_asset(
+            skill,
+            "gemini",
+            self._adapter.profile.config_assets.skill_defaults_path,
+        )
+        if skill_config_resolution.used_fallback and skill_config_resolution.issue_source == "declared":
+            logger.warning(
+                "Gemini skill config declaration fallback: skill=%s declared=%s fallback=%s issue=%s",
+                skill.id,
+                skill_config_resolution.declared_relpath,
+                skill_config_resolution.fallback_relpath,
+                skill_config_resolution.issue_code,
+            )
+        payload = load_resolved_json(skill_config_resolution.path)
+        if payload is not None:
+            skill_defaults = payload
+            logger.info("Loaded skill defaults from %s", skill_config_resolution.path)
+        elif skill_config_resolution.path is not None:
+            logger.warning("Failed to load Gemini skill defaults: %s", skill_config_resolution.path)
 
         user_overrides: dict[str, object] = {}
         if "model" in options:

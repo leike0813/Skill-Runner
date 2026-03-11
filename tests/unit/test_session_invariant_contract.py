@@ -121,4 +121,8 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "rasp_turn_marker_per_attempt_unique",
         "rasp_turn_marker_ordered",
         "fcmp_must_not_emit_assistant_turn_markers",
+        "interactive_ask_user_evidence_blocks_soft_completion",
+        "interactive_invalid_structured_output_waits_not_fails",
+        "interactive_missing_structured_output_waits_not_fails",
+        "repair_must_not_promote_ask_user_turn",
     }

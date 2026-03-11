@@ -67,6 +67,36 @@ def test_construct_config_skill_overrides_engine_default(tmp_path):
     assert payload["modelName"] == "iflow-skill-model"
 
 
+def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    custom_dir = skill_dir / "custom"
+    custom_dir.mkdir(parents=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (custom_dir / "iflow_settings.json").write_text(
+        json.dumps({"modelName": "iflow-declared-model"}),
+        encoding="utf-8",
+    )
+    (assets_dir / "iflow_settings.json").write_text(
+        json.dumps({"modelName": "iflow-fallback-model"}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engine_configs={"iflow": "custom/iflow_settings.json"},
+    )
+    adapter = IFlowExecutionAdapter()
+
+    config_path = adapter._construct_config(skill, run_dir, options={})
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert payload["modelName"] == "iflow-declared-model"
+
+
 def test_extract_session_handle_from_execution_info():
     adapter = IFlowExecutionAdapter()
     raw_stdout = """

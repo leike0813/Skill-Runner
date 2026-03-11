@@ -37,18 +37,19 @@ stateDiagram-v2
 stateDiagram-v2
     [*] --> turn_done_gate
     turn_done_gate --> completed: done_marker_found && output_valid
-    turn_done_gate --> completed: soft_complete(output_valid_without_done_marker)
-    turn_done_gate --> waiting_user: need_input(no_done_marker && not_soft_complete)
-    turn_done_gate --> failed: schema_fail_or_runtime_fail
+    turn_done_gate --> waiting_user: ask_user_wait(ask_user_evidence)
+    turn_done_gate --> completed: soft_complete(structured_output_valid)
+    turn_done_gate --> waiting_user: need_input(no_json_or_invalid_json)
+    turn_done_gate --> failed: runtime_fail | done_marker_with_invalid_output
 ```
 
 决策优先级：
 
 1. `done-marker` 强证据
-2. `soft-complete`（无 marker 但 schema 通过）
-3. `auth-required`（进入 `waiting_auth`）
-4. `need-input`（进入 `waiting_user`）
-5. `schema/runtime` 失败
+2. `ask-user` 证据（命中即进入 `waiting_user`）
+3. `soft-complete`（无 marker、无 ask_user、structured output + schema/artifact 有效）
+4. `need-input`（无 ask_user 且无可用 structured output）
+5. `runtime` 失败 / `done-marker` 命中但输出无效
 
 ## 4. Layer C: Timeout and Recovery Subchart
 
@@ -87,6 +88,10 @@ stateDiagram-v2
 - `agent.turn_start/agent.turn_complete` 为 RASP 审计锚点，不属于 FCMP 状态迁移事件
 - `agent.turn_complete.data` 可携带引擎结构化统计信息（例如 usage/tokens/cost/stats），不得影响状态迁移判定
 - 无回合结束信号时，仅 `succeeded|waiting_user` 允许 fallback 提升为 final；`failed|canceled` 禁止 fallback 提升
+- 命中 `<ASK_USER_YAML>` 或其他 ask-user 证据时，当前 attempt 不得进入 `succeeded`
+- interactive soft completion 必须同时满足：无 ask-user 证据、成功提取标准化 JSON、schema 有效、artifact 修复后仍有效
+- 提取到 JSON 但 schema 无效时，interactive 必须进入 `waiting_user`，不得直接失败
+- 无 ask-user 且未提取到 JSON 时，interactive 仍进入 `waiting_user`
 - `waiting_auth -> queued` 的唯一合法触发是 canonical `auth.completed`
 - `auth.completed` 的唯一合法来源是 auth session terminal success 或显式 callback/submission completion
 - `waiting_auth` 内部必须区分两条子路径：

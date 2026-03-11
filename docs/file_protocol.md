@@ -17,11 +17,21 @@
 ```json
 {
   "id": "your-skill-id",
-  "execution_modes": ["auto", "interactive"],
+  "execution_modes": ["auto", "interactive"]
+}
+```
+
+可选覆盖声明：
+
+```json
+{
   "schemas": {
     "input": "assets/input.schema.json",
     "parameter": "assets/parameter.schema.json",
     "output": "assets/output.schema.json"
+  },
+  "engine_configs": {
+    "gemini": "custom/gemini_settings.json"
   }
 }
 ```
@@ -38,6 +48,17 @@
 - 两者不可重叠。
 - `effective_engines` 不能为空。
 - 旧字段 `unsupport_engine` 会被拒绝（已重命名）。
+- `schemas` 不是强制显式声明；系统按以下顺序解析：
+  - `runner.json.schemas.<key>`
+  - 固定 fallback：`assets/<key>.schema.json`
+- `engine_configs` 为可选引擎级配置覆盖声明；系统按以下顺序解析：
+  - `runner.json.engine_configs.<engine>`
+  - 固定 fallback 文件名：
+    - `codex` -> `assets/codex_config.toml`
+    - `gemini` -> `assets/gemini_settings.json`
+    - `iflow` -> `assets/iflow_settings.json`
+    - `opencode` -> `assets/opencode_config.json`
+- schema 声明失败会 warning；engine config 声明失败仅后台日志，不做用户可见 warning。
 
 ## 3. Schema 规范
 
@@ -140,4 +161,3 @@
 - `GET /v1/jobs/{request_id}/artifacts`：返回产物相对路径列表。
 - `GET /v1/jobs/{request_id}/artifacts/{artifact_path}`：下载单个产物，`artifact_path` 必须以 `artifacts/` 开头且路径安全。
 - `GET /v1/jobs/{request_id}/bundle`：下载 run bundle（普通或 debug 版本）。
-

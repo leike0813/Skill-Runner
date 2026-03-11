@@ -8,6 +8,7 @@ from jinja2 import Template
 
 from ....models import SkillManifest
 from ....services.platform.schema_validator import schema_validator
+from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 
@@ -24,7 +25,7 @@ def build_prompt_contexts(
         raise ValueError(f"Missing required input files: {', '.join(missing_required)}")
 
     parameter_ctx = schema_validator.build_parameter_context(skill, input_data)
-    if merge_input_if_no_parameter_schema and (not skill.schemas or "parameter" not in skill.schemas):
+    if merge_input_if_no_parameter_schema and resolve_schema_asset(skill, "parameter").path is None:
         parameter_ctx.update(input_data.get("input", {}))
 
     return input_ctx, parameter_ctx

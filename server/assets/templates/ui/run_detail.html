@@ -784,12 +784,10 @@
             if (canDownload) {
                 bundleDownloadBtn.classList.remove("disabled");
                 bundleDownloadBtn.removeAttribute("aria-disabled");
-                bundleDownloadBtn.style.pointerEvents = "";
                 bundleDownloadBtn.tabIndex = 0;
             } else {
                 bundleDownloadBtn.classList.add("disabled");
                 bundleDownloadBtn.setAttribute("aria-disabled", "true");
-                bundleDownloadBtn.style.pointerEvents = "none";
                 bundleDownloadBtn.tabIndex = -1;
             }
         }
@@ -797,12 +795,10 @@
             if (canDownload) {
                 bundleDebugDownloadBtn.classList.remove("disabled");
                 bundleDebugDownloadBtn.removeAttribute("aria-disabled");
-                bundleDebugDownloadBtn.style.pointerEvents = "";
                 bundleDebugDownloadBtn.tabIndex = 0;
             } else {
                 bundleDebugDownloadBtn.classList.add("disabled");
                 bundleDebugDownloadBtn.setAttribute("aria-disabled", "true");
-                bundleDebugDownloadBtn.style.pointerEvents = "none";
                 bundleDebugDownloadBtn.tabIndex = -1;
             }
         }
@@ -824,6 +820,22 @@
         if (stdoutEl) {
             stdoutEl.textContent = "";
         }
+    }
+
+    function guardDisabledLinkClick(event) {
+        const link = event.currentTarget;
+        if (!(link instanceof HTMLElement)) return;
+        if (link.getAttribute("aria-disabled") === "true") {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }
+
+    if (bundleDownloadBtn) {
+        bundleDownloadBtn.addEventListener("click", guardDisabledLinkClick);
+    }
+    if (bundleDebugDownloadBtn) {
+        bundleDebugDownloadBtn.addEventListener("click", guardDisabledLinkClick);
     }
 
     function protocolType(row) {

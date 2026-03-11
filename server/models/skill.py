@@ -41,4 +41,5 @@ class SkillManifest(BaseModel):
     entrypoint: Optional[Dict[str, Any]] = {}
     artifacts: List[ManifestArtifact] = []
     schemas: Optional[Dict[str, str]] = {}
+    engine_configs: Optional[Dict[str, str]] = {}
     runtime: Optional[RuntimeDefinition] = None

@@ -12,11 +12,11 @@ from server.runtime.adapter.common.run_folder_validator_common import (
     ProfiledAttemptRunFolderValidator,
 )
 from server.services.engine_management.agent_cli_manager import AgentCliManager
-from server.engines.codex.adapter.config.toml_manager import CodexConfigManager
 from server.services.engine_management.engine_command_profile import engine_command_profile
 from .command_builder import CodexCommandBuilder
 from .config_composer import CodexConfigComposer
 from .stream_parser import CodexStreamParser
+from .toml_manager import CodexConfigManager
 
 
 class CodexExecutionAdapter(EngineExecutionAdapter):

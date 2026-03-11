@@ -25,3 +25,5 @@ Rules for `<ASK_USER_YAML>`:
 
 Completion constraint:
 - You MUST NOT emit the `__SKILL_DONE__` completion marker until all required user interactions are completed and the final output is ready.
+- You MUST NOT emit `__SKILL_DONE__` in the same turn as an `<ASK_USER_YAML>` block.
+- If you ask the user for input and emit `<ASK_USER_YAML>`, omit `__SKILL_DONE__` entirely in that turn.

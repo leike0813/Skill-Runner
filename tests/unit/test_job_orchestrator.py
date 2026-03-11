@@ -1653,6 +1653,53 @@ class InteractiveYamlAskUserSignalAdapter:
         )
 
 
+class InteractiveInvalidStructuredOutputAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        return _final_engine_result(
+            final_data={"value": 7},
+            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"invalid-structured-output"}}\n',
+        )
+
+
+class InteractiveEmbeddedJsonAskUserAdapter:
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        return {
+            "parser": "test",
+            "confidence": 1.0,
+            "session_id": None,
+            "assistant_messages": [
+                {
+                    "text": (
+                        "这里是正文说明。\n"
+                        "```json\n"
+                        "{\"claim\":\"not-final\"}\n"
+                        "```\n\n"
+                        "<ASK_USER_YAML>\n"
+                        "ask_user:\n"
+                        "  interaction_id: 9\n"
+                        "  kind: choose_one\n"
+                        "  prompt: Continue?\n"
+                        "  options:\n"
+                        "    - label: yes\n"
+                        "      value: yes\n"
+                        "</ASK_USER_YAML>\n"
+                    )
+                }
+            ],
+            "raw_rows": [],
+            "diagnostics": [],
+            "structured_types": [],
+        }
+
+    async def run(self, skill, input_data, run_dir, options):
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="embedded-json-and-ask-user",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
 @pytest.mark.asyncio
 async def test_run_job_output_validation_strips_done_marker(tmp_path):
     skill_dir = tmp_path / "skill-done-marker"
@@ -2186,7 +2233,7 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(tmp_path):
+async def test_run_job_interactive_yaml_ask_user_blocks_soft_completion(tmp_path):
     skill_dir = tmp_path / "skill-interactive-yaml-ask-user-soft-complete"
     skill_dir.mkdir()
     (skill_dir / "output.schema.json").write_text(
@@ -2226,10 +2273,176 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert status_data["pending"]["interaction_id"] == 3
+        assert "INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER" in meta_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_soft_completion_warns_on_permissive_schema(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-soft-complete-permissive"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-soft-complete-permissive",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveSoftCompletionAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
+        assert "INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_invalid_structured_output_waits_with_warning(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-invalid-structured-output"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-invalid-structured-output",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveInvalidStructuredOutputAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
+        assert status_data["status"] == "waiting_user"
+        assert "INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID" in meta_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_embedded_json_with_ask_user_waits(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-embedded-json-ask-user"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"claim": {"type": "string"}},
+                "required": ["claim"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-embedded-json-ask-user",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractiveEmbeddedJsonAskUserAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        assert status_data["status"] == "waiting_user"
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert status_data["pending"]["interaction_id"] == 9
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

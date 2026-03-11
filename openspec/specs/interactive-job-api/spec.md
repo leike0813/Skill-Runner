@@ -238,6 +238,14 @@ Auth submission kinds MUST include `callback_url`, `authorization_code`, and `ap
 - **THEN** it MUST accept `callback_url`
 - **AND** it MUST accept `authorization_code` and `api_key`
 
+### Requirement: skill asset reads MUST follow the shared declaration-plus-fallback resolver
+Runtime schema validation, artifact inference, and management schema reads MUST use the same skill asset resolution behavior.
+
+#### Scenario: management schema read follows fallback
+- **GIVEN** `runner.json.schemas.output` is missing
+- **AND** `assets/output.schema.json` exists
+- **THEN** management schema inspection MUST read the fallback file successfully
+
 ### Requirement: Live SSE MUST consume published FCMP rather than materialized audit FCMP
 The system MUST publish FCMP into a live journal first and MUST deliver active SSE traffic from that live publication path instead of reconstructing FCMP from audit files.
 

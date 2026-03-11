@@ -29,7 +29,7 @@ graph TD
 **Requirements**:
 1.  **Layered Loading**: Must implement the following precedence (highest priority last):
     -   *Layer 0*: **Base Defaults** (Hardcoded minimums, e.g. `quiet=true`)
-    -   *Layer 1*: **Skill Defaults** (Loaded from `assets/<engine>_settings.json` or `config.toml`)
+    -   *Layer 1*: **Skill Defaults** (Loaded from `runner.json.engine_configs.<engine>` when resolvable, otherwise from the engine's fixed fallback filename)
     -   *Layer 2*: **User Options** (Runtime overrides from API `model` + `runtime_options`)
     -   *Layer 3*: **System Enforced** (Loaded from `server/engines/<engine>/config/enforced.*`)
 2.  **Isolation**: The resulting config file must be written to `run_dir/.<engine>/` to avoid polluting global state.
@@ -78,6 +78,10 @@ def _setup_environment(self, skill: SkillManifest, run_dir: Path, config_path: P
     - Inject resolved paths into `{{ input }}`.
     - Inject config values into `{{ parameter }}`.
 3.  **Auditing**: Write the rendered string to `run_dir/logs/prompt.txt`.
+4.  **Schema Resolution**:
+    - `input/parameter/output` schema reads must use the shared declaration-plus-fallback resolver.
+    - `runner.json.schemas.<key>` has priority.
+    - Missing/invalid declarations fall back to `assets/<key>.schema.json`.
 
 **Interface Definition**:
 ```python

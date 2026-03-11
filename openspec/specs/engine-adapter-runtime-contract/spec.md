@@ -117,6 +117,20 @@ adapter profile 校验失败 MUST 在 registry 初始化阶段直接报错并阻
 - **THEN** attempt workspace 根目录与 skills 根目录来自 profile 的 `attempt_workspace` 字段
 - **AND** `attempt_workspace` 仅描述布局，不描述 skill 安装策略
 
+### Requirement: engine skill config resolution MUST be declarative-first with fixed fallback
+Engine adapters MUST resolve skill-specific config assets from `runner.json.engine_configs` first, then fall back to the engine's canonical fixed filename.
+
+#### Scenario: declared engine config missing and fallback exists
+- **GIVEN** `runner.json.engine_configs.opencode` points to an invalid or missing file
+- **AND** `assets/opencode_config.json` exists
+- **THEN** runtime MUST use the fallback file
+- **AND** runtime MUST log the fallback decision without surfacing a user-facing warning
+
+#### Scenario: declared engine config missing and fallback absent
+- **GIVEN** `runner.json.engine_configs.codex` cannot be resolved
+- **AND** `assets/codex_config.toml` does not exist
+- **THEN** runtime MUST continue without skill-specific engine defaults
+
 ### Requirement: Services MUST be domain-organized in phase1
 系统 MUST 将 `server/services` 按域分包（orchestration/skill/ui/platform），并停止继续新增扁平 services 模块。
 
@@ -314,4 +328,3 @@ Runtime adapter profile loader MUST read supported engines from a unified engine
 - **WHEN** 统一 engine catalog 增减 engine
 - **THEN** profile loader 使用更新后的列表
 - **AND** 无需同步修改本地硬编码引擎常量
-

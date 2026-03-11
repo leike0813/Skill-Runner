@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ....models import SkillManifest
+from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 
@@ -39,19 +40,15 @@ def validate_run_folder_contract(
     if not isinstance(runner, dict):
         raise RuntimeError(f"RUN_FOLDER_INVALID: runner.json must be an object: {runner_path}")
 
-    schemas = runner.get("schemas")
-    if not isinstance(schemas, dict):
-        raise RuntimeError(f"RUN_FOLDER_INVALID: runner.json missing schemas: {runner_path}")
     for schema_key in ("input", "parameter", "output"):
-        schema_rel = schemas.get(schema_key)
-        if not isinstance(schema_rel, str) or not schema_rel.strip():
+        resolution = resolve_schema_asset(
+            SkillManifest(id=skill.id, path=skill_dir, schemas=runner.get("schemas")),
+            schema_key,
+        )
+        if resolution.path is None:
             raise RuntimeError(
-                f"RUN_FOLDER_INVALID: runner.json missing schema '{schema_key}': {runner_path}"
-            )
-        schema_path = skill_dir / schema_rel
-        if not schema_path.exists():
-            raise RuntimeError(
-                f"RUN_FOLDER_INVALID: missing schema file '{schema_key}': {schema_path}"
+                f"RUN_FOLDER_INVALID: missing schema file '{schema_key}': "
+                f"{resolution.fallback_relpath or resolution.declared_relpath or runner_path}"
             )
 
     return skill_dir

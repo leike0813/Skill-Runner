@@ -183,6 +183,38 @@ def test_construct_config_allows_harness_profile_override(tmp_path):
     assert config_manager.update_profile.call_count == 1
 
 
+def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
+    config_manager = MagicMock()
+    config_path = tmp_path / ".codex" / "config.toml"
+    config_manager.config_path = config_path
+    config_manager.generate_profile_settings.return_value = {"model": "gpt-5.2-codex"}
+    adapter = CodexExecutionAdapter(config_manager=config_manager)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    custom_dir = skill_dir / "custom"
+    custom_dir.mkdir(parents=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (custom_dir / "codex_config.toml").write_text("model = 'declared'\n", encoding="utf-8")
+    (assets_dir / "codex_config.toml").write_text("model = 'fallback'\n", encoding="utf-8")
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engine_configs={"codex": "custom/codex_config.toml"},
+    )
+
+    result_path = adapter._construct_config(
+        skill,
+        run_dir,
+        options={},
+    )
+
+    assert result_path == config_path
+    passed_skill_defaults, _ = config_manager.generate_profile_settings.call_args[0]
+    assert passed_skill_defaults["model"] == "declared"
+
+
 def test_setup_environment_validates_run_folder_contract(tmp_path):
     adapter = CodexExecutionAdapter(config_manager=MagicMock())
     skill_dir = tmp_path / "skill"

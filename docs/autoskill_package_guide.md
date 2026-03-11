@@ -61,7 +61,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 - `id`
 - `version`（建议单调递增，如 `1.0.0`）
 - `engines`（非空列表）
-- `schemas.input` / `schemas.parameter` / `schemas.output`
+- 可被解析的 `input` / `parameter` / `output` schema（允许走固定 fallback）
 
 说明：
 
@@ -69,6 +69,17 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 - `unsupported_engines` 可选：用于从允许集合中剔除。有效集合 = (engines 或全量) - unsupported_engines。
 - `execution_modes` 是必填字段（见下文 2.6 节）。
 - `version` 建议采用数字点分形式（例如 `1.2.0`）。
+- `schemas` 是可选覆盖声明，不再要求显式完整写死：
+  - 优先使用 `runner.json.schemas.<key>`
+  - 失败时回退到 `assets/input.schema.json`、`assets/parameter.schema.json`、`assets/output.schema.json`
+- `engine_configs` 是可选引擎配置覆盖声明：
+  - 优先使用 `runner.json.engine_configs.<engine>`
+  - 失败时回退到固定文件名：
+    - `codex` -> `assets/codex_config.toml`
+    - `gemini` -> `assets/gemini_settings.json`
+    - `iflow` -> `assets/iflow_settings.json`
+    - `opencode` -> `assets/opencode_config.json`
+- schema 声明失败会产生显式 warning；engine config 声明失败仅后台日志记录
 
 ### 2.4 输入/参数/输出协议
 
@@ -207,7 +218,8 @@ interactive 模式关键约束：
 - [ ] `SKILL.md`、`runner.json`、三类 schema 均存在
 - [ ] `runner.json.execution_modes` 非空
 - [ ] `runner.json.engines` 非空或缺失（缺失按全量引擎处理）
-- [ ] `runner.json.schemas` 路径有效
+- [ ] `runner.json.schemas` 若声明，则路径有效；若未声明，固定 fallback 文件存在
+- [ ] `runner.json.engine_configs` 若声明，则路径有效；否则确认固定 fallback 或可接受地缺省
 - [ ] `output.schema.json` 对 artifact 字段已标注 `x-type: "artifact"`
 - [ ] 必填字段可被真实执行路径产出
 - [ ] interactive skill 的 SKILL.md 包含 `__SKILL_DONE__` 标记指引

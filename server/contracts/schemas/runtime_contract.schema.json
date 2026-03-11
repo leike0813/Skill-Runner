@@ -760,7 +760,8 @@
           "items": {
             "type": "string"
           },
-          "default": []
+          "default": [],
+          "description": "Lifecycle validation warnings. Interactive runs may emit gate-hardening warnings such as INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER, INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE, and INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER."
         },
         "error": {
           "type": [
@@ -1203,7 +1204,8 @@
                   },
                   "code": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Stable diagnostic warning code. Interactive gate-hardening may emit INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE, or INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER."
                   },
                   "message": {
                     "type": "string"

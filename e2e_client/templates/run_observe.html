@@ -1005,15 +1005,29 @@
         if (!linkEl) return;
         if (enabled) {
             linkEl.classList.remove("disabled");
-            linkEl.style.pointerEvents = "";
             linkEl.tabIndex = 0;
             linkEl.removeAttribute("aria-disabled");
         } else {
             linkEl.classList.add("disabled");
-            linkEl.style.pointerEvents = "none";
             linkEl.tabIndex = -1;
             linkEl.setAttribute("aria-disabled", "true");
         }
+    }
+
+    function guardDisabledLinkClick(event) {
+        const link = event.currentTarget;
+        if (!(link instanceof HTMLElement)) return;
+        if (link.getAttribute("aria-disabled") === "true") {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }
+
+    if (fileBundleDownloadEl) {
+        fileBundleDownloadEl.addEventListener("click", guardDisabledLinkClick);
+    }
+    if (fileDebugBundleDownloadEl) {
+        fileDebugBundleDownloadEl.addEventListener("click", guardDisabledLinkClick);
     }
 
     function applyBundleAvailability(status) {
