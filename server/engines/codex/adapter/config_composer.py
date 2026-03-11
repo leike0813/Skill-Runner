@@ -117,7 +117,14 @@ class CodexConfigComposer:
                 CodexConfigManager.PROFILE_NAME,
             )
             logger.info("Updating Codex profile '%s' with fused settings", active_profile_name)
-            config_manager.update_profile(fused_settings)
+            if isinstance(config_manager, CodexConfigManager):
+                enforced_globals = config_manager.get_enforced_global_settings()
+                config_manager.update_profile(
+                    fused_settings,
+                    global_settings=enforced_globals,
+                )
+            else:
+                config_manager.update_profile(fused_settings)
             return config_manager.config_path
         except ValueError as exc:
             raise RuntimeError(f"Configuration Error: {exc}")

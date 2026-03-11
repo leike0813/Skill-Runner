@@ -1,8 +1,7 @@
 import pytest
 import tomlkit
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from server.engines.codex.adapter.toml_manager import CodexConfigManager
 
 # Mocks
@@ -167,3 +166,10 @@ def test_engine_default_used_when_skill_and_runtime_missing(tmp_path, mock_schem
     assert final_config["model"] == "gpt-5.1-codex-mini"
     assert final_config["model_provider"] == "openai"
     assert final_config["model_reasoning_effort"] == "low"
+
+
+def test_extract_enforced_global_settings_from_top_level_tables(manager):
+    global_settings = manager.get_enforced_global_settings()
+
+    assert "profiles" not in global_settings
+    assert global_settings["features"]["shell_tool"] is False

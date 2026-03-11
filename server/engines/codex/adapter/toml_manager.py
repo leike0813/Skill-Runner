@@ -1,5 +1,6 @@
 import json
 import logging
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
@@ -75,15 +76,7 @@ class CodexConfigManager:
         self._deep_merge(final_config, skill_defaults)
         self._deep_merge(final_config, runtime_config)
 
-        enforced_config = self._load_enforced_config()
-        profiles_obj = enforced_config.get("profiles", {})
-        if not isinstance(profiles_obj, dict):
-            profiles_obj = {}
-        enforced_profile = profiles_obj.get(self.profile_name)
-        if not isinstance(enforced_profile, dict):
-            enforced_profile = profiles_obj.get(self.PROFILE_NAME, {})
-        if not isinstance(enforced_profile, dict):
-            enforced_profile = {}
+        enforced_profile, _ = self._extract_enforced_sections(self._load_enforced_config())
         self._deep_merge(final_config, enforced_profile)
 
         self._validate_config(final_config)
@@ -133,6 +126,29 @@ class CodexConfigManager:
             logger.exception("Error loading enforced config")
             return {}
 
+    def _extract_enforced_sections(
+        self,
+        enforced_config: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        profiles_obj = enforced_config.get("profiles", {})
+        if not isinstance(profiles_obj, dict):
+            profiles_obj = {}
+        enforced_profile = profiles_obj.get(self.profile_name)
+        if not isinstance(enforced_profile, dict):
+            enforced_profile = profiles_obj.get(self.PROFILE_NAME, {})
+        if not isinstance(enforced_profile, dict):
+            enforced_profile = {}
+        global_settings: Dict[str, Any] = {}
+        for key, value in enforced_config.items():
+            if key == "profiles":
+                continue
+            global_settings[key] = deepcopy(value)
+        return dict(enforced_profile), global_settings
+
+    def get_enforced_global_settings(self) -> Dict[str, Any]:
+        _, global_settings = self._extract_enforced_sections(self._load_enforced_config())
+        return global_settings
+
     def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
         for key, value in source.items():
             if key in target and isinstance(target[key], dict) and isinstance(value, dict):
@@ -140,7 +156,19 @@ class CodexConfigManager:
             else:
                 target[key] = value
 
-    def update_profile(self, settings: Dict[str, Any]) -> None:
+    def _merge_any_mapping(self, target: Any, source: Dict[str, Any]) -> None:
+        for key, value in source.items():
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                self._merge_any_mapping(target[key], value)
+            else:
+                target[key] = value
+
+    def update_profile(
+        self,
+        settings: Dict[str, Any],
+        *,
+        global_settings: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.ensure_config_exists()
 
         with open(self.config_path, "r", encoding="utf-8") as f:
@@ -157,6 +185,9 @@ class CodexConfigManager:
         profile = cast(Any, profiles[self.profile_name])
         for key, value in settings.items():
             profile[key] = value
+
+        if isinstance(global_settings, dict):
+            self._merge_any_mapping(doc, global_settings)
 
         with open(self.config_path, "w", encoding="utf-8") as f:
             f.write(tomlkit.dumps(doc))

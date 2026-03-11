@@ -55,3 +55,22 @@ def test_update_profile_preserves_comments(temp_config_file):
         doc = tomlkit.parse(f.read())
     
     assert doc["profiles"]["skill-runner"]["model"] == "gpt-5"
+
+
+def test_update_profile_writes_enforced_global_settings(temp_config_file):
+    manager = CodexConfigManager(config_path=temp_config_file)
+    settings = {"model": "gpt-5"}
+    global_settings = {
+        "features": {"shell_tool": True, "web_search_request": True},
+        "sandbox_workspace_write": {"network_access": True},
+    }
+
+    manager.update_profile(settings, global_settings=global_settings)
+
+    with open(temp_config_file, "r", encoding="utf-8") as f:
+        doc = tomlkit.parse(f.read())
+
+    assert doc["profiles"]["skill-runner"]["model"] == "gpt-5"
+    assert doc["features"]["shell_tool"] is True
+    assert doc["features"]["web_search_request"] is True
+    assert doc["sandbox_workspace_write"]["network_access"] is True
