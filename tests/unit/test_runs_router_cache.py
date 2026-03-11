@@ -862,6 +862,10 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
+    (run_dir / "result").mkdir(parents=True, exist_ok=True)
+    (run_dir / "result" / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/output.txt"]}'
+    )
 
     await store.create_request(
         request_id=request_id,
@@ -913,7 +917,10 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
-    (run_dir / "result" / "result.json").write_text('{"status":"success"}')
+    (run_dir / "result").mkdir(parents=True, exist_ok=True)
+    (run_dir / "result" / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/output.txt"]}'
+    )
 
     await store.create_request(
         request_id=request_id,
@@ -931,40 +938,18 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
 
 
 @pytest.mark.asyncio
-async def test_download_run_artifact_rejects_invalid_path(monkeypatch, temp_config_dirs):
-    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
-
-    request_id = "request-invalid-path"
-    run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
-    run_response = workspace_manager.create_run(run_request)
-
-    await store.create_request(
-        request_id=request_id,
-        skill_id="demo-skill",
-        engine="gemini",
-        parameter={},
-        engine_options={},
-        runtime_options={}
-    )
-    await store.update_request_run_id(request_id, run_response.run_id)
-
-    with pytest.raises(HTTPException) as exc:
-        await jobs_router.download_run_artifact(request_id, "bundle/run_bundle.zip")
-    assert exc.value.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_download_run_artifact_success(monkeypatch, temp_config_dirs):
+async def test_get_run_artifacts_does_not_scan_unlisted_files(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     _patch_run_store(monkeypatch, store)
 
-    request_id = "request-download-artifact"
+    request_id = "request-unlisted-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
     run_response = workspace_manager.create_run(run_request)
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
+    (run_dir / "result").mkdir(parents=True, exist_ok=True)
+    (run_dir / "result" / "result.json").write_text('{"status":"success","artifacts":[]}')
 
     await store.create_request(
         request_id=request_id,
@@ -976,5 +961,5 @@ async def test_download_run_artifact_success(monkeypatch, temp_config_dirs):
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 
-    response = await jobs_router.download_run_artifact(request_id, "artifacts/output.txt")
-    assert Path(response.path).exists()
+    response = await jobs_router.get_run_artifacts(request_id)
+    assert response.artifacts == []

@@ -518,7 +518,7 @@
 - **输入分离（Mixed Input）**:
   - 顶层 `input` 用于传递业务输入（可为 string/array/object）。
   - 对 `input.schema.json` 中 `x-input-source=inline` 的字段，值直接来自请求体 `input`。
-  - 对 `x-input-source=file`（或未声明，默认 file）的字段，值来自后续 `/upload` 上传并注入为文件路径。
+  - 对 `x-input-source=file`（或未声明，默认 file）的字段，值也在请求体 `input` 中显式提交，但值必须是 `uploads/` 根下相对路径（例如 `papers/a.pdf`）。
 - **参数分离**: API 请求体中的 `parameter` 字段仅用于传递 `parameter.schema.json` 中定义的数值或配置。
 - **模型字段**:
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
@@ -544,7 +544,10 @@
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
 - **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - **模式准入约束**: 请求的 `runtime_options.execution_mode` 必须包含在 skill 的 `execution_modes` 声明中，否则返回 400（`SKILL_EXECUTION_MODE_UNSUPPORTED`）。
-- **文件输入**: file 类型 input 仍由 `/upload` 接口提供。
+- **文件输入**:
+  - file 类型输入的路径声明也通过请求体 `input` 提交；
+  - `/upload` 仅负责上传 zip 并解压到 `uploads/`；
+  - 旧的 `uploads/<input_key>` 严格键匹配仅作为兼容回退，不再是主协议。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
 - **严格校验**: 缺少 required 的输入/参数/输出字段时会标记为 failed（不会仅给 warning）。
 - **并发保护**: 当执行队列已满时，`POST /v1/jobs` 或 `POST /v1/jobs/{request_id}/upload` 会返回 `429`。
@@ -730,7 +733,8 @@
 
 **行为**:
 - 系统会将 Zip 解压到 `data/requests/{request_id}/uploads/`。
-- **Strict Key-Matching**: 解压后的文件名必须与 Schema 定义的 Input Key 一致（例如 `input_file`），否则在运行时会报错。
+- Zip 包内部允许任意目录结构。
+- 若 create 阶段已声明 file 类型输入路径，upload 后系统会校验这些路径在 `uploads/` 下真实存在。
 
 **Response** (`RunUploadResponse`):
 ```json
@@ -754,7 +758,7 @@
   "result": {
     "status": "success",
     "data": { ... },
-    "artifacts": ["artifacts/report.md"],
+    "artifacts": ["reports/report.md"],
     "validation_warnings": [],
     "error": null
   }
@@ -774,16 +778,9 @@
 ```json
 {
   "request_id": "d290f1ee-6c54-4b01-90e6-...",
-  "artifacts": ["artifacts/report.md"]
+  "artifacts": ["reports/report.md"]
 }
 ```
-
-### 下载单个产物 (Download Artifact)
-`GET /v1/jobs/{request_id}/artifacts/{artifact_path}`
-
-**说明**:
-- `artifact_path` 必须以 `artifacts/` 开头。
-- 返回 `Content-Disposition` 以附件形式下载目标文件。
 
 ### 下载 Bundle (Get Bundle)
 `GET /v1/jobs/{request_id}/bundle`
@@ -793,7 +790,7 @@
 - `Content-Disposition` 文件名为 `run_bundle.zip`
 
 **说明**:
-- Bundle 内包含运行产物与 `bundle/manifest.json`。
+- 普通 bundle 采用 contract-driven 语义，仅包含 `result/result.json` 与 resolved artifact 文件，以及 `bundle/manifest.json`。
 
 ### 下载 Debug Bundle (Get Debug Bundle)
 `GET /v1/jobs/{request_id}/bundle/debug`
@@ -1347,7 +1344,6 @@ Query 参数：
 - `GET /v1/temp-skill-runs/{request_id}/result`
 - `GET /v1/temp-skill-runs/{request_id}/artifacts`
 - `GET /v1/temp-skill-runs/{request_id}/bundle`
-- `GET /v1/temp-skill-runs/{request_id}/artifacts/{artifact_path}`
 - `GET /v1/temp-skill-runs/{request_id}/logs`
 - `GET /v1/temp-skill-runs/{request_id}/logs/range`（支持 `stream`、`byte_from`、`byte_to`、`attempt` 参数）
 - `GET /v1/temp-skill-runs/{request_id}/events`

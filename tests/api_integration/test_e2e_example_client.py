@@ -128,7 +128,9 @@ class FakeBackend:
     async def upload_run_file(self, request_id: str, zip_bytes: bytes) -> dict[str, Any]:
         assert request_id == "req-e2e-1"
         assert zip_bytes
-        return {"request_id": request_id, "cache_hit": False, "extracted_files": ["input_file"]}
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), mode="r") as archive:
+            entries = sorted(archive.namelist())
+        return {"request_id": request_id, "cache_hit": False, "extracted_files": entries}
 
     async def upload_temp_run(
         self,
@@ -548,6 +550,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
+        assert fake_backend.create_payloads[-1]["input"]["input_file"] == "input_file/input.txt"
         assert "interactive_reply_timeout_sec" not in fake_backend.create_payloads[-1]["runtime_options"]
 
         runs = await _request(app, "GET", "/runs")
@@ -705,9 +708,10 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         assert create.headers.get("location") == "/runs/req-temp-1"
         assert fake_backend.temp_create_payloads
         assert fake_backend.temp_create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
+        assert fake_backend.temp_create_payloads[-1]["input"]["input_file"] == "input_file/input.txt"
         assert fake_backend.temp_upload_payloads
         assert "demo-prime-number/SKILL.md" in fake_backend.temp_upload_payloads[-1]["skill_entries"]
-        assert "input_file" in fake_backend.temp_upload_payloads[-1]["input_entries"]
+        assert "input_file/input.txt" in fake_backend.temp_upload_payloads[-1]["input_entries"]
 
         state = await _request(app, "GET", "/api/runs/req-temp-1")
         assert state.status_code == 200

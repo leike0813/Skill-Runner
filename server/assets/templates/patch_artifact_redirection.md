@@ -2,10 +2,10 @@
 
 ## Runtime Output Overrides
 
-The following output artifacts MUST be written to the specific paths listed below.
-IMPORTANT: Ignore any previous instructions regarding the file paths of these outputs.
+The following output fields are final file deliverables.
+Prefer writing those final deliverables under `<cwd>/artifacts/` using stable relative paths.
+Intermediate files do NOT need to follow this convention.
 
 {artifact_lines}
 
-Ensure you do NOT write these files to the current directory or any other location. Use ONLY the paths listed above.
-When reporting these artifacts in your final JSON output, use the exact paths listed above as the field values.
+When reporting these artifact paths in your final JSON output, return the actual file paths you wrote.

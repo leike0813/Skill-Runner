@@ -241,6 +241,22 @@ E2E runs 列表与 run observation 页面 MUST 使用带时区语义的时间值
 - **THEN** 列表中的 `updated_at` 使用带明确时区语义的时间值渲染
 - **AND** 浏览器本地时区转换后不产生 UTC/本地混淆
 
+### Requirement: E2E run form MUST submit file input values as declarative uploads-relative paths
+The built-in E2E client MUST include file-sourced input values in `POST /v1/jobs` payload `input`, where each value is an `uploads/`-relative path.
+
+#### Scenario: installed run submits mixed inline and file input values
+- **WHEN** user submits a run form with both inline and file fields
+- **THEN** the create-run payload includes inline values and file path values together in `input`
+- **AND** each file value points to the uploaded zip entry path relative to `uploads/`
+
+### Requirement: E2E file upload zip MUST preserve original filenames under field folders
+The built-in E2E client MUST package uploaded files under `<field>/<original_filename>` entries instead of renaming them to schema keys.
+
+#### Scenario: uploaded file keeps original filename
+- **WHEN** user uploads `input.txt` for field `input_file`
+- **THEN** upload zip contains `input_file/input.txt`
+- **AND** `input.input_file` is set to `input_file/input.txt`
+
 ### Requirement: E2E file preview MUST consume unified line-numbered rendered html
 E2E Observation 文件预览 MUST 优先消费后端统一生成的 `rendered_html`，并在除 Markdown 外的可显示文本预览中显示行号。
 

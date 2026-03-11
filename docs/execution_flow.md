@@ -39,9 +39,9 @@
    - 将技能的 `assets/` 和 `SKILL.md` 复制/安装到运行目录 `.<engine>/skills/` 下（如 `.gemini/.codex/.iflow/.opencode`），确保执行环境隔离。
 2. **输入解析 (Input Resolution)**:
    - 遍历 `input` Schema 的所有键。
-   - **Strict Key-Matching**: 检查 `uploads/` 目录下是否存在同名文件。
-     - **若存在**: 计算绝对路径并注入上下文。
-     - **若不存在**: 抛出错误 (MissingFileError)。禁止使用 JSON 中的字符串值作为回退。
+   - **声明式 file path 解析**: 若请求体 `input.<key>` 为 file 字段提供了 `uploads/` 相对路径，则优先按该路径解析。
+   - **兼容回退**: 若请求体未显式提供 file 路径，再回退到旧的 strict key-matching（检查 `uploads/<key>` 是否存在）。
+   - **若最终未命中**: 对 required file 字段抛出缺文件错误。
 3. **上下文构建 (Context Building)**:
    - `input_ctx`: 包含解析后的文件绝对路径。
    - `param_ctx`: 包含纯数值参数。

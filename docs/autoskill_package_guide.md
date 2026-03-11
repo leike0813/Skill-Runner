@@ -95,9 +95,8 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 
 - `x-type: "artifact"`（必须）
 - `x-role`（建议）
-- `x-filename`（建议）
 
-并确保 `required` 与实际可产出路径一致，避免“必填但不可生成”。
+`x-filename` 已废弃。artifact 真源是 output JSON 中对应字段的路径值；运行时会在终态前 resolve 为 bundle-relative path 并写回 `result.json`。
 
 ### 2.5 自动执行友好性要求
 

@@ -47,7 +47,9 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
 
     (run_dir / ".audit" / "stdout.1.log").write_text("stdout")
     (run_dir / "artifacts" / "text.md").write_text("artifact")
-    (run_dir / "result" / "result.json").write_text('{"status":"success"}')
+    (run_dir / "result" / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/text.md"]}'
+    )
     (run_dir / "uploads" / "input.txt").parent.mkdir(parents=True, exist_ok=True)
     (run_dir / "uploads" / "input.txt").write_text("upload")
 
@@ -71,7 +73,9 @@ def test_build_run_bundle_public_api_keeps_compatibility(tmp_path):
     (run_dir / "artifacts").mkdir(parents=True)
     (run_dir / "result").mkdir(parents=True)
     (run_dir / "artifacts" / "report.txt").write_text("artifact")
-    (run_dir / "result" / "result.json").write_text('{"status":"success"}')
+    (run_dir / "result" / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/report.txt"]}'
+    )
 
     orchestrator = JobOrchestrator()
     public_rel = orchestrator.build_run_bundle(run_dir, debug=False)

@@ -1,6 +1,6 @@
 import json
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, Any, List, Optional
 
 import jsonschema  # type: ignore[import-untyped]
@@ -23,6 +23,19 @@ _SCHEMA_VALIDATE_EXCEPTIONS = (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_upload_relative_path(raw_value: str) -> str:
+    normalized = PurePosixPath(raw_value.strip().replace("\\", "/"))
+    if normalized.is_absolute():
+        raise ValueError("file input path must be relative to uploads/")
+    for part in normalized.parts:
+        if part in {"", ".", ".."}:
+            raise ValueError("file input path must stay within uploads/")
+    rel_path = normalized.as_posix()
+    if not rel_path:
+        raise ValueError("file input path is required")
+    return rel_path
 
 
 class SchemaValidator:
@@ -145,8 +158,9 @@ class SchemaValidator:
 
     def validate_inline_input_create(self, skill: SkillManifest, inline_input: Dict[str, Any]) -> List[str]:
         """
-        Validate only inline-sourced input keys at create stage.
-        Required file inputs are intentionally ignored at this stage.
+        Validate request input keys at create stage.
+        Inline keys are schema-validated; file keys are validated as uploads-relative paths.
+        Required file inputs remain optional here because strict-key compatibility fallback is preserved.
         """
         schema = self._load_schema(skill, "input")
         if not schema:
@@ -161,9 +175,16 @@ class SchemaValidator:
             if key not in all_keys:
                 errors.append(f"input validation error: unknown input key '{key}'")
             elif key not in inline_keys:
-                errors.append(
-                    f"input validation error: key '{key}' is file-sourced; upload file via /upload"
-                )
+                value = inline_input.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(
+                        f"input validation error: key '{key}' must be a non-empty uploads-relative path"
+                    )
+                    continue
+                try:
+                    _normalize_upload_relative_path(value)
+                except ValueError as exc:
+                    errors.append(f"input validation error: key '{key}' {str(exc)}")
 
         properties = schema.get("properties", {})
         inline_schema = {
@@ -177,6 +198,44 @@ class SchemaValidator:
             errors.append(f"input validation error: {e.message} (Path: {'/'.join(str(x) for x in e.path)})")
         except _SCHEMA_VALIDATE_EXCEPTIONS as e:
             errors.append(f"Schema validation failed: {str(e)}")
+        return errors
+
+    def validate_declared_file_input_paths(
+        self,
+        skill: SkillManifest,
+        input_data: Dict[str, Any],
+        uploads_dir: Path,
+    ) -> List[str]:
+        errors: List[str] = []
+        if resolve_schema_asset(skill, "input").path is None:
+            return errors
+        inline_payload: Dict[str, Any] = {}
+        if isinstance(input_data.get("input"), dict):
+            inline_payload = input_data.get("input", {})
+        for key in self.get_input_keys_by_source(skill, "file"):
+            raw_value = inline_payload.get(key)
+            if raw_value is None:
+                continue
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                errors.append(
+                    f"input validation error: key '{key}' must be a non-empty uploads-relative path"
+                )
+                continue
+            try:
+                rel_path = _normalize_upload_relative_path(raw_value)
+            except ValueError as exc:
+                errors.append(f"input validation error: key '{key}' {str(exc)}")
+                continue
+            target = (uploads_dir / rel_path).resolve()
+            try:
+                target.relative_to(uploads_dir.resolve())
+            except ValueError:
+                errors.append(f"input validation error: key '{key}' escapes uploads root")
+                continue
+            if not target.exists() or not target.is_file():
+                errors.append(
+                    f"input validation error: uploaded file not found for key '{key}' at '{rel_path}'"
+                )
         return errors
 
     def validate_input_for_execution(
@@ -255,7 +314,7 @@ class SchemaValidator:
         """
         Resolve mixed input context and return (context, missing_required_files).
 
-        - file source: resolve from uploads/<key> to absolute path
+        - file source: resolve from request-declared uploads-relative path, else fallback to uploads/<key>
         - inline source: resolve from input_data["input"][<key>]
         """
         input_ctx: Dict[str, Any] = {}
@@ -273,6 +332,21 @@ class SchemaValidator:
         inline_keys = self.get_input_keys_by_source(skill, "inline")
 
         for key in file_keys:
+            declared_path = inline_payload.get(key)
+            if isinstance(declared_path, str) and declared_path.strip():
+                try:
+                    normalized_rel = _normalize_upload_relative_path(declared_path)
+                    potential_file = (uploads_dir / normalized_rel).resolve()
+                    potential_file.relative_to(uploads_dir.resolve())
+                except (ValueError, OSError):
+                    potential_file = None
+                if potential_file is not None and potential_file.exists() and potential_file.is_file():
+                    input_ctx[key] = str(potential_file.absolute())
+                    continue
+                if key in required_file_keys:
+                    missing_required_files.append(key)
+                continue
+
             potential_file = uploads_dir / key
             if potential_file.exists():
                 input_ctx[key] = str(potential_file.absolute())

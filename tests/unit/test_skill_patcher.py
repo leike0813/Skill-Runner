@@ -29,7 +29,8 @@ def test_generate_patch_content_auto_mode_forbids_questions_and_has_artifact_red
     )
     assert "Runtime Enforcement (Injected by Skill Runner" in content
     assert "# Runtime Output Overrides" in content
-    assert "{{ run_dir }}/artifacts/final.md" in content
+    assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
+    assert "nested folders allowed" in content
     assert "## Output Format Contract" in content
     assert "### Output Schema Specification" in content
     assert "__SKILL_DONE__" in content
@@ -42,7 +43,7 @@ def test_generate_patch_content_interactive_mode_keeps_ask_user_optional():
     artifacts = [ManifestArtifact(role="report", pattern="final.md")]
     content = patcher.generate_patch_content(artifacts, execution_mode="interactive")
     assert "# Runtime Output Overrides" in content
-    assert "{{ run_dir }}/artifacts/final.md" in content
+    assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
     assert "Execution Mode: INTERACTIVE" in content
     assert "<ASK_USER_YAML>" in content
     assert "Canonical minimal ASK_USER schema" in content

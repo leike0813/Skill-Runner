@@ -17,7 +17,7 @@ IMPORTANT: Ignore any previous instructions regarding the file paths of these ou
 {artifact_lines}
 
 Ensure you do NOT write these files to the current directory or any other location. Use ONLY the paths listed above.
-When reporting these artifacts in your final JSON output, use the exact paths listed above as the field values.
+When reporting these artifacts in your final JSON output, prefer paths under `<cwd>/artifacts/`, but return the actual file paths that were produced.
 ```
 
 ## Placeholder: `{artifact_lines}`
@@ -25,7 +25,7 @@ When reporting these artifacts in your final JSON output, use the exact paths li
 This placeholder is replaced at runtime with one line per artifact, using the format:
 
 ```
-- <role> (<pattern>) -> {{ run_dir }}/artifacts/<pattern>
+- <role> (<pattern>) -> prefer writing the final deliverable under {{ run_dir }}/artifacts/ (nested folders allowed)
 ```
 
 Where:

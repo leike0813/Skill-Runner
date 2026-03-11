@@ -95,12 +95,17 @@ class RunReadFacade:
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        artifacts_dir = run_dir / "artifacts"
+        result_path = run_dir / "result" / "result.json"
         artifacts: list[str] = []
-        if artifacts_dir.exists():
-            for path in artifacts_dir.rglob("*"):
-                if path.is_file():
-                    artifacts.append(path.relative_to(run_dir).as_posix())
+        if result_path.exists():
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            artifacts_obj = payload.get("artifacts")
+            if isinstance(artifacts_obj, list):
+                artifacts = [
+                    item.strip()
+                    for item in artifacts_obj
+                    if isinstance(item, str) and item.strip()
+                ]
         return RunArtifactsResponse(request_id=request_id, artifacts=artifacts)
 
     async def _get_bundle_by_mode(
@@ -215,29 +220,6 @@ class RunReadFacade:
             path=Path(path).as_posix(),
             preview=preview,
         )
-
-    async def get_artifact_file(
-        self,
-        *,
-        source_adapter: RunSourceAdapter | None = None,
-        request_id: str,
-        artifact_path: str,
-    ) -> FileResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
-            source_adapter=source_adapter,
-            request_id=request_id,
-        )
-        if not artifact_path:
-            raise HTTPException(status_code=400, detail="Artifact path is required")
-        if not artifact_path.startswith("artifacts/"):
-            raise HTTPException(status_code=404, detail="Artifact not found")
-        target = (run_dir / artifact_path).resolve()
-        artifacts_root = (run_dir / "artifacts").resolve()
-        if not str(target).startswith(str(artifacts_root)):
-            raise HTTPException(status_code=400, detail="Invalid artifact path")
-        if not target.exists() or not target.is_file():
-            raise HTTPException(status_code=404, detail="Artifact not found")
-        return FileResponse(path=target, filename=target.name)
 
     async def get_logs(
         self,

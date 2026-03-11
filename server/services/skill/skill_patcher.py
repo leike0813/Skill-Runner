@@ -162,8 +162,10 @@ class SkillPatcher:
             )
         lines: List[str] = []
         for artifact in artifacts:
-            target_path = "{{ run_dir }}/artifacts/" + artifact.pattern
-            lines.append(f"- {artifact.role} ({artifact.pattern}) -> {target_path}")
+            lines.append(
+                f"- {artifact.role} ({artifact.pattern}) -> prefer writing the final deliverable under "
+                "`{{ run_dir }}/artifacts/` (nested folders allowed)"
+            )
         return template.replace("{artifact_lines}", "\n".join(lines))
 
     def load_output_schema(

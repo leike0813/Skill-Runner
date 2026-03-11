@@ -191,11 +191,21 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_payload["runtime_options"] = runtime_opts
         request_payload["effective_runtime_options"] = effective_runtime_opts
 
-        has_required_file_inputs = (
-            bool(skill and resolve_schema_asset(skill, "input").path is not None)
-            and bool(skill and schema_validator.has_required_file_inputs(skill))
+        declared_file_input_present = False
+        has_required_file_inputs = False
+        if skill and resolve_schema_asset(skill, "input").path is not None:
+            file_keys = set(schema_validator.get_input_keys_by_source(skill, "file"))
+            has_required_file_inputs = bool(
+                schema_validator.has_required_file_inputs(skill)
+            )
+            declared_file_input_present = any(
+                key in inline_input for key in file_keys
+            )
+        requires_upload = (
+            request.skill_source == RequestSkillSource.TEMP_UPLOAD
+            or has_required_file_inputs
+            or declared_file_input_present
         )
-        requires_upload = request.skill_source == RequestSkillSource.TEMP_UPLOAD or has_required_file_inputs
 
         await run_store.create_request(
             request_id=request_id,
@@ -629,13 +639,6 @@ async def get_run_file(
         path=path,
     )
 
-@router.get("/{request_id}/artifacts/{artifact_path:path}")
-async def download_run_artifact(request_id: str, artifact_path: str):
-    return await run_read_facade.get_artifact_file(
-        request_id=request_id,
-        artifact_path=artifact_path,
-    )
-
 @router.get("/{request_id}/logs", response_model=RunLogsResponse)
 async def get_run_logs(request_id: str):
     return await run_read_facade.get_logs(request_id=request_id)
@@ -864,6 +867,17 @@ async def upload_file(
                 if file is not None:
                     content = await file.read()
                     extracted_files = _extract_zip_to_dir(content, uploads_dir)
+
+                declared_file_path_errors = schema_validator.validate_declared_file_input_paths(
+                    skill,
+                    {"input": request_record.get("input", {})},
+                    uploads_dir,
+                )
+                if declared_file_path_errors:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Input validation failed: {declared_file_path_errors}",
+                    )
 
                 manifest = build_input_manifest(uploads_dir)
                 manifest_hash = compute_input_manifest_hash(manifest)

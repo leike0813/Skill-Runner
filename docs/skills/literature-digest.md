@@ -86,11 +86,6 @@ GET /v1/jobs/{request_id}
   GET /v1/jobs/{request_id}/artifacts
   ```
 
-- 单文件下载：
-  ```
-  GET /v1/jobs/{request_id}/artifacts/{artifact_path}
-  ```
-
 - bundle 下载（包含 manifest 与产物）：
   ```
   GET /v1/jobs/{request_id}/bundle

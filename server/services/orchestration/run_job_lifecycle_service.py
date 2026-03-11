@@ -32,10 +32,8 @@ from server.runtime.session.statechart import timeout_requires_auto_decision
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_audit_contract_service import run_audit_contract_service
 from server.services.orchestration.run_artifact_path_autofix import (
-    autofix_missing_artifact_paths,
     collect_run_artifacts,
-    missing_required_artifact_patterns,
-    required_artifact_patterns,
+    resolve_output_artifact_paths,
 )
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
@@ -891,40 +889,28 @@ class _RunJobLifecyclePipeline:
                 # 6.1 Normalization (N0)
                 # Create standard envelope
                 artifacts = collect_run_artifacts(run_dir)
-                required_artifacts = required_artifact_patterns(skill)
-                missing_artifacts = missing_required_artifact_patterns(
-                    required_patterns=required_artifacts,
-                    artifacts=artifacts,
-                )
-                if missing_artifacts and (
-                    done_signal_found or (has_structured_output and not ask_user_signal_detected and not schema_output_errors)
-                ):
-                    autofix_result = autofix_missing_artifact_paths(
+                artifact_errors: list[str] = []
+                if done_signal_found or (has_structured_output and not ask_user_signal_detected):
+                    resolution_result = resolve_output_artifact_paths(
                         skill=skill,
                         run_dir=run_dir,
                         output_data=output_data,
-                        missing_patterns=missing_artifacts,
                     )
-                    output_data = autofix_result.output_data
+                    output_data = resolution_result.output_data
+                    artifacts = resolution_result.artifacts
                     if (
                         isinstance(turn_payload_for_completion, dict)
                         and turn_payload_for_completion
                     ):
                         turn_payload_for_completion = dict(output_data)
-                    for warning_code in autofix_result.warnings:
+                    for warning_code in resolution_result.warnings:
                         _append_validation_warning(warning_code)
-                    if autofix_result.attempted:
-                        artifacts = collect_run_artifacts(run_dir)
-                        missing_artifacts = missing_required_artifact_patterns(
-                            required_patterns=required_artifacts,
-                            artifacts=artifacts,
+                    schema_output_errors = schema_validator.validate_output(skill, output_data)
+                    if resolution_result.missing_required_fields:
+                        artifact_errors.append(
+                            "Missing required artifacts: "
+                            + ", ".join(resolution_result.missing_required_fields)
                         )
-                        schema_output_errors = schema_validator.validate_output(skill, output_data)
-                artifact_errors: list[str] = []
-                if missing_artifacts:
-                    artifact_errors.append(
-                        f"Missing required artifacts: {', '.join(missing_artifacts)}"
-                    )
                 if auth_detection_high and session_capable and request_id:
                     canonical_provider_id = _resolve_opencode_provider_from_model(
                         engine_name=engine_name,

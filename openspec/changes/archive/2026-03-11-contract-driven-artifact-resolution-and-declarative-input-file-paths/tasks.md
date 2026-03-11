@@ -1,0 +1,7 @@
+- [x] Update SSOT/docs for contract-driven artifact resolution and declarative file inputs
+- [x] Implement terminal artifact resolver and contract-driven non-debug bundle construction
+- [x] Deprecate artifact single-file download route and update jobs/read facade responses
+- [x] Implement declarative file input path validation and execution-time resolution with strict-key fallback
+- [x] Update built-in E2E client run form submission to send file inputs as declarative uploads-relative paths and package uploaded files with preserved filenames
+- [x] Update skill patcher/output schema helpers to remove x-filename-driven behavior and weaken artifact prompt guidance
+- [x] Update tests and fixtures for new artifact and input file protocol semantics

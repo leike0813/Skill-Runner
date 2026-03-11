@@ -457,7 +457,17 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
     skill_dir.mkdir()
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
     (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "artifact_path": {"type": "string", "x-type": "artifact"},
+                },
+                "required": ["artifact_path"],
+            }
+        )
+    )
     skill = SkillManifest(
         id="test-skill",
         path=skill_dir,
@@ -478,18 +488,23 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
     try:
         run_id = _create_run_with_skill(tmp_path, skill)
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
-        (run_dir / "artifacts" / "extra.txt").write_text("artifact")
+        class ArtifactRecordingAdapter:
+            async def run(self, skill, input_data, run_dir, options):
+                artifact_path = run_dir / "workspace" / "nested" / "extra.txt"
+                artifact_path.parent.mkdir(parents=True, exist_ok=True)
+                artifact_path.write_text("artifact", encoding="utf-8")
+                return _final_engine_result(final_data={"artifact_path": str(artifact_path)})
 
         orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": DummyAdapter()}
+        orchestrator.adapters = {"codex": ArtifactRecordingAdapter()}
 
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
              patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        assert "artifacts/extra.txt" in result_data["artifacts"]
+        assert result_data["artifacts"] == ["workspace/nested/extra.txt"]
+        assert result_data["data"]["artifact_path"] == "workspace/nested/extra.txt"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -548,8 +563,10 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
     skill_dir.mkdir()
     output_schema = {
         "type": "object",
-        "properties": {"value": {"type": "string"}},
-        "required": ["value"]
+        "properties": {
+            "required_path": {"type": "string", "x-type": "artifact"},
+        },
+        "required": ["required_path"],
     }
     (skill_dir / "output.schema.json").write_text(json.dumps(output_schema))
     (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
@@ -558,7 +575,6 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
         id="test-skill",
         path=skill_dir,
         engines=["codex"],
-        artifacts=[{"role": "result_file", "pattern": "required.txt", "required": True}],
         schemas={
             "input": "input.schema.json",
             "parameter": "parameter.schema.json",
@@ -603,7 +619,6 @@ async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_pat
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
-                "x-filename": "digest.md",
             }
         },
         "required": ["digest_path"],
@@ -642,10 +657,10 @@ async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_pat
         status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "succeeded"
-        assert (run_dir / "artifacts" / "digest.md").is_file()
-        assert not (run_dir / "uploads" / "digest.md").exists()
-        assert result_data["data"]["digest_path"] == str(run_dir / "artifacts" / "digest.md")
-        assert "OUTPUT_ARTIFACT_PATH_REPAIRED" in result_data["validation_warnings"]
+        assert (run_dir / "uploads" / "digest.md").is_file()
+        assert result_data["data"]["digest_path"] == "uploads/digest.md"
+        assert result_data["artifacts"] == ["uploads/digest.md"]
+        assert "OUTPUT_ARTIFACT_PATH_REWRITTEN" in result_data["validation_warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -663,7 +678,6 @@ async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
-                "x-filename": "digest.md",
             }
         },
         "required": ["digest_path"],
@@ -699,11 +713,11 @@ async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        assert status_data["status"] == "failed"
-        assert "Missing required artifacts" in result_data["error"]["message"]
-        assert "OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS" in result_data["validation_warnings"]
+        assert result_data["status"] == "success"
+        assert result_data["data"]["digest_path"] == "uploads/digest.md"
+        assert result_data["artifacts"] == ["uploads/digest.md"]
+        assert "OUTPUT_ARTIFACT_PATH_REWRITTEN" in result_data["validation_warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -721,7 +735,6 @@ async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
-                "x-filename": "digest.md",
             }
         },
         "required": ["digest_path"],
@@ -759,10 +772,11 @@ async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        assert status_data["status"] == "failed"
-        assert "Missing required artifacts" in result_data["error"]["message"]
-        assert "OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR" in result_data["validation_warnings"]
-        assert not (run_dir / "artifacts" / "digest.md").exists()
+        assert status_data["status"] == "succeeded"
+        assert result_data["data"]["digest_path"] == "artifacts/digest_path/outside-digest.md"
+        assert "OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR" in result_data["validation_warnings"]
+        assert "OUTPUT_ARTIFACT_PATH_REWRITTEN" in result_data["validation_warnings"]
+        assert (run_dir / "artifacts" / "digest_path" / "outside-digest.md").exists()
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -914,7 +928,7 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] == "TIMEOUT"
         assert "15s" in result_data["error"]["message"]
-        assert "artifacts/partial.txt" in result_data["artifacts"]
+        assert result_data["artifacts"] == []
         assert await local_store.get_cached_run("cache-key-1") is None
     finally:
         config.defrost()

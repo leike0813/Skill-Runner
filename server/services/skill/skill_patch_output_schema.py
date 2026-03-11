@@ -85,9 +85,9 @@ def _describe_type(field_schema: Dict[str, Any]) -> str:
 
 
 def _describe_field(field_schema: Dict[str, Any]) -> str:
-    if field_schema.get("x-type") == "artifact":
+    if field_schema.get("x-type") in {"artifact", "file"}:
         return (
-            "Artifact output path (set by runtime, see \"Runtime Output Overrides\" above)."
+            "Artifact output path. Prefer writing final deliverables under `<cwd>/artifacts/`; runtime resolves the final path into a bundle-relative path."
         )
     desc = field_schema.get("description")
     if isinstance(desc, str) and desc.strip():
@@ -180,11 +180,8 @@ def _build_skeleton(properties: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _skeleton_value(field_schema: Dict[str, Any]) -> Any:
-    if field_schema.get("x-type") == "artifact":
-        filename = field_schema.get("x-filename")
-        if isinstance(filename, str) and filename.strip():
-            return f"{{{{ run_dir }}}}/artifacts/{filename.strip()}"
-        return "{{ run_dir }}/artifacts/..."
+    if field_schema.get("x-type") in {"artifact", "file"}:
+        return "artifacts/..."
 
     for key in ("anyOf", "oneOf"):
         combo = field_schema.get(key)

@@ -148,7 +148,7 @@ data/runs/<run_id>/
 - Adapter 写入 `.audit/`（stdout/stderr/events 等，按 attempt 编号）
 - `RunStateService` 写入 `.state/state.json`、`.state/dispatch.json`、`result/result.json`
 - Bundle 生成器写入 `bundle/`
-- Skill 仅可写 `artifacts/`（通过引擎工作区间接写入）
+- Skill 最终交付文件建议优先写在 `artifacts/`，但不再是强约束；终态前系统会按 output contract 统一 resolve artifact 路径
 
 ================================================================================
 5. Skill 包结构与规范
@@ -214,14 +214,7 @@ skill-name/
   "engine_configs": {
     "gemini": "custom/gemini_settings.json"
   },
-  "artifacts": [
-    {
-      "role": "notes_md",
-      "pattern": "artifacts/notes.md",
-      "mime": "text/markdown",
-      "required": false
-    }
-  ],
+  "artifacts": [],
   "automation": {
     "timeout_sec": 600,
     "network": "off|allowlist",
@@ -354,8 +347,14 @@ _parse_output(raw_stdout) → AdapterTurnResult
 
 ### 校验阶段（Validate）
 - 使用 `output.schema.json` + jsonschema 校验。
-- 通过：进入 artifacts 索引。
+- 通过：进入 artifact path resolve。
 - 失败：进入规范化链。
+
+### Artifact Resolve
+- `output.schema.json` 中被 `x-type: "artifact" | "file"` 标记的字段视为 artifact 真源。
+- `x-filename` 已废弃，不再作为运行期校验真源。
+- 终态前系统会将这些路径 resolve 为 bundle-relative path，并覆写 `result/result.json`。
+- required artifact 校验基于“字段存在且 resolved 文件存在”，而不是固定 `artifacts/<pattern>` 命名。
 
 ### 规范化链（Normalize Pipeline）
 N0 Deterministic Normalize（runner 内置）
@@ -377,7 +376,8 @@ N2 Skill Fallback（可选，非LLM）
 8. Artifacts 管理与返回
 ================================================================================
 Artifact 索引规则：
-- 依据 `runner.json` artifacts 合同扫描 `artifacts/` 目录。
+- 依据 `output.schema.json` 中 `x-type: "artifact" | "file"` 标记的字段进行 artifact path resolve。
+- artifact 真源是 output JSON 中对应字段的路径值，而非固定 `artifacts/` 命名空间。
 - 对每个匹配文件计算 sha256、size、mime（后缀映射）。
 - 生成 `bundle/manifest.json`：
   ```json
@@ -392,8 +392,8 @@ Artifact 索引规则：
 
 下载：
 - `GET /v1/jobs/{request_id}/bundle` — 下载标准 bundle zip。
-- `GET /v1/jobs/{request_id}/artifacts` — 返回 artifacts 列表。
-- `GET /v1/jobs/{request_id}/artifacts/{path}` — 下载单个产物文件。
+- `GET /v1/jobs/{request_id}/artifacts` — 返回 resolved artifact 相对路径列表。
+- 单文件 artifact 下载接口已废弃；统一通过 bundle / debug bundle 获取产物。
 
 ================================================================================
 9. REST API 设计（v1）
@@ -444,9 +444,8 @@ Artifact 索引规则：
 | POST | `/v1/jobs` | 提交执行（skill_id/engine/parameter/model/runtime_options） |
 | GET | `/v1/jobs/{request_id}` | 查询状态 |
 | GET | `/v1/jobs/{request_id}/result` | 获取最终结构化结果 |
-| GET | `/v1/jobs/{request_id}/artifacts` | artifacts 列表 |
+| GET | `/v1/jobs/{request_id}/artifacts` | resolved artifact 相对路径列表 |
 | GET | `/v1/jobs/{request_id}/bundle` | 下载 bundle zip |
-| GET | `/v1/jobs/{request_id}/artifacts/{path}` | 下载单个产物 |
 | GET | `/v1/jobs/{request_id}/logs` | stdout/stderr 全量快照 |
 | GET | `/v1/jobs/{request_id}/events` | SSE 实时流（FCMP） |
 | GET | `/v1/jobs/{request_id}/events/history` | 历史事件回放 |
@@ -477,9 +476,8 @@ Artifact 索引规则：
 | POST | `/v1/temp-skill-runs/{request_id}/upload` | 上传 skill 包并启动执行 |
 | GET | `/v1/temp-skill-runs/{request_id}` | 查询状态 |
 | GET | `/v1/temp-skill-runs/{request_id}/result` | 获取结果 |
-| GET | `/v1/temp-skill-runs/{request_id}/artifacts` | artifacts 列表 |
+| GET | `/v1/temp-skill-runs/{request_id}/artifacts` | resolved artifact 相对路径列表 |
 | GET | `/v1/temp-skill-runs/{request_id}/bundle` | 下载 bundle |
-| GET | `/v1/temp-skill-runs/{request_id}/artifacts/{path}` | 下载单个产物 |
 | GET | `/v1/temp-skill-runs/{request_id}/logs` | 日志 |
 | GET | `/v1/temp-skill-runs/{request_id}/events` | SSE 实时流 |
 | GET | `/v1/temp-skill-runs/{request_id}/events/history` | 历史事件回放 |

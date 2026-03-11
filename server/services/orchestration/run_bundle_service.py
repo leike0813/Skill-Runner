@@ -59,16 +59,16 @@ class RunBundleService:
         bundle_path: Path,
         manifest_path: Path,
     ) -> list[Path]:
-        candidates = []
-        for path in run_dir.rglob("*"):
-            if not path.is_file():
-                continue
-            rel_path = path.relative_to(run_dir).as_posix()
-            if debug:
+        if debug:
+            candidates = []
+            for path in run_dir.rglob("*"):
+                if not path.is_file():
+                    continue
+                rel_path = path.relative_to(run_dir).as_posix()
                 if run_file_filter_service.include_in_debug_bundle(rel_path):
                     candidates.append(path)
-            elif run_file_filter_service.include_in_non_debug_bundle(rel_path):
-                candidates.append(path)
+        else:
+            candidates = self._contract_driven_non_debug_candidates(run_dir)
 
         bundle_dir = run_dir / "bundle"
         candidates = [
@@ -77,6 +77,41 @@ class RunBundleService:
             if path != bundle_path and path != manifest_path and path.parent != bundle_dir
         ]
         return candidates
+
+    def _contract_driven_non_debug_candidates(self, run_dir: Path) -> list[Path]:
+        result_path = run_dir / "result" / "result.json"
+        candidates: list[Path] = []
+        if result_path.exists():
+            candidates.append(result_path)
+        if not result_path.exists():
+            return candidates
+
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return candidates
+        artifacts_obj = payload.get("artifacts")
+        if not isinstance(artifacts_obj, list):
+            return candidates
+        for rel_path in artifacts_obj:
+            if not isinstance(rel_path, str) or not rel_path.strip():
+                continue
+            path = (run_dir / rel_path.strip()).resolve()
+            try:
+                path.relative_to(run_dir.resolve())
+            except ValueError:
+                continue
+            if path.exists() and path.is_file():
+                candidates.append(path)
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            rel = path.relative_to(run_dir).as_posix()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            unique.append(path)
+        return unique
 
     def hash_file(self, path: Path) -> str:
         hasher = hashlib.sha256()

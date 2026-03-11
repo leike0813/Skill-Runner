@@ -233,7 +233,7 @@ async def submit_run(
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
-                    "input": submission["inline_input"],
+                    "input": submission["combined_input"],
                     "parameter": submission["parameter_input"],
                 },
             ),
@@ -243,7 +243,7 @@ async def submit_run(
     create_payload = {
         "skill_id": skill_id,
         "engine": submission["engine"],
-        "input": submission["inline_input"],
+        "input": submission["combined_input"],
         "parameter": submission["parameter_input"],
         "runtime_options": submission["runtime_options"],
     }
@@ -313,7 +313,7 @@ async def submit_fixture_run(
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
-                    "input": submission["inline_input"],
+                    "input": submission["combined_input"],
                     "parameter": submission["parameter_input"],
                 },
             ),
@@ -322,6 +322,7 @@ async def submit_fixture_run(
 
     create_payload = {
         "engine": submission["engine"],
+        "input": submission["combined_input"],
         "parameter": submission["parameter_input"],
         "runtime_options": submission["runtime_options"],
     }
@@ -901,10 +902,12 @@ async def _collect_run_submission(
         field_prefix="parameter__",
         fields=parameter_fields,
     )
-    uploaded_files, file_errors = await _collect_file_values(
+    uploaded_files, file_input_values, file_errors = await _collect_file_values(
         run_form=run_form,
         file_fields=input_fields["file_fields"],
     )
+    combined_input = dict(inline_input)
+    combined_input.update(file_input_values)
 
     errors = input_errors + parameter_errors + file_errors + runtime_errors
     if mode_error:
@@ -923,6 +926,8 @@ async def _collect_run_submission(
         "runtime_options": runtime_options,
         "submitted_runtime_options": submitted_runtime_options,
         "inline_input": inline_input,
+        "file_input_values": file_input_values,
+        "combined_input": combined_input,
         "parameter_input": parameter_input,
         "uploaded_files": uploaded_files,
     }
@@ -1413,8 +1418,9 @@ async def _collect_file_values(
     *,
     run_form: Mapping[str, Any],
     file_fields: list[dict[str, Any]],
-) -> tuple[dict[str, bytes], list[str]]:
+) -> tuple[dict[str, bytes], dict[str, str], list[str]]:
     files: dict[str, bytes] = {}
+    file_inputs: dict[str, str] = {}
     errors: list[str] = []
     for field in file_fields:
         key = str(field.get("name", ""))
@@ -1434,8 +1440,15 @@ async def _collect_file_values(
         if not body and bool(field.get("required")):
             errors.append(f"{key} file is empty")
             continue
-        files[key] = body
-    return files, errors
+        safe_filename = PurePosixPath(filename.replace("\\", "/")).name.strip()
+        if not safe_filename:
+            if bool(field.get("required")):
+                errors.append(f"{key} file has invalid name")
+            continue
+        relative_path = f"{key}/{safe_filename}"
+        files[relative_path] = body
+        file_inputs[key] = relative_path
+    return files, file_inputs, errors
 
 
 def _coerce_scalar_value(raw: str, field_type: str) -> Any:

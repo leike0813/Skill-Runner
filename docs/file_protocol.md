@@ -1,6 +1,6 @@
 # 输入与文件协议 (Input & File Protocol)
 
-本文档描述当前实现下 Skill Runner 的输入、上传、产物识别与下载协议。
+本文档描述当前实现下 Skill Runner 的输入、上传、产物识别与 bundle 协议。
 
 ## 1. 术语与模型
 
@@ -8,7 +8,7 @@
   - `file`：来自上传 Zip，运行时注入为绝对路径字符串。
   - `inline`：来自 `POST /v1/jobs` 请求体的 `input` JSON 值。
 - `parameter`：业务参数/配置，来自 `POST /v1/jobs` 请求体的 `parameter`。
-- `artifact`：Skill 运行后写入 `run_dir/artifacts/` 的文件产物。
+- `artifact`：output JSON 中被 `x-type: "artifact" | "file"` 标记的文件路径字段；终态前会被统一 resolve 为 bundle 内相对路径。
 
 ## 2. `runner.json` 合同（当前实现）
 
@@ -97,36 +97,35 @@
 - 支持在属性上声明：
   - `x-type: "artifact"` 或 `x-type: "file"`
   - 可选 `x-role`
-  - 可选 `x-filename`
 
 ## 4. 输入校验与注入流程
 
 ### 4.1 Create 阶段（`POST /v1/jobs`）
 
-- 仅对 `inline` 输入做预校验：
-  - 未声明的 input key：报错。
-  - 把 `file` 类型 key 放到 `input`：报错（提示走 `/upload`）。
+- 所有业务输入都通过请求体 `input` 提交：
+  - `inline` 字段：值为业务 JSON；
+  - `file` 字段：值为 `uploads/` 根下的相对路径字符串（例如 `papers/a.pdf`）。
+- 预校验规则：
+  - 未声明的 input key：报错；
+  - file 路径必须是非空字符串、非绝对路径、且不得包含 `..`；
   - `inline` 的类型/required 按 input schema 校验。
+- 旧的 `uploads/<field_name>` 严格键匹配仍保留为兼容回退，但不再是主协议。
 
 ### 4.2 Upload 阶段（`POST /v1/jobs/{request_id}/upload`）
 
 - 上传 Zip 先解压到 `data/requests/{request_id}/uploads/`。
 - 创建 run 时再“提升”到 `data/runs/{run_id}/uploads/`。
+- Zip 包内部允许任意目录结构。
+- 若请求体中已显式声明 file 输入路径，上传后系统会校验这些路径在 `uploads/` 下真实存在。
 
 ### 4.3 执行前混合输入构建
 
-- `file` 字段：按严格键匹配查找 `run_dir/uploads/<field_name>`。
+- `file` 字段优先按请求体 `input.<field_name>` 中声明的 `uploads/` 相对路径 resolve。
+- resolve 成功后注入绝对路径字符串。
+- 若请求体未显式提供该 file 字段，则回退到旧的严格键匹配：
+  - 查找 `run_dir/uploads/<field_name>`
 - `inline` 字段：读取 `input[field_name]` 原始 JSON 值。
-- 仅 `required` 的 file 字段缺失会触发缺文件错误。
-
-## 5. 严格键匹配（file 输入）
-
-规则：
-
-1. 仅查找 `run_dir/uploads/`。
-2. 文件名必须与 input 字段名完全一致（`<field_name>`）。
-3. 命中后注入绝对路径字符串。
-4. required file 未命中则校验失败并拒绝执行。
+- `required` 的 file 字段在“显式路径 + 兼容回退”都无法命中时会触发缺文件错误。
 
 ## 6. Prompt 上下文
 
@@ -144,20 +143,28 @@
 
 ### 7.1 声明来源
 
-- 若 `runner.json.artifacts` 有内容：以其为准。
-- 若 `runner.json.artifacts` 缺失或为空：系统从 `output.schema.json` 自动推断：
-  - 识别 `x-type in {"artifact","file"}` 的字段
-  - `pattern = x-filename or 字段名`
-  - `role = x-role or "output"`
-  - `required = 字段名是否在 output.required`
+- Artifact 字段由 `output.schema.json` 中的 `x-type in {"artifact","file"}` 标记。
+- `x-role` 可选，用于角色语义。
+- `x-filename` 已废弃，不再参与运行期校验与目标路径推断。
+- `runner.json.artifacts` 若保留，仅作为兼容元数据；artifact 真源是 output JSON 中对应字段的路径值。
 
 ### 7.2 运行期校验
 
-- 运行后系统会校验 required artifacts 是否存在于 `artifacts/<pattern>`。
-- 缺失 required artifact 会导致 run 失败。
+- 终态前系统会统一执行 artifact path resolve：
+  1. 读取 output JSON 中被 `x-type` 标记的路径字段；
+  2. 解析为 run 内实际文件；
+  3. 若文件在 run 目录外，则执行唯一兜底移动到 run 内安全位置；
+  4. 将字段值覆写为 bundle-relative path，并写回 `result.json`。
+- required artifact 的校验基于：
+  - required 字段是否存在；
+  - 以及 resolved 文件是否真实存在。
+- 不再校验固定的 `artifacts/<pattern>` 文件名。
 
-## 8. 结果与下载
+## 8. 结果与 Bundle
 
-- `GET /v1/jobs/{request_id}/artifacts`：返回产物相对路径列表。
-- `GET /v1/jobs/{request_id}/artifacts/{artifact_path}`：下载单个产物，`artifact_path` 必须以 `artifacts/` 开头且路径安全。
-- `GET /v1/jobs/{request_id}/bundle`：下载 run bundle（普通或 debug 版本）。
+- `GET /v1/jobs/{request_id}/artifacts`：返回 resolved artifact 相对路径列表。
+- `GET /v1/jobs/{request_id}/bundle`：下载普通 bundle。
+  - 仅包含 `result/result.json` 与 resolved artifact 文件。
+- `GET /v1/jobs/{request_id}/bundle/debug`：下载 debug bundle。
+  - 保留更宽范围的运行期排障文件。
+- 单文件 artifact 下载接口已废弃；统一通过 bundle / debug bundle 获取产物。

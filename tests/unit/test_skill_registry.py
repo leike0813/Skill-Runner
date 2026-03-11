@@ -19,7 +19,6 @@ def test_scan_artifacts_from_output_schema(tmp_path):
                 "type": "string",
                 "x-type": "artifact",
                 "x-role": "text",
-                "x-filename": "text.md",
             },
             "info_path": {
                 "type": "string",
@@ -49,7 +48,7 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         assert len(skill.artifacts) == 2
 
         artifacts = {a.role: a for a in skill.artifacts}
-        assert artifacts["text"].pattern == "text.md"
+        assert artifacts["text"].pattern == "text_path"
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False

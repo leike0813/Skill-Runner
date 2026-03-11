@@ -31,7 +31,7 @@ def scan_output_schema_artifacts(schema_path: Path) -> List[Dict[str, Any]]:
             x_type = val.get("x-type")
             if x_type not in {"artifact", "file"}:
                 continue
-            pattern = val.get("x-filename", key)
+            pattern = key
             role = val.get("x-role", "output")
             artifacts.append(
                 {

@@ -1,145 +1,111 @@
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List
 
 from server.models import SkillManifest
 from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 
-WARNING_OUTPUT_ARTIFACT_PATH_REPAIRED = "OUTPUT_ARTIFACT_PATH_REPAIRED"
-WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS = (
-    "OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS"
-)
-WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR = (
-    "OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR"
-)
+WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN = "OUTPUT_ARTIFACT_PATH_REWRITTEN"
+WARNING_OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR = "OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR"
+WARNING_OUTPUT_ARTIFACT_PATH_INVALID = "OUTPUT_ARTIFACT_PATH_INVALID"
+WARNING_OUTPUT_ARTIFACT_PATH_MISSING = "OUTPUT_ARTIFACT_PATH_MISSING"
 
 
 @dataclass(frozen=True)
-class ArtifactPathAutofixResult:
+class ArtifactResolutionResult:
     output_data: Dict[str, Any]
+    artifacts: List[str]
     warnings: List[str]
-    attempted: bool
-    repaired_count: int
+    missing_required_fields: List[str]
+
+
+@dataclass(frozen=True)
+class _ArtifactField:
+    name: str
+    required: bool
 
 
 def collect_run_artifacts(run_dir: Path) -> List[str]:
-    artifacts_dir = run_dir / "artifacts"
+    result_path = run_dir / "result" / "result.json"
+    if result_path.exists():
+        payload = load_resolved_json(result_path)
+        if isinstance(payload, dict):
+            artifacts_obj = payload.get("artifacts")
+            if isinstance(artifacts_obj, list):
+                parsed = [
+                    item.strip()
+                    for item in artifacts_obj
+                    if isinstance(item, str) and item.strip()
+                ]
+                return sorted(dict.fromkeys(parsed))
+
     artifacts: List[str] = []
-    if artifacts_dir.exists():
-        for path in artifacts_dir.rglob("*"):
-            if path.is_file():
-                artifacts.append(path.relative_to(run_dir).as_posix())
-    artifacts.sort()
-    return artifacts
+    for path in run_dir.rglob("*"):
+        if path.is_file() and path.relative_to(run_dir).as_posix().startswith("artifacts/"):
+            artifacts.append(path.relative_to(run_dir).as_posix())
+    return sorted(dict.fromkeys(artifacts))
 
 
-def required_artifact_patterns(skill: SkillManifest) -> List[str]:
-    if not skill.artifacts:
-        return []
-    return [artifact.pattern for artifact in skill.artifacts if artifact.required]
-
-
-def missing_required_artifact_patterns(
-    *,
-    required_patterns: List[str],
-    artifacts: List[str],
-) -> List[str]:
-    missing: List[str] = []
-    for pattern in required_patterns:
-        expected_path = f"artifacts/{pattern}"
-        if expected_path not in artifacts:
-            missing.append(pattern)
-    return missing
-
-
-def autofix_missing_artifact_paths(
+def resolve_output_artifact_paths(
     *,
     skill: SkillManifest,
     run_dir: Path,
     output_data: Dict[str, Any],
-    missing_patterns: List[str],
-) -> ArtifactPathAutofixResult:
-    if not missing_patterns or not output_data:
-        return ArtifactPathAutofixResult(
-            output_data=dict(output_data),
-            warnings=[],
-            attempted=False,
-            repaired_count=0,
-        )
-
-    field_mapping = _load_artifact_output_field_mapping(skill)
-    normalized_run_dir = run_dir.resolve()
+) -> ArtifactResolutionResult:
     updated_output = dict(output_data)
-    warning_codes: List[str] = []
-    attempted = False
-    repaired_count = 0
+    warnings: List[str] = []
+    artifacts: List[str] = []
+    missing_required_fields: List[str] = []
+    normalized_run_dir = run_dir.resolve()
 
-    for pattern in missing_patterns:
-        field_name = field_mapping.get(pattern)
-        if field_name is None:
+    for field in _load_output_artifact_fields(skill):
+        raw_value = updated_output.get(field.name)
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            if field.required:
+                missing_required_fields.append(field.name)
             continue
-        raw_path = updated_output.get(field_name)
-        if not isinstance(raw_path, str) or not raw_path.strip():
+
+        raw_path = raw_value.strip()
+        try:
+            source_path = _resolve_run_local_path(run_dir=run_dir, raw_path=raw_path)
+        except ValueError:
+            _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_PATH_INVALID)
+            if field.required:
+                missing_required_fields.append(field.name)
             continue
-        attempted = True
-        source_path = _resolve_source_path_in_run(
-            raw_path=raw_path.strip(),
-            run_dir=run_dir,
-        )
-        if source_path is None:
-            _append_unique_warning(
-                warning_codes,
-                WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR,
-            )
+
+        if source_path is None or not source_path.exists() or not source_path.is_file():
+            _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_PATH_MISSING)
+            if field.required:
+                missing_required_fields.append(field.name)
             continue
-        if not source_path.exists() or not source_path.is_file():
-            source_path = _locate_candidate_by_filename_in_run(
+
+        resolved_source = source_path.resolve()
+        if not resolved_source.is_relative_to(normalized_run_dir):
+            target_path = _fallback_target_path(
                 run_dir=run_dir,
-                file_name=Path(raw_path.strip()).name,
+                field_name=field.name,
+                source_path=resolved_source,
             )
-            if source_path is None:
-                continue
-        source_resolved = source_path.resolve()
-        if not source_resolved.is_relative_to(normalized_run_dir):
-            _append_unique_warning(
-                warning_codes,
-                WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR,
-            )
-            continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(resolved_source), str(target_path))
+            resolved_source = target_path.resolve()
+            _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR)
 
-        target_path = (run_dir / "artifacts" / pattern).resolve()
-        if not target_path.is_relative_to(normalized_run_dir):
-            _append_unique_warning(
-                warning_codes,
-                WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_OUTSIDE_RUN_DIR,
-            )
-            continue
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        if target_path.exists():
-            _append_unique_warning(
-                warning_codes,
-                WARNING_OUTPUT_ARTIFACT_PATH_REPAIR_TARGET_EXISTS,
-            )
-            continue
-        shutil.move(str(source_resolved), str(target_path))
-        updated_output[field_name] = str(target_path)
-        repaired_count += 1
+        rel_path = resolved_source.relative_to(normalized_run_dir).as_posix()
+        if updated_output.get(field.name) != rel_path:
+            updated_output[field.name] = rel_path
+            _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN)
+        artifacts.append(rel_path)
 
-    if repaired_count > 0:
-        _append_unique_warning(
-            warning_codes,
-            WARNING_OUTPUT_ARTIFACT_PATH_REPAIRED,
-        )
-
-    return ArtifactPathAutofixResult(
+    return ArtifactResolutionResult(
         output_data=updated_output,
-        warnings=warning_codes,
-        attempted=attempted,
-        repaired_count=repaired_count,
+        artifacts=sorted(dict.fromkeys(artifacts)),
+        warnings=warnings,
+        missing_required_fields=missing_required_fields,
     )
 
 
@@ -148,53 +114,54 @@ def _append_unique_warning(warnings: List[str], code: str) -> None:
         warnings.append(code)
 
 
-def _resolve_source_path_in_run(*, raw_path: str, run_dir: Path) -> Path | None:
-    candidate = Path(raw_path)
-    if not candidate.is_absolute():
-        candidate = run_dir / candidate
-    resolved = candidate.resolve()
-    if not resolved.is_relative_to(run_dir.resolve()):
-        return None
-    return resolved
-
-
-def _locate_candidate_by_filename_in_run(
-    *,
-    run_dir: Path,
-    file_name: str,
-) -> Path | None:
-    if not file_name:
-        return None
-    matches = [path for path in run_dir.rglob(file_name) if path.is_file()]
-    if len(matches) != 1:
-        return None
-    return matches[0].resolve()
-
-
-def _load_artifact_output_field_mapping(skill: SkillManifest) -> Dict[str, str]:
+def _load_output_artifact_fields(skill: SkillManifest) -> List[_ArtifactField]:
     schema = _load_output_schema(skill)
-    if not schema:
-        return {}
+    if not isinstance(schema, dict):
+        return []
     properties = schema.get("properties")
     if not isinstance(properties, dict):
-        return {}
-
-    mapping: Dict[str, str] = {}
+        return []
+    required_fields = {
+        field.strip()
+        for field in schema.get("required", [])
+        if isinstance(field, str) and field.strip()
+    }
+    fields: List[_ArtifactField] = []
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str) or not isinstance(field_schema, dict):
             continue
-        x_type = field_schema.get("x-type")
-        if x_type not in {"artifact", "file"}:
+        if str(field_schema.get("x-type") or "").strip().lower() not in {"artifact", "file"}:
             continue
-        raw_pattern = field_schema.get("x-filename")
-        if isinstance(raw_pattern, str) and raw_pattern.strip():
-            pattern = raw_pattern.strip()
-        else:
-            pattern = field_name
-        if pattern not in mapping:
-            mapping[pattern] = field_name
-    return mapping
+        fields.append(_ArtifactField(name=field_name, required=field_name in required_fields))
+    return fields
 
 
 def _load_output_schema(skill: SkillManifest) -> Dict[str, Any] | None:
     return load_resolved_json(resolve_schema_asset(skill, "output").path)
+
+
+def _resolve_run_local_path(*, run_dir: Path, raw_path: str) -> Path | None:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    normalized_rel = _normalize_relative_path(raw_path)
+    return (run_dir / normalized_rel).resolve()
+
+
+def _normalize_relative_path(raw_path: str) -> str:
+    normalized = PurePosixPath(raw_path.strip().replace("\\", "/"))
+    if normalized.is_absolute():
+        raise ValueError("absolute path is not allowed")
+    for part in normalized.parts:
+        if part in {"", ".", ".."}:
+            raise ValueError("invalid path")
+    rel_path = normalized.as_posix()
+    if not rel_path:
+        raise ValueError("path is required")
+    return rel_path
+
+
+def _fallback_target_path(*, run_dir: Path, field_name: str, source_path: Path) -> Path:
+    file_name = source_path.name or field_name
+    return run_dir / "artifacts" / field_name / file_name

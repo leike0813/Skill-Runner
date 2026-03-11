@@ -311,7 +311,7 @@ def _skeleton_value(field_schema: Dict[str, Any]) -> Any:
     """Generate a placeholder value for a single field."""
     # Artifact fields
     if field_schema.get("x-type") == "artifact":
-        return "{{ run_dir }}/artifacts/" + (field_schema.get("x-filename") or "...")
+        return "artifacts/..."
 
     # anyOf / oneOf → prefer non-null variant for skeleton
     for combo_key in ("anyOf", "oneOf"):

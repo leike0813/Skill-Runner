@@ -1,34 +1,4 @@
-# run-file-contract Specification
-
-## Purpose
-TBD - created by archiving change complete-runtime-file-contract-cutover-and-scan. Update Purpose after archive.
-## Requirements
-### Requirement: New Runs Emit Only Canonical Runtime Files
-
-New runs MUST emit only the canonical runtime file layout.
-
-#### Scenario: create-run initializes canonical directories only
-- **WHEN** a new run directory is created
-- **THEN** it contains `.state/`, `.audit/`, `result/`, `artifacts/`, `bundle/`, and `uploads/`
-- **AND** it does not contain `interactions/`, `logs/`, `raw/`, `status.json`, `current/projection.json`, or root `input.json`
-
-### Requirement: Waiting Payload Lives Only In State
-
-Current waiting payload MUST live only inside `.state/state.json`.
-
-#### Scenario: run enters waiting_auth or waiting_user
-- **WHEN** the run transitions into `waiting_auth` or `waiting_user`
-- **THEN** current waiting data is embedded under `.state/state.json.pending`
-- **AND** no `interactions/pending*.json` file exists
-
-### Requirement: New Runs Must Not Emit Legacy Output Files
-
-New runs MUST NOT emit legacy output or mirror files.
-
-#### Scenario: process output is captured for a new run
-- **WHEN** attempt logs are written
-- **THEN** `.audit/stdout.<attempt>.log` and `.audit/stderr.<attempt>.log` are used
-- **AND** `logs/stdout.txt`, `logs/stderr.txt`, and `raw/output.json` are absent
+## ADDED Requirements
 
 ### Requirement: Artifact contract MUST be driven by output artifact-path fields
 The system MUST treat output fields marked with `x-type: artifact|file` as the canonical artifact contract.
@@ -58,7 +28,7 @@ Non-debug bundles MUST include only `result/result.json` and resolved artifact f
 File inputs MUST be expressible as `uploads/`-relative paths in `POST /v1/jobs`.
 
 #### Scenario: file input declared as uploads-relative path
-- **WHEN** a client submits `input.paper = "papers/a.pdf"`
+- **WHEN** a client submits `input.paper = \"papers/a.pdf\"`
 - **AND** upload zip contains `papers/a.pdf`
 - **THEN** runtime resolves the file to the uploaded file and injects its absolute path
 

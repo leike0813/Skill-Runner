@@ -259,6 +259,14 @@ The system MUST publish FCMP into a live journal first and MUST deliver active S
 ### Requirement: events/history MUST support memory-first replay with audit fallback
 The system MUST replay active and recently terminal FCMP events from memory first and MUST fall back to audit only when the requested cursor falls outside the live retention window or live memory is unavailable.
 
+### Requirement: jobs create API MUST accept declarative file input paths
+The `POST /v1/jobs` API MUST accept file-sourced input values in the request body as `uploads/`-relative paths.
+
+#### Scenario: create request carries inline and file inputs together
+- **WHEN** a client submits mixed inline and file inputs in `input`
+- **THEN** the backend accepts both in the same payload
+- **AND** file values are treated as uploads-relative path references
+
 #### Scenario: recent cursor replays from memory
 - **WHEN** the client calls `/events/history` for a recent cursor on an active or recently terminal run
 - **THEN** the response MAY use `source=live`

@@ -78,13 +78,13 @@ def test_generate_output_schema_patch_artifact_field_description_and_skeleton():
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
-                "x-filename": "digest.md",
             }
         },
     }
     patch = generate_output_schema_patch(schema)
-    assert "Artifact output path (set by runtime, see \"Runtime Output Overrides\" above)." in patch
-    assert "{{ run_dir }}/artifacts/digest.md" in patch
+    assert "Artifact output path." in patch
+    assert "bundle-relative path" in patch
+    assert "artifacts/..." in patch
 
 
 def test_generate_output_schema_patch_array_item_count_constraints_and_valid_skeleton():

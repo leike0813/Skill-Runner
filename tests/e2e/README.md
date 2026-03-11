@@ -45,7 +45,6 @@ Covered behaviors:
 - `GET /v1/temp-skill-runs/{request_id}` status polling
 - `GET /v1/jobs/{request_id}/result`
 - `GET /v1/temp-skill-runs/{request_id}/result`
-- `GET /v1/jobs/{request_id}/artifacts` (列表)
 - `GET /v1/temp-skill-runs/{request_id}/artifacts` (列表)
 - `GET /v1/jobs/{request_id}/bundle` (下载 bundle)
 - `GET /v1/temp-skill-runs/{request_id}/bundle` (下载 bundle)
