@@ -37,7 +37,7 @@
 - `POST /v1/management/engines/{engine}/auth/import`：提交并导入鉴权文件（multipart）
 
 ### Run 管理（对话窗口）
-- `GET /v1/management/runs`：运行摘要列表（支持 `limit`）
+- `GET /v1/management/runs`：运行摘要列表（支持 `page/page_size`，兼容 `limit`）
 - `GET /v1/management/runs/{request_id}`：会话状态（含 `pending_interaction_id`、`interaction_count`、`recovery_state/recovered_at/recovery_reason`）
 - `GET /v1/management/runs/{request_id}/files`：文件树
 - `GET /v1/management/runs/{request_id}/file?path=...`：文件预览
@@ -174,6 +174,39 @@
 - `400`: `confirmation` 文本不匹配。
 - `409`: 另一个重置操作正在进行中。
 - `500`: 文件系统错误。
+
+### 管理 Run 摘要列表（分页）
+`GET /v1/management/runs`
+
+返回管理端 Run 摘要列表，支持分页。
+
+**Query 参数**:
+- `page`（可选，默认 `1`，最小 `1`）
+- `page_size`（可选，默认 `20`，最小 `1`，最大 `200`）
+- `limit`（可选，兼容旧参数；未提供 `page_size` 时生效）
+
+**Response** (`ManagementRunListResponse`):
+```json
+{
+  "runs": [
+    {
+      "request_id": "d290f1ee-...",
+      "run_id": "9d2c1f31-...",
+      "skill_id": "demo-interactive-skill",
+      "engine": "codex",
+      "model": "gpt-5.4",
+      "status": "running",
+      "pending_interaction_id": null,
+      "interaction_count": 0,
+      "updated_at": "2026-03-11T09:20:00Z"
+    }
+  ],
+  "total": 128,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 7
+}
+```
 
 ### 对话事件流（Chat SSE）
 `GET /v1/management/runs/{request_id}/chat`
@@ -493,7 +526,7 @@
 - **缓存策略**:
   - 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查。
   - `runtime_options.execution_mode=interactive` 时，系统会跳过缓存命中，且不会写入 `cache_entries`。
-- **Debug Bundle**: 设置 `runtime_options.debug=true` 时，bundle 会打包整个 `run_dir`（含 logs/result/artifacts 等）；默认 `false` 时仅包含 `result/result.json` 与 `artifacts/**`。两者分别包含 `bundle/manifest_debug.json` 与 `bundle/manifest.json`。
+- **Debug Bundle**: 普通 bundle 与 Debug Bundle 是两个独立下载产物；是否下载 debug 版本不再由 `runtime_options` 控制。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
 - **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
@@ -527,6 +560,7 @@
   "status": "waiting_user",
   "skill_id": "demo-prime-number",
   "engine": "gemini",
+  "model": "gemini-3.1-pro-preview",
   "created_at": "2024-01-01T12:00:00Z",
   "updated_at": "2024-01-01T12:01:00Z",
   "pending_interaction_id": 12,
@@ -562,6 +596,7 @@
 说明：
 - `waiting_user` 为非终态，客户端应按 pending/reply 流程推进，而不是直接结束。
 - `pending_interaction_id` 为空表示当前没有待决交互。
+- `model` 为本次 run 记录的模型标识（若请求未显式指定则可能为空）。
 - `pending_auth_session_id` 非空时，表示 run 正在等待引擎鉴权，客户端应查询 `auth/session`。
 - `pending_payload` 包含待决事项的额外结构化载荷（如鉴权 URL 等），可用于前端直接渲染。
 - `interaction_count` 为当前 request 已记录的交互轮次计数。
@@ -739,10 +774,20 @@
 
 **Response**:
 - 直接返回 Bundle Zip 文件（`Content-Type: application/zip`）
-- `Content-Disposition` 中的文件名为 `run_bundle.zip`（debug=false）或 `run_bundle_debug.zip`（debug=true）
+- `Content-Disposition` 文件名为 `run_bundle.zip`
 
 **说明**:
-- Bundle 内包含运行产物与 `bundle/manifest.json`；debug=true 时会额外包含 logs 等调试文件，并使用 `bundle/manifest_debug.json`。
+- Bundle 内包含运行产物与 `bundle/manifest.json`。
+
+### 下载 Debug Bundle (Get Debug Bundle)
+`GET /v1/jobs/{request_id}/bundle/debug`
+
+**Response**:
+- 直接返回 Debug Bundle Zip 文件（`Content-Type: application/zip`）
+- `Content-Disposition` 文件名为 `run_bundle_debug.zip`
+
+**说明**:
+- Debug Bundle 会额外包含 logs 等调试文件，并使用 `bundle/manifest_debug.json`。
 
 ### 获取 Run 文件树 (Get Run Files)
 `GET /v1/jobs/{request_id}/files`
@@ -1152,12 +1197,18 @@ UI 层提供的引擎鉴权前端流程接口（代理后端 V2 Auth API）：
 
 页面能力：
 - 按 `request_id` 展示 run 列表（关联 `run_id`）；
+- 列表按页展示（默认 20 条/页），并支持“进入详情后返回原分页”；
+- 列表包含 `model` 列；
 - 展示当前状态、`pending_interaction_id`、`interaction_count`、`recovery_state` 与更新时间；
 - 轮询建议遵循 `poll_logs`：`queued/running=true`，`waiting_user=false`；
 - 支持自动刷新列表。
 
 ### Run 列表数据（Management Adapter）
 `GET /ui/management/runs/table`
+
+Query 参数：
+- `page`（可选，默认 `1`）
+- `page_size`（可选，默认 `20`）
 
 兼容旧接口（已弃用）：
 - `GET /ui/runs/table`
@@ -1167,6 +1218,7 @@ UI 层提供的引擎鉴权前端流程接口（代理后端 V2 Auth API）：
 
 页面能力：
 - 展示 request/run 基本信息；
+- run 动作区包含并列 `Download Bundle` 与 `Download Debug Bundle` 按钮（仅成功终态可用）；
 - 展示 run 文件树（只读）与文件预览；文件区采用最大高度约束并在区内滚动；
 - 通过 SSE 实时查看输出：主对话优先消费 `chat_event`（FCMP），并将诊断/原始日志分区展示；
 - 支持 `raw_ref` 回跳：从结构化消息定位并预览原始日志区间；

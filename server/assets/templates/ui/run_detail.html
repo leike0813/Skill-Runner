@@ -50,8 +50,19 @@
         .danger:hover { background: #991b1b; }
         .pane-scroll { height: var(--file-pane-height); max-height: var(--file-pane-height); overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
         .file-preview-pane { background: #ffffff; border-color: #d1d5db; }
+        .preview-markdown table { width: 100%; border-collapse: collapse; }
+        .preview-markdown td { vertical-align: top; }
+        .preview-markdown td.linenos {
+            width: 52px;
+            min-width: 52px;
+            padding-right: 10px;
+            border-right: 1px solid #e2e8f0;
+            color: #64748b;
+            user-select: none;
+        }
+        .preview-markdown td.code { padding-left: 10px; color: #0f172a; }
         .conversation-window { height: 380px; min-height: 380px; max-height: 380px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
-        .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
+        .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; overflow-wrap: anywhere; word-break: break-word; }
         .chat-item.system { background: #f3f4f6; }
         .chat-item.user { background: #e8f5ec; }
         .chat-item.thinking { border-style: dashed; border-color: #bfdbfe; background: #eff6ff; cursor: pointer; }
@@ -103,6 +114,8 @@
             font-size: 12px;
             color: #0f172a;
             white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
         .stderr-window {
             max-height: 220px;
@@ -331,6 +344,21 @@
             gap: 8px;
             align-items: start;
             margin-bottom: 8px;
+            padding: 2px 4px;
+            border-radius: 8px;
+        }
+        .timeline-event-row.attempt-cycle-0 { background: rgba(239, 246, 255, 0.55); }
+        .timeline-event-row.attempt-cycle-1 { background: rgba(250, 245, 255, 0.55); }
+        .timeline-event-row.attempt-cycle-2 { background: rgba(236, 253, 245, 0.55); }
+        .timeline-attempt-separator {
+            margin: 10px 0 8px;
+            font-size: 11px;
+            color: #475569;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            border-top: 1px solid #d1d5db;
+            padding-top: 6px;
         }
         .timeline-time {
             font-size: 11px;
@@ -398,6 +426,19 @@
         .timeline-load-more:hover {
             background: #cbd5e1;
         }
+        .file-toolbar-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            min-height: 34px;
+            padding: 8px 14px;
+            line-height: 1.2;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            text-decoration: none;
+        }
         @media (max-width: 960px) {
             .row, .row.three { grid-template-columns: 1fr; }
             .timeline-lane-header,
@@ -413,10 +454,22 @@
     <div class="card">
         {% set header_title = t("ui.run_detail.request_label", default="Request:") ~ " " ~ detail.request_id %}
         {% set header_subtitle = none %}
-        {% set header_back_href = "/ui/runs" %}
+        {% set header_back_href = "/ui/runs?page=" ~ return_page ~ "&page_size=" ~ return_page_size %}
         {% set header_back_label = t("ui.run_detail.back_runs", default="← Back to Runs") %}
         {% include "ui/partials/page_header.html" %}
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin:6px 0 0;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin:6px 0 0; flex-wrap: wrap;">
+            <a
+                id="bundle-download-btn"
+                class="btn btn-secondary file-toolbar-btn"
+                href="/v1/jobs/{{ detail.request_id }}/bundle"
+                download
+            >{{ t("ui.run_detail.download_bundle", default="Download Bundle") }}</a>
+            <a
+                id="bundle-debug-download-btn"
+                class="btn btn-secondary file-toolbar-btn"
+                href="/v1/jobs/{{ detail.request_id }}/bundle/debug"
+                download
+            >{{ t("ui.run_detail.download_debug_bundle", default="Download Debug Bundle") }}</a>
             <button id="rebuild-protocol-btn" type="button">{{ t("ui.run_detail.rebuild_protocol", default="重构协议") }}</button>
             <button id="cancel-run-btn" class="danger" type="button">{{ t("ui.run_detail.cancel_run", default="Cancel Run") }}</button>
         </div>
@@ -424,6 +477,7 @@
         <div class="meta">{{ t("ui.run_detail.meta_run_id", default="run_id:") }} {{ detail.run_id }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_skill", default="skill:") }} {{ detail.skill_id or "-" }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_engine", default="engine:") }} {{ detail.engine or "-" }}</div>
+        <div class="meta">{{ t("ui.run_detail.meta_model", default="model:") }} {{ detail.model or "-" }}</div>
         <div class="meta">{{ t("ui.run_detail.meta_status", default="status:") }} <span id="run-status">{{ detail.status }}</span></div>
         <div class="meta">{{ t("ui.run_detail.meta_updated_at", default="updated_at:") }} <span id="run-updated-at">{{ detail.updated_at or "-" }}</span></div>
         <div class="meta">{{ t("ui.run_detail.meta_pending_interaction_id", default="pending_interaction_id:") }} <span id="run-pending-id">{{ detail.pending_interaction_id if detail.pending_interaction_id is not none else "-" }}</span></div>
@@ -589,6 +643,7 @@
         fileBytes: {{ t("ui.file_preview.bytes", default="bytes") | tojson }},
         fileFormatMarkdown: {{ t("client.file_format_markdown", default="Markdown") | tojson }},
         fileFormatJson: {{ t("client.file_format_json", default="JSON") | tojson }},
+        fileFormatJsonl: {{ t("client.file_format_jsonl", default="JSONL") | tojson }},
         fileFormatYaml: {{ t("client.file_format_yaml", default="YAML") | tojson }},
         fileFormatToml: {{ t("client.file_format_toml", default="TOML") | tojson }},
         fileFormatPython: {{ t("client.file_format_python", default="Python") | tojson }},
@@ -611,7 +666,6 @@
         rebuildProtocolDone: {{ t("ui.run_detail.rebuild_protocol_done", default="Protocol rebuild finished") | tojson }},
     };
     const requestId = {{ detail.request_id | tojson }};
-    const runFileEntries = {{ detail.entries | tojson }};
     const statusEl = document.getElementById("run-status");
     const updatedAtEl = document.getElementById("run-updated-at");
     const pendingIdEl = document.getElementById("run-pending-id");
@@ -644,6 +698,8 @@
     const rebuildProtocolBtn = document.getElementById("rebuild-protocol-btn");
     const rebuildProtocolResultEl = document.getElementById("protocol-rebuild-result");
     const cancelBtn = document.getElementById("cancel-run-btn");
+    const bundleDownloadBtn = document.getElementById("bundle-download-btn");
+    const bundleDebugDownloadBtn = document.getElementById("bundle-debug-download-btn");
 
     const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
     const renderedChatSeq = new Set();
@@ -684,6 +740,8 @@
     let timelineExpandedKey = null;
     const timelineRows = [];
     const timelineBySeq = new Map();
+    let runFileExplorer = null;
+    let runFileTreeRefreshInFlight = false;
     let lastTerminalErrorMessage = {{ (
         detail.result.error.message
         if detail.result and detail.result.error and detail.result.error.message
@@ -715,6 +773,44 @@
         target.scrollTop = target.scrollHeight;
         if (target === stderrEl) {
             updateStderrIndicator();
+        }
+    }
+
+    function applyActionButtonState(status) {
+        const normalized = safeText(status).trim().toLowerCase();
+        const isTerminalStatus = terminalStatuses.has(normalized);
+        const canDownload = normalized === "succeeded";
+        if (bundleDownloadBtn) {
+            if (canDownload) {
+                bundleDownloadBtn.classList.remove("disabled");
+                bundleDownloadBtn.removeAttribute("aria-disabled");
+                bundleDownloadBtn.style.pointerEvents = "";
+                bundleDownloadBtn.tabIndex = 0;
+            } else {
+                bundleDownloadBtn.classList.add("disabled");
+                bundleDownloadBtn.setAttribute("aria-disabled", "true");
+                bundleDownloadBtn.style.pointerEvents = "none";
+                bundleDownloadBtn.tabIndex = -1;
+            }
+        }
+        if (bundleDebugDownloadBtn) {
+            if (canDownload) {
+                bundleDebugDownloadBtn.classList.remove("disabled");
+                bundleDebugDownloadBtn.removeAttribute("aria-disabled");
+                bundleDebugDownloadBtn.style.pointerEvents = "";
+                bundleDebugDownloadBtn.tabIndex = 0;
+            } else {
+                bundleDebugDownloadBtn.classList.add("disabled");
+                bundleDebugDownloadBtn.setAttribute("aria-disabled", "true");
+                bundleDebugDownloadBtn.style.pointerEvents = "none";
+                bundleDebugDownloadBtn.tabIndex = -1;
+            }
+        }
+        if (rebuildProtocolBtn) {
+            rebuildProtocolBtn.disabled = !isTerminalStatus;
+        }
+        if (cancelBtn) {
+            cancelBtn.disabled = isTerminalStatus;
         }
     }
 
@@ -914,6 +1010,13 @@
         return date.toLocaleTimeString([], { hour12: false });
     }
 
+    function formatDateTime(ts) {
+        if (typeof ts !== "string" || !ts.trim()) return "-";
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) return ts;
+        return date.toLocaleString([], { hour12: false });
+    }
+
     function updateTimelineHeader() {
         if (!timelineCountEl) return;
         const visibleCount = timelineCeiling > 0 ? Math.min(timelineRows.length, timelineCeiling) : timelineRows.length;
@@ -946,11 +1049,24 @@
             "chat_history",
             "client",
         ];
+        let previousAttempt = null;
         for (let idx = 0; idx < timelineRows.length; idx += 1) {
             const event = timelineRows[idx];
             const rowKey = timelineRowKey(event, idx);
+            const attemptNumberObj = Number(event && event.attempt);
+            const attemptNumber = Number.isFinite(attemptNumberObj) && attemptNumberObj > 0
+                ? Math.floor(attemptNumberObj)
+                : null;
+            if (attemptNumber !== null && attemptNumber !== previousAttempt) {
+                const separator = document.createElement("div");
+                separator.className = "timeline-attempt-separator";
+                separator.textContent = `${I18N.metaAttemptPrefix} ${attemptNumber}`;
+                fragment.appendChild(separator);
+                previousAttempt = attemptNumber;
+            }
             const rowEl = document.createElement("div");
-            rowEl.className = "timeline-event-row";
+            const cycleClass = attemptNumber === null ? "" : ` attempt-cycle-${attemptNumber % 3}`;
+            rowEl.className = `timeline-event-row${cycleClass}`;
 
             const timeEl = document.createElement("div");
             timeEl.className = "timeline-time";
@@ -1641,7 +1757,7 @@
 
     async function initRunFileExplorer() {
         if (!window.SkillRunnerFileExplorer || !runFileTreePanelEl || !runFilePreviewEl) return;
-        const explorer = window.SkillRunnerFileExplorer.mountFileExplorer({
+        runFileExplorer = window.SkillRunnerFileExplorer.mountFileExplorer({
             treeEl: runFileTreePanelEl,
             previewEl: runFilePreviewEl,
             defaultCollapsed: true,
@@ -1665,18 +1781,27 @@
             formatLabels: {
                 markdown: I18N.fileFormatMarkdown,
                 json: I18N.fileFormatJson,
+                jsonl: I18N.fileFormatJsonl,
                 yaml: I18N.fileFormatYaml,
                 toml: I18N.fileFormatToml,
                 python: I18N.fileFormatPython,
                 javascript: I18N.fileFormatJavascript,
                 text: I18N.fileFormatText,
             },
-            getEntries: async () => runFileEntries.map((entry) => ({
-                path: safeText(entry.rel_path),
-                name: safeText(entry.name),
-                is_dir: Boolean(entry.is_dir),
-                depth: Number(entry.depth || 0),
-            })),
+            getEntries: async () => {
+                const res = await fetch(`/v1/management/runs/${requestId}/files`);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const payload = await res.json();
+                const entries = Array.isArray(payload.entries) ? payload.entries : [];
+                return entries.map((entry) => ({
+                    path: safeText(entry.path || entry.rel_path),
+                    name: safeText(entry.name),
+                    is_dir: Boolean(entry.is_dir),
+                    depth: Number(entry.depth || 0),
+                }));
+            },
             onOpenFile: async (entry) => {
                 const path = encodeURIComponent(safeText(entry.path));
                 const res = await fetch(`/v1/management/runs/${requestId}/file?path=${path}`);
@@ -1691,7 +1816,17 @@
                 };
             },
         });
-        await explorer.load();
+        await runFileExplorer.load();
+    }
+
+    async function refreshRunFileTree() {
+        if (!runFileExplorer || runFileTreeRefreshInFlight) return;
+        runFileTreeRefreshInFlight = true;
+        try {
+            await runFileExplorer.load();
+        } finally {
+            runFileTreeRefreshInFlight = false;
+        }
     }
 
     function clearWaitingUserWatchdog() {
@@ -1826,9 +1961,10 @@
                 clearWaitingUserWatchdog();
                 clearWaitingAuthWatchdog();
             }
+            applyActionButtonState(payload.status);
         }
         if (typeof payload.updated_at === "string" && payload.updated_at) {
-            updatedAtEl.textContent = payload.updated_at;
+            updatedAtEl.textContent = formatDateTime(payload.updated_at);
         }
         const resultObj = payload.result && typeof payload.result === "object" ? payload.result : null;
         const resultError = resultObj && resultObj.error && typeof resultObj.error === "object"
@@ -1866,6 +2002,7 @@
                 loadProtocolPanel("rasp", raspAuditEl),
                 loadProtocolPanel("orchestrator", orchestratorAuditEl),
             ]).catch(() => {});
+            refreshRunFileTree().catch(() => {});
         }
     }
 
@@ -1909,6 +2046,9 @@
     }
 
     function updateAvailableAttempts(candidates) {
+        const previousMaxAttempt = availableAttempts.length
+            ? availableAttempts[availableAttempts.length - 1]
+            : 0;
         if (!Array.isArray(candidates) || !candidates.length) {
             if (!availableAttempts.length) {
                 availableAttempts.push(currentAttempt);
@@ -1922,6 +2062,12 @@
             availableAttempts.push(Math.floor(attempt));
         }
         availableAttempts.sort((a, b) => a - b);
+        const nextMaxAttempt = availableAttempts.length
+            ? availableAttempts[availableAttempts.length - 1]
+            : 0;
+        if (nextMaxAttempt > previousMaxAttempt) {
+            refreshRunFileTree().catch(() => {});
+        }
     }
 
     async function refreshProtocolHistory(streamName, targetEl) {
@@ -2155,7 +2301,7 @@
                     rebuildProtocolResultEl.textContent = `${I18N.rebuildProtocolFailed}: ${String(error)}`;
                 }
             } finally {
-                rebuildProtocolBtn.disabled = false;
+                applyActionButtonState(statusEl.textContent || "");
             }
         });
     }
@@ -2165,6 +2311,7 @@
         if (idx <= 0) return;
         currentAttempt = availableAttempts[idx - 1];
         updateAttemptPager();
+        await refreshRunFileTree();
         await loadProtocolPanel("fcmp", fcmpAuditEl);
         await loadProtocolPanel("rasp", raspAuditEl);
         await loadProtocolPanel("orchestrator", orchestratorAuditEl);
@@ -2176,6 +2323,7 @@
         if (idx < 0 || idx >= availableAttempts.length - 1) return;
         currentAttempt = availableAttempts[idx + 1];
         updateAttemptPager();
+        await refreshRunFileTree();
         await loadProtocolPanel("fcmp", fcmpAuditEl);
         await loadProtocolPanel("rasp", raspAuditEl);
         await loadProtocolPanel("orchestrator", orchestratorAuditEl);
@@ -2227,6 +2375,11 @@
             renderTimeline();
         });
     }
+
+    if (updatedAtEl) {
+        updatedAtEl.textContent = formatDateTime(updatedAtEl.textContent || "");
+    }
+    applyActionButtonState(statusEl.textContent || "");
 
     setInterval(() => {
         loadStderrForAttempt().catch(() => {});

@@ -101,7 +101,6 @@
             <div class="row">
                 <div style="flex: 1 1 260px;">
                     <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> {{ t("client.run_form_no_cache", default="Disable cache") }}</label><br>
-                    <label><input type="checkbox" name="runtime__debug" {% if submitted_runtime_options.get("debug") %}checked{% endif %}> {{ t("client.run_form_debug", default="Debug mode") }}</label><br>
                 </div>
             </div>
             <div id="runtime_interactive_section" class="row" style="margin-top: 12px;">

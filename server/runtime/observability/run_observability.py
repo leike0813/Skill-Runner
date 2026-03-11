@@ -2538,6 +2538,29 @@ class RunObservabilityService:
 
     async def list_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
         rows = await maybe_await(self._run_store().list_requests_with_runs(limit=limit))
+        return await self._build_run_rows(rows)
+
+    async def list_runs_paginated(self, *, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        safe_page = max(1, int(page))
+        safe_page_size = max(1, min(int(page_size), 1000))
+        total = await maybe_await(self._run_store().count_requests_with_runs())
+        rows = await maybe_await(
+            self._run_store().list_requests_with_runs_page(
+                page=safe_page,
+                page_size=safe_page_size,
+            )
+        )
+        runs = await self._build_run_rows(rows)
+        total_pages = (total + safe_page_size - 1) // safe_page_size if total > 0 else 0
+        return {
+            "runs": runs,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total": total,
+            "total_pages": total_pages,
+        }
+
+    async def _build_run_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         for row in rows:
             run_id_obj = row.get("run_id")
@@ -2569,6 +2592,7 @@ class RunObservabilityService:
                     "run_id": run_id,
                     "skill_id": row.get("skill_id"),
                     "engine": row.get("engine"),
+                    "model": self._resolve_model_from_row(row),
                     "status": run_status,
                     "updated_at": updated_at,
                     "effective_session_timeout_sec": (
@@ -2630,6 +2654,7 @@ class RunObservabilityService:
             "run_dir": str(run_dir_path),
             "skill_id": record.get("skill_id"),
             "engine": record.get("engine"),
+            "model": self._resolve_model_from_row(record),
             "status": run_status,
             "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir_path, record),
             "effective_session_timeout_sec": await maybe_await(self._run_store().get_effective_session_timeout(request_id)),
@@ -2655,6 +2680,26 @@ class RunObservabilityService:
             "source_attempt": status_payload.get("source_attempt"),
             "target_attempt": status_payload.get("target_attempt"),
         }
+
+    def _resolve_model_from_row(self, row: Dict[str, Any]) -> str | None:
+        if not isinstance(row, dict):
+            return None
+        engine_options = row.get("engine_options")
+        if not isinstance(engine_options, dict):
+            engine_options_raw = row.get("engine_options_json")
+            if isinstance(engine_options_raw, str) and engine_options_raw:
+                try:
+                    parsed = json.loads(engine_options_raw)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    parsed = {}
+                engine_options = parsed if isinstance(parsed, dict) else {}
+            else:
+                engine_options = {}
+        for key in ("model", "model_id"):
+            value = engine_options.get(key) if isinstance(engine_options, dict) else None
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     async def resolve_run_file_path(self, request_id: str, relative_path: str) -> Path:
         detail = await self.get_run_detail(request_id)

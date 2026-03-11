@@ -5,12 +5,27 @@
 
 ## Requirements
 ### Requirement: Harness CLI MUST 提供独立入口并保持与主服务解耦
-系统 MUST 提供独立的 harness CLI 入口，运行于独立代码目录；其执行不依赖启动主服务 UI 或改写主服务路由行为。
+系统 MUST 提供独立的 harness CLI 入口，运行于独立代码目录；其执行不依赖启动主服务 UI 或改写主服务路由行为。系统同时 MUST 在容器部署场景提供独立的宿主机 wrapper，将调用显式转发到容器内 harness。
 
 #### Scenario: 独立入口可执行
 - **WHEN** 用户在项目根目录调用 harness CLI
 - **THEN** CLI 可以在不启动主服务开发服务器的前提下执行
 - **AND** 主服务对外 API 路径与行为不因 harness 存在而改变
+
+#### Scenario: local harness remains local
+- **WHEN** 用户在本地环境执行 `agent-harness ...`
+- **THEN** CLI 继续在当前环境直接执行
+- **AND** 不自动转发到 docker 容器
+
+#### Scenario: container wrapper forwards to api service harness
+- **WHEN** 用户在容器部署场景执行项目提供的 harness container wrapper
+- **THEN** wrapper 使用 `docker compose exec api agent-harness ...` 转发调用
+- **AND** 原样透传参数、stdin/stdout/stderr 与退出码
+
+#### Scenario: wrapper fails clearly when compose api is unavailable
+- **WHEN** docker 或 `api` 服务不可用
+- **THEN** wrapper 返回明确错误
+- **AND** 不静默回退到宿主机本地 `agent-harness`
 
 ### Requirement: Harness CLI MUST 支持 start 与 passthrough 参数透传
 系统 MUST 支持 `start [--auto] <engine> [passthrough-args...]`。  
@@ -119,4 +134,3 @@
 - **WHEN** 用户执行 opencode start/resume 且运行环境缺失 opencode 可执行文件
 - **THEN** harness 返回结构化缺失错误并附带可诊断信息
 - **AND** MUST NOT 静默回退到其它引擎
-

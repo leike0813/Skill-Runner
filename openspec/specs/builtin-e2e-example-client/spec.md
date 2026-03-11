@@ -177,12 +177,17 @@ The example client MUST present a product-style chat experience while preserving
 - **AND** 仅通过入口命令区分服务角色
 
 ### Requirement: 示例客户端 Run Observation MUST 提供 bundle 下载入口
-示例客户端 MUST 在 Run Observation 页面提供可直接下载当前 run bundle 的入口，避免用户离开 E2E 页面进行二次操作。
+示例客户端 MUST 在 Run Observation 页面提供可直接下载当前 run bundle 的入口，并继续提供独立的 debug bundle 下载入口；两者均不依赖 runtime options 中的 debug 开关。
 
 #### Scenario: user downloads run bundle from observation page
 - **WHEN** 用户在 `/runs/{request_id}` 页面点击下载 bundle
 - **THEN** 浏览器开始下载 zip 文件
 - **AND** 下载目标对应当前 run 的 bundle 内容
+
+#### Scenario: debug bundle remains downloadable without runtime debug option
+- **WHEN** 用户在 `/runs/{request_id}` 页面查看成功终态 run
+- **THEN** 页面继续提供 `Download Bundle` 与 `Download Debug Bundle`
+- **AND** 两个入口的可用性与 `runtime_options.debug` 无关
 
 #### Scenario: download action does not break file explorer
 - **WHEN** 用户触发 bundle 下载
@@ -220,3 +225,53 @@ E2E 对话区 MUST 在 `assistant_final` 到达时移除已提升的过程条目
 - **THEN** UI MUST 优先按 `message_id` 删除对应过程条目
 - **AND** 若 `message_id` 缺失，MUST 在同 attempt 按规范化文本精确匹配删除
 
+### Requirement: Built-in E2E runtime options UI MUST follow context-aware visibility
+E2E 客户端 runtime options 区域 MUST 仅暴露仍然有效的运行参数，不得继续展示已下线的 runtime debug 开关。
+
+#### Scenario: runtime debug option is removed
+- **WHEN** 用户查看 E2E run form 的 runtime options 区域
+- **THEN** 页面 MUST NOT 显示 `debug` 相关 checkbox
+- **AND** 表单提交 MUST NOT 发送 `runtime_options.debug`
+
+### Requirement: E2E run timestamps MUST be rendered from timezone-explicit values
+E2E runs 列表与 run observation 页面 MUST 使用带时区语义的时间值，以保证浏览器本地时区展示正确。
+
+#### Scenario: e2e runs list uses timezone-explicit updated_at
+- **WHEN** 用户访问 `/runs`
+- **THEN** 列表中的 `updated_at` 使用带明确时区语义的时间值渲染
+- **AND** 浏览器本地时区转换后不产生 UTC/本地混淆
+
+### Requirement: E2E file preview MUST consume unified line-numbered rendered html
+E2E Observation 文件预览 MUST 优先消费后端统一生成的 `rendered_html`，并在除 Markdown 外的可显示文本预览中显示行号。
+
+#### Scenario: preview jsonl file in e2e observation
+- **WHEN** 用户在 Observation 页面打开 `.jsonl` 文件
+- **THEN** 页面显示 JSONL 语义渲染内容
+- **AND** 行号与后端预览结果保持一致
+
+#### Scenario: markdown preview stays rich-text only
+- **WHEN** 用户打开 Markdown 文件
+- **THEN** 页面显示富文本 Markdown
+- **AND** 不额外追加源码行号栏
+
+### Requirement: E2E Run Observation MUST expose normal/debug bundle downloads
+E2E 客户端 Run Observation 页面 MUST 提供普通 bundle 与 debug bundle 两个并列下载动作，且仅在成功终态可用。
+
+#### Scenario: e2e shows both bundle actions
+- **WHEN** 用户打开 `/runs/{request_id}`
+- **THEN** 页面显示 `Download Bundle` 与 `Download Debug Bundle` 两个按钮
+- **AND** 两者样式一致
+
+#### Scenario: e2e bundle actions enabled only on success
+- **WHEN** run 状态为 `queued/running/waiting_* /failed/canceled`
+- **THEN** 两个下载按钮不可用
+- **WHEN** run 状态变为 `succeeded`
+- **THEN** 两个下载按钮可用
+
+### Requirement: E2E runs list MUST support pagination with return-context preservation
+E2E runs 列表 MUST 支持分页，且从详情返回时应保留进入前分页上下文。
+
+#### Scenario: return to same page after opening run detail
+- **WHEN** 用户在 runs 第 N 页进入某 run 详情并返回
+- **THEN** 页面回到第 N 页
+- **AND** 分页参数与页大小保持不变

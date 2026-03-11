@@ -319,6 +319,12 @@ Orchestration MUST execute interaction/auth/resume lifecycle from unified reques
 - **THEN** 系统 MUST 使用 debug 黑名单规则文件排除候选文件
 - **AND** 命中任意层级 `node_modules` 的目录与文件 MUST 被排除
 
+#### Scenario: debug bundle is an explicit build target
+- **WHEN** orchestration 构建 debug bundle
+- **THEN** 系统使用 debug bundle 过滤规则
+- **AND** 该行为由显式 debug bundle 构建入口触发
+- **AND** MUST NOT 依赖 `runtime_options.debug`
+
 ### Requirement: Run explorer filtering MUST reuse debug denylist contract
 
 run 文件树和文件预览 MUST 复用 debug 黑名单规则文件，保持“打包可见集合”与“浏览可见集合”一致。
@@ -486,4 +492,3 @@ run lifecycle MUST consume execution-stage `auth_signal_snapshot` as its only au
 - **GIVEN** `auth_signal_snapshot.required=true` and `confidence=low`
 - **WHEN** run terminal normalization executes
 - **THEN** lifecycle MUST NOT transition to `waiting_auth` based solely on this signal.
-

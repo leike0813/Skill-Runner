@@ -56,9 +56,8 @@ COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/entrypoint_e2e.sh /entrypoint_e2e.sh
 COPY scripts/agent_manager.sh /app/scripts/agent_manager.sh
 COPY scripts/agent_manager.py /app/scripts/agent_manager.py
-COPY scripts/upgrade_agents.sh /app/scripts/upgrade_agents.sh
 COPY scripts/deploy_local.sh /app/scripts/deploy_local.sh
-RUN chmod +x /entrypoint.sh /entrypoint_e2e.sh /app/scripts/agent_manager.sh /app/scripts/upgrade_agents.sh /app/scripts/deploy_local.sh
+RUN chmod +x /entrypoint.sh /entrypoint_e2e.sh /app/scripts/agent_manager.sh /app/scripts/deploy_local.sh
 
 EXPOSE 8000 8011 17681
 

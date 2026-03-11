@@ -537,7 +537,6 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
                 "runtime__no_cache": "on",
-                "runtime__debug": "on",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -549,7 +548,6 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
-        assert fake_backend.create_payloads[-1]["runtime_options"]["debug"] is True
         assert "interactive_reply_timeout_sec" not in fake_backend.create_payloads[-1]["runtime_options"]
 
         runs = await _request(app, "GET", "/runs")

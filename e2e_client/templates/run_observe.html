@@ -1,9 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-    <h2 style="margin-top: 0;">{{ t("client.observe_title", default="Run Observation:") }} <code>{{ request_id }}</code></h2>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <h2 style="margin-top: 0;">{{ t("client.observe_title", default="Run Observation:") }} <code>{{ request_id }}</code></h2>
+        <a class="btn btn-secondary" href="/runs?page={{ return_page }}&page_size={{ return_page_size }}">{{ t("client.runs_back", default="Back to Runs") }}</a>
+    </div>
     <div class="row">
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_status", default="Status:") }}</strong> <span id="run-status">{{ t("client.observe_loading", default="loading") }}</span></div>
+        <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_engine", default="Engine:") }}</strong> <span id="run-engine">-</span></div>
+        <div style="flex: 1 1 240px;"><strong>{{ t("client.observe_model", default="Model:") }}</strong> <span id="run-model">-</span></div>
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_pending_id", default="Pending ID:") }}</strong> <span id="pending-id">-</span></div>
         <div style="flex: 1 1 200px;"><strong>{{ t("client.observe_cursor", default="Cursor:") }}</strong> <span id="run-cursor">0</span></div>
     </div>
@@ -88,6 +93,11 @@
                 id="file-bundle-download"
                 href="/api/runs/{{ request_id }}/bundle/download{% if run_source != 'installed' %}?source={{ run_source }}{% endif %}"
             >{{ t("client.observe_download_bundle", default="Download Bundle") }}</a>
+            <a
+                class="btn btn-secondary file-toolbar-btn"
+                id="file-debug-bundle-download"
+                href="/api/runs/{{ request_id }}/bundle/debug/download{% if run_source != 'installed' %}?source={{ run_source }}{% endif %}"
+            >{{ t("client.observe_download_debug_bundle", default="Download Debug Bundle") }}</a>
             <button class="btn btn-secondary file-toolbar-btn" id="file-tree-toggle" type="button">{{ t("client.observe_show_files", default="Show Files") }}</button>
         </div>
     </div>
@@ -126,6 +136,8 @@
         border-radius: 14px;
         padding: 10px 12px;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
         line-height: 1.5;
         border: 1px solid var(--neutral-200);
         box-shadow: 0 4px 14px rgba(20, 100, 59, 0.08);
@@ -201,6 +213,8 @@
         font-size: 12px;
         color: #1f2937;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     .prompt-card {
         margin-top: 12px;
@@ -374,6 +388,20 @@
         padding: 0;
         font: inherit;
     }
+    .preview-markdown table { width: 100%; border-collapse: collapse; }
+    .preview-markdown td { vertical-align: top; }
+    .preview-markdown td.linenos {
+        width: 52px;
+        min-width: 52px;
+        padding-right: 10px;
+        border-right: 1px solid var(--neutral-200);
+        color: var(--neutral-500);
+        user-select: none;
+    }
+    .preview-markdown td.code {
+        padding-left: 10px;
+        color: var(--neutral-900);
+    }
     .file-entry .tree-toggle-btn {
         display: inline-block;
         width: 14px;
@@ -509,6 +537,7 @@
         fileNotPreviewable: {{ t("client.file_not_previewable", default="Not previewable") | tojson }},
         fileFormatMarkdown: {{ t("client.file_format_markdown", default="Markdown") | tojson }},
         fileFormatJson: {{ t("client.file_format_json", default="JSON") | tojson }},
+        fileFormatJsonl: {{ t("client.file_format_jsonl", default="JSONL") | tojson }},
         fileFormatYaml: {{ t("client.file_format_yaml", default="YAML") | tojson }},
         fileFormatToml: {{ t("client.file_format_toml", default="TOML") | tojson }},
         fileFormatPython: {{ t("client.file_format_python", default="Python") | tojson }},
@@ -524,6 +553,8 @@
     };
     const requestId = "{{ request_id }}";
     const statusEl = document.getElementById("run-status");
+    const runEngineEl = document.getElementById("run-engine");
+    const runModelEl = document.getElementById("run-model");
     const pendingIdEl = document.getElementById("pending-id");
     const cursorEl = document.getElementById("run-cursor");
     const chatEl = document.getElementById("chat-panel");
@@ -565,6 +596,8 @@
     const fileTreeSectionEl = document.getElementById("file-tree-section");
     const fileTreePanelEl = document.getElementById("file-tree-panel");
     const filePreviewPanelEl = document.getElementById("file-preview-panel");
+    const fileBundleDownloadEl = document.getElementById("file-bundle-download");
+    const fileDebugBundleDownloadEl = document.getElementById("file-debug-bundle-download");
 
     let cursor = 0;
     let stream = null;
@@ -966,6 +999,27 @@
 
     function isTerminal(status) {
         return ["succeeded", "failed", "canceled"].includes(status);
+    }
+
+    function setLinkEnabled(linkEl, enabled) {
+        if (!linkEl) return;
+        if (enabled) {
+            linkEl.classList.remove("disabled");
+            linkEl.style.pointerEvents = "";
+            linkEl.tabIndex = 0;
+            linkEl.removeAttribute("aria-disabled");
+        } else {
+            linkEl.classList.add("disabled");
+            linkEl.style.pointerEvents = "none";
+            linkEl.tabIndex = -1;
+            linkEl.setAttribute("aria-disabled", "true");
+        }
+    }
+
+    function applyBundleAvailability(status) {
+        const canDownload = safeText(status).trim().toLowerCase() === "succeeded";
+        setLinkEnabled(fileBundleDownloadEl, canDownload);
+        setLinkEnabled(fileDebugBundleDownloadEl, canDownload);
     }
 
     function clearReplyError() {
@@ -1661,6 +1715,7 @@
             formatLabels: {
                 markdown: I18N.fileFormatMarkdown,
                 json: I18N.fileFormatJson,
+                jsonl: I18N.fileFormatJsonl,
                 yaml: I18N.fileFormatYaml,
                 toml: I18N.fileFormatToml,
                 python: I18N.fileFormatPython,
@@ -1755,6 +1810,13 @@
             updateInteractiveAutoReplyConfig(payload);
             currentStatus = safeText(payload.status || "unknown");
             statusEl.textContent = currentStatus;
+            if (runEngineEl) {
+                runEngineEl.textContent = safeText(payload.engine).trim() || "-";
+            }
+            if (runModelEl) {
+                runModelEl.textContent = safeText(payload.model).trim() || "-";
+            }
+            applyBundleAvailability(currentStatus);
             updateThinkingCard(currentStatus);
             pendingIdEl.textContent = payload.pending_interaction_id == null ? "-" : String(payload.pending_interaction_id);
             if (typeof payload.cursor === "number") updateCursor(payload.cursor);
@@ -1885,6 +1947,13 @@
             const payload = JSON.parse(evt.data || "{}");
             currentStatus = safeText(payload.status || currentStatus);
             statusEl.textContent = currentStatus;
+            applyBundleAvailability(currentStatus);
+            if (runEngineEl && typeof payload.engine === "string") {
+                runEngineEl.textContent = safeText(payload.engine).trim() || "-";
+            }
+            if (runModelEl && typeof payload.model === "string") {
+                runModelEl.textContent = safeText(payload.model).trim() || "-";
+            }
             updateThinkingCard(currentStatus);
             if (payload.pending_interaction_id != null) {
                 pendingIdEl.textContent = String(payload.pending_interaction_id);
@@ -1987,6 +2056,7 @@
 
     (async () => {
         try {
+            applyBundleAvailability(currentStatus);
             await loadHistory();
             await startStream();
             await refreshState();

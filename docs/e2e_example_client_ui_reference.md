@@ -41,7 +41,7 @@ Primary routes:
   - Parameter fields.
   - File upload fields.
 - Runtime options block:
-  - booleans: `no_cache/debug/interactive_auto_reply`
+  - booleans: `no_cache/interactive_auto_reply`
   - timeout option: `interactive_reply_timeout_sec`
   - visibility rules:
     - `interactive_auto_reply` and `interactive_reply_timeout_sec` only when `execution_mode=interactive`

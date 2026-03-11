@@ -359,11 +359,11 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
     assert body["pending_interaction_id"] == 9
     assert body["interaction_count"] == 3
     assert body["auto_decision_count"] == 2
-    assert body["last_auto_decision_at"] == "2026-02-16T00:10:00"
+    assert body["last_auto_decision_at"] == "2026-02-16T00:10:00Z"
     assert body["interactive_auto_reply"] is True
     assert body["interactive_reply_timeout_sec"] == 5
     assert body["recovery_state"] == "recovered_waiting"
-    assert body["recovered_at"] == "2026-02-16T00:01:00"
+    assert body["recovered_at"] == "2026-02-16T00:01:00Z"
     assert body["recovery_reason"] == "resumable_waiting_preserved"
 
 
@@ -576,6 +576,16 @@ async def test_management_run_protocol_rebuild_route(monkeypatch, tmp_path: Path
                         "success": True,
                     }
                 ],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.run_observability_service.get_run_detail",
+        AsyncMock(
+            return_value={
+                "request_id": "req-rebuild",
+                "run_id": "run-rebuild-route",
+                "status": "succeeded",
             }
         ),
     )

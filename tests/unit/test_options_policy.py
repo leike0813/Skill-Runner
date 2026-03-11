@@ -20,15 +20,10 @@ def test_runtime_no_cache_allowed():
     }
 
 
-def test_runtime_debug_allowed():
+def test_runtime_debug_rejected():
     policy = OptionsPolicy()
-    runtime_opts = policy.validate_runtime_options({"debug": True})
-    assert runtime_opts == {
-        "debug": True,
-        "execution_mode": "auto",
-        "interactive_auto_reply": False,
-        "interactive_reply_timeout_sec": 1200,
-    }
+    with pytest.raises(ValueError, match="Unknown runtime_options"):
+        policy.validate_runtime_options({"debug": True})
 
 
 def test_runtime_debug_keep_temp_rejected():

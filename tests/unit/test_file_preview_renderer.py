@@ -38,6 +38,20 @@ def test_build_preview_payload_from_bytes_json_pretty() -> None:
     assert '"ok": true' in (preview["json_pretty"] or "")
 
 
+def test_build_preview_payload_from_bytes_jsonl_rendered() -> None:
+    preview = renderer.build_preview_payload_from_bytes(
+        data=b'{"ok":true}\n{"nested":{"value":1}}\n',
+        size=33,
+        filename="result.jsonl",
+    )
+    assert preview["mode"] == "text"
+    assert preview["detected_format"] == "jsonl"
+    assert preview["json_pretty"] is None
+    assert isinstance(preview["rendered_html"], str)
+    assert "ok" in preview["rendered_html"]
+    assert "nested" in preview["rendered_html"]
+
+
 def test_build_preview_payload_from_bytes_code_highlight_for_structured_formats(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -99,6 +113,14 @@ def test_build_preview_payload_from_bytes_code_highlight_for_structured_formats(
     )
     assert js_preview["detected_format"] == "javascript"
     assert "data-lexer='javascript'" in (js_preview["rendered_html"] or "")
+
+    text_preview = renderer.build_preview_payload_from_bytes(
+        data=b"hello\nworld\n",
+        size=12,
+        filename="notes.txt",
+    )
+    assert text_preview["detected_format"] == "text"
+    assert "data-lexer='text'" in (text_preview["rendered_html"] or "")
 
 
 def test_build_preview_payload_from_bytes_markdown_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:

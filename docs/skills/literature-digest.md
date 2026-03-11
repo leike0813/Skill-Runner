@@ -33,8 +33,7 @@ POST /v1/jobs
   },
   "model": "gemini-3-pro-preview",
   "runtime_options": {
-    "no_cache": false,
-    "debug": false
+    "no_cache": false
   }
 }
 ```

@@ -15,6 +15,25 @@
         overflow-x: auto;
         color: #0f172a;
     }
+    .preview-rich table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .preview-rich td {
+        vertical-align: top;
+    }
+    .preview-rich td.linenos {
+        width: 52px;
+        min-width: 52px;
+        padding-right: 10px;
+        border-right: 1px solid #e2e8f0;
+        color: #64748b;
+        user-select: none;
+    }
+    .preview-rich td.code {
+        padding-left: 10px;
+        color: #0f172a;
+    }
     .preview-plain {
         padding: 12px;
         border: 1px solid #d1d5db;
@@ -28,12 +47,10 @@
 </div>
 {% if preview.mode == "text" %}
 <div class="preview-meta">{{ preview.meta }}</div>
-{% if preview.rendered_html and preview.detected_format in ["markdown", "json", "yaml", "toml", "python", "javascript"] %}
+{% if preview.rendered_html %}
 <div class="preview-rich preview-markdown">{{ preview.rendered_html | safe }}</div>
-{% elif preview.detected_format == "json" and preview.json_pretty %}
-<pre class="preview-plain">{{ preview.json_pretty }}</pre>
 {% else %}
-<pre class="preview-plain">{{ preview.content }}</pre>
+<pre class="preview-plain">{{ preview.json_pretty or preview.content }}</pre>
 {% endif %}
 {% elif preview.mode == "too_large" %}
 <div style="color:#b45309; font-size:13px;">{{ t("ui.file_preview.too_large", default="文件过大不可预览") }}</div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,8 @@ TEXT_DECODE_CANDIDATES = (
 )
 
 MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdx"}
-JSON_SUFFIXES = {".json", ".jsonl"}
+JSON_SUFFIXES = {".json"}
+JSONL_SUFFIXES = {".jsonl"}
 YAML_SUFFIXES = {".yaml", ".yml"}
 TOML_SUFFIXES = {".toml"}
 PYTHON_SUFFIXES = {".py", ".pyw"}
@@ -113,8 +115,10 @@ def build_preview_payload_from_bytes(
         except (json.JSONDecodeError, TypeError, ValueError):
             json_pretty = None
             detected_format = "text"
-            rendered_html = None
-    elif detected_format in {"yaml", "toml", "python", "javascript"}:
+            rendered_html = render_code_highlight(content, "text")
+    elif detected_format == "jsonl":
+        rendered_html = render_jsonl_highlight(content)
+    elif detected_format in {"yaml", "toml", "python", "javascript", "text"}:
         rendered_html = render_code_highlight(content, detected_format)
 
     return {
@@ -134,6 +138,8 @@ def detect_text_format(*, filename: str | None, content: str) -> str:
         return "markdown"
     if suffix in JSON_SUFFIXES:
         return "json"
+    if suffix in JSONL_SUFFIXES:
+        return "jsonl"
     if suffix in YAML_SUFFIXES:
         return "yaml"
     if suffix in TOML_SUFFIXES:
@@ -142,6 +148,8 @@ def detect_text_format(*, filename: str | None, content: str) -> str:
         return "python"
     if suffix in JAVASCRIPT_SUFFIXES:
         return "javascript"
+    if _looks_like_jsonl(content):
+        return "jsonl"
     trimmed = content.lstrip()
     if trimmed.startswith("{") or trimmed.startswith("["):
         try:
@@ -180,10 +188,12 @@ def render_code_highlight(content: str, format_name: str) -> str | None:
         return None
     lexer_name_map = {
         "json": "json",
+        "jsonl": "json",
         "yaml": "yaml",
         "toml": "toml",
         "python": "python",
         "javascript": "javascript",
+        "text": "text",
     }
     lexer_name = lexer_name_map.get(format_name)
     if not lexer_name:
@@ -192,13 +202,38 @@ def render_code_highlight(content: str, format_name: str) -> str | None:
         lexer = lexers_module.get_lexer_by_name(lexer_name)
         formatter = formatters_module.HtmlFormatter(
             noclasses=True,
-            linenos=False,
+            linenos="table",
+            lineanchors="L",
             nowrap=False,
-            style="friendly",
+            style="default",
         )
-        return pygments_module.highlight(content, lexer, formatter)
+        highlighted = pygments_module.highlight(content, lexer, formatter)
+        return _strip_inline_background_styles(highlighted)
     except (AttributeError, LookupError, TypeError, ValueError):
         return None
+
+
+def render_jsonl_highlight(content: str) -> str | None:
+    rendered_lines: list[str] = []
+    for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            rendered_lines.append("")
+            continue
+        try:
+            parsed = json.loads(raw_line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            rendered_lines.append(raw_line)
+            continue
+        rendered_lines.append(json.dumps(parsed, ensure_ascii=False, indent=2))
+    return render_code_highlight("\n".join(rendered_lines), "jsonl")
+
+
+def _strip_inline_background_styles(html: str) -> str:
+    if not isinstance(html, str) or not html:
+        return ""
+    no_bg = re.sub(r"background(?:-color)?\s*:\s*[^;\"']+;?", "", html, flags=re.IGNORECASE)
+    return re.sub(r"style=\"\s+\"", "style=\"\"", no_bg)
 
 
 def is_binary_blob(data: bytes) -> bool:
@@ -226,6 +261,20 @@ def decode_text_blob(data: bytes) -> tuple[str, str]:
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="replace"), "utf-8-replace"
+
+
+def _looks_like_jsonl(content: str) -> bool:
+    lines = [line for line in content.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+    valid_count = 0
+    for line in lines:
+        try:
+            json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return False
+        valid_count += 1
+    return valid_count > 1
 
 
 def _import_optional(module_name: str):

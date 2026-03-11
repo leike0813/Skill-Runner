@@ -45,7 +45,7 @@
       targetEl.appendChild(metaEl);
 
       const renderedHtml = safeText(preview && preview.rendered_html).trim();
-      if (renderedHtml && ["markdown", "json", "yaml", "toml", "python", "javascript"].includes(detectedFormat)) {
+      if (renderedHtml) {
         const richEl = document.createElement("div");
         richEl.className = options.richClass || "preview-markdown";
         richEl.innerHTML = renderedHtml;

@@ -16,6 +16,7 @@ venv/
 .agent/
 data/
 agent_config/
+deprecated/
 *.log
 *.egg-info/
 debug_parse.py

@@ -9,11 +9,13 @@
         {% if engine == "opencode" %}
         <div class="row" style="margin-top: 10px;">
             <form
+                id="opencode-model-refresh-form"
                 hx-post="/ui/engines/opencode/models/refresh"
                 hx-target="#engine-models-panel"
                 hx-swap="outerHTML"
             >
-                <button class="btn btn-primary" type="submit">{{ t("ui.engine_models.refresh_opencode", default="手动刷新模型列表") }}</button>
+                <button id="opencode-model-refresh-btn" class="btn btn-primary" type="submit">{{ t("ui.engine_models.refresh_opencode", default="手动刷新模型列表") }}</button>
+                <span id="opencode-model-refresh-hint" class="muted" style="display:none; margin-left:8px;">{{ t("ui.engine_models.refreshing", default="刷新中...") }}</span>
             </form>
         </div>
         {% endif %}
@@ -97,3 +99,19 @@
     </div>
     {% endif %}
 </div>
+{% if engine == "opencode" %}
+<script>
+(() => {
+    const form = document.getElementById("opencode-model-refresh-form");
+    if (!form) return;
+    const button = document.getElementById("opencode-model-refresh-btn");
+    const hint = document.getElementById("opencode-model-refresh-hint");
+    const lock = () => {
+        if (button) button.disabled = true;
+        if (hint) hint.style.display = "inline";
+    };
+    form.addEventListener("submit", lock);
+    form.addEventListener("htmx:beforeRequest", lock);
+})();
+</script>
+{% endif %}

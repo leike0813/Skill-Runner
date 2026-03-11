@@ -106,6 +106,12 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 .\scripts\deploy_local.ps1
 ```
 
+Entrée officielle du harness en déploiement conteneurisé :
+
+```bash
+./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+```
+
 <details>
 <summary>📋 <strong>Configuration avancée</strong></summary>
 

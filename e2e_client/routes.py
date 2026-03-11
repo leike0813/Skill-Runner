@@ -53,7 +53,7 @@ templates.env.globals["lang"] = _template_lang
 
 router = APIRouter(tags=["e2e-client"])
 
-RUNTIME_BOOL_OPTIONS = ("no_cache", "debug", "interactive_auto_reply")
+RUNTIME_BOOL_OPTIONS = ("no_cache", "interactive_auto_reply")
 RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec",)
 VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
 ENGINE_DEFAULT_PROVIDER = {
@@ -88,6 +88,22 @@ def get_backend_client(
     settings: E2EClientSettings = Depends(get_settings),
 ) -> BackendClient:
     return HttpBackendClient(settings.backend_base_url)
+
+
+async def _list_management_runs_compat(
+    backend: BackendClient,
+    *,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
+    try:
+        return await backend.list_management_runs(
+            page=page,
+            page_size=page_size,
+        )
+    except TypeError:
+        # Backward-compat for tests/fakes still implementing legacy signature.
+        return await backend.list_management_runs()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -346,12 +362,19 @@ async def run_observe_page(
     request: Request,
     request_id: str,
     source: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
 ):
     run_source = _resolve_run_source(source=source, request_id=request_id)
     return templates.TemplateResponse(
         request=request,
         name="run_observe.html",
-        context={"request_id": request_id, "run_source": run_source},
+        context={
+            "request_id": request_id,
+            "run_source": run_source,
+            "return_page": max(1, int(page)),
+            "return_page_size": max(1, int(page_size)),
+        },
     )
 
 
@@ -359,9 +382,17 @@ async def run_observe_page(
 async def list_runs_page(
     request: Request,
     backend: BackendClient = Depends(get_backend_client),
+    page: int = 1,
+    page_size: int = 20,
 ):
+    safe_page = max(1, int(page))
+    safe_page_size = max(1, min(int(page_size), 200))
     try:
-        payload = await backend.list_management_runs()
+        payload = await _list_management_runs_compat(
+            backend,
+            page=safe_page,
+            page_size=safe_page_size,
+        )
     except BackendApiError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     raw_runs = payload.get("runs", [])
@@ -386,13 +417,24 @@ async def list_runs_page(
                 "run_source": run_source,
                 "updated_at": row.get("updated_at"),
                 "step_count": 0,
+                "model": str(row.get("model") or "-"),
                 **summary,
             }
         )
+    total = int(payload.get("total") or len(run_rows))
+    total_pages = int(payload.get("total_pages") or (1 if run_rows else 0))
+    current_page = int(payload.get("page") or safe_page)
+    current_page_size = int(payload.get("page_size") or safe_page_size)
     return templates.TemplateResponse(
         request=request,
         name="runs.html",
-        context={"rows": run_rows},
+        context={
+            "rows": run_rows,
+            "page": current_page,
+            "page_size": current_page_size,
+            "total": total,
+            "total_pages": total_pages,
+        },
     )
 
 
@@ -450,6 +492,26 @@ async def download_run_bundle_api(
     except Exception as exc:
         raise _to_http_exception(exc)
     filename = f"{request_id}.bundle.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=bundle_bytes,
+        media_type="application/zip",
+        headers=headers,
+    )
+
+
+@router.get("/api/runs/{request_id}/bundle/debug/download")
+async def download_run_debug_bundle_api(
+    request_id: str,
+    source: str | None = None,
+    backend: BackendClient = Depends(get_backend_client),
+):
+    run_source = _resolve_run_source(source=source, request_id=request_id)
+    try:
+        bundle_bytes = await backend.get_run_debug_bundle(request_id, run_source=run_source)
+    except Exception as exc:
+        raise _to_http_exception(exc)
+    filename = f"{request_id}.debug.bundle.zip"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(
         content=bundle_bytes,
@@ -1302,9 +1364,6 @@ def _build_runtime_options(
     errors: list[str] = []
     if bool(submitted.get("no_cache")):
         options["no_cache"] = True
-    if bool(submitted.get("debug")):
-        options["debug"] = True
-
     if execution_mode == "interactive":
         interactive_auto_reply = bool(submitted.get("interactive_auto_reply"))
         options["interactive_auto_reply"] = interactive_auto_reply

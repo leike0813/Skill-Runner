@@ -13,7 +13,7 @@ import io
 import shutil
 import zipfile
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Query, Request  # type: ignore[import-not-found]
 from typing import Any
@@ -91,6 +91,22 @@ logger = logging.getLogger(__name__)
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
+
+
+def _parse_datetime_utc(raw: Any, *, default_now: bool = False) -> datetime | None:
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc)
+        return raw.astimezone(timezone.utc)
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.now(timezone.utc) if default_now else None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return datetime.now(timezone.utc) if default_now else None
 
 
 def _execution_mode_value(mode: object) -> str:
@@ -432,31 +448,23 @@ async def get_run_status(request_id: str):
     # Read run metadata
     skill_id = str(request_record.get("skill_id") or "unknown")
     engine = str(request_record.get("engine") or "unknown")
+    engine_options_obj = request_record.get("engine_options")
+    engine_options = engine_options_obj if isinstance(engine_options_obj, dict) else {}
+    model_obj = engine_options.get("model")
+    if not isinstance(model_obj, str) or not model_obj.strip():
+        model_obj = engine_options.get("model_id")
+    model = model_obj.strip() if isinstance(model_obj, str) and model_obj.strip() else None
     
     # Return status
-    from datetime import datetime
-    created_at = datetime.now()
+    created_at = datetime.now(timezone.utc)
     created_at_obj = request_record.get("created_at")
-    if isinstance(created_at_obj, str) and created_at_obj:
-        try:
-            created_at = datetime.fromisoformat(created_at_obj)
-        except ValueError:
-            created_at = datetime.now()
-    if updated_at:
-        try:
-            updated_at_dt = datetime.fromisoformat(updated_at)
-        except ValueError:
-            updated_at_dt = datetime.now()
-    else:
-        updated_at_dt = datetime.now()
+    parsed_created_at = _parse_datetime_utc(created_at_obj)
+    if parsed_created_at is not None:
+        created_at = parsed_created_at
+    updated_at_dt = _parse_datetime_utc(updated_at, default_now=True) or datetime.now(timezone.utc)
     auto_stats = await maybe_await(run_store.get_auto_decision_stats(request_id))
     last_auto_decision_at_obj = auto_stats.get("last_auto_decision_at")
-    last_auto_decision_at = None
-    if isinstance(last_auto_decision_at_obj, str) and last_auto_decision_at_obj:
-        try:
-            last_auto_decision_at = datetime.fromisoformat(last_auto_decision_at_obj)
-        except ValueError:
-            last_auto_decision_at = None
+    last_auto_decision_at = _parse_datetime_utc(last_auto_decision_at_obj)
     pending_interaction_id = (
         state_payload.get("pending", {}).get("interaction_id")
         if isinstance(state_payload, dict)
@@ -496,19 +504,14 @@ async def get_run_status(request_id: str):
     )
     interaction_count = await maybe_await(run_store.get_interaction_count(request_id))
     recovery_info = await maybe_await(run_store.get_recovery_info(run_id))
-    recovered_at = None
-    recovered_at_obj = recovery_info.get("recovered_at")
-    if isinstance(recovered_at_obj, str) and recovered_at_obj:
-        try:
-            recovered_at = datetime.fromisoformat(recovered_at_obj)
-        except ValueError:
-            recovered_at = None
+    recovered_at = _parse_datetime_utc(recovery_info.get("recovered_at"))
 
     return RequestStatusResponse(
         request_id=request_id,
         status=current_status, 
         skill_id=skill_id,
         engine=engine,
+        model=model,
         created_at=created_at,
         updated_at=updated_at_dt,
         warnings=warnings,
@@ -603,6 +606,11 @@ async def get_run_artifacts(request_id: str):
 @router.get("/{request_id}/bundle")
 async def get_run_bundle(request_id: str):
     return await run_read_facade.get_bundle(request_id=request_id)
+
+
+@router.get("/{request_id}/bundle/debug")
+async def get_run_debug_bundle(request_id: str):
+    return await run_read_facade.get_debug_bundle(request_id=request_id)
 
 
 @router.get("/{request_id}/files", response_model=RunFilesResponse)

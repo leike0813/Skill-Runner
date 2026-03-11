@@ -188,7 +188,7 @@ async def run_suite_case(
             "engine": engine,
             "parameter": parameters,
             "model": model,
-            "runtime_options": {"no_cache": True, "debug": debug},
+            "runtime_options": {"no_cache": True},
         }
         logger.info("Case: %s (source=temp, engine=%s, debug=%s)", name, engine, debug)
         logger.info("Create payload: %s", create_payload)
@@ -229,14 +229,18 @@ async def run_suite_case(
         )
         result_path = f"/v1/temp-skill-runs/{request_id}/result"
         artifacts_path = f"/v1/temp-skill-runs/{request_id}/artifacts"
-        bundle_path = f"/v1/temp-skill-runs/{request_id}/bundle"
+        bundle_path = (
+            f"/v1/temp-skill-runs/{request_id}/bundle/debug"
+            if debug
+            else f"/v1/temp-skill-runs/{request_id}/bundle"
+        )
     else:
         create_payload = {
             "skill_id": skill_id,
             "engine": engine,
             "parameter": parameters,
             "model": model,
-            "runtime_options": {"no_cache": no_cache, "debug": debug},
+            "runtime_options": {"no_cache": no_cache},
         }
         logger.info("Case: %s (source=installed, engine=%s, no_cache=%s, debug=%s)", name, engine, no_cache, debug)
         logger.info("Create payload: %s", create_payload)
@@ -279,7 +283,11 @@ async def run_suite_case(
         )
         result_path = f"/v1/jobs/{request_id}/result"
         artifacts_path = f"/v1/jobs/{request_id}/artifacts"
-        bundle_path = f"/v1/jobs/{request_id}/bundle"
+        bundle_path = (
+            f"/v1/jobs/{request_id}/bundle/debug"
+            if debug
+            else f"/v1/jobs/{request_id}/bundle"
+        )
 
     logger.info("Final status: %s", status_payload["status"])
     expected_status = expectations.get("status")

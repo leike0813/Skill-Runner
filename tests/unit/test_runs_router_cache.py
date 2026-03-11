@@ -921,12 +921,12 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
         engine="gemini",
         parameter={},
         engine_options={},
-        runtime_options={"debug": True}
+        runtime_options={}
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 
     response = await jobs_router.get_run_bundle(request_id)
-    assert str(response.path).endswith("run_bundle_debug.zip")
+    assert str(response.path).endswith("run_bundle.zip")
     assert Path(response.path).exists()
 
 

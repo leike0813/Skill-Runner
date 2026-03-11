@@ -88,6 +88,7 @@ class RequestStatusResponse(BaseModel):
     status: RunStatus
     skill_id: str
     engine: str
+    model: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     warnings: List[Any] = []

@@ -2,6 +2,7 @@ import logging
 import os
 import uuid
 import inspect
+from datetime import datetime, timezone
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NoReturn
@@ -15,6 +16,7 @@ from fastapi import (  # type: ignore[import-not-found]
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
@@ -159,6 +161,19 @@ def _raise_ui_internal_server_error(*, action: str, exc: Exception) -> NoReturn:
     raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _request_opencode_catalog_refresh_if_needed(snapshot: object, *, reason: str) -> None:
+    if not isinstance(snapshot, Mapping):
+        return
+    engine = str(snapshot.get("engine") or "").strip().lower()
+    status = str(snapshot.get("status") or "").strip().lower()
+    if engine != "opencode" or status != "succeeded":
+        return
+    engine_model_catalog_lifecycle.request_refresh_async(
+        "opencode",
+        reason=reason,
+    )
+
+
 def _legacy_data_headers(replacement_path: str) -> dict[str, str]:
     return {
         "Deprecation": "true",
@@ -193,6 +208,22 @@ def _payload_get(payload: object, key: str, default=None):
     return getattr(payload, key, default)
 
 
+def _serialize_datetime_for_ui(raw: object) -> str:
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc).isoformat()
+        return raw.astimezone(timezone.utc).isoformat()
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return raw
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc).isoformat()
+        return parsed.astimezone(timezone.utc).isoformat()
+    return ""
+
+
 def _serialize_payload_item(item: object) -> dict[str, object]:
     model_dump = getattr(item, "model_dump", None)
     if callable(model_dump):
@@ -211,6 +242,22 @@ def _serialize_payload_list(payload: object, key: str) -> list[dict[str, object]
     if raw_items is None:
         return []
     return [_serialize_payload_item(item) for item in raw_items]
+
+
+async def _list_management_runs_payload(*, page: int, page_size: int):
+    try:
+        return await _resolve_async(
+            management_router.list_management_runs(
+                page=page,
+                page_size=page_size,
+                limit=None,
+            )
+        )
+    except TypeError:
+        # Backward-compat for tests/legacy call sites monkeypatching old signature.
+        return await _resolve_async(
+            management_router.list_management_runs(limit=page_size)
+        )
 
 
 def _render_skills_table(
@@ -365,50 +412,76 @@ async def ui_skill_preview_file_json(skill_id: str, path: str):
 
 
 @router.get("/runs", response_class=HTMLResponse)
-async def ui_runs(request: Request):
+async def ui_runs(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+):
     return templates.TemplateResponse(
         request=request,
         name="ui/runs.html",
-        context={},
+        context={
+            "page": max(1, int(page)),
+            "page_size": max(1, int(page_size)),
+        },
     )
 
 
 @router.get("/management/runs/table", response_class=HTMLResponse)
-async def ui_management_runs_table(request: Request):
-    runs_payload = await _resolve_async(management_router.list_management_runs(limit=200))
+async def ui_management_runs_table(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+):
+    runs_payload = await _list_management_runs_payload(page=page, page_size=page_size)
     runs = _serialize_payload_list(runs_payload, "runs")
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/runs_table.html",
-        context={"runs": runs},
+        context={
+            "runs": runs,
+            "page": _payload_get(runs_payload, "page", page),
+            "page_size": _payload_get(runs_payload, "page_size", page_size),
+            "total": _payload_get(runs_payload, "total", len(runs)),
+            "total_pages": _payload_get(runs_payload, "total_pages", 0),
+        },
     )
 
 
 @router.get("/runs/table", response_class=HTMLResponse)
-async def ui_runs_table(request: Request):
+async def ui_runs_table(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+):
     _handle_legacy_data_endpoint("/ui/runs/table", "/ui/management/runs/table")
-    response = await ui_management_runs_table(request)
+    response = await ui_management_runs_table(
+        request=request,
+        page=page,
+        page_size=page_size,
+    )
     response.headers.update(_legacy_data_headers("/ui/management/runs/table"))
     return response
 
 
 @router.get("/runs/{request_id}", response_class=HTMLResponse)
-async def ui_run_detail(request: Request, request_id: str):
+async def ui_run_detail(
+    request: Request,
+    request_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+):
     state = await _resolve_async(management_router.get_management_run(request_id))
     files = await _resolve_async(management_router.get_management_run_files(request_id))
     status = _payload_get(state, "status")
     updated_at = _payload_get(state, "updated_at")
-    if hasattr(updated_at, "isoformat"):
-        updated_at_value = updated_at.isoformat()
-    elif updated_at is None:
-        updated_at_value = ""
-    else:
-        updated_at_value = str(updated_at)
+    updated_at_value = _serialize_datetime_for_ui(updated_at)
     detail = {
         "request_id": _payload_get(state, "request_id"),
         "run_id": _payload_get(state, "run_id"),
         "skill_id": _payload_get(state, "skill_id"),
         "engine": _payload_get(state, "engine"),
+        "model": _payload_get(state, "model"),
         "status": status.value if isinstance(status, RunStatus) else str(status),
         "updated_at": updated_at_value,
         "pending_interaction_id": _payload_get(state, "pending_interaction_id"),
@@ -420,7 +493,11 @@ async def ui_run_detail(request: Request, request_id: str):
     return templates.TemplateResponse(
         request=request,
         name="ui/run_detail.html",
-        context={"detail": detail},
+        context={
+            "detail": detail,
+            "return_page": max(1, int(page)),
+            "return_page_size": max(1, int(page_size)),
+        },
     )
 
 
@@ -532,7 +609,12 @@ async def ui_engine_auth_oauth_proxy_start(request: Request, body: AuthSessionSt
 @router.get("/engines/auth/oauth-proxy/sessions/{session_id}")
 async def ui_engine_auth_oauth_proxy_status(session_id: str):
     try:
-        return JSONResponse(oauth_proxy_orchestrator.get_session(session_id))
+        payload = oauth_proxy_orchestrator.get_session(session_id)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_status_poll",
+        )
+        return JSONResponse(payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
@@ -559,6 +641,10 @@ async def ui_engine_auth_oauth_proxy_cancel(session_id: str):
 async def ui_engine_auth_oauth_proxy_input(session_id: str, body: AuthSessionInputRequestV2):
     try:
         payload = oauth_proxy_orchestrator.input_session(session_id, body.kind, body.value)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_input_submit",
+        )
         return JSONResponse(
             {
                 "session": payload,
@@ -598,7 +684,12 @@ async def ui_engine_auth_cli_delegate_start(request: Request, body: AuthSessionS
 @router.get("/engines/auth/cli-delegate/sessions/{session_id}")
 async def ui_engine_auth_cli_delegate_status(session_id: str):
     try:
-        return JSONResponse(cli_delegate_orchestrator.get_session(session_id))
+        payload = cli_delegate_orchestrator.get_session(session_id)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_status_poll",
+        )
+        return JSONResponse(payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
@@ -625,6 +716,10 @@ async def ui_engine_auth_cli_delegate_cancel(session_id: str):
 async def ui_engine_auth_cli_delegate_input(session_id: str, body: AuthSessionInputRequestV2):
     try:
         payload = cli_delegate_orchestrator.input_session(session_id, body.kind, body.value)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_input_submit",
+        )
         return JSONResponse(
             {
                 "session": payload,
@@ -673,6 +768,10 @@ async def ui_engine_auth_active_session():
 async def ui_engine_auth_status(session_id: str):
     try:
         payload = engine_auth_flow_manager.get_session(session_id)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_status_poll",
+        )
         payload["deprecated"] = True
         return JSONResponse(payload)
     except KeyError:
@@ -702,6 +801,10 @@ async def ui_engine_auth_cancel(session_id: str):
 async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequest):
     try:
         payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        _request_opencode_catalog_refresh_if_needed(
+            payload,
+            reason="auth_success_input_submit",
+        )
         payload["deprecated"] = True
         return JSONResponse(
             {

@@ -25,4 +25,3 @@ echo "======================================="
 
 cd "${ROOT_DIR}"
 exec conda run --no-capture-output -n DataProcessing python -u -m e2e_client.app
-

@@ -30,7 +30,7 @@
     <div class="card">
         <div
             id="runs-table-container"
-            hx-get="/ui/management/runs/table"
+            hx-get="/ui/management/runs/table?page={{ page }}&page_size={{ page_size }}"
             hx-trigger="load, every 5s"
             hx-swap="innerHTML"
         >
@@ -41,4 +41,27 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+    function formatLocalDateTimes(root) {
+        const scope = root || document;
+        const nodes = scope.querySelectorAll(".js-local-datetime");
+        nodes.forEach((node) => {
+            const ts = node.getAttribute("data-ts");
+            if (!ts) return;
+            const date = new Date(ts);
+            if (Number.isNaN(date.getTime())) return;
+            node.textContent = date.toLocaleString([], { hour12: false });
+        });
+    }
+    document.addEventListener("htmx:afterSwap", (event) => {
+        const target = event && event.detail ? event.detail.target : null;
+        formatLocalDateTimes(target || document);
+    });
+    formatLocalDateTimes(document);
+})();
+</script>
 {% endblock %}

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -359,8 +359,26 @@ async def submit_management_engine_auth_import(
 
 
 @router.get("/runs", response_model=ManagementRunListResponse)
-async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
-    rows = await run_observability_service.list_runs(limit=limit)
+async def list_management_runs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    limit: int | None = Query(default=None, ge=1, le=1000),
+):
+    if limit is not None:
+        rows = await run_observability_service.list_runs(limit=limit)
+        paging_payload = {
+            "runs": rows,
+            "page": 1,
+            "page_size": limit,
+            "total": len(rows),
+            "total_pages": 1 if rows else 0,
+        }
+    else:
+        paging_payload = await run_observability_service.list_runs_paginated(
+            page=page,
+            page_size=page_size,
+        )
+    rows = paging_payload["runs"]
     runs: list[ManagementRunConversationState] = []
     for row in rows:
         request_id_obj = row.get("request_id")
@@ -381,6 +399,7 @@ async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
                 run_id=run_id_obj,
                 status=run_status,
                 engine=str(row.get("engine", "unknown")),
+                model=_coerce_str_or_none(row.get("model")),
                 skill_id=str(row.get("skill_id", "unknown")),
                 updated_at=_parse_datetime(row.get("updated_at")),
                 pending_interaction_id=pending_interaction_id,
@@ -394,7 +413,13 @@ async def list_management_runs(limit: int = Query(default=200, ge=1, le=1000)):
                 error=None,
             )
         )
-    return ManagementRunListResponse(runs=runs)
+    return ManagementRunListResponse(
+        runs=runs,
+        page=int(paging_payload.get("page") or 1),
+        page_size=int(paging_payload.get("page_size") or 20),
+        total=int(paging_payload.get("total") or 0),
+        total_pages=int(paging_payload.get("total_pages") or 0),
+    )
 
 
 @router.get("/runs/{request_id}", response_model=ManagementRunConversationState)
@@ -601,6 +626,15 @@ async def rebuild_management_run_protocol_history(request_id: str):
     run_dir = workspace_manager.get_run_dir(run_id_obj)
     if not run_dir or not run_dir.exists():
         raise HTTPException(status_code=404, detail="Run directory not found")
+    detail = await _get_run_detail_or_404(request_id)
+    status_raw = detail.get("status")
+    status_value = (
+        status_raw.value
+        if isinstance(status_raw, RunStatus)
+        else str(status_raw or "").strip().lower()
+    )
+    if status_value not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
+        raise HTTPException(status_code=409, detail="Protocol rebuild is only allowed for terminal runs")
     payload = await run_observability_service.rebuild_protocol_history(
         run_dir=run_dir,
         request_id=request_id,
@@ -765,6 +799,7 @@ async def _build_run_state_from_detail(
         run_id=str(detail.get("run_id", "")),
         status=status,
         engine=str(detail.get("engine", "unknown")),
+        model=_coerce_str_or_none(detail.get("model")),
         skill_id=str(detail.get("skill_id", "unknown")),
         updated_at=_parse_datetime(detail.get("updated_at")),
         pending_interaction_id=(
@@ -833,21 +868,31 @@ def _parse_run_status(raw: Any) -> RunStatus:
 
 def _parse_datetime(raw: Any) -> datetime:
     if isinstance(raw, datetime):
-        return raw
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc)
+        return raw.astimezone(timezone.utc)
     if isinstance(raw, str) and raw:
         try:
-            return datetime.fromisoformat(raw)
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
         except ValueError:
-            return datetime.utcnow()
-    return datetime.utcnow()
+            return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc)
 
 
 def _parse_datetime_or_none(raw: Any) -> datetime | None:
     if isinstance(raw, datetime):
-        return raw
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc)
+        return raw.astimezone(timezone.utc)
     if isinstance(raw, str) and raw:
         try:
-            return datetime.fromisoformat(raw)
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
         except ValueError:
             return None
     return None

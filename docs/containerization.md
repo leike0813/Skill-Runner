@@ -21,7 +21,7 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/entrypoint_e2e.sh`: built-in E2E client entrypoint (same image, different startup path).
 - `scripts/agent_manager.py`: cross-platform Engine manager (ensure/check/upgrade).
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
-- `scripts/upgrade_agents.sh`: upgrade wrapper (`local` / `container` mode).
+- `scripts/agent_harness_container.sh`: host-side wrapper to run containerized `agent-harness` through `docker compose exec api`.
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
 
 ## Volumes
@@ -44,12 +44,21 @@ Install packages that provide `codex`, `gemini`, `iflow`, and `opencode` command
 
 ## Upgrading agent CLIs
 
-Use the upgrade script to refresh installed CLIs:
+Use `agent_manager.py` directly to refresh installed CLIs:
 
+Local:
+
+```bash
+uv run python scripts/agent_manager.py --upgrade
 ```
-./scripts/upgrade_agents.sh local
-./scripts/upgrade_agents.sh container
+
+Container:
+
+```bash
+docker compose exec api python3 /app/scripts/agent_manager.py --upgrade
 ```
+
+Legacy helper wrappers were moved out of `scripts/` and are no longer recommended as the primary entrypoint.
 
 ## Agent CLI status
 
@@ -185,6 +194,17 @@ Method 2: Import credential files from Admin UI
 - Open `/ui/engines`.
 - Choose engine/provider auth menu entry: **Import Credentials**.
 - Upload required files. Service validates payload structure and writes to isolated Agent Home.
+
+### Harness usage
+
+- Local runtime: run `agent-harness ...` directly in the current environment.
+- Container runtime: use the supported wrapper from the project root:
+
+```bash
+./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+```
+
+- The wrapper always targets the `api` service with `docker compose exec`; it does not change the semantics of the local `agent-harness` CLI.
 
 OpenAI OAuth proxy note:
 - Skill Runner `oauth_proxy` for `codex` and `opencode/openai` starts a per-session local callback listener (`127.0.0.1:1455`) and stops it when session finishes.

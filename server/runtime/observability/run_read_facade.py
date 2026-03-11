@@ -103,32 +103,56 @@ class RunReadFacade:
                     artifacts.append(path.relative_to(run_dir).as_posix())
         return RunArtifactsResponse(request_id=request_id, artifacts=artifacts)
 
+    async def _get_bundle_by_mode(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+        debug: bool,
+    ) -> FileResponse:
+        _request_record, run_dir = await self._resolve_request_and_run_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
+        bundle_name = "run_bundle_debug.zip" if debug else "run_bundle.zip"
+        bundle_path = run_dir / "bundle" / bundle_name
+        if not bundle_path.exists():
+            control = self._job_control()
+            if hasattr(control, "build_run_bundle"):
+                control.build_run_bundle(run_dir, debug)
+            else:
+                # Backward-compatible fallback for legacy test doubles.
+                legacy_control = control
+                if isinstance(legacy_control, object):
+                    getattr(legacy_control, "_build_run_bundle")(run_dir, debug)
+
+        if not bundle_path.exists():
+            raise HTTPException(status_code=404, detail="Bundle not found")
+        return FileResponse(path=bundle_path, filename=bundle_path.name)
+
     async def get_bundle(
         self,
         *,
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> FileResponse:
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        return await self._get_bundle_by_mode(
             source_adapter=source_adapter,
             request_id=request_id,
+            debug=False,
         )
-        debug_mode = bool(request_record.get("runtime_options", {}).get("debug"))
-        bundle_name = "run_bundle_debug.zip" if debug_mode else "run_bundle.zip"
-        bundle_path = run_dir / "bundle" / bundle_name
-        if not bundle_path.exists():
-            control = self._job_control()
-            if hasattr(control, "build_run_bundle"):
-                control.build_run_bundle(run_dir, debug_mode)
-            else:
-                # Backward-compatible fallback for legacy test doubles.
-                legacy_control = control
-                if isinstance(legacy_control, object):
-                    getattr(legacy_control, "_build_run_bundle")(run_dir, debug_mode)
 
-        if not bundle_path.exists():
-            raise HTTPException(status_code=404, detail="Bundle not found")
-        return FileResponse(path=bundle_path, filename=bundle_path.name)
+    async def get_debug_bundle(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None = None,
+        request_id: str,
+    ) -> FileResponse:
+        return await self._get_bundle_by_mode(
+            source_adapter=source_adapter,
+            request_id=request_id,
+            debug=True,
+        )
 
     async def get_files(
         self,

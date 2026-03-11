@@ -605,6 +605,7 @@ class RunStore:
                     req.skill_id AS skill_id,
                     req.skill_source AS skill_source,
                     req.engine AS engine,
+                    req.engine_options_json AS engine_options_json,
                     req.run_id AS run_id,
                     req.runtime_options_json AS runtime_options_json,
                     req.effective_runtime_options_json AS effective_runtime_options_json,
@@ -626,6 +627,10 @@ class RunStore:
             return None
         data = dict(row)
         runtime_options_raw = data.pop("runtime_options_json", "{}")
+        try:
+            data["engine_options"] = json.loads(data.pop("engine_options_json", "{}") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            data["engine_options"] = {}
         try:
             data["runtime_options"] = json.loads(runtime_options_raw or "{}")
         except (json.JSONDecodeError, TypeError):
@@ -675,6 +680,7 @@ class RunStore:
                     req.skill_id AS skill_id,
                     req.skill_source AS skill_source,
                     req.engine AS engine,
+                    req.engine_options_json AS engine_options_json,
                     req.run_id AS run_id,
                     req.created_at AS request_created_at,
                     run.status AS run_status,
@@ -689,6 +695,60 @@ class RunStore:
                 LIMIT ?
                 """,
                 (safe_limit,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def count_requests_with_runs(self) -> int:
+        await self._ensure_initialized()
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                """
+                SELECT COUNT(1) AS total
+                FROM requests req
+                WHERE req.run_id IS NOT NULL
+                """
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return 0
+        total_obj = row["total"]
+        try:
+            total = int(total_obj)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, total)
+
+    async def list_requests_with_runs_page(self, page: int = 1, page_size: int = 20) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        safe_page_size = max(1, min(int(page_size), 1000))
+        safe_page = max(1, int(page))
+        offset = (safe_page - 1) * safe_page_size
+        async with self._connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                """
+                SELECT
+                    req.request_id AS request_id,
+                    req.skill_id AS skill_id,
+                    req.skill_source AS skill_source,
+                    req.engine AS engine,
+                    req.engine_options_json AS engine_options_json,
+                    req.run_id AS run_id,
+                    req.created_at AS request_created_at,
+                    run.status AS run_status,
+                    run.created_at AS run_created_at,
+                    run.recovery_state AS recovery_state,
+                    run.recovered_at AS recovered_at,
+                    run.recovery_reason AS recovery_reason
+                FROM requests req
+                LEFT JOIN runs run ON req.run_id = run.run_id
+                WHERE req.run_id IS NOT NULL
+                ORDER BY req.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (safe_page_size, offset),
             )
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]

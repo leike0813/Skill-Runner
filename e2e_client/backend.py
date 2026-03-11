@@ -22,7 +22,12 @@ class BackendClient:
     async def list_management_engines(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def list_management_runs(self) -> dict[str, Any]:
+    async def list_management_runs(
+        self,
+        *,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     async def list_skills(self) -> dict[str, Any]:
@@ -122,6 +127,14 @@ class BackendClient:
     ) -> bytes:
         raise NotImplementedError
 
+    async def get_run_debug_bundle(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> bytes:
+        raise NotImplementedError
+
     async def get_run_files(
         self,
         request_id: str,
@@ -200,8 +213,22 @@ class HttpBackendClient(BackendClient):
     async def list_management_engines(self) -> dict[str, Any]:
         return await self._request_json("GET", "/v1/management/engines")
 
-    async def list_management_runs(self) -> dict[str, Any]:
-        return await self._request_json("GET", "/v1/management/runs")
+    async def list_management_runs(
+        self,
+        *,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if isinstance(page, int) and page > 0:
+            params["page"] = page
+        if isinstance(page_size, int) and page_size > 0:
+            params["page_size"] = page_size
+        return await self._request_json(
+            "GET",
+            "/v1/management/runs",
+            params=params if params else None,
+        )
 
     async def list_skills(self) -> dict[str, Any]:
         return await self._request_json("GET", "/v1/management/skills")
@@ -380,6 +407,15 @@ class HttpBackendClient(BackendClient):
     ) -> bytes:
         _ = run_source
         return await self._request_bytes("GET", f"/v1/jobs/{request_id}/bundle")
+
+    async def get_run_debug_bundle(
+        self,
+        request_id: str,
+        *,
+        run_source: RunSource = RUN_SOURCE_INSTALLED,
+    ) -> bytes:
+        _ = run_source
+        return await self._request_bytes("GET", f"/v1/jobs/{request_id}/bundle/debug")
 
     async def get_run_files(
         self,

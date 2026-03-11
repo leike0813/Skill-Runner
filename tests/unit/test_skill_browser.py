@@ -46,7 +46,7 @@ def test_build_preview_payload_text_binary_and_size(tmp_path: Path):
     assert text_preview["mode"] == "text"
     assert text_preview["content"] == "hello"
     assert text_preview["detected_format"] == "text"
-    assert text_preview["rendered_html"] is None
+    assert isinstance(text_preview["rendered_html"], str)
     assert text_preview["json_pretty"] is None
 
     binary_file = tmp_path / "b.bin"
@@ -81,3 +81,13 @@ def test_build_preview_payload_json_pretty(tmp_path: Path):
     assert preview["detected_format"] == "json"
     assert isinstance(preview["json_pretty"], str)
     assert '"a": 1' in preview["json_pretty"]
+
+
+def test_build_preview_payload_jsonl_with_line_number_rendering(tmp_path: Path):
+    jsonl_file = tmp_path / "events.jsonl"
+    jsonl_file.write_text('{"seq":1}\n{"seq":2}\n', encoding="utf-8")
+    preview = build_preview_payload(jsonl_file)
+    assert preview["mode"] == "text"
+    assert preview["detected_format"] == "jsonl"
+    assert isinstance(preview["rendered_html"], str)
+    assert "seq" in preview["rendered_html"]

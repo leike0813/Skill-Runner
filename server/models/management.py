@@ -192,6 +192,7 @@ class ManagementRunConversationState(BaseModel):
     run_id: str
     status: RunStatus
     engine: str
+    model: Optional[str] = None
     skill_id: str
     updated_at: datetime
     pending_interaction_id: Optional[int] = None
@@ -211,6 +212,10 @@ class ManagementRunListResponse(BaseModel):
     """Response payload for management run list."""
 
     runs: List[ManagementRunConversationState] = []
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1)
+    total: int = Field(default=0, ge=0)
+    total_pages: int = Field(default=0, ge=0)
 
 
 class ManagementRunFilesResponse(BaseModel):

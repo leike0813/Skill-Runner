@@ -4,7 +4,7 @@
 定义本地一键部署脚本的依赖检查、路径初始化和运行时解析统一规则。
 ## Requirements
 ### Requirement: 系统 MUST 提供本地一键部署脚本
-系统 MUST 提供 Linux/macOS 与 Windows 两套本地一键部署脚本，完成基础目录初始化与服务启动准备。
+系统 MUST 提供 Linux/macOS 与 Windows 两套本地一键部署脚本，完成基础目录初始化与服务启动准备。系统同时 MUST 保持 `scripts/` 目录只包含正式支持的部署、启动、发布或受支持运维脚本；历史兼容、排障和实验脚本 MUST 迁出主目录。
 
 #### Scenario: Linux/macOS 一键部署
 - **WHEN** 用户执行 `scripts/deploy_local.sh`
@@ -15,6 +15,16 @@
 - **WHEN** 用户执行 `scripts/deploy_local.ps1`
 - **THEN** 脚本完成 Windows 本地路径初始化与前置检查
 - **AND** 输出明确的后续启动信息
+
+#### Scenario: supported scripts remain in scripts directory
+- **WHEN** 用户查看项目根目录 `scripts/`
+- **THEN** 其中仅包含当前正式支持的部署/启动/运维入口
+- **AND** 历史兼容或一次性脚本不再与正式入口混放
+
+#### Scenario: deprecated or forensic scripts are relocated
+- **WHEN** 用户需要访问历史兼容或排障脚本
+- **THEN** 可以分别在 `deprecated/scripts/` 或 `artifacts/scripts/` 找到
+- **AND** README 与容器化文档不会再把它们列为正式入口
 
 ### Requirement: 部署脚本 MUST 统一使用运行时解析规则
 部署脚本 MUST 与服务端运行时解析逻辑一致，避免脚本初始化路径与服务实际读取路径不一致。
@@ -109,4 +119,3 @@
 - **WHEN** compose 同时启用主服务与可选客户端服务
 - **THEN** 两个服务使用同一镜像标签
 - **AND** 分别执行各自角色对应的启动命令
-

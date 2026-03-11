@@ -3,12 +3,25 @@
 </div>
 {% if preview.mode == "text" %}
 <div style="margin-bottom:8px;color:var(--neutral-500);font-size:12px;">{{ preview.meta }}</div>
-{% if preview.rendered_html and preview.detected_format in ["markdown", "json", "yaml", "toml", "python", "javascript"] %}
-<div class="preview-markdown" style="padding:12px;border:1px solid var(--neutral-200);border-radius:10px;background:#fff;">{{ preview.rendered_html | safe }}</div>
-{% elif preview.detected_format == "json" %}
-<pre style="padding:12px;border:1px solid var(--neutral-200);border-radius:10px;background:#fff;">{{ preview.json_pretty or preview.content }}</pre>
+{% if preview.rendered_html %}
+<div class="preview-markdown" style="padding:12px;border:1px solid var(--neutral-200);border-radius:10px;background:#fff;">
+    <style>
+        .preview-markdown table { width: 100%; border-collapse: collapse; }
+        .preview-markdown td { vertical-align: top; }
+        .preview-markdown td.linenos {
+            width: 52px;
+            min-width: 52px;
+            padding-right: 10px;
+            border-right: 1px solid #e2e8f0;
+            color: #64748b;
+            user-select: none;
+        }
+        .preview-markdown td.code { padding-left: 10px; color: #0f172a; }
+    </style>
+    {{ preview.rendered_html | safe }}
+</div>
 {% else %}
-<pre style="padding:12px;border:1px solid var(--neutral-200);border-radius:10px;background:#fff;">{{ preview.content }}</pre>
+<pre style="padding:12px;border:1px solid var(--neutral-200);border-radius:10px;background:#fff;">{{ preview.json_pretty or preview.content }}</pre>
 {% endif %}
 {% elif preview.mode == "too_large" %}
 <div style="color:var(--warning-500);font-size:13px;">{{ t("client.file_too_large", default="文件过大不可预览") }}</div>

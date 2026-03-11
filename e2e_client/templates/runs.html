@@ -10,6 +10,7 @@
                 <th>{{ t("client.runs_table_status", default="Status") }}</th>
                 <th>{{ t("client.runs_table_skill", default="Skill") }}</th>
                 <th>{{ t("client.runs_table_engine", default="Engine") }}</th>
+                <th>{{ t("client.runs_table_model", default="Model") }}</th>
                 <th>{{ t("client.runs_table_updated_at", default="Updated At") }}</th>
                 <th>{{ t("client.runs_table_steps", default="Steps") }}</th>
                 <th></th>
@@ -27,15 +28,35 @@
                 </td>
                 <td>{{ row.skill_id }}</td>
                 <td>{{ row.engine }}</td>
-                <td>{{ row.updated_at or "-" }}</td>
+                <td>{{ row.model or "-" }}</td>
+                <td><span class="js-local-datetime" data-ts="{{ row.updated_at or '' }}">{{ row.updated_at or "-" }}</span></td>
                 <td>{{ row.step_count }}</td>
-                <td><div class="table-actions"><a class="btn btn-secondary" href="/runs/{{ row.request_id }}">{{ t("client.btn_details", default="Details") }}</a></div></td>
+                <td><div class="table-actions"><a class="btn btn-secondary" href="/runs/{{ row.request_id }}?page={{ page }}&page_size={{ page_size }}">{{ t("client.btn_details", default="Details") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not rows %}
-            <tr><td colspan="7" class="muted">{{ t("client.runs_no_runs", default="No runs created from this client yet.") }}</td></tr>
+            <tr><td colspan="8" class="muted">{{ t("client.runs_no_runs", default="No runs created from this client yet.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px; flex-wrap:wrap;">
+        <div class="muted">{{ t("client.runs_pagination_summary", default="Page {page}/{total_pages} · Total {total}", page=page, total_pages=total_pages or 1, total=total) }}</div>
+        <div style="display:flex; gap:8px;">
+            <a class="btn btn-secondary {% if page <= 1 %}disabled{% endif %}" href="/runs?page={{ page - 1 if page > 1 else 1 }}&page_size={{ page_size }}">{{ t("client.runs_prev", default="Previous") }}</a>
+            <a class="btn btn-secondary {% if total_pages and page >= total_pages %}disabled{% endif %}" href="/runs?page={{ page + 1 }}&page_size={{ page_size }}">{{ t("client.runs_next", default="Next") }}</a>
+        </div>
+    </div>
 </section>
+<script>
+(() => {
+    const nodes = document.querySelectorAll(".js-local-datetime");
+    nodes.forEach((node) => {
+        const ts = node.getAttribute("data-ts");
+        if (!ts) return;
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) return;
+        node.textContent = date.toLocaleString([], { hour12: false });
+    });
+})();
+</script>
 {% endblock %}
