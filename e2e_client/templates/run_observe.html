@@ -686,6 +686,22 @@
         return options;
     }
 
+    function resolveInteractionActionResponse(kind, option) {
+        if (kind === "confirm") {
+            const label = safeText(option && option.label).trim();
+            if (label) return label;
+            const value = option ? option.value : null;
+            if (typeof value === "string") {
+                const normalized = value.trim();
+                return normalized || value;
+            }
+            if (typeof value === "boolean" || typeof value === "number") {
+                return String(value);
+            }
+        }
+        return option ? option.value : null;
+    }
+
     function deriveAskUserView(payload) {
         const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
         const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim();
@@ -694,8 +710,8 @@
         let options = normalizeChoiceOptions(optionsRaw);
         if (kind === "confirm" && options.length === 0) {
             options = [
-                { label: "是", value: true },
-                { label: "否", value: false },
+                { label: "是", value: "是" },
+                { label: "否", value: "否" },
             ];
         }
         const askHint = askUser
@@ -1400,7 +1416,7 @@
                             {
                                 mode: "interaction",
                                 interaction_id: interactionId,
-                                response: option.value,
+                                response: resolveInteractionActionResponse(kind, option),
                             },
                             {
                                 clearPromptCard: true,

@@ -110,6 +110,10 @@ class RuntimeProfile:
         existing_path = env.get("PATH", "")
         prepend = os.pathsep.join(str(path) for path in self.managed_bin_dirs)
         env["PATH"] = f"{prepend}{os.pathsep}{existing_path}" if existing_path else prepend
+        forced_env = config.SYSTEM.RUNTIME_ENV.FORCED
+        for key in forced_env:
+            value = forced_env[key]
+            env[str(key)] = str(value)
         return env
 
 
