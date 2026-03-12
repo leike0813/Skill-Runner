@@ -552,9 +552,12 @@
         "browse": "Parcourir",
         "empty": "Aucun Skill installé.",
         "engines": "Moteurs",
+        "execution_modes": "Modes d'exécution",
         "health": "Santé",
+        "health_aria": "État de santé",
         "id": "ID",
         "name": "Name",
+        "skill": "Skill",
         "version": "Version"
       }
     }

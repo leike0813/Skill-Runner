@@ -346,6 +346,12 @@ async def test_ui_skills_table_highlight(monkeypatch):
     response = await _request("GET", "/ui/skills/table?highlight_skill_id=skill-b")
     assert response.status_code == 200
     assert "Skill B" in response.text
+    assert "<code>skill-b</code>" in response.text
+    assert "skill-mode-pill" in response.text
+    assert "health-led-" in response.text
+    assert "sr-only" in response.text
+    assert 'class="btn btn-secondary"' in response.text
+    assert "/ui/skills/skill-b" in response.text
     assert "background:#ecfdf5;" in response.text
 
 

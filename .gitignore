@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+uv_cache/
 .env
 .env.engine_auth.local
 .DS_Store

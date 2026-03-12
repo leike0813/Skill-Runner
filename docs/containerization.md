@@ -26,6 +26,17 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/up/down/status/doctor`).
 - `scripts/skill-runner-install.sh` / `scripts/skill-runner-install.ps1`: release installer scripts with SHA256 verification.
 
+## Release Assets (Tag Builds)
+
+For each `v*` tag, CI publishes installer-facing release assets:
+
+- `docker-compose.release.yml`
+- `docker-compose.release.yml.sha256`
+- `skill-runner-<version>.tar.gz`
+- `skill-runner-<version>.tar.gz.sha256`
+
+The source package includes repository files plus `skills/*` submodule contents.
+
 ## Volumes
 
 The default compose file mounts:

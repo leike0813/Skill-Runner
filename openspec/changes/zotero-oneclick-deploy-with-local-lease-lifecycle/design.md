@@ -12,6 +12,8 @@
 - 本地租约 TTL 默认 `60s`，推荐心跳间隔 `20s`。
 - 本地模式不做自动重启；Docker 模式常驻由 compose 策略控制。
 - 安装器只接受 release 固定版本并做 SHA256 校验。
+- tag release 资产至少包含四件套：`docker-compose.release.yml`、其 `.sha256`、`skill-runner-<version>.tar.gz`、其 `.sha256`。
+- 源码包由 CI 在 tag 构建时生成，且必须包含 `skills/*` 子模块内容。
 
 ## Runtime Lifecycle
 

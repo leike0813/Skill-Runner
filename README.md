@@ -128,6 +128,11 @@ Release installers (for fixed-tag assets + SHA256 verification):
 .\scripts\skill-runner-install.ps1 -Version v0.4.3
 ```
 
+The installers download these GitHub Release assets for the selected tag:
+
+- `skill-runner-<version>.tar.gz`
+- `skill-runner-<version>.tar.gz.sha256`
+
 Containerized harness entrypoint:
 
 ```bash

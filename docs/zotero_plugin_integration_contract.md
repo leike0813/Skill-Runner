@@ -9,6 +9,9 @@
 - 推荐使用：
   - `scripts/skill-runner-install.sh`
   - `scripts/skill-runner-install.ps1`
+- 安装器依赖同版本 Release 资产：
+  - `skill-runner-<version>.tar.gz`
+  - `skill-runner-<version>.tar.gz.sha256`
 
 ## 2) 控制命令（插件唯一入口）
 

@@ -2,23 +2,39 @@
 <table class="table table-striped">
     <thead>
         <tr>
-            <th>{{ t("ui.skills.table.id", default="ID") }}</th>
-            <th>{{ t("ui.skills.table.name", default="Name") }}</th>
+            <th>{{ t("ui.skills.table.skill", default="Skill") }}</th>
             <th>{{ t("ui.skills.table.version", default="Version") }}</th>
             <th>{{ t("ui.skills.table.engines", default="Engines") }}</th>
-            <th>{{ t("ui.skills.table.health", default="Health") }}</th>
+            <th>{{ t("ui.skills.table.execution_modes", default="Execution Modes") }}</th>
+            <th><span class="sr-only">{{ t("ui.skills.table.health", default="Health") }}</span></th>
             <th>{{ t("ui.skills.table.actions", default="Actions") }}</th>
         </tr>
     </thead>
     <tbody>
     {% for skill in skills %}
         <tr style="{% if highlight_skill_id and skill.id == highlight_skill_id %}background:#ecfdf5;{% endif %}">
-            <td>{{ skill.id }}</td>
-            <td>{{ skill.name or "-" }}</td>
+            <td>
+                <div><strong>{{ skill.display_name }}</strong></div>
+                <div class="muted"><code>{{ skill.raw_name }}</code></div>
+            </td>
             <td>{{ skill.version or "-" }}</td>
             <td>{{ ", ".join(skill.engines or []) }}</td>
-            <td>{{ skill.health or "-" }}</td>
-            <td><div class="table-actions"><a class="btn btn-primary" href="/ui/skills/{{ skill.id }}">{{ t("ui.skills.table.browse", default="Browse") }}</a></div></td>
+            <td>
+                <div class="skill-mode-list">
+                    {% for mode in ["auto", "interactive"] %}
+                        {% if mode in (skill.execution_modes or []) %}
+                            <span class="skill-mode-pill">{{ mode }}</span>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </td>
+            <td>
+                <span class="health-indicator" aria-label="{{ t('ui.skills.table.health_aria', default='Health status') }}">
+                    <span class="health-led health-led-{{ skill.health_level }}"></span>
+                    <span>{{ skill.health_fallback }}</span>
+                </span>
+            </td>
+            <td><div class="table-actions"><a class="btn btn-secondary" href="/ui/skills/{{ skill.id }}">{{ t("ui.skills.table.browse", default="Browse") }}</a></div></td>
         </tr>
     {% endfor %}
     </tbody>

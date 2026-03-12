@@ -28,3 +28,8 @@
 - **WHEN** 下载资产哈希与发布校验值不一致
 - **THEN** 安装器拒绝继续执行
 - **AND** 返回明确错误信息
+
+#### Scenario: tag release publishes installer source package assets
+- **WHEN** CI 处理 `v*` tag 发布
+- **THEN** Release 资产包含 `skill-runner-<version>.tar.gz` 与对应 `.sha256`
+- **AND** 该源码包包含 `skills/*` 子模块内容

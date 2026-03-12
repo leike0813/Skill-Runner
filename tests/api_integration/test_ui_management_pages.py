@@ -67,7 +67,7 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
     engines = await _request("GET", "/ui/engines")
     assert engines.status_code == 200
     assert "/ui/management/engines/table" not in engines.text
-    assert "<table>" in engines.text
+    assert "<table" in engines.text
 
     runs = await _request("GET", "/ui/runs")
     assert runs.status_code == 200
@@ -119,3 +119,33 @@ async def test_ui_legacy_data_routes_emit_deprecation_headers(monkeypatch):
     runs = await _request("GET", "/ui/runs/table")
     assert runs.status_code == 200
     assert runs.headers.get("Deprecation") == "true"
+
+
+@pytest.mark.asyncio
+async def test_ui_management_skills_table_aligns_with_e2e_style(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_skills",
+        lambda: SimpleNamespace(
+            skills=[
+                SimpleNamespace(
+                    id="skill-e2e-align",
+                    name="Skill Align",
+                    version="1.2.3",
+                    engines=["opencode", "gemini"],
+                    execution_modes=["auto", "interactive"],
+                    health="healthy",
+                )
+            ]
+        ),
+    )
+
+    response = await _request("GET", "/ui/management/skills/table")
+    assert response.status_code == 200
+    assert "<strong>Skill Align</strong>" in response.text
+    assert "<code>skill-e2e-align</code>" in response.text
+    assert "skill-mode-pill" in response.text
+    assert "health-led-healthy" in response.text
+    assert 'class="btn btn-secondary"' in response.text
+    assert "/ui/skills/skill-e2e-align" in response.text

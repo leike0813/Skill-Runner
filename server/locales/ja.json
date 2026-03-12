@@ -552,9 +552,12 @@
         "browse": "閲覧",
         "empty": "インストール済み Skill はありません。",
         "engines": "エンジン",
+        "execution_modes": "実行モード",
         "health": "ヘルス",
+        "health_aria": "ヘルス状態",
         "id": "ID",
         "name": "Name",
+        "skill": "Skill",
         "version": "Version"
       }
     }

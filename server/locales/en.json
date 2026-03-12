@@ -562,8 +562,11 @@
         "empty": "No installed skills.",
         "engines": "Engines",
         "health": "Health",
+        "health_aria": "Health status",
         "id": "ID",
         "name": "Name",
+        "skill": "Skill",
+        "execution_modes": "Execution Modes",
         "version": "Version"
       }
     }

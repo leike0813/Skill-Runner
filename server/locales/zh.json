@@ -562,8 +562,11 @@
         "empty": "暂无已安装 Skill。",
         "engines": "引擎",
         "health": "健康状态",
+        "health_aria": "健康状态",
         "id": "ID",
         "name": "名称",
+        "skill": "Skill",
+        "execution_modes": "执行模式",
         "version": "版本"
       }
     }

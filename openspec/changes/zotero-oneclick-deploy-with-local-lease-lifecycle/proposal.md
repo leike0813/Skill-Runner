@@ -9,6 +9,7 @@
 - 新增本地运行租约 API（acquire/heartbeat/release/status），并在本地模式下启用 TTL（默认 60s）超时自停。
 - 新增标准控制命令 `skill-runnerctl`（install/up/down/status/doctor），作为插件唯一调用入口。
 - 新增跨平台安装器脚本（Linux/macOS + Windows），采用 release 固定版本与 SHA256 校验。
+- tag release 资产补齐源码包与校验文件，确保安装器可下载 `skill-runner-<version>.tar.gz` 与对应 `.sha256`（包含 `skills/*` 子模块内容）。
 - 保留 `deploy_local.sh/.ps1` 作为底层能力，不再作为插件集成入口。
 - 文档新增 Zotero 插件集成契约，明确调用时序与错误语义。
 

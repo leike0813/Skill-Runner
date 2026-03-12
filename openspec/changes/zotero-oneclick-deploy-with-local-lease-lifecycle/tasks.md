@@ -19,6 +19,7 @@
 - [x] 4.1 Add `skill-runner-install.sh` and `skill-runner-install.ps1` (release + SHA256 verify).
 - [x] 4.2 Keep `deploy_local.*` as implementation path and switch default bind to localhost.
 - [x] 4.3 Remove hard blocking on optional ttyd dependency in local deploy.
+- [x] 4.4 Update tag release workflow to publish installer source package + checksum (with submodules).
 
 ## 5. Docs and Validation
 

@@ -269,10 +269,80 @@ def _render_skills_table(
         request=request,
         name="ui/partials/skills_table.html",
         context={
-            "skills": skills,
+            "skills": _normalize_ui_skills_rows(skills),
             "highlight_skill_id": highlight_skill_id,
         },
     )
+
+
+def _coerce_non_empty_str(raw: object, fallback: str) -> str:
+    if isinstance(raw, str):
+        value = raw.strip()
+        if value:
+            return value
+    return fallback
+
+
+def _normalize_string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                values.append(text)
+    return values
+
+
+def _normalize_execution_modes(raw: object) -> list[str]:
+    modes = _normalize_string_list(raw)
+    if not modes:
+        return ["auto"]
+    return list(dict.fromkeys(modes))
+
+
+def _normalize_health_indicator(raw: object) -> dict[str, str]:
+    text = raw.strip() if isinstance(raw, str) else ""
+    normalized = text.lower()
+    yellow_states = {"unknown", "pending", "degraded", "warning"}
+    red_states = {"error", "unhealthy", "failed", "offline"}
+    if normalized == "healthy":
+        return {"level": "healthy", "fallback": text or "healthy"}
+    if normalized in yellow_states:
+        return {"level": "warning", "fallback": text or normalized}
+    if normalized in red_states:
+        return {"level": "error", "fallback": text or normalized}
+    if text:
+        return {"level": "warning", "fallback": text}
+    return {"level": "warning", "fallback": "unknown"}
+
+
+def _normalize_ui_skills_rows(rows: list[object]) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for item in rows:
+        payload = _serialize_payload_item(item)
+        skill_id = _coerce_non_empty_str(payload.get("id"), "")
+        if not skill_id:
+            continue
+        display_name = _coerce_non_empty_str(payload.get("name"), skill_id)
+        engines = _normalize_string_list(payload.get("effective_engines")) or _normalize_string_list(
+            payload.get("engines")
+        )
+        health = _normalize_health_indicator(payload.get("health"))
+        normalized.append(
+            {
+                "id": skill_id,
+                "display_name": display_name,
+                "raw_name": skill_id,
+                "version": _coerce_non_empty_str(payload.get("version"), "-"),
+                "engines": engines,
+                "execution_modes": _normalize_execution_modes(payload.get("execution_modes")),
+                "health_level": health["level"],
+                "health_fallback": health["fallback"],
+            }
+        )
+    return normalized
 
 
 def _render_engine_upgrade_status(
