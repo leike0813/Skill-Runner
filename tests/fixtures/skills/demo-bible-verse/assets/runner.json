@@ -1,6 +1,7 @@
 {
     "id": "demo-bible-verse",
     "version": "1.0.0",
+    "name": "Demo: The Bible Verse Sampler",
     "execution_modes": [
         "auto",
         "interactive"

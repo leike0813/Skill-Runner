@@ -1,7 +1,7 @@
 {
     "id": "demo-pandas-stats",
     "version": "1.0.0",
-    "name": "Pandas Data Stats",
+    "name": "Demo: Pandas Data Stats",
     "description": "Calculate statistics from CSV using Pandas",
     "execution_modes": [
         "auto"
