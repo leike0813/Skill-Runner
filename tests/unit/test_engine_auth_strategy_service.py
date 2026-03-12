@@ -17,6 +17,8 @@ def test_strategy_service_exposes_ui_capabilities_from_policy() -> None:
 
     assert capabilities["oauth_proxy"]["codex"] == ["callback", "auth_code_or_url"]
     assert capabilities["oauth_proxy"]["opencode"]["deepseek"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["opencode"]["alibaba-coding-plan"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["opencode"]["alibaba-coding-plan-cn"] == ["api_key"]
     assert "deepseek" not in capabilities["cli_delegate"]["opencode"]
 
 
@@ -80,6 +82,8 @@ def test_strategy_service_opencode_conversation_methods_use_provider_scope() -> 
 
     assert service.methods_for_conversation("opencode", "openai") == ("callback", "device_auth", "import")
     assert service.methods_for_conversation("opencode", "deepseek") == ("api_key",)
+    assert service.methods_for_conversation("opencode", "alibaba-coding-plan") == ("api_key",)
+    assert service.methods_for_conversation("opencode", "alibaba-coding-plan-cn") == ("api_key",)
     assert service.methods_for_conversation("opencode", None) == ()
 
 

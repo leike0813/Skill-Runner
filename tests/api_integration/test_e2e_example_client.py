@@ -521,6 +521,9 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         home = await _request(app, "GET", "/")
         assert home.status_code == 200
         assert "Demo Skill" in home.text
+        assert "skill-mode-pill" in home.text
+        assert "health-led-healthy" in home.text
+        assert '<th><span class="sr-only">健康状态</span></th>' in home.text
 
         run_form = await _request(app, "GET", "/skills/demo-skill/run")
         assert run_form.status_code == 200
@@ -685,6 +688,7 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         assert home.status_code == 200
         assert "样例 Skill（临时上传）" in home.text
         assert "demo-prime-number" in home.text
+        assert "<th>样例</th>" not in home.text
 
         run_form = await _request(app, "GET", "/fixtures/demo-prime-number/run")
         assert run_form.status_code == 200

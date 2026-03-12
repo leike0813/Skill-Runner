@@ -1,4 +1,62 @@
 {% extends "base.html" %}
+{% block extra_head %}
+<style>
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+    .skill-mode-list {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 156px;
+    }
+    .skill-mode-pill {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 28px;
+        border-radius: 999px;
+        border: 1px solid var(--neutral-200);
+        background: var(--neutral-50);
+        color: var(--neutral-700);
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: lowercase;
+        padding: 0 12px;
+    }
+    .health-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .health-led {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-block;
+    }
+    .health-led-healthy {
+        background: #16a34a;
+        box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.16), 0 0 8px rgba(22, 163, 74, 0.55);
+    }
+    .health-led-warning {
+        background: #eab308;
+        box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.16), 0 0 8px rgba(234, 179, 8, 0.55);
+    }
+    .health-led-error {
+        background: #dc2626;
+        box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.16), 0 0 8px rgba(220, 38, 38, 0.5);
+    }
+</style>
+{% endblock %}
 {% block content %}
 <section class="card">
     <h2 style="margin-top: 0;">{{ t("client.index_title", default="Available Skills") }}</h2>
@@ -9,7 +67,8 @@
                 <th>{{ t("client.index_table_skill", default="Skill") }}</th>
                 <th>{{ t("client.index_table_version", default="Version") }}</th>
                 <th>{{ t("client.index_table_engines", default="Engines") }}</th>
-                <th>{{ t("client.index_table_health", default="Health") }}</th>
+                <th>{{ t("client.index_execution_modes", default="Execution Modes") }}</th>
+                <th><span class="sr-only">{{ t("client.index_table_health", default="Health") }}</span></th>
                 <th></th>
             </tr>
         </thead>
@@ -17,17 +76,35 @@
         {% for skill in skills %}
             <tr>
                 <td>
-                    <div><strong>{{ skill.name or skill.id }}</strong></div>
-                    <div class="muted"><code>{{ skill.id }}</code></div>
+                    <div><strong>{{ skill.display_name }}</strong></div>
+                    <div class="muted"><code>{{ skill.raw_name }}</code></div>
                 </td>
                 <td><span class="badge badge-info">{{ skill.version }}</span></td>
-                <td>{{ ", ".join(skill.effective_engines or skill.engines or []) }}</td>
-                <td>{{ skill.health }}</td>
+                <td>{{ ", ".join(skill.engines or []) }}</td>
+                <td>
+                    <div class="skill-mode-list">
+                        {% for mode in ["auto", "interactive"] %}
+                            {% if mode in (skill.execution_modes or []) %}
+                                <span class="skill-mode-pill">{{ mode }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </td>
+                <td>
+                    <span class="health-indicator" aria-label="{{ t('client.index_health_aria', default='Health status') }}">
+                        <span class="health-led health-led-{{ skill.health_level }}"></span>
+                        {% if skill.health_i18n_key %}
+                            <span>{{ t(skill.health_i18n_key, default=skill.health_fallback) }}</span>
+                        {% else %}
+                            <span>{{ skill.health_fallback }}</span>
+                        {% endif %}
+                    </span>
+                </td>
                 <td><div class="table-actions"><a class="btn btn-secondary" href="/skills/{{ skill.id }}/run">{{ t("client.btn_run", default="Run") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not skills %}
-            <tr><td colspan="5" class="muted">{{ t("client.index_no_skills", default="No skills returned by backend.") }}</td></tr>
+            <tr><td colspan="6" class="muted">{{ t("client.index_no_skills", default="No skills returned by backend.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>
@@ -39,8 +116,7 @@
     <table class="table table-striped">
         <thead>
             <tr>
-                <th>{{ t("client.index_fixture", default="Fixture") }}</th>
-                <th>{{ t("client.index_table_skill", default="Skill ID") }}</th>
+                <th>{{ t("client.index_table_skill", default="Skill") }}</th>
                 <th>{{ t("client.index_table_version", default="Version") }}</th>
                 <th>{{ t("client.index_table_engines", default="Engines") }}</th>
                 <th>{{ t("client.index_execution_modes", default="Execution Modes") }}</th>
@@ -50,16 +126,26 @@
         <tbody>
         {% for skill in fixture_skills %}
             <tr>
-                <td><code>{{ skill.fixture_skill_id }}</code></td>
-                <td>{{ skill.id }}</td>
+                <td>
+                    <div><strong>{{ skill.name or skill.id }}</strong></div>
+                    <div class="muted"><code>{{ skill.id }}</code></div>
+                </td>
                 <td><span class="badge badge-info">{{ skill.version }}</span></td>
                 <td>{{ ", ".join(skill.engines or []) }}</td>
-                <td>{{ ", ".join(skill.execution_modes or []) }}</td>
+                <td>
+                    <div class="skill-mode-list">
+                        {% for mode in ["auto", "interactive"] %}
+                            {% if mode in (skill.execution_modes or []) %}
+                                <span class="skill-mode-pill">{{ mode }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </td>
                 <td><div class="table-actions"><a class="btn btn-secondary" href="/fixtures/{{ skill.fixture_skill_id }}/run">{{ t("client.btn_run_temp", default="Run (Temp)") }}</a></div></td>
             </tr>
         {% endfor %}
         {% if not fixture_skills %}
-            <tr><td colspan="6" class="muted">{{ t("client.index_no_fixtures", default="No fixture skills found.") }}</td></tr>
+            <tr><td colspan="5" class="muted">{{ t("client.index_no_fixtures", default="No fixture skills found.") }}</td></tr>
         {% endif %}
         </tbody>
     </table>

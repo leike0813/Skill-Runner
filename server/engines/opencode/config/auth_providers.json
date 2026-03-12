@@ -53,6 +53,18 @@
       "display_name": "Z.AI Coding Plan",
       "auth_mode": "api_key",
       "menu_label": "Z.AI Coding Plan"
+    },
+    {
+      "provider_id": "alibaba-coding-plan",
+      "display_name": "Alibaba Coding Plan",
+      "auth_mode": "api_key",
+      "menu_label": "Alibaba Coding Plan"
+    },
+    {
+      "provider_id": "alibaba-coding-plan-cn",
+      "display_name": "Alibaba Coding Plan (China)",
+      "auth_mode": "api_key",
+      "menu_label": "Alibaba Coding Plan (China)"
     }
   ]
 }

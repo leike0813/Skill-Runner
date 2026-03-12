@@ -100,7 +100,7 @@
             <h3 style="margin-top: 0;">{{ t("client.run_form_runtime_options", default="Runtime Options") }}</h3>
             <div class="row">
                 <div style="flex: 1 1 260px;">
-                    <label><input type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> {{ t("client.run_form_no_cache", default="Disable cache") }}</label><br>
+                    <label><input id="runtime__no_cache" type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> {{ t("client.run_form_no_cache", default="Disable cache") }}</label><br>
                 </div>
             </div>
             <div id="runtime_interactive_section" class="row" style="margin-top: 12px;">
@@ -141,6 +141,7 @@
     const providerSelect = document.getElementById("provider");
     const modelSelect = document.getElementById("model_value");
     const modelHidden = document.getElementById("model");
+    const noCacheCheckbox = document.getElementById("runtime__no_cache");
     const interactiveSection = document.getElementById("runtime_interactive_section");
     const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
     const timeoutGroup = document.getElementById("runtime_timeout_group");
@@ -261,6 +262,9 @@
     });
     function updateRuntimeOptionVisibility() {
         const isInteractive = executionModeSelect && executionModeSelect.value === "interactive";
+        if (noCacheCheckbox) {
+            noCacheCheckbox.disabled = isInteractive;
+        }
         if (interactiveSection) {
             interactiveSection.style.display = isInteractive ? "flex" : "none";
         }

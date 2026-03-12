@@ -17,3 +17,7 @@ def test_engine_package_execution_adapters() -> None:
 def test_opencode_auth_registry_reexport_is_available() -> None:
     provider = opencode_auth_provider_registry.get("openai")
     assert provider.provider_id == "openai"
+    provider_non_cn = opencode_auth_provider_registry.get("alibaba-coding-plan")
+    assert provider_non_cn.provider_id == "alibaba-coding-plan"
+    provider_cn = opencode_auth_provider_registry.get("alibaba-coding-plan-cn")
+    assert provider_cn.provider_id == "alibaba-coding-plan-cn"

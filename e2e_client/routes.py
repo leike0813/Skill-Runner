@@ -124,7 +124,7 @@ async def home(
         request=request,
         name="index.html",
         context={
-            "skills": skills,
+            "skills": _normalize_home_skills_rows(skills),
             "fixture_skills": _list_fixture_skills(
                 settings,
                 fallback_engines=supported_engines,
@@ -1272,6 +1272,66 @@ def _extract_execution_modes(detail: Mapping[str, Any]) -> list[str]:
     if not modes:
         return ["auto"]
     return list(dict.fromkeys(modes))
+
+
+def _normalize_home_skills_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        skill_id = _coerce_non_empty_str(row.get("id"), "")
+        if not skill_id:
+            continue
+        display_name = _coerce_non_empty_str(row.get("name"), skill_id)
+        version = _coerce_non_empty_str(row.get("version"), "-")
+        engines = _normalize_str_list(row.get("effective_engines")) or _normalize_str_list(row.get("engines"))
+        health = _normalize_health_indicator(row.get("health"))
+        normalized.append(
+            {
+                "id": skill_id,
+                "display_name": display_name,
+                "raw_name": skill_id,
+                "version": version,
+                "engines": engines,
+                "execution_modes": _extract_execution_modes(row),
+                "health_level": health["level"],
+                "health_i18n_key": health["i18n_key"],
+                "health_fallback": health["fallback"],
+            }
+        )
+    return normalized
+
+
+def _normalize_health_indicator(raw: Any) -> dict[str, str | None]:
+    text = raw.strip() if isinstance(raw, str) else ""
+    normalized = text.lower()
+    yellow_states = {"unknown", "pending", "degraded", "warning"}
+    red_states = {"error", "unhealthy", "failed", "offline"}
+    if normalized == "healthy":
+        return {
+            "level": "healthy",
+            "i18n_key": "client.index_health_healthy",
+            "fallback": text or "healthy",
+        }
+    if normalized in yellow_states:
+        return {
+            "level": "warning",
+            "i18n_key": f"client.index_health_{normalized}",
+            "fallback": text or normalized,
+        }
+    if normalized in red_states:
+        return {
+            "level": "error",
+            "i18n_key": f"client.index_health_{normalized}",
+            "fallback": text or normalized,
+        }
+    if text:
+        return {"level": "warning", "i18n_key": None, "fallback": text}
+    return {
+        "level": "warning",
+        "i18n_key": "client.index_health_unknown",
+        "fallback": "unknown",
+    }
 
 
 def _resolve_execution_mode(selected: str, detail: Mapping[str, Any]) -> tuple[str, str | None]:

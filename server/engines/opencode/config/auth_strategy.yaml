@@ -123,3 +123,25 @@ providers:
     in_conversation:
       methods:
         - api_key
+  alibaba-coding-plan:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  alibaba-coding-plan-cn:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
