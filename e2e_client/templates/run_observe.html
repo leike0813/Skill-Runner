@@ -691,7 +691,13 @@
         const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim();
         const kind = safeText((askUser && askUser.kind) || payload.kind).trim() || "open_text";
         const optionsRaw = askUser && Array.isArray(askUser.options) ? askUser.options : payload.options;
-        const options = normalizeChoiceOptions(optionsRaw);
+        let options = normalizeChoiceOptions(optionsRaw);
+        if (kind === "confirm" && options.length === 0) {
+            options = [
+                { label: "是", value: true },
+                { label: "否", value: false },
+            ];
+        }
         const askHint = askUser
             ? (
                 safeText(askUser.hint).trim()
