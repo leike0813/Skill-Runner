@@ -26,6 +26,7 @@ $env:SKILL_RUNNER_NPM_PREFIX = if ($env:SKILL_RUNNER_NPM_PREFIX) { $env:SKILL_RU
 $env:NPM_CONFIG_PREFIX = if ($env:NPM_CONFIG_PREFIX) { $env:NPM_CONFIG_PREFIX } else { $env:SKILL_RUNNER_NPM_PREFIX }
 $env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $env:SKILL_RUNNER_AGENT_CACHE_DIR "uv_cache" }
 $env:UV_PROJECT_ENVIRONMENT = if ($env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT } else { Join-Path $env:SKILL_RUNNER_AGENT_CACHE_DIR "uv_venv" }
+$env:SKILL_RUNNER_LOCAL_BIND_HOST = if ($env:SKILL_RUNNER_LOCAL_BIND_HOST) { $env:SKILL_RUNNER_LOCAL_BIND_HOST } else { "127.0.0.1" }
 
 New-Item -ItemType Directory -Force -Path $env:SKILL_RUNNER_DATA_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:SKILL_RUNNER_AGENT_CACHE_DIR | Out-Null
@@ -39,7 +40,8 @@ Write-Host "Data Dir: $($env:SKILL_RUNNER_DATA_DIR)"
 Write-Host "Agent Cache Dir: $($env:SKILL_RUNNER_AGENT_CACHE_DIR)"
 Write-Host "Agent Home: $($env:SKILL_RUNNER_AGENT_HOME)"
 Write-Host "NPM Prefix: $($env:SKILL_RUNNER_NPM_PREFIX)"
+Write-Host "Bind Host: $($env:SKILL_RUNNER_LOCAL_BIND_HOST)"
 
 Set-Location $ProjectRoot
 uv run python scripts/agent_manager.py --ensure
-uv run uvicorn server.main:app --host 0.0.0.0 --port $Port
+uv run uvicorn server.main:app --host $env:SKILL_RUNNER_LOCAL_BIND_HOST --port $Port

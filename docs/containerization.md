@@ -23,6 +23,8 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
 - `scripts/agent_harness_container.sh`: host-side wrapper to run containerized `agent-harness` through `docker compose exec api`.
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
+- `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/up/down/status/doctor`).
+- `scripts/skill-runner-install.sh` / `scripts/skill-runner-install.ps1`: release installer scripts with SHA256 verification.
 
 ## Volumes
 
@@ -59,6 +61,24 @@ docker compose exec api python3 /app/scripts/agent_manager.py --upgrade
 ```
 
 Legacy helper wrappers were moved out of `scripts/` and are no longer recommended as the primary entrypoint.
+
+## Plugin integration lifecycle (local mode)
+
+For Zotero/local desktop integration, prefer `skill-runnerctl` instead of calling `deploy_local.*` directly:
+
+```bash
+./scripts/skill-runnerctl install --json
+./scripts/skill-runnerctl up --mode local --json
+./scripts/skill-runnerctl status --mode local --json
+```
+
+Local mode defaults to loopback bind (`127.0.0.1`) and supports lease-driven lifecycle APIs:
+
+- `POST /v1/local-runtime/lease/acquire`
+- `POST /v1/local-runtime/lease/heartbeat`
+- `POST /v1/local-runtime/lease/release`
+
+If all leases expire or are released, local runtime can self-terminate (TTL default: 60s).
 
 ## Agent CLI status
 

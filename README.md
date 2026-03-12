@@ -106,6 +106,28 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 .\scripts\deploy_local.ps1
 ```
 
+Plugin-oriented control CLI:
+
+```bash
+# Linux / macOS
+./scripts/skill-runnerctl status --mode local --json
+./scripts/skill-runnerctl up --mode local --json
+./scripts/skill-runnerctl down --mode local --json
+
+# Windows (PowerShell)
+.\scripts\skill-runnerctl.ps1 status --mode local --json
+```
+
+Release installers (for fixed-tag assets + SHA256 verification):
+
+```bash
+# Linux / macOS
+./scripts/skill-runner-install.sh --version v0.4.3
+
+# Windows (PowerShell)
+.\scripts\skill-runner-install.ps1 -Version v0.4.3
+```
+
 Containerized harness entrypoint:
 
 ```bash
@@ -286,6 +308,7 @@ graph TD
 | [API Reference](docs/api_reference.md) | REST API specification |
 | [Frontend Design Guide](docs/developer/frontend_design_guide.md) | Building frontend clients |
 | [Containerization](docs/containerization.md) | Docker deployment guide |
+| [Zotero Plugin Integration Contract](docs/zotero_plugin_integration_contract.md) | One-click deploy and local lease lifecycle contract |
 | [Developer Guide](docs/dev_guide.md) | Contributing and development |
 
 ## ⚠️ Disclaimer

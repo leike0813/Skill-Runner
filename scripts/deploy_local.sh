@@ -20,9 +20,8 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 if ! command -v ttyd >/dev/null 2>&1; then
-  echo "ttyd not found. Please install ttyd first for /ui inline terminal."
+  echo "ttyd not found. /ui inline terminal will be unavailable until ttyd is installed."
   echo "Ubuntu/Debian: sudo apt-get install -y ttyd"
-  exit 1
 fi
 
 LOCAL_ROOT="${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}"
@@ -35,6 +34,7 @@ export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-$SKILL_RUNNER_NPM_PREFIX}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$SKILL_RUNNER_AGENT_CACHE_DIR/uv_cache}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$SKILL_RUNNER_AGENT_CACHE_DIR/uv_venv}"
 export UI_SHELL_TTYD_PORT="${UI_SHELL_TTYD_PORT:-17681}"
+export SKILL_RUNNER_LOCAL_BIND_HOST="${SKILL_RUNNER_LOCAL_BIND_HOST:-127.0.0.1}"
 export PATH="$SKILL_RUNNER_NPM_PREFIX/bin:$PATH"
 
 mkdir -p "$SKILL_RUNNER_DATA_DIR" "$SKILL_RUNNER_AGENT_CACHE_DIR" "$SKILL_RUNNER_AGENT_HOME"
@@ -46,7 +46,8 @@ echo "Agent Cache Dir: $SKILL_RUNNER_AGENT_CACHE_DIR"
 echo "Agent Home: $SKILL_RUNNER_AGENT_HOME"
 echo "NPM Prefix: $SKILL_RUNNER_NPM_PREFIX"
 echo "UI Shell ttyd Port: $UI_SHELL_TTYD_PORT"
+echo "Bind Host: $SKILL_RUNNER_LOCAL_BIND_HOST"
 
 cd "$PROJECT_ROOT"
 uv run python scripts/agent_manager.py --ensure
-uv run uvicorn server.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+uv run uvicorn server.main:app --host "${SKILL_RUNNER_LOCAL_BIND_HOST}" --port "${PORT:-8000}"

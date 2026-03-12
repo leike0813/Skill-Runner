@@ -53,9 +53,71 @@
 - `POST /v1/management/runs/{request_id}/reply`：提交交互回复
 - `POST /v1/management/runs/{request_id}/cancel`：取消运行
 
+### Local Runtime 租约（本地模式）
+- `GET /v1/local-runtime/status`：读取本地租约管理状态（是否启用、TTL、活跃租约数）
+- `POST /v1/local-runtime/lease/acquire`：申请租约（返回 `lease_id`、`expires_at`）
+- `POST /v1/local-runtime/lease/heartbeat`：续租
+- `POST /v1/local-runtime/lease/release`：释放租约
+
 说明：
 - 管理 API 是推荐的前端消费面。
 - 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*`、`/v1/temp-skill-runs*` 保持兼容，用于执行链路与存量调用。
+- `local-runtime` 接口仅在 `SKILL_RUNNER_RUNTIME_MODE=local` 下可用；非 local 模式返回 `409`。
+
+### 本地运行租约接口
+`GET /v1/local-runtime/status`
+
+**Response** (`LocalRuntimeStatusResponse`):
+```json
+{
+  "enabled": true,
+  "ttl_seconds": 60,
+  "heartbeat_interval_seconds": 20,
+  "active_leases": 1,
+  "has_ever_had_lease": true
+}
+```
+
+`POST /v1/local-runtime/lease/acquire`
+
+**Request Body** (`LocalLeaseAcquireRequest`):
+```json
+{
+  "owner_id": "zotero-plugin",
+  "metadata": {
+    "client": "zotero"
+  }
+}
+```
+
+**Response** (`LocalLeaseAcquireResponse`):
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2",
+  "ttl_seconds": 60,
+  "heartbeat_interval_seconds": 20,
+  "expires_at": "2026-03-12T12:01:00Z",
+  "active_leases": 1
+}
+```
+
+`POST /v1/local-runtime/lease/heartbeat`
+
+**Request Body**:
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2"
+}
+```
+
+`POST /v1/local-runtime/lease/release`
+
+**Request Body**:
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2"
+}
+```
 
 ### 获取系统设置
 `GET /v1/management/system/settings`

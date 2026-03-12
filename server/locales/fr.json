@@ -35,6 +35,7 @@
     "index_subtitle_suffix": "et ouvre un formulaire d'exécution piloté par le schéma.",
     "index_table_engines": "Moteurs",
     "index_table_health": "Santé",
+    "index_health_aria": "État de santé",
     "index_table_skill": "Skill",
     "index_table_version": "Version",
     "index_title": "Skills disponibles",

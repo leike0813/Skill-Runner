@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[im
 from server.models import (
     CancelResponse,
     RunArtifactsResponse,
+    RunFileEntry,
     RunFilePreviewResponse,
     RunFilesResponse,
     RunLogsResponse,
@@ -175,17 +176,17 @@ class RunReadFacade:
             raise HTTPException(status_code=404, detail=str(exc))
         raw_entries = detail.get("entries")
         entries = raw_entries if isinstance(raw_entries, list) else []
-        normalized_entries: list[dict[str, Any]] = []
+        normalized_entries: list[RunFileEntry] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
             normalized_entries.append(
-                {
-                    "path": str(entry.get("rel_path") or ""),
-                    "name": str(entry.get("name") or ""),
-                    "is_dir": bool(entry.get("is_dir")),
-                    "depth": int(entry.get("depth") or 0),
-                }
+                RunFileEntry(
+                    path=str(entry.get("rel_path") or ""),
+                    name=str(entry.get("name") or ""),
+                    is_dir=bool(entry.get("is_dir")),
+                    depth=int(entry.get("depth") or 0),
+                )
             )
         return RunFilesResponse(
             request_id=request_id,

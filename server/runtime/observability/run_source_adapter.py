@@ -65,9 +65,17 @@ class RunSourceCapabilities:
 
 
 class RunSourceAdapter(Protocol):
-    source: str
-    cache_namespace: str
-    capabilities: RunSourceCapabilities
+    @property
+    def source(self) -> str:
+        ...
+
+    @property
+    def cache_namespace(self) -> str:
+        ...
+
+    @property
+    def capabilities(self) -> RunSourceCapabilities:
+        ...
 
     async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
         ...
@@ -148,7 +156,9 @@ async def get_request_and_run_dir(
     source_adapter: RunSourceAdapter,
     request_id: str,
 ) -> tuple[Dict[str, Any], Path]:
-    request_record = await maybe_await(source_adapter.get_request(request_id))
+    request_record: Dict[str, Any] | None = await maybe_await(
+        source_adapter.get_request(request_id)
+    )
     if not request_record:
         raise HTTPException(status_code=404, detail="Request not found")
     run_id_obj = request_record.get("run_id")

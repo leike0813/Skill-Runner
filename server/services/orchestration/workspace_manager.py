@@ -18,15 +18,23 @@ class WorkspaceManager:
     """
     def create_run(self, request: RunCreateRequest) -> RunResponse:
         from server.services.skill.skill_registry import skill_registry
-        skill = skill_registry.get_skill(request.skill_id)
+        skill_id = request.skill_id
+        if not isinstance(skill_id, str) or not skill_id.strip():
+            raise ValueError("skill_id is required")
+        skill = skill_registry.get_skill(skill_id)
         if not skill:
-            raise ValueError(f"Skill '{request.skill_id}' not found")
+            raise ValueError(f"Skill '{skill_id}' not found")
         self._validate_skill_engine(skill, request.engine)
-        return self._create_run_dir_and_metadata(request)
+        return self._create_run_dir_and_metadata(request, skill_id=skill_id)
 
     def create_run_for_skill(self, request: RunCreateRequest, skill: SkillManifest) -> RunResponse:
         self._validate_skill_engine(skill, request.engine)
-        return self._create_run_dir_and_metadata(request)
+        resolved_skill_id = (
+            request.skill_id
+            if isinstance(request.skill_id, str) and request.skill_id.strip()
+            else skill.id
+        )
+        return self._create_run_dir_and_metadata(request, skill_id=resolved_skill_id)
 
     def _validate_skill_engine(self, skill: SkillManifest, engine: str) -> None:
         policy = resolve_skill_engine_policy(skill)
@@ -35,7 +43,7 @@ class WorkspaceManager:
                 f"Skill '{skill.id}' does not support engine '{engine}'"
             )
 
-    def _create_run_dir_and_metadata(self, request: RunCreateRequest) -> RunResponse:
+    def _create_run_dir_and_metadata(self, request: RunCreateRequest, *, skill_id: str) -> RunResponse:
         run_id = str(uuid.uuid4())
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +60,7 @@ class WorkspaceManager:
         status = RunResponse(
             run_id=run_id,
             status=RunStatus.QUEUED,
-            skill_id=request.skill_id,
+            skill_id=skill_id,
             engine=request.engine,
             created_at=now,
             updated_at=now

@@ -1,0 +1,518 @@
+#!/usr/bin/env python
+"""Control utility for Skill Runner local/docker lifecycle."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib import error as urlerror
+from urllib import request as urlrequest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.services.engine_management.runtime_profile import get_runtime_profile
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _emit(payload: dict[str, Any], *, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(payload.get("message", payload))
+    return int(payload.get("exit_code", 0))
+
+
+def _command_exists(name: str) -> bool:
+    from shutil import which
+
+    return which(name) is not None
+
+
+def _project_root() -> Path:
+    return PROJECT_ROOT
+
+
+def _state_file(profile) -> Path:
+    return profile.agent_cache_root / "local_runtime_service.json"
+
+
+def _local_logs_file(profile) -> Path:
+    return profile.data_dir / "logs" / "local_runtime_service.log"
+
+
+def _build_service_url(host: str, port: int, path: str = "/") -> str:
+    safe_path = path if path.startswith("/") else f"/{path}"
+    return f"http://{host}:{port}{safe_path}"
+
+
+def _http_json(
+    method: str, url: str, *, payload: dict[str, Any] | None = None, timeout: float = 3.0
+) -> tuple[int | None, dict[str, Any] | None]:
+    body = None
+    headers: dict[str, str] = {}
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["content-type"] = "application/json"
+    req = urlrequest.Request(url=url, data=body, headers=headers, method=method)
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            if not raw.strip():
+                return int(resp.status), {}
+            return int(resp.status), json.loads(raw)
+    except urlerror.HTTPError as exc:
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+            return int(exc.code), json.loads(raw)
+        except (json.JSONDecodeError, OSError, ValueError):
+            return int(exc.code), {"detail": str(exc)}
+    except (urlerror.URLError, TimeoutError, OSError):
+        return None, None
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform.startswith("win"):
+        cmd = ["tasklist", "/FI", f"PID eq {pid}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        return str(pid) in (proc.stdout or "")
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _terminate_pid(pid: int) -> None:
+    if pid <= 0:
+        return
+    if sys.platform.startswith("win"):
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except OSError:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return
+
+
+def _load_state(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError):
+        return None
+
+
+def _save_state(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _remove_state(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _runtime_env() -> tuple[Any, dict[str, str]]:
+    profile = get_runtime_profile()
+    profile.ensure_directories()
+    env = profile.build_subprocess_env()
+    env.setdefault("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1")
+    return profile, env
+
+
+def _cmd_install(args: argparse.Namespace) -> int:
+    profile, env = _runtime_env()
+    checks = {
+        "uv": _command_exists("uv"),
+        "node": _command_exists("node"),
+        "npm": _command_exists("npm"),
+    }
+    if not all(checks.values()):
+        return _emit(
+            {
+                "ok": False,
+                "exit_code": 2,
+                "message": "Missing required dependencies.",
+                "checks": checks,
+            },
+            as_json=args.json,
+        )
+    ensure_cmd = ["uv", "run", "python", "scripts/agent_manager.py", "--ensure"]
+    proc = subprocess.run(
+        ensure_cmd,
+        cwd=str(_project_root()),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    payload = {
+        "ok": proc.returncode == 0,
+        "exit_code": proc.returncode,
+        "mode": profile.mode,
+        "checks": checks,
+        "command": ensure_cmd,
+        "stdout": proc.stdout[-2000:] if proc.stdout else "",
+        "stderr": proc.stderr[-2000:] if proc.stderr else "",
+    }
+    payload["message"] = "Install completed." if proc.returncode == 0 else "Install failed."
+    return _emit(payload, as_json=args.json)
+
+
+def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
+    profile, env = _runtime_env()
+    state_path = _state_file(profile)
+    state = _load_state(state_path) or {}
+    host = str(state.get("host") or env.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
+    port_raw = state.get("port", args.port)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = int(args.port)
+    pid = int(state.get("pid") or 0)
+    pid_alive = _is_pid_alive(pid)
+    status_code, health_payload = _http_json("GET", _build_service_url(host, port, "/"))
+    healthy = status_code == 200 and isinstance(health_payload, dict)
+    status = "running" if healthy else ("starting" if pid_alive else "stopped")
+    payload = {
+        "ok": True,
+        "exit_code": 0,
+        "mode": "local",
+        "status": status,
+        "pid": pid if pid > 0 else None,
+        "pid_alive": pid_alive,
+        "service_healthy": healthy,
+        "host": host,
+        "port": port,
+        "url": _build_service_url(host, port, "/"),
+        "state_file": str(state_path),
+    }
+    payload["message"] = f"Local runtime status: {status}."
+    return payload
+
+
+def _cmd_status_local(args: argparse.Namespace, *, as_json: bool) -> int:
+    payload = _collect_local_status(args)
+    return _emit(payload, as_json=as_json)
+
+
+def _cmd_status_docker(args: argparse.Namespace, *, as_json: bool) -> int:
+    if not _command_exists("docker"):
+        return _emit(
+            {
+                "ok": False,
+                "exit_code": 2,
+                "mode": "docker",
+                "message": "docker is not installed.",
+            },
+            as_json=as_json,
+        )
+    cmd = ["docker", "compose", "ps", "api", "--format", "json"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    raw = (proc.stdout or "").strip()
+    status = "unknown"
+    detail: dict[str, Any] | str = raw
+    if proc.returncode == 0 and raw:
+        try:
+            parsed = json.loads(raw)
+            detail = parsed
+            service_state = str(parsed.get("State") or parsed.get("Status") or "").lower()
+            status = "running" if "running" in service_state else "stopped"
+        except json.JSONDecodeError:
+            status = "running" if "running" in raw.lower() else "stopped"
+    payload = {
+        "ok": proc.returncode == 0,
+        "exit_code": proc.returncode,
+        "mode": "docker",
+        "status": status,
+        "detail": detail,
+        "message": f"Docker runtime status: {status}.",
+    }
+    if proc.returncode != 0:
+        payload["stderr"] = proc.stderr[-2000:] if proc.stderr else ""
+    return _emit(payload, as_json=as_json)
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    if args.mode == "docker":
+        return _cmd_status_docker(args, as_json=args.json)
+    return _cmd_status_local(args, as_json=args.json)
+
+
+def _start_local_process(host: str, port: int, env: dict[str, str], profile) -> tuple[int, Path]:
+    project_root = _project_root()
+    log_path = _local_logs_file(profile)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "a", encoding="utf-8")
+    cmd = ["uv", "run", "uvicorn", "server.main:app", "--host", host, "--port", str(port)]
+    kwargs: dict[str, Any] = {
+        "cwd": str(project_root),
+        "env": env,
+        "stdout": log_file,
+        "stderr": log_file,
+        "stdin": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if sys.platform.startswith("win"):
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+        )
+    else:
+        kwargs["preexec_fn"] = os.setsid
+    proc = subprocess.Popen(cmd, **kwargs)
+    log_file.close()
+    return int(proc.pid or 0), log_path
+
+
+def _cmd_up_local(args: argparse.Namespace) -> int:
+    profile, env = _runtime_env()
+    if not _command_exists("uv"):
+        return _emit(
+            {"ok": False, "exit_code": 2, "message": "uv is not installed."},
+            as_json=args.json,
+        )
+    current = _collect_local_status(args)
+    if bool(current.get("service_healthy")):
+        return _emit(
+            {
+                "ok": True,
+                "exit_code": 0,
+                "message": "Local runtime already running.",
+                "mode": "local",
+                "host": current.get("host"),
+                "port": current.get("port"),
+                "url": current.get("url"),
+            },
+            as_json=args.json,
+        )
+    host = str(args.host or env.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
+    port = int(args.port)
+    pid, log_path = _start_local_process(host, port, env, profile)
+    if pid <= 0:
+        return _emit(
+            {"ok": False, "exit_code": 1, "message": "Failed to start local runtime."},
+            as_json=args.json,
+        )
+    state_path = _state_file(profile)
+    _save_state(
+        state_path,
+        {
+            "pid": pid,
+            "host": host,
+            "port": port,
+            "started_at": _utc_now_iso(),
+            "mode": "local",
+            "log_path": str(log_path),
+        },
+    )
+    deadline = time.monotonic() + float(args.wait_seconds)
+    healthy = False
+    while time.monotonic() < deadline:
+        code, _ = _http_json("GET", _build_service_url(host, port, "/"), timeout=1.5)
+        if code == 200:
+            healthy = True
+            break
+        if not _is_pid_alive(pid):
+            break
+        time.sleep(0.5)
+    if not healthy:
+        _terminate_pid(pid)
+        _remove_state(state_path)
+        return _emit(
+            {
+                "ok": False,
+                "exit_code": 1,
+                "message": "Local runtime failed to become healthy within timeout.",
+                "pid": pid,
+                "log_path": str(log_path),
+            },
+            as_json=args.json,
+        )
+    return _emit(
+        {
+            "ok": True,
+            "exit_code": 0,
+            "message": "Local runtime started.",
+            "mode": "local",
+            "pid": pid,
+            "host": host,
+            "port": port,
+            "url": _build_service_url(host, port, "/"),
+            "log_path": str(log_path),
+        },
+        as_json=args.json,
+    )
+
+
+def _cmd_up_docker(args: argparse.Namespace) -> int:
+    if not _command_exists("docker"):
+        return _emit(
+            {"ok": False, "exit_code": 2, "message": "docker is not installed."},
+            as_json=args.json,
+        )
+    cmd = ["docker", "compose", "up", "-d", "api"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return _emit(
+        {
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "mode": "docker",
+            "message": "Docker api service started." if proc.returncode == 0 else "Docker start failed.",
+            "stdout": proc.stdout[-2000:] if proc.stdout else "",
+            "stderr": proc.stderr[-2000:] if proc.stderr else "",
+        },
+        as_json=args.json,
+    )
+
+
+def _cmd_up(args: argparse.Namespace) -> int:
+    if args.mode == "docker":
+        return _cmd_up_docker(args)
+    return _cmd_up_local(args)
+
+
+def _cmd_down_local(args: argparse.Namespace) -> int:
+    profile, _ = _runtime_env()
+    state_path = _state_file(profile)
+    state = _load_state(state_path) or {}
+    pid = int(state.get("pid") or 0)
+    if pid > 0 and _is_pid_alive(pid):
+        _terminate_pid(pid)
+    _remove_state(state_path)
+    return _emit(
+        {"ok": True, "exit_code": 0, "mode": "local", "message": "Local runtime stopped."},
+        as_json=args.json,
+    )
+
+
+def _cmd_down_docker(args: argparse.Namespace) -> int:
+    if not _command_exists("docker"):
+        return _emit(
+            {"ok": False, "exit_code": 2, "message": "docker is not installed."},
+            as_json=args.json,
+        )
+    cmd = ["docker", "compose", "stop", "api"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return _emit(
+        {
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "mode": "docker",
+            "message": "Docker api service stopped." if proc.returncode == 0 else "Docker stop failed.",
+            "stdout": proc.stdout[-2000:] if proc.stdout else "",
+            "stderr": proc.stderr[-2000:] if proc.stderr else "",
+        },
+        as_json=args.json,
+    )
+
+
+def _cmd_down(args: argparse.Namespace) -> int:
+    if args.mode == "docker":
+        return _cmd_down_docker(args)
+    return _cmd_down_local(args)
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    profile, env = _runtime_env()
+    checks = {
+        "uv": _command_exists("uv"),
+        "node": _command_exists("node"),
+        "npm": _command_exists("npm"),
+        "docker": _command_exists("docker"),
+        "ttyd": _command_exists("ttyd"),
+    }
+    payload = {
+        "ok": True,
+        "exit_code": 0,
+        "mode": profile.mode,
+        "checks": checks,
+        "paths": {
+            "data_dir": str(profile.data_dir),
+            "agent_cache_root": str(profile.agent_cache_root),
+            "agent_home": str(profile.agent_home),
+            "npm_prefix": str(profile.npm_prefix),
+            "uv_cache_dir": str(profile.uv_cache_dir),
+            "uv_project_environment": str(profile.uv_project_environment),
+            "state_file": str(_state_file(profile)),
+            "local_log_file": str(_local_logs_file(profile)),
+        },
+        "env_snapshot": {
+            "SKILL_RUNNER_RUNTIME_MODE": env.get("SKILL_RUNNER_RUNTIME_MODE"),
+            "SKILL_RUNNER_LOCAL_BIND_HOST": env.get("SKILL_RUNNER_LOCAL_BIND_HOST"),
+        },
+        "message": "Doctor completed.",
+    }
+    return _emit(payload, as_json=args.json)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Skill Runner control utility")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    install = sub.add_parser("install", help="Install/ensure local runtime prerequisites")
+    install.add_argument("--json", action="store_true", help="Output JSON")
+    install.set_defaults(func=_cmd_install)
+
+    up = sub.add_parser("up", help="Start runtime")
+    up.add_argument("--mode", choices=("local", "docker"), default="local")
+    up.add_argument("--host", default=os.environ.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
+    up.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    up.add_argument("--wait-seconds", type=int, default=30)
+    up.add_argument("--json", action="store_true", help="Output JSON")
+    up.set_defaults(func=_cmd_up)
+
+    down = sub.add_parser("down", help="Stop runtime")
+    down.add_argument("--mode", choices=("local", "docker"), default="local")
+    down.add_argument("--json", action="store_true", help="Output JSON")
+    down.set_defaults(func=_cmd_down)
+
+    status = sub.add_parser("status", help="Get runtime status")
+    status.add_argument("--mode", choices=("local", "docker"), default="local")
+    status.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    status.add_argument("--json", action="store_true", help="Output JSON")
+    status.set_defaults(func=_cmd_status)
+
+    doctor = sub.add_parser("doctor", help="Diagnose runtime environment")
+    doctor.add_argument("--json", action="store_true", help="Output JSON")
+    doctor.set_defaults(func=_cmd_doctor)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    func = getattr(args, "func", None)
+    if func is None:
+        parser.print_help()
+        return 2
+    return int(func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

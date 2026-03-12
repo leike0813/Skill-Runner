@@ -35,6 +35,7 @@
     "index_subtitle_suffix": "そして Schema 駆動の実行フォームを開きます。",
     "index_table_engines": "エンジン",
     "index_table_health": "ヘルス",
+    "index_health_aria": "ヘルス状態",
     "index_table_skill": "Skill",
     "index_table_version": "バージョン",
     "index_title": "利用可能な Skills",
