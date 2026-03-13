@@ -68,6 +68,11 @@
 - **THEN** 安装器必须拒绝执行
 - **AND** 返回明确的失败原因
 
+#### Scenario: installer emits machine-readable install output
+- **WHEN** 用户以 JSON 模式执行 release 安装器（`skill-runner-install.sh --json` 或 `skill-runner-install.ps1 -Json`）
+- **THEN** 安装器输出包含 `ok` 与 `install_dir` 的机器可读 JSON 结果
+- **AND** 非 JSON 模式仍保留 `Installed to: <path>` 兼容文本输出
+
 ### Requirement: Release compose asset MUST be rendered from template without mutating repository compose
 系统 MUST 从发布模板渲染 `docker-compose.release.yml` 作为 release 资产，且不得在发布流程中改写仓库内 `docker-compose.yml`。
 

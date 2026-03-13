@@ -14,6 +14,11 @@
   - `skill-runner-<version>.tar.gz.sha256`
 - 安装器在解压后会自动执行一次 `skill-runnerctl bootstrap --json`。
 - `bootstrap` 非零时安装器仅告警，不回滚已解压内容；插件应读取诊断报告并给出可见提示。
+- 安装器支持机器可读输出：
+  - Linux/macOS: `scripts/skill-runner-install.sh --version <tag> --json`
+  - Windows: `scripts/skill-runner-install.ps1 -Version <tag> -Json`
+- JSON 成功输出至少包含：`ok`、`install_dir`、`version`、`bootstrap_exit_code`。
+- 非 JSON 模式下安装器仍输出兼容文本行：`Installed to: <path>`。
 
 ## 2) 控制命令（插件唯一入口）
 
@@ -61,7 +66,7 @@
 
 ## 5) Recommended sequence
 
-1. 安装 Release：`skill-runner-install.* --version <tag>`
+1. 安装 Release（推荐机器可读）：`skill-runner-install.* --version <tag> --json`（PowerShell 使用 `-Json`）
 2. 读取 `${SKILL_RUNNER_DATA_DIR}/agent_bootstrap_report.json`（若 `summary.outcome=partial_failure`，前台提示但允许继续）
 3. `skill-runnerctl up --mode local --json`
 4. `POST /v1/local-runtime/lease/acquire`

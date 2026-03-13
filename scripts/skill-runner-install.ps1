@@ -2,10 +2,25 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
     [string]$Repo = "leike0813/Skill-Runner",
-    [string]$InstallRoot = "$env:LOCALAPPDATA\SkillRunner\releases"
+    [string]$InstallRoot = "$env:LOCALAPPDATA\SkillRunner\releases",
+    [switch]$Json
 )
 
 $ErrorActionPreference = "Stop"
+
+function Write-InstallerInfo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if ($Json) {
+        [Console]::Error.WriteLine($Message)
+    }
+    else {
+        Write-Output $Message
+    }
+}
 
 $artifact = "skill-runner-$Version.tar.gz"
 $checksum = "$artifact.sha256"
@@ -20,9 +35,9 @@ try {
     $artifactPath = Join-Path $tmpDir $artifact
     $checksumPath = Join-Path $tmpDir $checksum
 
-    Write-Host "Downloading $artifactUrl"
+    Write-InstallerInfo "Downloading $artifactUrl"
     Invoke-WebRequest -Uri $artifactUrl -OutFile $artifactPath
-    Write-Host "Downloading $checksumUrl"
+    Write-InstallerInfo "Downloading $checksumUrl"
     Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath
 
     $expected = (Get-Content $checksumPath -Raw).Split()[0].Trim().ToLowerInvariant()
@@ -36,9 +51,15 @@ try {
     tar -xzf $artifactPath -C $targetDir
 
     $bootstrapCtl = Join-Path $targetDir "scripts\skill-runnerctl.ps1"
+    $bootstrapExit = $null
     if (Test-Path $bootstrapCtl) {
-        Write-Host "Running bootstrap (same strategy as agent_manager --ensure)..."
-        & $bootstrapCtl bootstrap --json
+        Write-InstallerInfo "Running bootstrap (same strategy as agent_manager --ensure)..."
+        if ($Json) {
+            & $bootstrapCtl bootstrap --json | Out-Null
+        }
+        else {
+            & $bootstrapCtl bootstrap --json
+        }
         $bootstrapExit = $LASTEXITCODE
         if ($bootstrapExit -ne 0) {
             Write-Warning "Bootstrap returned exit code $bootstrapExit. Installation will continue; check bootstrap diagnostics logs."
@@ -48,10 +69,21 @@ try {
         Write-Warning "Bootstrap script not found at $bootstrapCtl. Installation will continue without bootstrap."
     }
 
-    Write-Host "Installed to: $targetDir"
-    Write-Host "Next:"
-    Write-Host "  $targetDir\scripts\skill-runnerctl.ps1 install --json"
-    Write-Host "  $targetDir\scripts\skill-runnerctl.ps1 up --mode local --json"
+    if ($Json) {
+        $payload = [ordered]@{
+            "ok"                  = $true
+            "install_dir"         = $targetDir
+            "version"             = $Version
+            "bootstrap_exit_code" = $bootstrapExit
+        }
+        Write-Output ($payload | ConvertTo-Json -Compress)
+    }
+    else {
+        Write-Output "Installed to: $targetDir"
+        Write-Output "Next:"
+        Write-Output "  $targetDir\scripts\skill-runnerctl.ps1 install --json"
+        Write-Output "  $targetDir\scripts\skill-runnerctl.ps1 up --mode local --json"
+    }
 }
 finally {
     Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
