@@ -39,7 +39,6 @@ def _windows_subprocess_options(*, detached: bool = False) -> dict[str, Any]:
     creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if detached:
         creationflags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-        creationflags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
         creationflags |= int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
     if creationflags:
         options["creationflags"] = creationflags
