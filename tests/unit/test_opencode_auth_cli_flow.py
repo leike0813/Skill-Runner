@@ -164,3 +164,56 @@ def test_opencode_auth_cli_flow_google_auto_decline_add_another_account(tmp_path
 
     assert "n\r" in writes
     assert session.add_another_account_declined is True
+
+
+class _FakeProcess:
+    def __init__(self, returncode: int | None = None) -> None:
+        self._returncode = returncode
+        self.pid = 12345
+
+    def poll(self):
+        return self._returncode
+
+
+class _FakePtyRuntime:
+    def __init__(self) -> None:
+        self.process = _FakeProcess(None)
+        self.master_fd = -1
+        self.writes: list[str] = []
+
+    def read(self, _size: int) -> bytes:
+        return b""
+
+    def write(self, text: str) -> None:
+        self.writes.append(text)
+
+    def close(self) -> None:
+        return
+
+
+def test_start_session_uses_shared_pty_runtime(monkeypatch, tmp_path):
+    flow = OpencodeAuthCliFlow()
+    runtime = _FakePtyRuntime()
+    monkeypatch.setattr(
+        "server.engines.opencode.auth.drivers.cli_delegate_flow.spawn_cli_pty",
+        lambda **_kwargs: runtime,
+    )
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    session = flow.start_session(
+        session_id="op-runtime",
+        command_path=tmp_path / "opencode.cmd",
+        cwd=tmp_path,
+        env={},
+        output_path=tmp_path / "opencode_provider_auth.log",
+        expires_at=expires_at,
+        provider_id="openai",
+        provider_label="OpenAI",
+    )
+    assert session.pty_runtime is runtime
+    assert session.master_fd == -1
+    session.status = "waiting_user"
+    flow.submit_input(session, "https://localhost/callback?code=abc")
+    assert runtime.writes[-1] == "https://localhost/callback?code=abc\r"
+    runtime.process._returncode = 0
+    flow.cancel(session)
+    assert session.status == "canceled"

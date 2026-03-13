@@ -23,6 +23,20 @@ def _build_profile(tmp_path: Path) -> RuntimeProfile:
     )
 
 
+def _build_windows_profile(tmp_path: Path) -> RuntimeProfile:
+    cache_root = tmp_path / "cache"
+    return RuntimeProfile(
+        mode="local",
+        platform="windows",
+        data_dir=tmp_path / "data",
+        agent_cache_root=cache_root,
+        agent_home=cache_root / "agent-home",
+        npm_prefix=cache_root / "npm",
+        uv_cache_dir=cache_root / "uv_cache",
+        uv_project_environment=cache_root / "uv_venv",
+    )
+
+
 def test_ensure_layout_creates_default_config_files(tmp_path):
     manager = AgentCliManager(_build_profile(tmp_path))
     manager.ensure_layout()
@@ -218,6 +232,123 @@ def test_read_version_extracts_semver_from_prefixed_output(tmp_path: Path, monke
     )
 
     assert manager.read_version("codex") == "0.105.0"
+
+
+def test_read_version_returns_none_on_oserror(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+    monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise OSError(193, "%1 is not a valid Win32 application")
+
+    monkeypatch.setattr("subprocess.run", _raise_oserror)
+    assert manager.read_version("codex") is None
+
+
+def test_resolve_managed_engine_command_prefers_windows_cmd(tmp_path: Path) -> None:
+    manager = AgentCliManager(_build_windows_profile(tmp_path))
+    manager.ensure_layout()
+    npm_prefix = manager.profile.npm_prefix
+    npm_prefix.mkdir(parents=True, exist_ok=True)
+    shim = npm_prefix / "codex"
+    cmd = npm_prefix / "codex.cmd"
+    shim.write_text("shim", encoding="utf-8")
+    cmd.write_text("@echo off", encoding="utf-8")
+    shim.chmod(0o755)
+    cmd.chmod(0o755)
+    resolved = manager.resolve_managed_engine_command("codex")
+    assert resolved is not None
+    assert resolved.name == "codex.cmd"
+
+
+def test_resolve_ttyd_command_prefers_windows_wrappers(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_windows_profile(tmp_path))
+    manager.ensure_layout()
+    seen: list[str] = []
+
+    def _fake_which(name: str, path: str | None = None):  # noqa: ARG001
+        seen.append(name)
+        if name == "ttyd.cmd":
+            return "/tmp/ttyd.cmd"
+        return None
+
+    monkeypatch.setattr("shutil.which", _fake_which)
+    resolved = manager.resolve_ttyd_command()
+    assert resolved is not None
+    assert resolved.name == "ttyd.cmd"
+    assert seen[0] == "ttyd.cmd"
+
+
+def test_run_command_returns_failure_on_oserror(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise OSError(193, "%1 is not a valid Win32 application")
+
+    monkeypatch.setattr("subprocess.run", _raise_oserror)
+    result = manager._run_command(["codex", "--help"])
+    assert result.returncode == 127
+    assert result.stdout == ""
+
+
+def test_install_package_prefers_windows_npm_cmd(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_windows_profile(tmp_path))
+    manager.ensure_layout()
+
+    seen_names: list[str] = []
+
+    def _fake_which(name: str, path: str | None = None):  # noqa: ARG001
+        seen_names.append(name)
+        if name == "npm.cmd":
+            return "C:/Program Files/nodejs/npm.cmd"
+        return None
+
+    captured_cmd: list[str] = []
+
+    def _fake_run(argv, **kwargs):  # noqa: ANN001, ANN003
+        captured_cmd[:] = argv
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("shutil.which", _fake_which)
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    result = manager.install_package("@openai/codex")
+
+    assert seen_names[0] == "npm.cmd"
+    assert captured_cmd[0].lower().endswith("npm.cmd")
+    assert result.returncode == 0
+
+
+def test_resolve_npm_command_prefers_explicit_env_override_on_windows(tmp_path: Path) -> None:
+    manager = AgentCliManager(_build_windows_profile(tmp_path))
+    manager.ensure_layout()
+    explicit = str((tmp_path / "nodejs" / "npm.cmd").resolve())
+    explicit_path = Path(explicit)
+    explicit_path.parent.mkdir(parents=True, exist_ok=True)
+    explicit_path.write_text("@echo off", encoding="utf-8")
+    resolved = manager._resolve_npm_command(  # noqa: SLF001
+        {
+            "PATH": "",
+            "SKILL_RUNNER_NPM_COMMAND": explicit,
+        }
+    )
+    assert Path(resolved).resolve() == explicit_path.resolve()
+
+
+def test_install_package_returns_failure_on_oserror(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_windows_profile(tmp_path))
+    manager.ensure_layout()
+
+    monkeypatch.setattr("shutil.which", lambda *args, **kwargs: "C:/Program Files/nodejs/npm.cmd")
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise FileNotFoundError(2, "file not found")
+
+    monkeypatch.setattr("subprocess.run", _raise_oserror)
+    result = manager.install_package("@openai/codex")
+    assert result.returncode == 127
+    assert "file not found" in result.stderr.lower()
 
 
 @pytest.mark.parametrize(

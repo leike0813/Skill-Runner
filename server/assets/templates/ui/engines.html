@@ -251,7 +251,7 @@
                 {{ t("ui.engines.terminal_ttyd_missing", default="当前环境未检测到 ttyd。请先安装 ttyd 后再刷新本页。") }}
             </div>
         {% endif %}
-        <div class="terminal-wrap">
+        <div class="terminal-wrap" {% if not ttyd_available %}style="display:none;"{% endif %}>
             <div class="terminal-meta">
                 <div id="terminal-state">{{ t("ui.engines.auth_state_prefix", default="状态：") }}idle</div>
                 <div id="terminal-sandbox">{{ t("ui.engines.terminal_sandbox_unknown", default="sandbox: unknown") }}</div>
@@ -264,8 +264,8 @@
                 <iframe id="terminal-iframe" src="about:blank" title="{{ t("ui.engines.terminal_iframe_title", default="Engine TUI Terminal") }}"></iframe>
             </div>
         </div>
-        <div id="terminal-error" class="error"></div>
-        <div id="terminal-warning" class="warning"></div>
+        <div id="terminal-error" class="error" {% if not ttyd_available %}style="display:none;"{% endif %}></div>
+        <div id="terminal-warning" class="warning" {% if not ttyd_available %}style="display:none;"{% endif %}></div>
     </div>
 </div>
 {% endblock %}

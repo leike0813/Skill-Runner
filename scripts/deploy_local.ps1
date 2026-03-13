@@ -7,13 +7,35 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
+function Resolve-NpmCommand {
+    $candidates = @("npm.cmd", "npm.exe", "npm.bat", "npm")
+    foreach ($name in $candidates) {
+        $app = Get-Command $name -ErrorAction SilentlyContinue -CommandType Application
+        if ($app -and $app.Source) {
+            return $app.Source
+        }
+    }
+    $fallback = Get-Command npm -ErrorAction SilentlyContinue
+    if ($fallback -and $fallback.Source) {
+        $source = [string]$fallback.Source
+        if ([System.IO.Path]::GetExtension($source).ToLowerInvariant() -eq ".ps1") {
+            $cmdSibling = [System.IO.Path]::ChangeExtension($source, ".cmd")
+            if (Test-Path $cmdSibling) {
+                return $cmdSibling
+            }
+        }
+        return $source
+    }
+    return $null
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Error "uv not found. Please install uv first: https://docs.astral.sh/uv/"
 }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Error "node not found. Please install Node.js 24+."
 }
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+if (-not (Resolve-NpmCommand)) {
     Write-Error "npm not found. Please install npm."
 }
 
@@ -32,6 +54,15 @@ New-Item -ItemType Directory -Force -Path $env:SKILL_RUNNER_DATA_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:SKILL_RUNNER_AGENT_CACHE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:SKILL_RUNNER_AGENT_HOME | Out-Null
 
+$resolvedNpmCommand = Resolve-NpmCommand
+if ($resolvedNpmCommand) {
+    $env:SKILL_RUNNER_NPM_COMMAND = $resolvedNpmCommand
+    $npmCommandDir = Split-Path -Parent $resolvedNpmCommand
+    if ($npmCommandDir) {
+        $env:PATH = "$npmCommandDir;$($env:PATH)"
+    }
+}
+
 $env:PATH = "$($env:SKILL_RUNNER_NPM_PREFIX);$($env:SKILL_RUNNER_NPM_PREFIX)\bin;$($env:PATH)"
 
 Write-Host "=== Skill Runner Local Deploy (Windows) ==="
@@ -43,5 +74,5 @@ Write-Host "NPM Prefix: $($env:SKILL_RUNNER_NPM_PREFIX)"
 Write-Host "Bind Host: $($env:SKILL_RUNNER_LOCAL_BIND_HOST)"
 
 Set-Location $ProjectRoot
-uv run python scripts/agent_manager.py --ensure
+uv run python scripts/skill_runnerctl.py bootstrap --json
 uv run uvicorn server.main:app --host $env:SKILL_RUNNER_LOCAL_BIND_HOST --port $Port

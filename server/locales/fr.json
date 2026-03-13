@@ -300,6 +300,8 @@
         "engine": "Engine",
         "models": "Modèles",
         "models_manage": "Gérer les modèles",
+        "status": "Statut",
+        "status_aria": "Statut du moteur {engine} : {status}",
         "start_tui": "Démarrer le TUI",
         "upgrade": "Mettre à niveau"
       },
@@ -333,6 +335,12 @@
       "unavailable": "Aperçu indisponible"
     },
     "index": {
+      "engine_status_error": "Indisponible",
+      "engine_status_healthy": "Sain",
+      "engine_status_led_aria": "Statut du moteur {engine} : {status}",
+      "engine_status_subtitle": "Le statut provient du snapshot de cache moteur bootstrap/ensure (affichage statique, sans rafraîchissement automatique).",
+      "engine_status_title": "État des moteurs",
+      "engine_status_warning": "Version non résolue",
       "install_action": "Téléverser et installer",
       "install_title": "Installer un package Skill",
       "installed_skills": "Skills installés",

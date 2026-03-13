@@ -49,5 +49,5 @@ echo "UI Shell ttyd Port: $UI_SHELL_TTYD_PORT"
 echo "Bind Host: $SKILL_RUNNER_LOCAL_BIND_HOST"
 
 cd "$PROJECT_ROOT"
-uv run python scripts/agent_manager.py --ensure
+uv run python scripts/skill_runnerctl.py bootstrap --json
 uv run uvicorn server.main:app --host "${SKILL_RUNNER_LOCAL_BIND_HOST}" --port "${PORT:-8000}"

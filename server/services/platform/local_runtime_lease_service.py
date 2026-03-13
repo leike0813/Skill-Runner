@@ -30,6 +30,7 @@ class _LeaseRecord:
     owner_id: str | None
     metadata: dict[str, str]
     expires_at: datetime
+    first_heartbeat_received: bool
 
 
 class LocalRuntimeLeaseService:
@@ -39,6 +40,10 @@ class LocalRuntimeLeaseService:
         ttl = int(getattr(config.SYSTEM, "LOCAL_RUNTIME_LEASE_TTL_SEC", 60))
         self._ttl_seconds = max(10, ttl)
         self._heartbeat_interval_seconds = max(5, min(20, self._ttl_seconds // 3))
+        self._first_heartbeat_grace_seconds = max(
+            0,
+            int(getattr(config.SYSTEM, "LOCAL_RUNTIME_LEASE_FIRST_HEARTBEAT_GRACE_SEC", 15)),
+        )
         self._sweep_interval_seconds = max(
             1, int(getattr(config.SYSTEM, "LOCAL_RUNTIME_LEASE_SWEEP_INTERVAL_SEC", 5))
         )
@@ -91,6 +96,7 @@ class LocalRuntimeLeaseService:
                 owner_id=owner_id,
                 metadata=dict(metadata or {}),
                 expires_at=expires_at,
+                first_heartbeat_received=False,
             )
             self._shutdown_requested = False
             self._has_ever_had_lease = True
@@ -109,6 +115,7 @@ class LocalRuntimeLeaseService:
                 active = len(self._leases)
                 return False, None, active
             lease.expires_at = now + timedelta(seconds=self._ttl_seconds)
+            lease.first_heartbeat_received = True
             active = len(self._leases)
             return True, lease.expires_at, active
 
@@ -143,9 +150,15 @@ class LocalRuntimeLeaseService:
         }
 
     def _prune_expired_locked(self, now: datetime) -> None:
-        expired = [lease_id for lease_id, lease in self._leases.items() if lease.expires_at <= now]
+        expired = [lease_id for lease_id, lease in self._leases.items() if self._is_expired(lease, now)]
         for lease_id in expired:
             self._leases.pop(lease_id, None)
+
+    def _is_expired(self, lease: _LeaseRecord, now: datetime) -> bool:
+        expires_at = lease.expires_at
+        if not lease.first_heartbeat_received and self._first_heartbeat_grace_seconds > 0:
+            expires_at = expires_at + timedelta(seconds=self._first_heartbeat_grace_seconds)
+        return expires_at <= now
 
     async def _sweep_loop(self) -> None:
         while True:

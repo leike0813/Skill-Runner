@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +23,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.services.engine_management.runtime_profile import get_runtime_profile
+
+WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 
 
 def _utc_now_iso() -> str:
@@ -142,17 +146,132 @@ def _runtime_env() -> tuple[Any, dict[str, str]]:
     profile = get_runtime_profile()
     profile.ensure_directories()
     env = profile.build_subprocess_env()
+    if sys.platform.startswith("win"):
+        path_env = env.get("PATH", "")
+        resolved_npm = ""
+        for candidate in WINDOWS_NPM_CANDIDATES:
+            found = shutil.which(candidate, path=path_env)
+            if found:
+                resolved_npm = found
+                break
+        if resolved_npm:
+            npm_path = Path(resolved_npm)
+            if npm_path.suffix.lower() == ".ps1":
+                cmd_sibling = npm_path.with_suffix(".cmd")
+                if cmd_sibling.exists():
+                    npm_path = cmd_sibling
+            env["SKILL_RUNNER_NPM_COMMAND"] = str(npm_path)
+            npm_dir = str(npm_path.parent)
+            path_parts = [part for part in path_env.split(os.pathsep) if part]
+            if npm_dir and npm_dir not in path_parts:
+                env["PATH"] = f"{npm_dir}{os.pathsep}{path_env}" if path_env else npm_dir
     env.setdefault("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1")
     return profile, env
 
 
-def _cmd_install(args: argparse.Namespace) -> int:
-    profile, env = _runtime_env()
-    checks = {
+def _runtime_dependency_checks() -> dict[str, bool]:
+    return {
         "uv": _command_exists("uv"),
         "node": _command_exists("node"),
         "npm": _command_exists("npm"),
     }
+
+
+def _forward_stream_to_stderr(stream: Any, sink: Any, collector: list[str]) -> None:
+    try:
+        for line in iter(stream.readline, ""):
+            collector.append(line)
+            sink.write(line)
+            sink.flush()
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
+def _run_agent_bootstrap(profile: Any, env: dict[str, str]) -> dict[str, Any]:
+    report_path = profile.data_dir / "agent_bootstrap_report.json"
+    ensure_cmd = [
+        "uv",
+        "run",
+        "python",
+        "scripts/agent_manager.py",
+        "--ensure",
+        "--bootstrap-report-file",
+        str(report_path),
+    ]
+    try:
+        proc = subprocess.Popen(
+            ensure_cmd,
+            cwd=str(_project_root()),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as exc:
+        return {
+            "ok": False,
+            "exit_code": 127,
+            "mode": profile.mode,
+            "command": ensure_cmd,
+            "bootstrap_report_file": str(report_path),
+            "stdout": "",
+            "stderr": str(exc),
+        }
+
+    if proc.stdout is None or proc.stderr is None:
+        return_code = int(proc.wait())
+        return {
+            "ok": return_code == 0,
+            "exit_code": return_code,
+            "mode": profile.mode,
+            "command": ensure_cmd,
+            "bootstrap_report_file": str(report_path),
+            "stdout": "",
+            "stderr": "",
+        }
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    stdout_thread = threading.Thread(
+        target=_forward_stream_to_stderr,
+        args=(proc.stdout, sys.stderr, stdout_lines),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_forward_stream_to_stderr,
+        args=(proc.stderr, sys.stderr, stderr_lines),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    return_code = int(proc.wait())
+    stdout_thread.join()
+    stderr_thread.join()
+    stdout_text = "".join(stdout_lines)
+    stderr_text = "".join(stderr_lines)
+    return {
+        "ok": return_code == 0,
+        "exit_code": return_code,
+        "mode": profile.mode,
+        "command": ensure_cmd,
+        "bootstrap_report_file": str(report_path),
+        "stdout": stdout_text[-2000:] if stdout_text else "",
+        "stderr": stderr_text[-2000:] if stderr_text else "",
+    }
+
+
+def _run_bootstrap_command(
+    args: argparse.Namespace,
+    *,
+    success_message: str,
+    failure_message: str,
+) -> int:
+    profile, env = _runtime_env()
+    checks = _runtime_dependency_checks()
     if not all(checks.values()):
         return _emit(
             {
@@ -163,26 +282,26 @@ def _cmd_install(args: argparse.Namespace) -> int:
             },
             as_json=args.json,
         )
-    ensure_cmd = ["uv", "run", "python", "scripts/agent_manager.py", "--ensure"]
-    proc = subprocess.run(
-        ensure_cmd,
-        cwd=str(_project_root()),
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    payload = {
-        "ok": proc.returncode == 0,
-        "exit_code": proc.returncode,
-        "mode": profile.mode,
-        "checks": checks,
-        "command": ensure_cmd,
-        "stdout": proc.stdout[-2000:] if proc.stdout else "",
-        "stderr": proc.stderr[-2000:] if proc.stderr else "",
-    }
-    payload["message"] = "Install completed." if proc.returncode == 0 else "Install failed."
+    payload = _run_agent_bootstrap(profile, env)
+    payload["checks"] = checks
+    payload["message"] = success_message if payload["ok"] else failure_message
     return _emit(payload, as_json=args.json)
+
+
+def _cmd_install(args: argparse.Namespace) -> int:
+    return _run_bootstrap_command(
+        args,
+        success_message="Install completed.",
+        failure_message="Install failed.",
+    )
+
+
+def _cmd_bootstrap(args: argparse.Namespace) -> int:
+    return _run_bootstrap_command(
+        args,
+        success_message="Bootstrap completed.",
+        failure_message="Bootstrap failed.",
+    )
 
 
 def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
@@ -501,6 +620,10 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Diagnose runtime environment")
     doctor.add_argument("--json", action="store_true", help="Output JSON")
     doctor.set_defaults(func=_cmd_doctor)
+
+    bootstrap = sub.add_parser("bootstrap", help="Run startup bootstrap (same strategy as ensure)")
+    bootstrap.add_argument("--json", action="store_true", help="Output JSON")
+    bootstrap.set_defaults(func=_cmd_bootstrap)
     return parser
 
 

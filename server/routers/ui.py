@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # ty
 from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from ..config import config
+from ..config_registry import keys
 from ..i18n import get_language, get_translator
 from ..logging_config import get_logging_settings_payload
 from ..models import (
@@ -42,6 +43,7 @@ from ..services.engine_management.engine_upgrade_manager import (
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
+from ..services.engine_management.engine_status_cache_service import engine_status_cache_service
 from ..services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
 from ..services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from ..services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
@@ -172,6 +174,10 @@ def _request_opencode_catalog_refresh_if_needed(snapshot: object, *, reason: str
         "opencode",
         reason=reason,
     )
+
+
+def _is_ttyd_available() -> bool:
+    return agent_cli_manager.resolve_ttyd_command() is not None
 
 
 def _legacy_data_headers(replacement_path: str) -> dict[str, str]:
@@ -345,6 +351,63 @@ def _normalize_ui_skills_rows(rows: list[object]) -> list[dict[str, object]]:
     return normalized
 
 
+def _engine_status_level(*, present: bool, version: object) -> str:
+    version_text = version.strip() if isinstance(version, str) else ""
+    if not present:
+        return "error"
+    if version_text:
+        return "healthy"
+    return "warning"
+
+
+def _load_engine_status_snapshot() -> dict[str, object]:
+    try:
+        return dict(engine_status_cache_service.get_snapshot())
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        logger.warning(
+            "ui index failed to read engine status cache; falling back to unavailable markers",
+            extra={
+                "component": "router.ui",
+                "action": "ui_index_engine_status",
+                "error_type": type(exc).__name__,
+                "fallback": "all_unavailable",
+            },
+            exc_info=True,
+        )
+        return {}
+
+
+def _home_engine_status_rows() -> list[dict[str, str]]:
+    snapshot = _load_engine_status_snapshot()
+    rows: list[dict[str, str]] = []
+    for engine in keys.ENGINE_KEYS:
+        status = snapshot.get(engine)
+        present = bool(getattr(status, "present", False))
+        version = getattr(status, "version", None)
+        rows.append(
+            {
+                "engine": engine,
+                "status_level": _engine_status_level(present=present, version=version),
+                "version": version.strip() if isinstance(version, str) else "",
+            }
+        )
+    return rows
+
+
+def _with_engine_status_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    snapshot = _load_engine_status_snapshot()
+    enriched: list[dict[str, object]] = []
+    for row in rows:
+        item = dict(row)
+        engine = str(item.get("engine") or "").strip().lower()
+        status = snapshot.get(engine)
+        present = bool(getattr(status, "present", False))
+        version = getattr(status, "version", None)
+        item["status_level"] = _engine_status_level(present=present, version=version)
+        enriched.append(item)
+    return enriched
+
+
 def _render_engine_upgrade_status(
     request: Request,
     request_id: str,
@@ -374,6 +437,7 @@ async def ui_index(request: Request):
         name="ui/index.html",
         context={
             "skills": _payload_get(skills_payload, "skills", []),
+            "engine_status_rows": _home_engine_status_rows(),
         },
     )
 
@@ -623,7 +687,7 @@ async def ui_run_logs_tail(request: Request, request_id: str):
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
-    rows = _serialize_payload_list(engines_payload, "engines")
+    rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
     opencode_providers = [
         {
             "provider_id": item.provider_id,
@@ -645,7 +709,7 @@ async def ui_engines(request: Request):
             "auth_ui_high_risk_capabilities": (
                 engine_auth_strategy_service.list_ui_high_risk_capabilities()
             ),
-            "ttyd_available": agent_cli_manager.resolve_ttyd_command() is not None,
+            "ttyd_available": _is_ttyd_available(),
         },
     )
 
@@ -893,6 +957,8 @@ async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequ
 
 @router.post("/engines/tui/session/start")
 async def ui_engine_tui_start(engine: str = Form(...)):
+    if not _is_ttyd_available():
+        raise HTTPException(status_code=503, detail="ttyd not found. Inline TUI is unavailable.")
     try:
         data = ui_shell_manager.start_session(engine)
         return JSONResponse(data)
@@ -901,6 +967,8 @@ async def ui_engine_tui_start(engine: str = Form(...)):
     except UiShellValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except UiShellRuntimeError as exc:
+        if "ttyd not found" in str(exc).lower():
+            raise HTTPException(status_code=503, detail=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -930,11 +998,14 @@ async def ui_engines_table(request: Request):
 @router.get("/management/engines/table", response_class=HTMLResponse)
 async def ui_management_engines_table(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
-    rows = _serialize_payload_list(engines_payload, "engines")
+    rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/engines_table.html",
-        context={"rows": rows},
+        context={
+            "rows": rows,
+            "ttyd_available": _is_ttyd_available(),
+        },
     )
 
 

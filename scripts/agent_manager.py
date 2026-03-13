@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -89,6 +90,64 @@ def _compact_for_log(summary: str, *, max_chars: int = 220) -> str:
     if len(compact) > max_chars:
         return compact[: max_chars - 14] + "...(truncated)"
     return compact
+
+
+def _run_opencode_warmup(manager: AgentCliManager) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    payload: dict[str, Any] = {
+        "attempted": False,
+        "outcome": "skipped_cli_missing",
+        "returncode": None,
+        "duration_ms": 0,
+        "stderr_summary": "",
+        "stdout_summary": "",
+    }
+    cmd = manager.resolve_engine_command("opencode")
+    if cmd is None:
+        logger.warning(
+            "event=agent.warmup.result phase=agent_ensure target=opencode_models outcome=skipped_cli_missing"
+        )
+        return payload
+
+    payload["attempted"] = True
+    logger.info(
+        "event=agent.warmup.start phase=agent_ensure target=opencode_models command=%s",
+        cmd,
+    )
+    try:
+        result = subprocess.run(
+            [str(cmd), "models"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=manager.profile.build_subprocess_env(),
+        )
+        payload["returncode"] = int(result.returncode)
+        payload["stderr_summary"] = _summarize_output(result.stderr)
+        payload["stdout_summary"] = _summarize_output(result.stdout)
+        payload["outcome"] = "succeeded" if result.returncode == 0 else "failed"
+    except OSError as exc:
+        payload["returncode"] = 127
+        payload["stderr_summary"] = _summarize_output(str(exc))
+        payload["outcome"] = "error"
+    finally:
+        payload["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+
+    if payload["outcome"] == "succeeded":
+        logger.info(
+            "event=agent.warmup.result phase=agent_ensure target=opencode_models outcome=succeeded returncode=%s duration_ms=%s",
+            payload["returncode"],
+            payload["duration_ms"],
+        )
+    else:
+        logger.warning(
+            "event=agent.warmup.result phase=agent_ensure target=opencode_models outcome=%s returncode=%s duration_ms=%s stderr_summary=%s",
+            payload["outcome"],
+            payload["returncode"],
+            payload["duration_ms"],
+            _compact_for_log(payload["stderr_summary"]),
+        )
+    return payload
 
 
 def _write_bootstrap_report(report_file: Path | None, payload: dict[str, Any]) -> None:
@@ -195,6 +254,7 @@ def _ensure_with_diagnostics(manager: AgentCliManager) -> dict[str, Any]:
         total_duration_ms,
         ",".join(failed_engines) if failed_engines else "none",
     )
+    opencode_warmup = _run_opencode_warmup(manager)
     return {
         "generated_at": _utc_now_iso(),
         "summary": {
@@ -204,6 +264,7 @@ def _ensure_with_diagnostics(manager: AgentCliManager) -> dict[str, Any]:
             "total_duration_ms": total_duration_ms,
         },
         "engines": engines_payload,
+        "opencode_warmup": opencode_warmup,
     }
 
 

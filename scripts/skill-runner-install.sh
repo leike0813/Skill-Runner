@@ -73,6 +73,16 @@ TARGET_DIR="${INSTALL_ROOT}/${VERSION}"
 mkdir -p "$TARGET_DIR"
 tar -xzf "$TMP_DIR/$ARTIFACT" -C "$TARGET_DIR"
 
+BOOTSTRAP_CTL="${TARGET_DIR}/scripts/skill-runnerctl"
+if [ -x "$BOOTSTRAP_CTL" ]; then
+  echo "Running bootstrap (same strategy as agent_manager --ensure)..."
+  if ! "$BOOTSTRAP_CTL" bootstrap --json; then
+    echo "WARNING: bootstrap failed; installation will continue. Check bootstrap diagnostics logs."
+  fi
+else
+  echo "WARNING: bootstrap script not found at ${BOOTSTRAP_CTL}; installation will continue without bootstrap."
+fi
+
 echo "Installed to: ${TARGET_DIR}"
 echo "Next:"
 echo "  ${TARGET_DIR}/scripts/skill-runnerctl install --json"

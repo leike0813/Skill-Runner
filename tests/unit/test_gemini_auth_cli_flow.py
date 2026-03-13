@@ -19,6 +19,23 @@ class _FakeProcess:
         return self._returncode
 
 
+class _FakePtyRuntime:
+    def __init__(self) -> None:
+        self.process = _FakeProcess(None)
+        self.master_fd = -1
+        self.writes: list[str] = []
+        self.closed = False
+
+    def read(self, _size: int) -> bytes:
+        return b""
+
+    def write(self, text: str) -> None:
+        self.writes.append(text)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _build_session(tmp_path: Path, master_fd: int) -> GeminiAuthCliSession:
     now = _utc_now()
     return GeminiAuthCliSession(
@@ -33,6 +50,31 @@ def _build_session(tmp_path: Path, master_fd: int) -> GeminiAuthCliSession:
 
 
 def _drain_pipe(read_fd: int) -> bytes:
+    if os.name == "nt":
+        import ctypes
+        import msvcrt
+
+        chunks: list[bytes] = []
+        handle = msvcrt.get_osfhandle(read_fd)
+        kernel32 = ctypes.windll.kernel32
+        while True:
+            available = ctypes.c_ulong(0)
+            ok = kernel32.PeekNamedPipe(
+                ctypes.c_void_p(handle),
+                None,
+                0,
+                None,
+                ctypes.byref(available),
+                None,
+            )
+            if not ok or int(available.value) <= 0:
+                break
+            chunk = os.read(read_fd, min(4096, int(available.value)))
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+
     os.set_blocking(read_fd, False)
     chunks: list[bytes] = []
     while True:
@@ -60,6 +102,31 @@ Enter the authorization code:
     assert extracted is not None
     assert extracted.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
     assert "offline" in extracted
+
+
+def test_start_session_uses_shared_pty_runtime(monkeypatch, tmp_path: Path):
+    flow = GeminiAuthCliFlow()
+    runtime = _FakePtyRuntime()
+    monkeypatch.setattr(
+        "server.engines.gemini.auth.drivers.cli_delegate_flow.spawn_cli_pty",
+        lambda **_kwargs: runtime,
+    )
+    session = flow.start_session(
+        session_id="g-runtime",
+        command_path=Path("gemini.cmd"),
+        cwd=tmp_path,
+        env={},
+        output_path=tmp_path / "gemini_auth.log",
+        expires_at=_utc_now() + timedelta(minutes=5),
+    )
+    assert session.pty_runtime is runtime
+    assert session.master_fd == -1
+    session.status = "waiting_user"
+    flow.submit_code(session, "ABCD-EFGH")
+    assert runtime.writes[-1] == "ABCD-EFGH\r"
+    runtime.process._returncode = 0
+    flow.cancel(session)
+    assert session.status == "canceled"
 
 
 def test_consume_output_state_transitions(tmp_path: Path):

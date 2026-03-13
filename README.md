@@ -84,7 +84,7 @@ Every skill declares its supported execution modes in `runner.json`:
 
 ```bash
 mkdir -p skills data
-docker compose up --build
+docker compose up -d --build
 ```
 
 - **API**: http://localhost:8000/v1
@@ -93,10 +93,13 @@ docker compose up --build
 Or run independently:
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
+  leike0813/skill-runner:latest
 ```
 
-### Local Development
+### Local Deployment
 
 ```bash
 # Linux / macOS
@@ -105,6 +108,12 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 # Windows (PowerShell)
 .\scripts\deploy_local.ps1
 ```
+
+Prerequisites:
+
+- `uv`
+- `Node.js` and `npm`
+- `ttyd` (optional, required only for Inline TUI in `/ui/engines`)
 
 Plugin-oriented control CLI:
 
@@ -133,10 +142,29 @@ The installers download these GitHub Release assets for the selected tag:
 - `skill-runner-<version>.tar.gz`
 - `skill-runner-<version>.tar.gz.sha256`
 
-Containerized harness entrypoint:
+Deploy directly from a release compose asset:
 
 ```bash
-./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+VERSION=v0.4.3
+curl -fL -o docker-compose.release.yml \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
+curl -fL -o docker-compose.release.yml.sha256 \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml.sha256"
+# Optional integrity check:
+sha256sum -c docker-compose.release.yml.sha256
+docker compose -f docker-compose.release.yml up -d
+```
+
+Containerized harness entrypoint:
+
+- TUI Mode
+```bash
+./scripts/agent_harness_container.sh start codex
+```
+
+- Non-interactive Mode (or requiring parameter passthrough)
+```bash
+./scripts/agent_harness_container.sh start codex -- --json --full-auto "hello"
 ```
 
 <details>
@@ -156,10 +184,12 @@ Containerized harness entrypoint:
 
 ```bash
 docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.4.0
+  leike0813/skill-runner:latest
 ```
 
 </details>
@@ -171,7 +201,7 @@ Access the built-in management interface at `/ui`:
 - **Skill Browser** — View installed skills, inspect package structure and files
 - **Engine Management** — Monitor engine status, trigger upgrades, view logs
 - **Model Catalog** — Browse and manage engine model snapshots
-- **Inline TUI** — Launch engine terminals directly in the browser (single managed session)
+- **Inline TUI** — Launch engine terminals directly in the browser (single managed session, requires `ttyd`)
 
 ## 🔑 Engine Authentication
 
@@ -204,7 +234,7 @@ Available from the same Admin UI engine management interface.
 <details>
 <summary>Click to expand legacy methods</summary>
 
-**Inline TUI** — The Admin UI embeds engine terminals (`/ui/engines`) where you can run CLI login commands directly in the browser.
+**Inline TUI** — The Admin UI embeds engine terminals (`/ui/engines`) where you can run CLI login commands directly in the browser (requires `ttyd`).
 
 **Container CLI login**:
 ```bash

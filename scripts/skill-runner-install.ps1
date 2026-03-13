@@ -35,6 +35,19 @@ try {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     tar -xzf $artifactPath -C $targetDir
 
+    $bootstrapCtl = Join-Path $targetDir "scripts\skill-runnerctl.ps1"
+    if (Test-Path $bootstrapCtl) {
+        Write-Host "Running bootstrap (same strategy as agent_manager --ensure)..."
+        & $bootstrapCtl bootstrap --json
+        $bootstrapExit = $LASTEXITCODE
+        if ($bootstrapExit -ne 0) {
+            Write-Warning "Bootstrap returned exit code $bootstrapExit. Installation will continue; check bootstrap diagnostics logs."
+        }
+    }
+    else {
+        Write-Warning "Bootstrap script not found at $bootstrapCtl. Installation will continue without bootstrap."
+    }
+
     Write-Host "Installed to: $targetDir"
     Write-Host "Next:"
     Write-Host "  $targetDir\scripts\skill-runnerctl.ps1 install --json"

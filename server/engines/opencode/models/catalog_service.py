@@ -201,7 +201,10 @@ class OpencodeModelCatalog:
     async def _scheduled_refresh(self) -> None:
         await self.refresh(reason="interval")
 
-    async def _run_models_probe(self) -> List[Dict[str, Any]]:
+    def _resolve_probe_timeout_seconds(self) -> int:
+        return max(1, int(config.SYSTEM.ENGINE_MODELS_CATALOG_PROBE_TIMEOUT_SEC))
+
+    async def _run_models_probe(self, *, timeout_sec: int) -> List[Dict[str, Any]]:
         command = self.cli_manager.resolve_engine_command("opencode")
         if command is None:
             raise RuntimeError("opencode CLI not found")
@@ -214,7 +217,6 @@ class OpencodeModelCatalog:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        timeout_sec = int(config.SYSTEM.ENGINE_MODELS_CATALOG_PROBE_TIMEOUT_SEC)
         try:
             stdout_raw, stderr_raw = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
         except asyncio.TimeoutError as exc:
@@ -250,10 +252,10 @@ class OpencodeModelCatalog:
         return [dedup[key] for key in sorted(dedup.keys())]
 
     async def refresh(self, *, reason: str = "manual") -> None:
-        _ = reason
         async with self._refresh_lock:
+            timeout_sec = self._resolve_probe_timeout_seconds()
             try:
-                probed = await self._run_models_probe()
+                probed = await self._run_models_probe(timeout_sec=timeout_sec)
                 if probed:
                     payload = self._build_payload(models=probed, status="ready", last_error=None)
                 elif self._cache.get("models"):

@@ -76,9 +76,12 @@ def terminate_pid_tree(
 
     term_grace = _term_grace(term_grace_sec)
     kill_grace = _kill_grace(kill_grace_sec)
+    killpg = getattr(os, "killpg", None)
+    if not callable(killpg):
+        return TerminationResult(outcome="failed", detail="killpg_unavailable")
 
     try:
-        os.killpg(pid, signal.SIGTERM)
+        killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
         return TerminationResult(outcome="already_exited", detail="pg_not_found")
     except OSError as exc:
@@ -91,7 +94,8 @@ def terminate_pid_tree(
         time.sleep(0.05)
 
     try:
-        os.killpg(pid, signal.SIGKILL)
+        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+        killpg(pid, sigkill)
     except ProcessLookupError:
         return TerminationResult(outcome="terminated", detail="sigkill_lookup_after_term")
     except OSError as exc:
@@ -142,14 +146,16 @@ async def terminate_asyncio_process_tree(
     if pid <= 0:
         return TerminationResult(outcome="failed", detail="invalid_pid")
 
+    getpgid = getattr(os, "getpgid", None)
     try:
-        pgid = os.getpgid(pid)
-    except OSError:
+        pgid = getpgid(pid) if callable(getpgid) else None
+    except (OSError, ValueError):
         pgid = None
 
-    if pgid is not None and pgid == pid:
+    killpg = getattr(os, "killpg", None)
+    if pgid is not None and pgid == pid and callable(killpg):
         try:
-            os.killpg(pgid, signal.SIGTERM)
+            killpg(pgid, signal.SIGTERM)
             await asyncio.wait_for(proc.wait(), timeout=term_grace)
             return TerminationResult(outcome="terminated", detail="sigterm_ok")
         except asyncio.TimeoutError:
@@ -160,7 +166,8 @@ async def terminate_asyncio_process_tree(
             return TerminationResult(outcome="failed", detail=f"sigterm_error:{type(exc).__name__}")
 
         try:
-            os.killpg(pgid, signal.SIGKILL)
+            sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+            killpg(pgid, sigkill)
             await asyncio.wait_for(proc.wait(), timeout=kill_grace)
             return TerminationResult(outcome="terminated", detail="sigkill_ok")
         except asyncio.TimeoutError:

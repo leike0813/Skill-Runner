@@ -90,20 +90,31 @@ async def lifespan(_app: FastAPI):
         )
     engine_model_catalog_lifecycle.start()
     if bool(config.SYSTEM.ENGINE_MODELS_CATALOG_STARTUP_PROBE):
-        try:
-            for engine in engine_model_catalog_lifecycle.runtime_probe_engines():
-                await engine_model_catalog_lifecycle.refresh(engine, reason="startup")
-        except (OSError, RuntimeError, ValueError, TypeError) as exc:
-            logger.warning(
-                "Engine model catalog refresh failed during startup; continuing with existing cache",
-                extra={
-                    "component": "main",
-                    "action": "startup_engine_model_catalog_refresh",
-                    "error_type": type(exc).__name__,
-                    "fallback": "keep_existing_engine_model_catalog_cache",
-                },
-                exc_info=True,
-            )
+        for engine in engine_model_catalog_lifecycle.runtime_probe_engines():
+            try:
+                task = engine_model_catalog_lifecycle.request_refresh_async(engine, reason="startup")
+                if task is None:
+                    logger.warning(
+                        "Engine model catalog refresh scheduling skipped during startup",
+                        extra={
+                            "component": "main",
+                            "action": "startup_engine_model_catalog_refresh_schedule",
+                            "engine": engine,
+                            "fallback": "keep_existing_engine_model_catalog_cache",
+                        },
+                    )
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Engine model catalog refresh scheduling failed during startup; continuing with existing cache",
+                    extra={
+                        "component": "main",
+                        "action": "startup_engine_model_catalog_refresh_schedule",
+                        "engine": engine,
+                        "error_type": type(exc).__name__,
+                        "fallback": "keep_existing_engine_model_catalog_cache",
+                    },
+                    exc_info=True,
+                )
     install_runtime_protocol_ports()
     install_runtime_observability_ports()
 

@@ -1,7 +1,6 @@
 import errno
 import os
 import platform
-import pty
 import re
 import signal
 import subprocess
@@ -10,7 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock, Thread
-from typing import Any
+
+from server.runtime.auth.cli_pty_runtime import CliPtyRuntime, ProcessHandle, spawn_cli_pty
 
 _ANSI_CSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _ANSI_OSC_PATTERN = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
@@ -44,7 +44,7 @@ def _strip_ansi(text: str) -> str:
 @dataclass
 class GeminiAuthCliSession:
     session_id: str
-    process: subprocess.Popen[Any]
+    process: ProcessHandle
     master_fd: int
     output_path: Path
     created_at: datetime
@@ -74,6 +74,7 @@ class GeminiAuthCliSession:
     _clean_buffer: str = ""
     _line_tail: list[str] = field(default_factory=list)
     _reader_thread: Thread | None = None
+    pty_runtime: CliPtyRuntime | None = None
     _lock: Lock = field(default_factory=Lock, repr=False)
 
 
@@ -88,35 +89,22 @@ class GeminiAuthCliFlow:
         output_path: Path,
         expires_at: datetime,
     ) -> GeminiAuthCliSession:
-        master_fd, slave_fd = (
-            os.openpty() if hasattr(os, "openpty") else pty.openpty()
+        runtime = spawn_cli_pty(
+            command=[str(command_path), "--screen-reader"],
+            cwd=cwd,
+            env=env,
         )
-        try:
-            process = subprocess.Popen(
-                [str(command_path), "--screen-reader"],
-                cwd=str(cwd),
-                env=env,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                text=False,
-                start_new_session=True,
-            )
-        finally:
-            try:
-                os.close(slave_fd)
-            except OSError:
-                pass
 
         now = _utc_now()
         session = GeminiAuthCliSession(
             session_id=session_id,
-            process=process,
-            master_fd=master_fd,
+            process=runtime.process,
+            master_fd=runtime.master_fd,
             output_path=output_path,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
+            pty_runtime=runtime,
         )
         reader = Thread(target=self._reader_loop, args=(session,), daemon=True)
         session._reader_thread = reader
@@ -176,9 +164,14 @@ class GeminiAuthCliFlow:
     def _reader_loop(self, session: GeminiAuthCliSession) -> None:
         while True:
             try:
-                chunk = os.read(session.master_fd, 4096)
+                runtime = session.pty_runtime
+                if runtime is None:
+                    chunk = os.read(session.master_fd, 4096)
+                else:
+                    chunk = runtime.read(4096)
             except OSError as exc:
-                if exc.errno not in {errno.EBADF, errno.EIO}:
+                err_no = getattr(exc, "errno", None)
+                if err_no not in {None, errno.EBADF, errno.EIO}:
                     with session._lock:
                         if session.status not in _TERMINAL_STATUSES:
                             session.error = session.error or f"PTY read error: {exc}"
@@ -366,7 +359,11 @@ class GeminiAuthCliFlow:
         if session.process.poll() is not None:
             return
         try:
-            os.write(session.master_fd, text.encode("utf-8", errors="replace"))
+            runtime = session.pty_runtime
+            if runtime is None:
+                os.write(session.master_fd, text.encode("utf-8", errors="replace"))
+            else:
+                runtime.write(text)
         except OSError:
             pass
 
@@ -382,19 +379,32 @@ class GeminiAuthCliFlow:
                         check=False,
                     )
                 else:
-                    os.killpg(proc.pid, signal.SIGTERM)
+                    killpg = getattr(os, "killpg", None)
+                    if not callable(killpg):
+                        raise OSError("killpg_unavailable")
+                    killpg(proc.pid, signal.SIGTERM)
                     deadline = time.monotonic() + 2.5
                     while time.monotonic() < deadline:
                         if proc.poll() is not None:
                             break
                         time.sleep(0.05)
                     if proc.poll() is None:
-                        os.killpg(proc.pid, signal.SIGKILL)
+                        sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+                        killpg(proc.pid, sigkill)
             except (OSError, subprocess.SubprocessError):
                 pass
-        if not session._closed_fd:
+        if session._closed_fd:
+            return
+        runtime = session.pty_runtime
+        if runtime is not None:
             try:
-                os.close(session.master_fd)
+                runtime.close()
             except OSError:
                 pass
             session._closed_fd = True
+            return
+        try:
+            os.close(session.master_fd)
+        except OSError:
+            pass
+        session._closed_fd = True

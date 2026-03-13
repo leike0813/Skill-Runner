@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from server.config import config
+from server.services.platform import concurrency_manager as cm_module
 from server.services.platform.concurrency_manager import ConcurrencyManager
 
 
@@ -98,3 +99,85 @@ def test_env_override_for_queue_size(monkeypatch, temp_concurrency_profile):
     manager.start()
     assert manager._max_queue_size == 3
     assert manager._max_concurrent == 4
+
+
+def test_windows_limit_uses_minimum_of_all_dimensions(monkeypatch):
+    manager = ConcurrencyManager()
+    policy = {
+        "fallback_max_concurrent": 2,
+        "cpu_factor": 1.0,
+        "mem_reserve_mb": 256,
+        "estimated_mem_per_run_mb": 256,
+        "fd_reserve": 64,
+        "estimated_fd_per_run": 8,
+        "pid_reserve": 16,
+        "estimated_pid_per_run": 1,
+        "max_concurrent_hard_cap": 16,
+    }
+    monkeypatch.setattr(manager, "_is_windows", lambda: True)
+    monkeypatch.setattr(cm_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(manager, "_mem_available_mb", lambda: 3000)
+    monkeypatch.setattr(manager, "_windows_fd_limit", lambda _policy, _hard_cap: 6)
+    monkeypatch.setattr(manager, "_windows_pid_limit", lambda _policy, _hard_cap: 12)
+    assert manager._compute_max_concurrency(policy) == 6
+
+
+def test_windows_pid_limit_not_constrained_without_job_limit(monkeypatch):
+    manager = ConcurrencyManager()
+    policy = {
+        "pid_reserve": 16,
+        "estimated_pid_per_run": 2,
+    }
+    monkeypatch.setattr(manager, "_windows_active_process_limit", lambda: None)
+    assert manager._windows_pid_limit(policy, hard_cap=20) == 20
+
+
+def test_windows_pid_limit_constrained_with_job_limit(monkeypatch):
+    manager = ConcurrencyManager()
+    policy = {
+        "pid_reserve": 10,
+        "estimated_pid_per_run": 3,
+    }
+    monkeypatch.setattr(manager, "_windows_active_process_limit", lambda: 40)
+    assert manager._windows_pid_limit(policy, hard_cap=100) == 10
+
+
+def test_windows_missing_psutil_fails_fast(monkeypatch):
+    manager = ConcurrencyManager()
+    policy = {
+        "max_concurrent_hard_cap": 16,
+        "max_queue_size": 8,
+        "cpu_factor": 1.0,
+        "mem_reserve_mb": 256,
+        "estimated_mem_per_run_mb": 256,
+        "fd_reserve": 64,
+        "estimated_fd_per_run": 8,
+        "pid_reserve": 16,
+        "estimated_pid_per_run": 1,
+        "fallback_max_concurrent": 2,
+    }
+    monkeypatch.setattr(cm_module, "psutil", None)
+    monkeypatch.setattr(manager, "_is_windows", lambda: True)
+    monkeypatch.setattr(manager, "_load_policy", lambda: policy)
+    with pytest.raises(cm_module._WindowsConcurrencyProbeFatal, match="psutil"):
+        manager.start()
+
+
+def test_non_windows_probe_error_still_uses_fallback(monkeypatch):
+    manager = ConcurrencyManager()
+    policy = {
+        "max_concurrent_hard_cap": 16,
+        "max_queue_size": 8,
+        "cpu_factor": 1.0,
+        "mem_reserve_mb": 256,
+        "estimated_mem_per_run_mb": 256,
+        "fd_reserve": 64,
+        "estimated_fd_per_run": 8,
+        "pid_reserve": 16,
+        "estimated_pid_per_run": 1,
+        "fallback_max_concurrent": 2,
+    }
+    monkeypatch.setattr(manager, "_is_windows", lambda: False)
+    monkeypatch.setattr(cm_module.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(manager, "_mem_available_mb", lambda: (_ for _ in ()).throw(RuntimeError("probe fail")))
+    assert manager._compute_max_concurrency(policy) == 2
