@@ -50,4 +50,4 @@ echo "Bind Host: $SKILL_RUNNER_LOCAL_BIND_HOST"
 
 cd "$PROJECT_ROOT"
 uv run python scripts/skill_runnerctl.py bootstrap --json
-uv run uvicorn server.main:app --host "${SKILL_RUNNER_LOCAL_BIND_HOST}" --port "${PORT:-8000}"
+uv run uvicorn server.main:app --host "${SKILL_RUNNER_LOCAL_BIND_HOST}" --port "${PORT:-9813}"

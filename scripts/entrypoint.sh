@@ -105,4 +105,4 @@ print(f"Bootstrapped trust for runs parent: {runs_parent}")
 bootstrap_log_event "event=bootstrap.trust_bootstrap.done phase=run_trust_bootstrap outcome=ok"
 bootstrap_log_event "event=bootstrap.handoff_uvicorn phase=container_start outcome=running"
 
-exec uvicorn server.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+exec uvicorn server.main:app --host 0.0.0.0 --port "${PORT:-9813}"

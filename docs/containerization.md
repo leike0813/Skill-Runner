@@ -25,6 +25,7 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
 - `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/up/down/status/doctor`).
 - `scripts/skill-runner-install.sh` / `scripts/skill-runner-install.ps1`: release installer scripts with SHA256 verification.
+- `scripts/skill-runner-uninstall.sh` / `scripts/skill-runner-uninstall.ps1`: plugin-friendly uninstall scripts with optional data/agent-home cleanup.
 
 ## Release Assets (Tag Builds)
 
@@ -81,7 +82,24 @@ For Zotero/local desktop integration, prefer `skill-runnerctl` instead of callin
 ./scripts/skill-runnerctl install --json
 ./scripts/skill-runnerctl up --mode local --json
 ./scripts/skill-runnerctl status --mode local --json
+sh ./scripts/skill-runner-uninstall.sh --json
 ```
+
+`skill-runnerctl` local defaults:
+
+- Linux/macOS LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}`
+- Windows LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-%LOCALAPPDATA%\\SkillRunner}`
+- `SKILL_RUNNER_DATA_DIR` default: `<LocalRoot>/data` (override still supported via env var)
+- `SKILL_RUNNER_LOCAL_PORT` default: `29813`
+- `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN` default: `10` (tries `29813-29823`)
+- `deploy_local.*` default data dir remains `PROJECT_ROOT/data`
+- service general default port remains `9813` when `PORT` is unset
+
+Uninstall options:
+
+- `--clear-data` / `-ClearData`: also remove `<LocalRoot>/data`
+- `--clear-agent-home` / `-ClearAgentHome`: also remove `<LocalRoot>/agent-cache/agent-home`
+- both enabled: attempt to remove whole `<LocalRoot>`
 
 Local mode defaults to loopback bind (`127.0.0.1`) and supports lease-driven lifecycle APIs:
 
@@ -154,7 +172,7 @@ services:
 
 Example docker run:
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
@@ -284,11 +302,11 @@ For local development, use the repository compose file (build-first):
 docker compose up --build
 ```
 
-The API will be available at `http://localhost:8000/v1`.
+The API will be available at `http://localhost:9813/v1`.
 
 To enable the built-in E2E example client, uncomment the `e2e_client` service block in
 `docker-compose.yml` and restart compose. The E2E UI will be available at
-`http://localhost:8011`.
+`http://localhost:9814`.
 
 ### Bootstrap diagnostics (agent install / startup)
 
@@ -323,7 +341,7 @@ docker build -t skill-runner:local .
 Run the container with the same mounts as compose (example):
 
 ```
-docker run --rm -p 8000:8000 \
+docker run --rm -p 9813:9813 \
   -e UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache \
   -e UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv \
   -e SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner \
@@ -339,8 +357,8 @@ docker run --rm -p 8000:8000 \
 Run the built-in E2E client from the same image:
 
 ```bash
-docker run --rm -p 8011:8011 \
+docker run --rm -p 9814:9814 \
   --entrypoint /entrypoint_e2e.sh \
-  -e SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL=http://host.docker.internal:8000 \
+  -e SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL=http://host.docker.internal:9813 \
   skill-runner:local
 ```

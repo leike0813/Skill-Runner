@@ -6,11 +6,11 @@
 不影响本文档中的对外 API 契约。
 
 ## Base URL
-默认为 `http://localhost:8000` (取决于部署配置)。
+默认为 `http://localhost:9813` (取决于部署配置)。
 建议使用版本化前缀：`/v1`。
 
 示例：
-`http://localhost:8000/v1`
+`http://localhost:9813/v1`
 
 ---
 
@@ -1145,11 +1145,11 @@
 
 ### 内建 E2E 示例客户端服务（独立端口）
 
-内建 E2E 示例客户端是独立 FastAPI 服务（默认端口 `8011`），用于模拟真实前端调用链路，不复用 `/ui/*` 路由。
+内建 E2E 示例客户端是独立 FastAPI 服务（默认端口 `9814`），用于模拟真实前端调用链路，不复用 `/ui/*` 路由。
 
 配置：
-- `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `8011`；无效值回退到 `8011`。
-- `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:8000`。
+- `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `9814`；无效值回退到 `9814`。
+- `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:9813`。
 
 主要页面与接口：
 - `GET /`：读取并展示 Skill 列表。

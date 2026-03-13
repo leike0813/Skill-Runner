@@ -60,6 +60,48 @@
 - **THEN** 系统启动本地服务并返回机器可读状态
 - **AND** 后续可用 `status/down` 读取与控制生命周期
 
+#### Scenario: skill-runnerctl local data dir defaults under local root
+- **WHEN** 客户端通过 `skill-runnerctl` 在 local 模式启动服务且未显式设置 `SKILL_RUNNER_DATA_DIR`
+- **THEN** 默认数据目录为 `<LocalRoot>/data`
+- **AND** `<LocalRoot>` 在 Linux/macOS 下默认为 `$HOME/.local/share/skill-runner`，Windows 下默认为 `%LOCALAPPDATA%/SkillRunner`
+- **AND** 若显式传入 `SKILL_RUNNER_DATA_DIR` 则继续以外部值为准
+
+#### Scenario: service general default port is 9813
+- **WHEN** 服务通过 `deploy_local.*` 或容器入口启动且未显式设置 `PORT`
+- **THEN** 默认监听端口为 `9813`
+- **AND** 显式设置 `PORT` 时必须优先使用外部值
+
+#### Scenario: plugin local auto-deploy uses dedicated default port with fallback
+- **WHEN** 客户端通过 `skill-runnerctl up --mode local` 启动且未显式设置 `--port`
+- **THEN** 默认端口为 `29813`
+- **AND** 当端口占用时可在 `29813-29823` 范围内自动回退到可用端口
+- **AND** 显式传入 `--port` 或环境变量覆盖时仍以外部配置为准
+
+### Requirement: 系统 MUST 提供可选清理策略的跨平台卸载脚本
+系统 MUST 提供 Linux/macOS 与 Windows 两套卸载脚本，支持默认清理缓存/发布目录，并按选项清理 data 与 agent home。
+
+#### Scenario: uninstall script performs stop-then-clean workflow
+- **WHEN** 客户端调用 `skill-runner-uninstall.*`
+- **THEN** 脚本先尝试执行 `skill-runnerctl down --mode local --json`
+- **AND** 即使 down 失败，后续目录清理仍继续执行
+
+#### Scenario: uninstall default cleanup scope
+- **WHEN** 客户端调用卸载脚本且未启用额外清理选项
+- **THEN** 脚本删除 `<LocalRoot>/releases`
+- **AND** 删除 `<LocalRoot>/agent-cache/npm`、`<LocalRoot>/agent-cache/uv_cache`、`<LocalRoot>/agent-cache/uv_venv`
+- **AND** 保留 `<LocalRoot>/data` 与 `<LocalRoot>/agent-cache/agent-home`
+
+#### Scenario: uninstall supports optional data and agent-home cleanup
+- **WHEN** 客户端调用卸载脚本并启用 `clear-data` 或 `clear-agent-home`
+- **THEN** 脚本按选项额外删除 `<LocalRoot>/data` 与/或 `<LocalRoot>/agent-cache/agent-home`
+- **AND** 当两个选项同时开启时，脚本在安全条件满足时尝试删除顶层 `<LocalRoot>`
+
+#### Scenario: uninstall emits machine-readable summary with partial-success semantics
+- **WHEN** 客户端以 JSON 模式调用卸载脚本（`--json` / `-Json`）
+- **THEN** 输出包含 `ok`、`exit_code`、`message`、`local_root`
+- **AND** 输出 `removed_paths`、`failed_paths`、`preserved_paths`、`options`、`down_result`
+- **AND** 当存在清理失败时进程返回非零退出码，但保留已完成项结果
+
 ### Requirement: release 安装器 MUST 执行固定版本下载与 SHA256 校验
 系统 MUST 提供跨平台安装器脚本，并在执行前校验发布资产哈希。
 

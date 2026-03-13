@@ -36,7 +36,9 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 
 $LocalRoot = if ($env:SKILL_RUNNER_LOCAL_ROOT) { $env:SKILL_RUNNER_LOCAL_ROOT } else { Join-Path $env:LOCALAPPDATA "SkillRunner" }
 $env:SKILL_RUNNER_RUNTIME_MODE = if ($env:SKILL_RUNNER_RUNTIME_MODE) { $env:SKILL_RUNNER_RUNTIME_MODE } else { "local" }
-$env:SKILL_RUNNER_DATA_DIR = if ($env:SKILL_RUNNER_DATA_DIR) { $env:SKILL_RUNNER_DATA_DIR } else { Join-Path $ProjectRoot "data" }
+$env:SKILL_RUNNER_LOCAL_PORT = if ($env:SKILL_RUNNER_LOCAL_PORT) { $env:SKILL_RUNNER_LOCAL_PORT } else { "29813" }
+$env:SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN = if ($env:SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN) { $env:SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN } else { "10" }
+$env:SKILL_RUNNER_DATA_DIR = if ($env:SKILL_RUNNER_DATA_DIR) { $env:SKILL_RUNNER_DATA_DIR } else { Join-Path $LocalRoot "data" }
 $env:SKILL_RUNNER_AGENT_CACHE_DIR = if ($env:SKILL_RUNNER_AGENT_CACHE_DIR) { $env:SKILL_RUNNER_AGENT_CACHE_DIR } else { Join-Path $LocalRoot "agent-cache" }
 $env:SKILL_RUNNER_AGENT_HOME = if ($env:SKILL_RUNNER_AGENT_HOME) { $env:SKILL_RUNNER_AGENT_HOME } else { Join-Path $env:SKILL_RUNNER_AGENT_CACHE_DIR "agent-home" }
 $env:SKILL_RUNNER_NPM_PREFIX = if ($env:SKILL_RUNNER_NPM_PREFIX) { $env:SKILL_RUNNER_NPM_PREFIX } else { Join-Path $env:SKILL_RUNNER_AGENT_CACHE_DIR "npm" }

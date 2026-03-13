@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_PORT = 8011
+DEFAULT_PORT = 9814
 PORT_ENV = "SKILL_RUNNER_E2E_CLIENT_PORT"
 BACKEND_BASE_URL_ENV = "SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL"
 HOST_ENV = "SKILL_RUNNER_E2E_CLIENT_HOST"
@@ -27,8 +27,8 @@ def load_settings() -> E2EClientSettings:
         default=DEFAULT_PORT,
     )
     backend_base_url = (
-        os.environ.get(BACKEND_BASE_URL_ENV, "http://127.0.0.1:8000").strip()
-        or "http://127.0.0.1:8000"
+        os.environ.get(BACKEND_BASE_URL_ENV, "http://127.0.0.1:9813").strip()
+        or "http://127.0.0.1:9813"
     )
     fixtures_skills_dir_raw = os.environ.get(FIXTURES_SKILLS_DIR_ENV, "").strip()
     if fixtures_skills_dir_raw:

@@ -187,7 +187,7 @@ server/
 | `skills/` | 已安装的 Skill 包（每个 skill 一个子目录，含 `SKILL.md` + `assets/runner.json`） |
 | `tests/` | 测试套件（`unit/`、`integration/`、`common/`、`e2e/`、`suites/`） |
 | `agent_harness/` | 外部运行时 harness（独立 CLI 测试环境） |
-| `e2e_client/` | 内建 E2E 示例客户端（端口 8011） |
+| `e2e_client/` | 内建 E2E 示例客户端（端口 9814） |
 | `scripts/` | 工具脚本（启动、清理、部署等） |
 | `docs/` | 项目文档（API 参考、协议规范、合同定义） |
 | `openspec/` | OpenSpec 规范（`specs/`）与变更（`changes/`） |

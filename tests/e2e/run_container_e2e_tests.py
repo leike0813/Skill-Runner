@@ -322,7 +322,7 @@ def main() -> int:
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output (-v, -vv)")
     parser.add_argument("--no-cache", action="store_true", help="Disable cache usage")
     parser.add_argument("--debug", action="store_true", help="Enable debug bundle (include full run dir)")
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Target service base URL")
+    parser.add_argument("--base-url", default="http://localhost:9813", help="Target service base URL")
     args = parser.parse_args()
 
     _setup_logging(args.verbose)

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8000}"
+PORT="${PORT:-9813}"
 
 export UI_BASIC_AUTH_ENABLED="${UI_BASIC_AUTH_ENABLED:-true}"
 export UI_BASIC_AUTH_USERNAME="${UI_BASIC_AUTH_USERNAME:-admin}"

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import shutil
 import signal
 import subprocess
@@ -25,6 +26,29 @@ if str(PROJECT_ROOT) not in sys.path:
 from server.services.engine_management.runtime_profile import get_runtime_profile
 
 WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
+DEFAULT_SERVICE_PORT = 9813
+DEFAULT_PLUGIN_LOCAL_PORT = 29813
+
+
+def _windows_subprocess_options(*, detached: bool = False) -> dict[str, Any]:
+    if not sys.platform.startswith("win"):
+        return {}
+    options: dict[str, Any] = {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if detached:
+        creationflags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        creationflags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
+        creationflags |= int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0))
+    if creationflags:
+        options["creationflags"] = creationflags
+    startupinfo_factory = getattr(subprocess, "STARTUPINFO", None)
+    startf_use_showwindow = int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    if startupinfo_factory is not None and startf_use_showwindow:
+        startupinfo = startupinfo_factory()
+        startupinfo.dwFlags |= startf_use_showwindow
+        startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+        options["startupinfo"] = startupinfo
+    return options
 
 
 def _utc_now_iso() -> str:
@@ -43,6 +67,29 @@ def _command_exists(name: str) -> bool:
     from shutil import which
 
     return which(name) is not None
+
+
+def _int_from_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _default_ctl_port() -> int:
+    if "SKILL_RUNNER_LOCAL_PORT" in os.environ:
+        return _int_from_env("SKILL_RUNNER_LOCAL_PORT", DEFAULT_PLUGIN_LOCAL_PORT)
+    if "PORT" in os.environ:
+        return _int_from_env("PORT", DEFAULT_SERVICE_PORT)
+    return DEFAULT_SERVICE_PORT
+
+
+def _default_ctl_fallback_span() -> int:
+    span = _int_from_env("SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN", 0)
+    return max(0, span)
 
 
 def _project_root() -> Path:
@@ -92,7 +139,13 @@ def _is_pid_alive(pid: int) -> bool:
         return False
     if sys.platform.startswith("win"):
         cmd = ["tasklist", "/FI", f"PID eq {pid}"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            **_windows_subprocess_options(),
+        )
         return str(pid) in (proc.stdout or "")
     try:
         os.kill(pid, 0)
@@ -110,6 +163,7 @@ def _terminate_pid(pid: int) -> None:
             check=False,
             capture_output=True,
             text=True,
+            **_windows_subprocess_options(),
         )
         return
     try:
@@ -140,6 +194,60 @@ def _remove_state(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         return
+
+
+def _is_valid_port(port: int) -> bool:
+    return 1 <= port <= 65535
+
+
+def _can_bind_port(host: str, port: int) -> bool:
+    if not _is_valid_port(port):
+        return False
+    bind_host = host.strip()
+    if bind_host in {"", "0.0.0.0", "::"}:
+        bind_host = ""
+    try:
+        infos = socket.getaddrinfo(
+            bind_host,
+            port,
+            socket.AF_UNSPEC,
+            socket.SOCK_STREAM,
+            0,
+            socket.AI_PASSIVE,
+        )
+    except socket.gaierror:
+        return False
+    seen: set[tuple[Any, ...]] = set()
+    for family, socktype, proto, _, sockaddr in infos:
+        if isinstance(sockaddr, tuple):
+            sockaddr_id: tuple[Any, ...] = (sockaddr[0], sockaddr[1])
+        else:
+            sockaddr_id = (sockaddr,)
+        key = (family, socktype, proto, sockaddr_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        test_socket: socket.socket | None = None
+        try:
+            test_socket = socket.socket(family, socktype, proto)
+            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_socket.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+        finally:
+            if test_socket is not None:
+                test_socket.close()
+    return False
+
+
+def _select_port_with_fallback(host: str, requested_port: int, fallback_span: int) -> tuple[int | None, list[int]]:
+    max_port = min(65535, requested_port + max(0, fallback_span))
+    tried_ports = list(range(requested_port, max_port + 1))
+    for candidate in tried_ports:
+        if _can_bind_port(host, candidate):
+            return candidate, tried_ports
+    return None, tried_ports
 
 
 def _runtime_env() -> tuple[Any, dict[str, str]]:
@@ -210,6 +318,7 @@ def _run_agent_bootstrap(profile: Any, env: dict[str, str]) -> dict[str, Any]:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            **_windows_subprocess_options(),
         )
     except OSError as exc:
         return {
@@ -353,7 +462,13 @@ def _cmd_status_docker(args: argparse.Namespace, *, as_json: bool) -> int:
             as_json=as_json,
         )
     cmd = ["docker", "compose", "ps", "api", "--format", "json"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        **_windows_subprocess_options(),
+    )
     raw = (proc.stdout or "").strip()
     status = "unknown"
     detail: dict[str, Any] | str = raw
@@ -399,9 +514,7 @@ def _start_local_process(host: str, port: int, env: dict[str, str], profile) -> 
         "close_fds": True,
     }
     if sys.platform.startswith("win"):
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-        )
+        kwargs.update(_windows_subprocess_options(detached=True))
     else:
         kwargs["preexec_fn"] = os.setsid
     proc = subprocess.Popen(cmd, **kwargs)
@@ -431,8 +544,35 @@ def _cmd_up_local(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     host = str(args.host or env.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
-    port = int(args.port)
-    pid, log_path = _start_local_process(host, port, env, profile)
+    requested_port = int(args.port)
+    if not _is_valid_port(requested_port):
+        return _emit(
+            {
+                "ok": False,
+                "exit_code": 2,
+                "mode": "local",
+                "message": f"Invalid port: {requested_port}.",
+            },
+            as_json=args.json,
+        )
+    fallback_span = max(0, int(args.port_fallback_span))
+    selected_port, tried_ports = _select_port_with_fallback(host, requested_port, fallback_span)
+    if selected_port is None:
+        return _emit(
+            {
+                "ok": False,
+                "exit_code": 1,
+                "mode": "local",
+                "message": "No available port found in fallback range.",
+                "host": host,
+                "requested_port": requested_port,
+                "port_fallback_span": fallback_span,
+                "tried_ports": tried_ports,
+            },
+            as_json=args.json,
+        )
+    fallback_used = selected_port != requested_port
+    pid, log_path = _start_local_process(host, selected_port, env, profile)
     if pid <= 0:
         return _emit(
             {"ok": False, "exit_code": 1, "message": "Failed to start local runtime."},
@@ -444,7 +584,7 @@ def _cmd_up_local(args: argparse.Namespace) -> int:
         {
             "pid": pid,
             "host": host,
-            "port": port,
+            "port": selected_port,
             "started_at": _utc_now_iso(),
             "mode": "local",
             "log_path": str(log_path),
@@ -453,7 +593,7 @@ def _cmd_up_local(args: argparse.Namespace) -> int:
     deadline = time.monotonic() + float(args.wait_seconds)
     healthy = False
     while time.monotonic() < deadline:
-        code, _ = _http_json("GET", _build_service_url(host, port, "/"), timeout=1.5)
+        code, _ = _http_json("GET", _build_service_url(host, selected_port, "/"), timeout=1.5)
         if code == 200:
             healthy = True
             break
@@ -470,19 +610,35 @@ def _cmd_up_local(args: argparse.Namespace) -> int:
                 "message": "Local runtime failed to become healthy within timeout.",
                 "pid": pid,
                 "log_path": str(log_path),
+                "host": host,
+                "requested_port": requested_port,
+                "port": selected_port,
+                "port_fallback_span": fallback_span,
+                "port_fallback_used": fallback_used,
+                "tried_ports": tried_ports,
             },
             as_json=args.json,
+        )
+    started_message = "Local runtime started."
+    if fallback_used:
+        started_message = (
+            f"Local runtime started on fallback port {selected_port} "
+            f"(requested {requested_port})."
         )
     return _emit(
         {
             "ok": True,
             "exit_code": 0,
-            "message": "Local runtime started.",
+            "message": started_message,
             "mode": "local",
             "pid": pid,
             "host": host,
-            "port": port,
-            "url": _build_service_url(host, port, "/"),
+            "requested_port": requested_port,
+            "port": selected_port,
+            "port_fallback_span": fallback_span,
+            "port_fallback_used": fallback_used,
+            "tried_ports": tried_ports,
+            "url": _build_service_url(host, selected_port, "/"),
             "log_path": str(log_path),
         },
         as_json=args.json,
@@ -496,7 +652,13 @@ def _cmd_up_docker(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     cmd = ["docker", "compose", "up", "-d", "api"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        **_windows_subprocess_options(),
+    )
     return _emit(
         {
             "ok": proc.returncode == 0,
@@ -537,7 +699,13 @@ def _cmd_down_docker(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     cmd = ["docker", "compose", "stop", "api"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        **_windows_subprocess_options(),
+    )
     return _emit(
         {
             "ok": proc.returncode == 0,
@@ -584,6 +752,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "env_snapshot": {
             "SKILL_RUNNER_RUNTIME_MODE": env.get("SKILL_RUNNER_RUNTIME_MODE"),
             "SKILL_RUNNER_LOCAL_BIND_HOST": env.get("SKILL_RUNNER_LOCAL_BIND_HOST"),
+            "SKILL_RUNNER_LOCAL_PORT": os.environ.get("SKILL_RUNNER_LOCAL_PORT"),
+            "SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN": os.environ.get("SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN"),
         },
         "message": "Doctor completed.",
     }
@@ -601,7 +771,8 @@ def _build_parser() -> argparse.ArgumentParser:
     up = sub.add_parser("up", help="Start runtime")
     up.add_argument("--mode", choices=("local", "docker"), default="local")
     up.add_argument("--host", default=os.environ.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
-    up.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    up.add_argument("--port", type=int, default=_default_ctl_port())
+    up.add_argument("--port-fallback-span", type=int, default=_default_ctl_fallback_span())
     up.add_argument("--wait-seconds", type=int, default=30)
     up.add_argument("--json", action="store_true", help="Output JSON")
     up.set_defaults(func=_cmd_up)
@@ -613,7 +784,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="Get runtime status")
     status.add_argument("--mode", choices=("local", "docker"), default="local")
-    status.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    status.add_argument("--port", type=int, default=_default_ctl_port())
     status.add_argument("--json", action="store_true", help="Output JSON")
     status.set_defaults(func=_cmd_status)
 
