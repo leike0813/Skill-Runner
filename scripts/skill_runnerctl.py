@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -28,6 +29,7 @@ from server.services.engine_management.runtime_profile import get_runtime_profil
 WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 DEFAULT_SERVICE_PORT = 9813
 DEFAULT_PLUGIN_LOCAL_PORT = 29813
+INTEGRITY_MANIFEST_NAME = "release_integrity_manifest.json"
 
 
 def _windows_subprocess_options(*, detached: bool = False) -> dict[str, Any]:
@@ -413,6 +415,391 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
     )
 
 
+def _preflight_required_files() -> dict[str, Path]:
+    root = _project_root()
+    return {
+        "api_entry": root / "server" / "main.py",
+        "agent_manager": root / "scripts" / "agent_manager.py",
+    }
+
+
+def _preflight_issue(code: str, message: str, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    payload.update(extra)
+    return payload
+
+
+def _integrity_manifest_path() -> Path:
+    return _project_root() / INTEGRITY_MANIFEST_NAME
+
+
+def _sha256_file(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+            size += len(chunk)
+    return hasher.hexdigest(), size
+
+
+def _run_integrity_checks() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    manifest_path = _integrity_manifest_path()
+    check: dict[str, Any] = {
+        "path": str(manifest_path),
+        "exists": manifest_path.exists(),
+        "parse_ok": False,
+        "schema_version": None,
+        "scope": None,
+        "verified_files": 0,
+        "missing_files": 0,
+        "mismatched_files": 0,
+    }
+    issues: list[dict[str, Any]] = []
+    if not manifest_path.exists():
+        issues.append(
+            _preflight_issue(
+                "integrity_manifest_missing",
+                f"Integrity manifest not found: {manifest_path}.",
+                path=str(manifest_path),
+            )
+        )
+        return check, issues
+    try:
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        issues.append(
+            _preflight_issue(
+                "integrity_manifest_unreadable",
+                f"Integrity manifest is unreadable: {manifest_path}.",
+                path=str(manifest_path),
+            )
+        )
+        return check, issues
+    if not isinstance(manifest_payload, dict):
+        issues.append(
+            _preflight_issue(
+                "integrity_manifest_unreadable",
+                "Integrity manifest content is invalid.",
+                path=str(manifest_path),
+            )
+        )
+        return check, issues
+
+    files = manifest_payload.get("files")
+    if not isinstance(files, list):
+        issues.append(
+            _preflight_issue(
+                "integrity_manifest_unreadable",
+                "Integrity manifest missing valid files array.",
+                path=str(manifest_path),
+            )
+        )
+        return check, issues
+
+    check["parse_ok"] = True
+    check["schema_version"] = manifest_payload.get("schema_version")
+    check["scope"] = manifest_payload.get("scope")
+
+    project_root = _project_root()
+    for entry in files:
+        if not isinstance(entry, dict):
+            issues.append(
+                _preflight_issue(
+                    "integrity_manifest_unreadable",
+                    "Integrity manifest entry is invalid.",
+                    path=str(manifest_path),
+                )
+            )
+            continue
+        rel_path = entry.get("path")
+        expected_hash = entry.get("sha256")
+        expected_size_raw = entry.get("size")
+        if not isinstance(rel_path, str) or not rel_path:
+            issues.append(
+                _preflight_issue(
+                    "integrity_manifest_unreadable",
+                    "Integrity manifest entry missing valid path.",
+                    path=str(manifest_path),
+                )
+            )
+            continue
+        if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+            issues.append(
+                _preflight_issue(
+                    "integrity_manifest_unreadable",
+                    f"Integrity manifest entry missing valid sha256: {rel_path}.",
+                    path=str(manifest_path),
+                    file=rel_path,
+                )
+            )
+            continue
+        expected_size = expected_size_raw if isinstance(expected_size_raw, int) else None
+        target = project_root / rel_path
+        if not target.is_file():
+            check["missing_files"] = int(check["missing_files"]) + 1
+            issues.append(
+                _preflight_issue(
+                    "integrity_file_missing",
+                    f"Integrity check file missing: {rel_path}.",
+                    file=rel_path,
+                    path=str(target),
+                )
+            )
+            continue
+        try:
+            actual_hash, actual_size = _sha256_file(target)
+        except OSError:
+            check["missing_files"] = int(check["missing_files"]) + 1
+            issues.append(
+                _preflight_issue(
+                    "integrity_file_missing",
+                    f"Integrity check file unreadable: {rel_path}.",
+                    file=rel_path,
+                    path=str(target),
+                )
+            )
+            continue
+        if actual_hash != expected_hash or (expected_size is not None and actual_size != expected_size):
+            check["mismatched_files"] = int(check["mismatched_files"]) + 1
+            issues.append(
+                _preflight_issue(
+                    "integrity_hash_mismatch",
+                    f"Integrity hash mismatch: {rel_path}.",
+                    file=rel_path,
+                    expected_sha256=expected_hash,
+                    actual_sha256=actual_hash,
+                    expected_size=expected_size,
+                    actual_size=actual_size,
+                )
+            )
+            continue
+        check["verified_files"] = int(check["verified_files"]) + 1
+    return check, issues
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    profile, env = _runtime_env()
+    host = str(args.host or env.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
+    requested_port = int(args.port)
+    fallback_span = max(0, int(args.port_fallback_span))
+    blocking_issues: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    dependency_checks = _runtime_dependency_checks()
+    for component, present in dependency_checks.items():
+        if not present:
+            blocking_issues.append(
+                _preflight_issue(
+                    "missing_dependency",
+                    f"Missing required dependency: {component}.",
+                    component=component,
+                )
+            )
+
+    required_file_checks: dict[str, dict[str, Any]] = {}
+    for file_id, path in _preflight_required_files().items():
+        exists = path.is_file()
+        readable = exists and os.access(path, os.R_OK)
+        required_file_checks[file_id] = {
+            "path": str(path),
+            "exists": exists,
+            "readable": readable,
+        }
+        if not exists:
+            blocking_issues.append(
+                _preflight_issue(
+                    "required_file_missing",
+                    f"Required entry file missing: {path}.",
+                    file_id=file_id,
+                    path=str(path),
+                )
+            )
+        elif not readable:
+            blocking_issues.append(
+                _preflight_issue(
+                    "required_file_unreadable",
+                    f"Required entry file is not readable: {path}.",
+                    file_id=file_id,
+                    path=str(path),
+                )
+            )
+
+    integrity_check, integrity_issues = _run_integrity_checks()
+    blocking_issues.extend(integrity_issues)
+
+    selected_port: int | None = None
+    tried_ports: list[int] = []
+    if not _is_valid_port(requested_port):
+        blocking_issues.append(
+            _preflight_issue(
+                "invalid_port",
+                f"Invalid port: {requested_port}.",
+                host=host,
+                requested_port=requested_port,
+            )
+        )
+    else:
+        selected_port, tried_ports = _select_port_with_fallback(host, requested_port, fallback_span)
+        if selected_port is None:
+            blocking_issues.append(
+                _preflight_issue(
+                    "port_unavailable",
+                    "No available port found in fallback range.",
+                    host=host,
+                    requested_port=requested_port,
+                    port_fallback_span=fallback_span,
+                    tried_ports=tried_ports,
+                )
+            )
+
+    port_check = {
+        "host": host,
+        "requested_port": requested_port,
+        "port_fallback_span": fallback_span,
+        "selected_port": selected_port,
+        "tried_ports": tried_ports,
+        "available": selected_port is not None,
+    }
+
+    bootstrap_report_path = profile.data_dir / "agent_bootstrap_report.json"
+    bootstrap_check: dict[str, Any] = {
+        "path": str(bootstrap_report_path),
+        "exists": bootstrap_report_path.exists(),
+        "parse_ok": False,
+        "outcome": None,
+    }
+    if bootstrap_report_path.exists():
+        try:
+            bootstrap_payload = json.loads(bootstrap_report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            warnings.append(
+                _preflight_issue(
+                    "bootstrap_report_unreadable",
+                    f"Bootstrap report is unreadable: {bootstrap_report_path}.",
+                    path=str(bootstrap_report_path),
+                )
+            )
+        else:
+            bootstrap_check["parse_ok"] = True
+            summary = bootstrap_payload.get("summary") if isinstance(bootstrap_payload, dict) else None
+            outcome = str(summary.get("outcome") or "") if isinstance(summary, dict) else ""
+            bootstrap_check["outcome"] = outcome or None
+            if outcome == "partial_failure":
+                warnings.append(
+                    _preflight_issue(
+                        "bootstrap_partial_failure",
+                        "Bootstrap report indicates partial_failure.",
+                        path=str(bootstrap_report_path),
+                        outcome=outcome,
+                    )
+                )
+    else:
+        warnings.append(
+            _preflight_issue(
+                "bootstrap_report_missing",
+                f"Bootstrap report not found: {bootstrap_report_path}.",
+                path=str(bootstrap_report_path),
+            )
+        )
+
+    state_path = _state_file(profile)
+    state_exists = state_path.exists()
+    state_payload = _load_state(state_path) if state_exists else None
+    state_pid = 0
+    state_pid_alive = False
+    state_stale = False
+    if state_exists:
+        if state_payload is None:
+            state_stale = True
+            warnings.append(
+                _preflight_issue(
+                    "stale_state_file",
+                    f"State file exists but is unreadable: {state_path}.",
+                    path=str(state_path),
+                )
+            )
+        else:
+            try:
+                state_pid = int(state_payload.get("pid") or 0)
+            except (TypeError, ValueError):
+                state_pid = 0
+            state_pid_alive = _is_pid_alive(state_pid) if state_pid > 0 else False
+            if not state_pid_alive:
+                state_stale = True
+                warnings.append(
+                    _preflight_issue(
+                        "stale_state_file",
+                        "State file exists but recorded pid is not alive.",
+                        path=str(state_path),
+                        pid=state_pid if state_pid > 0 else None,
+                    )
+                )
+    state_check = {
+        "path": str(state_path),
+        "exists": state_exists,
+        "parse_ok": (state_payload is not None) if state_exists else True,
+        "pid": state_pid if state_pid > 0 else None,
+        "pid_alive": state_pid_alive,
+        "stale": state_stale,
+    }
+
+    has_blocking = bool(blocking_issues)
+    if has_blocking:
+        severe_codes = {
+            "missing_dependency",
+            "invalid_port",
+            "required_file_missing",
+            "required_file_unreadable",
+            "integrity_manifest_missing",
+            "integrity_manifest_unreadable",
+            "integrity_file_missing",
+            "integrity_hash_mismatch",
+        }
+        exit_code = 2 if any(issue.get("code") in severe_codes for issue in blocking_issues) else 1
+        ok = False
+        message = "Preflight failed with blocking issues."
+    else:
+        exit_code = 0
+        ok = True
+        message = "Preflight passed with warnings." if warnings else "Preflight passed."
+
+    suggested_port = selected_port if selected_port is not None else requested_port
+    suggested_next = {
+        "mode": "local",
+        "host": host,
+        "requested_port": requested_port,
+        "port": suggested_port,
+        "port_fallback_span": fallback_span,
+        "command": (
+            "up --mode local "
+            f"--host {host} --port {suggested_port} --port-fallback-span {fallback_span} --json"
+        ),
+    }
+
+    payload = {
+        "ok": ok,
+        "exit_code": exit_code,
+        "mode": "local",
+        "message": message,
+        "checks": {
+            "dependencies": dependency_checks,
+            "required_files": required_file_checks,
+            "integrity": integrity_check,
+            "port": port_check,
+            "bootstrap_report": bootstrap_check,
+            "state_file": state_check,
+        },
+        "blocking_issues": blocking_issues,
+        "warnings": warnings,
+        "suggested_next": suggested_next,
+    }
+    return _emit(payload, as_json=args.json)
+
+
 def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
     profile, env = _runtime_env()
     state_path = _state_file(profile)
@@ -787,6 +1174,13 @@ def _build_parser() -> argparse.ArgumentParser:
     status.add_argument("--port", type=int, default=_default_ctl_port())
     status.add_argument("--json", action="store_true", help="Output JSON")
     status.set_defaults(func=_cmd_status)
+
+    preflight = sub.add_parser("preflight", help="Run static local-runtime preflight checks")
+    preflight.add_argument("--host", default=os.environ.get("SKILL_RUNNER_LOCAL_BIND_HOST", "127.0.0.1"))
+    preflight.add_argument("--port", type=int, default=_default_ctl_port())
+    preflight.add_argument("--port-fallback-span", type=int, default=_default_ctl_fallback_span())
+    preflight.add_argument("--json", action="store_true", help="Output JSON")
+    preflight.set_defaults(func=_cmd_preflight)
 
     doctor = sub.add_parser("doctor", help="Diagnose runtime environment")
     doctor.add_argument("--json", action="store_true", help="Output JSON")

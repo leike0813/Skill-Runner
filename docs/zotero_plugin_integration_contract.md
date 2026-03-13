@@ -28,6 +28,7 @@
 
 - `bootstrap --json`
 - `install --json`（兼容入口，当前语义与 `bootstrap` 一致）
+- `preflight --json`
 - `up --mode local|docker`
 - `down --mode local|docker`
 - `status --mode local|docker --json`
@@ -98,6 +99,45 @@
 - `ok=false`
 - `exit_code=<ensure 返回码>`
 - `message` 为 `Install failed.` 或 `Bootstrap failed.`
+
+### `preflight --json` 分支契约
+
+用途：
+- 在不启动服务的前提下，做本地可启动性静态体检。
+- 推荐插件在 `up` 前先执行，用于减少后续探测负担。
+
+接口：
+- `preflight --json [--host <host>] [--port <port>] [--port-fallback-span <span>]`
+
+输出字段基线：
+- `ok`, `exit_code`, `mode=local`, `message`
+- `checks`（`dependencies` / `required_files` / `integrity` / `port` / `bootstrap_report` / `state_file`）
+- `blocking_issues`（数组）
+- `warnings`（数组）
+- `suggested_next`（建议的 `up` 参数）
+
+分级语义：
+- `blocking_issues`：会导致 `exit_code!=0`，插件应中止自动启动并提示。
+- `warnings`：仅提示，不阻断，`exit_code` 仍可能为 `0`。
+
+blocking（非零）：
+- 缺少依赖（`uv/node/npm`）
+- 关键入口文件缺失或不可读
+- 完整性清单缺失或不可解析（`integrity_manifest_*`）
+- 完整性清单中的文件缺失（`integrity_file_missing`）
+- 完整性清单中的文件哈希不一致（`integrity_hash_mismatch`）
+- 端口参数非法
+- 回退范围内无可用端口
+
+warning（可继续）：
+- bootstrap 报告缺失或不可解析
+- bootstrap 报告 `summary.outcome=partial_failure`
+- state 文件残留但 pid 不存活（stale）
+
+退出码约定：
+- `0`：无 blocking（可包含 warning）
+- `1`：主要为端口可用性失败（如回退范围耗尽）
+- `2`：参数/依赖/关键文件/完整性校验等硬失败
 
 ### `doctor --json` 分支契约
 
@@ -245,9 +285,9 @@
 
 1. 安装 Release（推荐机器可读）：`skill-runner-install.* --version <tag> --json`（PowerShell 使用 `-Json`）
 2. 读取 `${SKILL_RUNNER_DATA_DIR}/agent_bootstrap_report.json`（若 `summary.outcome=partial_failure`，前台提示但允许继续）
-3. `skill-runnerctl up --mode local --json`
-4. 轮询 `skill-runnerctl status --mode local --json`，直到 `status=running`（含超时）
-5. `POST /v1/local-runtime/lease/acquire`（使用 `up/status` 返回的实际 `host/port/url`，不要硬编码端口）
+3. `skill-runnerctl preflight --json`（`exit_code!=0` 则中止自动启动并展示 blocking）
+4. `skill-runnerctl up --mode local --json`
+5. `POST /v1/local-runtime/lease/acquire`（使用 `up` 返回的实际 `host/port/url`，不要硬编码端口）
 6. 按 `heartbeat_interval_seconds` 定时 `heartbeat`
 7. 插件退出时 `release`
 8. 可选 `skill-runnerctl down --mode local --json`
@@ -296,6 +336,8 @@ JSON 输出字段：
 
 - `local-runtime` 接口返回 `409`：说明当前不是 local 模式，插件应停止 lease 流程。
 - `heartbeat` 返回 `404`：lease 已失效，插件应重新 `acquire`。
-- `status` 返回非 running：插件可重试 `up`，并记录 `doctor` 结果用于诊断。
+- `preflight` 返回非零：插件应中止自动启动并展示 `blocking_issues`。
+- `preflight` 若为完整性相关失败：插件应提示用户重装同版本 release 包，不应直接继续 `up`。
+- `up` 返回非零：插件应执行 `status + doctor` 作为诊断回退，并记录结果用于排查。
 - `bootstrap/install` 返回非零：视为硬失败（依赖缺失或启动前置失败），插件应中止自动启动并提示用户修复环境。
 - `bootstrap/install` 返回零但报告为 `partial_failure`：插件可继续 `up`，同时展示“部分引擎未就绪”警告与报告摘要。

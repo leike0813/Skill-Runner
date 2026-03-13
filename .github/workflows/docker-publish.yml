@@ -87,6 +87,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
+          INTEGRITY_MANIFEST="release_integrity_manifest.json"
+          python3 scripts/generate_release_integrity_manifest.py --root . --output "${INTEGRITY_MANIFEST}"
           PACKAGE="skill-runner-${{ steps.vars.outputs.version }}.tar.gz"
           tar \
             --exclude='./.git' \
@@ -96,6 +98,7 @@ jobs:
             --exclude='./__pycache__' \
             -czf "dist/${PACKAGE}" \
             .
+          rm -f "${INTEGRITY_MANIFEST}"
           sha256sum "dist/${PACKAGE}" > "dist/${PACKAGE}.sha256"
 
       - name: Upload release assets

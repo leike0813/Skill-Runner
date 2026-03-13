@@ -23,7 +23,7 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
 - `scripts/agent_harness_container.sh`: host-side wrapper to run containerized `agent-harness` through `docker compose exec api`.
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
-- `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/up/down/status/doctor`).
+- `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/preflight/up/down/status/doctor`).
 - `scripts/skill-runner-install.sh` / `scripts/skill-runner-install.ps1`: release installer scripts with SHA256 verification.
 - `scripts/skill-runner-uninstall.sh` / `scripts/skill-runner-uninstall.ps1`: plugin-friendly uninstall scripts with optional data/agent-home cleanup.
 
@@ -36,7 +36,8 @@ For each `v*` tag, CI publishes installer-facing release assets:
 - `skill-runner-<version>.tar.gz`
 - `skill-runner-<version>.tar.gz.sha256`
 
-The source package includes repository files plus `skills/*` submodule contents.
+The source package includes repository files plus `skills/*` submodule contents, and embeds
+`release_integrity_manifest.json` for file-level preflight integrity verification.
 
 ## Volumes
 
@@ -80,10 +81,14 @@ For Zotero/local desktop integration, prefer `skill-runnerctl` instead of callin
 
 ```bash
 ./scripts/skill-runnerctl install --json
+./scripts/skill-runnerctl preflight --json
 ./scripts/skill-runnerctl up --mode local --json
-./scripts/skill-runnerctl status --mode local --json
 sh ./scripts/skill-runner-uninstall.sh --json
 ```
+
+Recommended plugin chain is `preflight -> up -> acquire lease` (no regular status polling).  
+`preflight` now includes file-level integrity verification against `release_integrity_manifest.json`; integrity failures should be handled as blocking and trigger reinstall guidance.  
+If `up` fails, call `status --mode local --json` and `doctor --json` for diagnostics.
 
 `skill-runnerctl` local defaults:
 
