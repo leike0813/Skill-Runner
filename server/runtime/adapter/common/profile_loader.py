@@ -261,6 +261,17 @@ def _validate_resolved_path(
         raise RuntimeError(f"Adapter profile invalid {label}: path not found ({candidate})")
 
 
+def _is_absolute_relpath_like(raw_value: str) -> bool:
+    normalized = raw_value.strip()
+    if not normalized:
+        return False
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        return True
+    # On Windows, Path("/tmp/x").is_absolute() is False; treat rooted paths as absolute-like.
+    return normalized.startswith(("/", "\\"))
+
+
 @lru_cache(maxsize=16)
 def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterProfile:
     profile_path = Path(profile_path_str)
@@ -349,8 +360,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             raise RuntimeError(
                 f"Adapter profile invalid cli_management.credential_imports[{index}].target_relpath: empty ({profile_path})"
             )
-        target_path = Path(target_raw.strip())
-        if target_path.is_absolute():
+        if _is_absolute_relpath_like(target_raw):
             raise RuntimeError(
                 f"Adapter profile invalid cli_management.credential_imports[{index}].target_relpath: must be relative ({profile_path})"
             )
@@ -377,7 +387,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             raise RuntimeError(
                 f"Adapter profile invalid cli_management.layout.extra_dirs[{index}]: empty ({profile_path})"
             )
-        if Path(raw_dir.strip()).is_absolute():
+        if _is_absolute_relpath_like(raw_dir):
             raise RuntimeError(
                 f"Adapter profile invalid cli_management.layout.extra_dirs[{index}]: must be relative ({profile_path})"
             )
@@ -387,7 +397,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
         raise RuntimeError(
             f"Adapter profile invalid cli_management.layout.bootstrap_target_relpath: empty ({profile_path})"
         )
-    if Path(bootstrap_target_raw.strip()).is_absolute():
+    if _is_absolute_relpath_like(bootstrap_target_raw):
         raise RuntimeError(
             f"Adapter profile invalid cli_management.layout.bootstrap_target_relpath: must be relative ({profile_path})"
         )

@@ -13,7 +13,13 @@
         <tr>
             <td>{{ row.engine }}</td>
             {% set status_level = row.status_level or "warning" %}
-            {% set status_text = t("ui.index.engine_status_" ~ status_level, default=status_level) %}
+            {% if status_level == "healthy" %}
+                {% set status_text = t("ui.index.engine_status_healthy", default="healthy") %}
+            {% elif status_level == "error" %}
+                {% set status_text = t("ui.index.engine_status_error", default="error") %}
+            {% else %}
+                {% set status_text = t("ui.index.engine_status_warning", default="warning") %}
+            {% endif %}
             <td>
                 <span class="health-indicator" aria-label="{{ t('ui.engines.table.status_aria', default='Engine {engine} status: {status}', engine=row.engine, status=status_text) }}">
                     <span class="health-led health-led-{{ status_level }}"></span>

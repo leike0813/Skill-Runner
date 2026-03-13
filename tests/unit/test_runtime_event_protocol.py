@@ -366,8 +366,8 @@ def test_build_rasp_events_delegates_parsing_to_adapter(monkeypatch, tmp_path: P
 
     class _FakeAdapter:
         def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
-            assert stdout_raw.decode("utf-8") == "raw stdout\n"
-            assert stderr_raw.decode("utf-8") == "raw stderr\n"
+            assert stdout_raw.decode("utf-8").replace("\r\n", "\n") == "raw stdout\n"
+            assert stderr_raw.decode("utf-8").replace("\r\n", "\n") == "raw stderr\n"
             return {
                 "parser": "fake_adapter_parser",
                 "confidence": 0.93,

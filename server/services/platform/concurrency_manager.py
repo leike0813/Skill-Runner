@@ -260,7 +260,7 @@ class ConcurrencyManager:
             )
         try:
             available = int(psutil.virtual_memory().available // 1024 // 1024)
-        except Exception as exc:  # pragma: no cover - guarded by tests via monkeypatch
+        except (AttributeError, OSError, TypeError, ValueError, RuntimeError) as exc:
             raise _WindowsConcurrencyProbeFatal(
                 f"failed to probe Windows available memory via psutil: {type(exc).__name__}"
             ) from exc

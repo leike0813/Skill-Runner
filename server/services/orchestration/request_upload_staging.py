@@ -37,7 +37,7 @@ def handle_upload(base_dir: str | Path, request_id: str, file_bytes: bytes) -> d
     except zipfile.BadZipFile as exc:
         raise ValueError("Invalid zip file") from exc
     extracted_files = [
-        str(path.relative_to(uploads_dir))
+        path.relative_to(uploads_dir).as_posix()
         for path in uploads_dir.rglob("*")
         if path.is_file()
     ]

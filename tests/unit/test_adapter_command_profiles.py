@@ -8,6 +8,10 @@ from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 
 
+def _platform_cmd(path: str) -> str:
+    return str(Path(path))
+
+
 def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
     adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
@@ -24,7 +28,7 @@ def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
     )
 
     assert command == [
-        "/usr/bin/codex",
+        _platform_cmd("/usr/bin/codex"),
         "exec",
         "--json",
         "--full-auto",
@@ -50,7 +54,7 @@ def test_codex_harness_start_command_passthrough_without_profile(monkeypatch) ->
         use_profile_defaults=False,
     )
 
-    assert command == ["/usr/bin/codex", "exec", "--json", "--full-auto", "-p", "hello"]
+    assert command == [_platform_cmd("/usr/bin/codex"), "exec", "--json", "--full-auto", "-p", "hello"]
 
 
 def test_codex_start_command_fallbacks_full_auto_to_yolo_when_landlock_disabled(monkeypatch) -> None:
@@ -84,7 +88,7 @@ def test_codex_harness_passthrough_full_auto_fallbacks_to_yolo_when_landlock_dis
         use_profile_defaults=False,
     )
 
-    assert command == ["/usr/bin/codex", "exec", "--json", "--yolo", "-p", "hello"]
+    assert command == [_platform_cmd("/usr/bin/codex"), "exec", "--json", "--yolo", "-p", "hello"]
 
 
 def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
@@ -106,8 +110,8 @@ def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
         use_profile_defaults=False,
     )
 
-    assert with_profile == ["/usr/bin/gemini", "--yolo", "--model", "gemini-default", "hello"]
-    assert without_profile == ["/usr/bin/gemini", "hello"]
+    assert with_profile == [_platform_cmd("/usr/bin/gemini"), "--yolo", "--model", "gemini-default", "hello"]
+    assert without_profile == [_platform_cmd("/usr/bin/gemini"), "hello"]
 
 
 def test_codex_resume_command_preserves_profile_flags(monkeypatch) -> None:
@@ -134,7 +138,7 @@ def test_codex_resume_command_preserves_profile_flags(monkeypatch) -> None:
     )
 
     assert command == [
-        "/usr/bin/codex",
+        _platform_cmd("/usr/bin/codex"),
         "exec",
         "-p",
         "skill-runner",
@@ -173,7 +177,7 @@ def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None
     )
 
     assert command == [
-        "/usr/bin/iflow",
+        _platform_cmd("/usr/bin/iflow"),
         "--resume",
         "sess-iflow",
         "--custom-flag",
@@ -199,7 +203,7 @@ def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> No
     )
 
     assert command == [
-        "/usr/bin/opencode",
+        _platform_cmd("/usr/bin/opencode"),
         "run",
         "--format",
         "json",
@@ -243,7 +247,7 @@ def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monk
     )
 
     assert command == [
-        "/usr/bin/opencode",
+        _platform_cmd("/usr/bin/opencode"),
         "run",
         "--session=ses-123",
         "--format",

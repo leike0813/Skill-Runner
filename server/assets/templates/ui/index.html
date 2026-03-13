@@ -33,7 +33,13 @@
             {% for row in engine_status_rows %}
             <div class="engine-status-pill" data-engine="{{ row.engine }}" data-status-level="{{ row.status_level }}">
                 <span class="engine-status-name">{{ row.engine }}</span>
-                {% set status_text = t("ui.index.engine_status_" ~ row.status_level, default=row.status_level) %}
+                {% if row.status_level == "healthy" %}
+                    {% set status_text = t("ui.index.engine_status_healthy", default="healthy") %}
+                {% elif row.status_level == "error" %}
+                    {% set status_text = t("ui.index.engine_status_error", default="error") %}
+                {% else %}
+                    {% set status_text = t("ui.index.engine_status_warning", default="warning") %}
+                {% endif %}
                 <span class="health-indicator" aria-label="{{ t('ui.index.engine_status_led_aria', default='Engine {engine} status: {status}', engine=row.engine, status=status_text) }}">
                     <span class="health-led health-led-{{ row.status_level }}"></span>
                     <span class="sr-only">{{ status_text }}</span>

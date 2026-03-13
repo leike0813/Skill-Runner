@@ -53,6 +53,12 @@ def _platform_name() -> str:
     return "linux"
 
 
+def _resolve_profile_path(path: Path, *, resolve: bool) -> Path:
+    if resolve:
+        return path.resolve()
+    return path
+
+
 @dataclass(frozen=True)
 class RuntimeProfile:
     mode: str
@@ -101,12 +107,12 @@ class RuntimeProfile:
         env["XDG_DATA_HOME"] = str(xdg_data_home)
         env["XDG_STATE_HOME"] = str(xdg_state_home)
         env["XDG_CACHE_HOME"] = str(xdg_cache_home)
+        env["ZDOTDIR"] = str(self.agent_home)
         if self.platform == "windows":
             env["USERPROFILE"] = str(self.agent_home)
             env["HOME"] = str(self.agent_home)
         else:
             env["HOME"] = str(self.agent_home)
-            env["ZDOTDIR"] = str(self.agent_home)
         existing_path = env.get("PATH", "")
         prepend = os.pathsep.join(str(path) for path in self.managed_bin_dirs)
         env["PATH"] = f"{prepend}{os.pathsep}{existing_path}" if existing_path else prepend
@@ -121,6 +127,7 @@ class RuntimeProfile:
 def get_runtime_profile() -> RuntimeProfile:
     mode = _detect_mode()
     platform_name = _platform_name()
+    should_resolve = mode != "container"
     if mode == "container":
         cache_root_default = Path("/opt/cache/skill-runner")
         data_dir_default = Path("/data")
@@ -129,25 +136,35 @@ def get_runtime_profile() -> RuntimeProfile:
         cache_root_default = base_dir / "agent-cache"
         data_dir_default = Path(config.SYSTEM.DATA_DIR)
 
-    data_dir = Path(os.environ.get("SKILL_RUNNER_DATA_DIR", str(data_dir_default))).resolve()
-    cache_root = Path(
-        os.environ.get("SKILL_RUNNER_AGENT_CACHE_DIR", str(cache_root_default))
-    ).resolve()
-    agent_home = Path(
-        os.environ.get("SKILL_RUNNER_AGENT_HOME", str(cache_root / "agent-home"))
-    ).resolve()
-    npm_prefix = Path(
+    data_dir = _resolve_profile_path(
+        Path(os.environ.get("SKILL_RUNNER_DATA_DIR", str(data_dir_default))),
+        resolve=should_resolve,
+    )
+    cache_root = _resolve_profile_path(
+        Path(os.environ.get("SKILL_RUNNER_AGENT_CACHE_DIR", str(cache_root_default))),
+        resolve=should_resolve,
+    )
+    agent_home = _resolve_profile_path(
+        Path(os.environ.get("SKILL_RUNNER_AGENT_HOME", str(cache_root / "agent-home"))),
+        resolve=should_resolve,
+    )
+    npm_prefix = _resolve_profile_path(
+        Path(
         os.environ.get(
             "SKILL_RUNNER_NPM_PREFIX",
             os.environ.get("NPM_CONFIG_PREFIX", str(cache_root / "npm")),
         )
-    ).resolve()
-    uv_cache = Path(
-        os.environ.get("UV_CACHE_DIR", str(cache_root / "uv_cache"))
-    ).resolve()
-    uv_venv = Path(
-        os.environ.get("UV_PROJECT_ENVIRONMENT", str(cache_root / "uv_venv"))
-    ).resolve()
+        ),
+        resolve=should_resolve,
+    )
+    uv_cache = _resolve_profile_path(
+        Path(os.environ.get("UV_CACHE_DIR", str(cache_root / "uv_cache"))),
+        resolve=should_resolve,
+    )
+    uv_venv = _resolve_profile_path(
+        Path(os.environ.get("UV_PROJECT_ENVIRONMENT", str(cache_root / "uv_venv"))),
+        resolve=should_resolve,
+    )
 
     return RuntimeProfile(
         mode=mode,

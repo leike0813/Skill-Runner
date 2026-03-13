@@ -20,8 +20,6 @@ agent_config/
 deprecated/
 *.log
 *.egg-info/
-debug_parse.py
-debug_patch.py
 uv.lock
 references/codex/
 references/gemini-cli/
