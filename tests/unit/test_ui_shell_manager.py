@@ -227,7 +227,7 @@ def test_ui_shell_manager_start_session_injects_trust_and_ttyd_flags(
     assert len(patch_fake_popen) == 1
     popen_args, popen_kwargs = patch_fake_popen[0]
     command = list(cast(list[str], popen_args[0]))
-    assert command[0] == "/usr/bin/ttyd"
+    assert Path(command[0]).as_posix() == "/usr/bin/ttyd"
     assert "--writable" in command
     assert "-w" in command
     assert "--" in command
@@ -329,7 +329,7 @@ def test_ui_shell_manager_opencode_session_reports_non_sandbox(
     session_dir = Path(started["session_dir"])
     popen_args, _ = patch_fake_popen[0]
     command = list(cast(list[str], popen_args[0]))
-    assert command[0] == "/usr/bin/ttyd"
+    assert Path(command[0]).as_posix() == "/usr/bin/ttyd"
     assert command[command.index("--") + 1] == sys.executable
     assert started["sandbox_status"] == "unsupported"
     assert "without sandbox" in started["sandbox_message"]

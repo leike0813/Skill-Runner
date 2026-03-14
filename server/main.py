@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 import os
+import signal
 from pathlib import Path
 from .config import config
 
@@ -38,7 +40,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[i
 from fastapi.responses import JSONResponse  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
-from .routers import skills, jobs, engines, management, oauth_callback, skill_packages, ui
+from .routers import skills, jobs, engines, management, local_runtime, oauth_callback, skill_packages, ui
 from .services.engine_management.runtime_profile import get_runtime_profile
 from .i18n import SUPPORTED_LANGUAGES, get_language, get_translator
 
@@ -61,6 +63,7 @@ async def lifespan(_app: FastAPI):
         engine_model_catalog_lifecycle,
     )
     from .runtime.auth_detection.service import auth_detection_service
+    from .services.platform.local_runtime_lease_service import local_runtime_lease_service
 
     runtime_profile = get_runtime_profile()
     runtime_profile.ensure_directories()
@@ -87,20 +90,31 @@ async def lifespan(_app: FastAPI):
         )
     engine_model_catalog_lifecycle.start()
     if bool(config.SYSTEM.ENGINE_MODELS_CATALOG_STARTUP_PROBE):
-        try:
-            for engine in engine_model_catalog_lifecycle.runtime_probe_engines():
-                await engine_model_catalog_lifecycle.refresh(engine, reason="startup")
-        except (OSError, RuntimeError, ValueError, TypeError) as exc:
-            logger.warning(
-                "Engine model catalog refresh failed during startup; continuing with existing cache",
-                extra={
-                    "component": "main",
-                    "action": "startup_engine_model_catalog_refresh",
-                    "error_type": type(exc).__name__,
-                    "fallback": "keep_existing_engine_model_catalog_cache",
-                },
-                exc_info=True,
-            )
+        for engine in engine_model_catalog_lifecycle.runtime_probe_engines():
+            try:
+                task = engine_model_catalog_lifecycle.request_refresh_async(engine, reason="startup")
+                if task is None:
+                    logger.warning(
+                        "Engine model catalog refresh scheduling skipped during startup",
+                        extra={
+                            "component": "main",
+                            "action": "startup_engine_model_catalog_refresh_schedule",
+                            "engine": engine,
+                            "fallback": "keep_existing_engine_model_catalog_cache",
+                        },
+                    )
+            except (OSError, RuntimeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Engine model catalog refresh scheduling failed during startup; continuing with existing cache",
+                    extra={
+                        "component": "main",
+                        "action": "startup_engine_model_catalog_refresh_schedule",
+                        "engine": engine,
+                        "error_type": type(exc).__name__,
+                        "fallback": "keep_existing_engine_model_catalog_cache",
+                    },
+                    exc_info=True,
+                )
     install_runtime_protocol_ports()
     install_runtime_observability_ports()
 
@@ -114,10 +128,30 @@ async def lifespan(_app: FastAPI):
     cache_manager.start()
     engine_status_cache_service.start()
     run_cleanup_manager.start()
+    runtime_profile_mode = str(getattr(runtime_profile, "mode", "local")).strip().lower() or "local"
+
+    async def _shutdown_for_local_lease(reason: str) -> None:
+        if runtime_profile_mode != "local":
+            return
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            logger.info("Skip local runtime self-shutdown under pytest: reason=%s", reason)
+            return
+        logger.info("Local runtime lease shutdown requested: reason=%s", reason)
+        async def _delayed_shutdown() -> None:
+            try:
+                await asyncio.sleep(0.5)
+                os.kill(os.getpid(), signal.SIGTERM)
+            except (OSError, ValueError):
+                logger.warning("Failed to trigger local runtime shutdown", exc_info=True)
+
+        asyncio.create_task(_delayed_shutdown())
+
+    await local_runtime_lease_service.start(_shutdown_for_local_lease)
     await job_orchestrator.recover_incomplete_runs_on_startup()
     try:
         yield
     finally:
+        await local_runtime_lease_service.stop()
         await process_supervisor.stop()
         engine_status_cache_service.stop()
         engine_model_catalog_lifecycle.stop()
@@ -194,6 +228,7 @@ v1_router.include_router(skills.router)
 v1_router.include_router(jobs.router)
 v1_router.include_router(engines.router)
 v1_router.include_router(management.router)
+v1_router.include_router(local_runtime.router)
 v1_router.include_router(skill_packages.router)
 app.include_router(v1_router)
 app.include_router(ui.router)

@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
@@ -21,6 +22,7 @@ from server.services.engine_management.runtime_profile import RuntimeProfile, ge
 logger = logging.getLogger(__name__)
 
 TTYD_BINARY_CANDIDATES = ["ttyd", "ttyd.exe", "ttyd.cmd"]
+WINDOWS_NPM_BINARY_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 
 _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
     "gemini": {
@@ -243,7 +245,7 @@ class AgentCliManager:
                 check=False,
                 env=env,
             )
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             return None
         output = (result.stdout or "").strip() or (result.stderr or "").strip()
         if not output:
@@ -289,21 +291,59 @@ class AgentCliManager:
 
     def install_package(self, package: str) -> CommandResult:
         env = self.profile.build_subprocess_env()
-        result = subprocess.run(
-            ["npm", "install", "-g", package],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
+        npm_cmd = self._resolve_npm_command(env)
+        started_at = time.perf_counter()
+        logger.info(
+            "event=agent_cli.command.start action=install_package package=%s command=%s mode=%s platform=%s",
+            package,
+            npm_cmd,
+            self.profile.mode,
+            self.profile.platform,
         )
-        return CommandResult(
-            returncode=result.returncode,
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
-        )
+        try:
+            result = subprocess.run(
+                [npm_cmd, "install", "-g", package],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.info(
+                "event=agent_cli.command.result action=install_package package=%s outcome=%s returncode=%s duration_ms=%s",
+                package,
+                "ok" if result.returncode == 0 else "failed",
+                result.returncode,
+                duration_ms,
+            )
+            return CommandResult(
+                returncode=result.returncode,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+            )
+        except OSError as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.warning(
+                "event=agent_cli.command.result action=install_package package=%s outcome=exception error_type=%s duration_ms=%s",
+                package,
+                type(exc).__name__,
+                duration_ms,
+                exc_info=True,
+            )
+            return CommandResult(
+                returncode=127,
+                stdout="",
+                stderr=str(exc),
+            )
 
     def _run_command(self, argv: list[str], timeout_sec: int = 5) -> CommandResult:
         env = self.profile.build_subprocess_env()
+        started_at = time.perf_counter()
+        logger.debug(
+            "event=agent_cli.command.start action=run_command command=%s timeout_sec=%s",
+            self._command_preview(argv),
+            timeout_sec,
+        )
         try:
             result = subprocess.run(
                 argv,
@@ -313,22 +353,50 @@ class AgentCliManager:
                 env=env,
                 timeout=timeout_sec,
             )
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.debug(
+                "event=agent_cli.command.result action=run_command command=%s outcome=%s returncode=%s duration_ms=%s",
+                self._command_preview(argv),
+                "ok" if result.returncode == 0 else "failed",
+                result.returncode,
+                duration_ms,
+            )
             return CommandResult(
                 returncode=result.returncode,
                 stdout=result.stdout or "",
                 stderr=result.stderr or "",
             )
         except subprocess.TimeoutExpired as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
             stdout = exc.stdout or ""
             stderr = exc.stderr or "timeout"
             if isinstance(stdout, bytes):
                 stdout = stdout.decode("utf-8", errors="replace")
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
+            logger.warning(
+                "event=agent_cli.command.result action=run_command command=%s outcome=timeout returncode=124 duration_ms=%s",
+                self._command_preview(argv),
+                duration_ms,
+            )
             return CommandResult(
                 returncode=124,
                 stdout=stdout,
                 stderr=stderr,
+            )
+        except OSError as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.warning(
+                "event=agent_cli.command.result action=run_command command=%s outcome=exception error_type=%s duration_ms=%s",
+                self._command_preview(argv),
+                type(exc).__name__,
+                duration_ms,
+                exc_info=True,
+            )
+            return CommandResult(
+                returncode=127,
+                stdout="",
+                stderr=str(exc),
             )
 
     def import_credentials(self, source_root: Path) -> Dict[str, list[str]]:
@@ -359,7 +427,7 @@ class AgentCliManager:
         profile = self._load_engine_profile_or_none(engine)
         if profile is None:
             return None
-        candidates = profile.cli_management.binary_candidates
+        candidates = self._ordered_binary_candidates(profile.cli_management.binary_candidates)
         for base in self.profile.managed_bin_dirs:
             for name in candidates:
                 path = base / name
@@ -371,7 +439,7 @@ class AgentCliManager:
         profile = self._load_engine_profile_or_none(engine)
         if profile is None:
             return None
-        candidates = profile.cli_management.binary_candidates
+        candidates = self._ordered_binary_candidates(profile.cli_management.binary_candidates)
         global_path = self._build_global_only_path(os.environ.get("PATH", ""))
         for name in candidates:
             resolved = shutil.which(name, path=global_path)
@@ -387,15 +455,43 @@ class AgentCliManager:
                 return candidate
             return None
         managed_path = os.pathsep.join(str(path) for path in self.profile.managed_bin_dirs)
-        for name in TTYD_BINARY_CANDIDATES:
+        ttyd_candidates = self._ordered_binary_candidates(TTYD_BINARY_CANDIDATES)
+        for name in ttyd_candidates:
             resolved = shutil.which(name, path=managed_path)
             if resolved:
                 return Path(resolved)
-        for name in TTYD_BINARY_CANDIDATES:
+        for name in ttyd_candidates:
             resolved = shutil.which(name, path=os.environ.get("PATH", ""))
             if resolved:
                 return Path(resolved)
         return None
+
+    def _resolve_npm_command(self, env: Mapping[str, str]) -> str:
+        explicit = str(
+            env.get("SKILL_RUNNER_NPM_COMMAND")
+            or os.environ.get("SKILL_RUNNER_NPM_COMMAND", "")
+        ).strip()
+        if explicit:
+            explicit_path = Path(explicit)
+            if explicit_path.exists():
+                return str(explicit_path)
+            logger.warning(
+                "Configured SKILL_RUNNER_NPM_COMMAND does not exist: %s",
+                explicit,
+            )
+        path = env.get("PATH", "")
+        if self.profile.platform == "windows":
+            for candidate in WINDOWS_NPM_BINARY_CANDIDATES:
+                resolved = shutil.which(candidate, path=path)
+                if resolved:
+                    return resolved
+            for candidate in WINDOWS_NPM_BINARY_CANDIDATES:
+                resolved = shutil.which(candidate, path=os.environ.get("PATH", ""))
+                if resolved:
+                    return resolved
+            return WINDOWS_NPM_BINARY_CANDIDATES[0]
+        resolved = shutil.which("npm", path=path)
+        return resolved or "npm"
 
     def collect_auth_status(self) -> Dict[str, Dict[str, Any]]:
         status: Dict[str, Dict[str, Any]] = {}
@@ -614,6 +710,34 @@ class AgentCliManager:
                 continue
             kept.append(chunk)
         return os.pathsep.join(kept)
+
+    def _ordered_binary_candidates(self, candidates: Iterable[str]) -> list[str]:
+        names = [str(item) for item in candidates]
+        if self.profile.platform != "windows":
+            return names
+        return sorted(names, key=self._windows_candidate_priority)
+
+    @staticmethod
+    def _windows_candidate_priority(name: str) -> tuple[int, str]:
+        suffix = Path(name).suffix.lower()
+        rank = {
+            ".cmd": 0,
+            ".exe": 1,
+            ".bat": 2,
+            ".com": 3,
+        }.get(suffix, 10)
+        return rank, name.lower()
+
+    @staticmethod
+    def _command_preview(argv: Iterable[str], *, max_parts: int = 5, max_len: int = 160) -> str:
+        parts = [str(part) for part in argv]
+        preview_parts = parts[:max_parts]
+        preview = " ".join(preview_parts)
+        if len(parts) > max_parts:
+            preview = f"{preview} ..."
+        if len(preview) > max_len:
+            preview = preview[: max_len - 14].rstrip() + "...(truncated)"
+        return preview
 
     def _resolve_xterm_asset_sources(self) -> tuple[Path | None, Path | None]:
         candidates = [

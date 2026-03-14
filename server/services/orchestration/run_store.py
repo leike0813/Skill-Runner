@@ -977,12 +977,21 @@ class RunStore:
             pending: Dict[str, Any] = pending_obj if isinstance(pending_obj, dict) else {}
             resume: Dict[str, Any] = resume_obj if isinstance(resume_obj, dict) else {}
             runtime: Dict[str, Any] = runtime_obj if isinstance(runtime_obj, dict) else {}
+            updated_at_raw = state_payload.get("updated_at")
+            updated_at: datetime | None = updated_at_raw if isinstance(updated_at_raw, datetime) else None
+            if updated_at is None and isinstance(updated_at_raw, str) and updated_at_raw:
+                try:
+                    updated_at = datetime.fromisoformat(updated_at_raw)
+                except ValueError:
+                    updated_at = None
+            if updated_at is None:
+                updated_at = datetime.utcnow()
             try:
                 projection = CurrentRunProjection(
                     request_id=str(state_payload.get("request_id") or ""),
                     run_id=str(state_payload.get("run_id") or ""),
                     status=state_payload.get("status", RunStatus.QUEUED.value),
-                    updated_at=state_payload.get("updated_at"),
+                    updated_at=updated_at,
                     current_attempt=int(state_payload.get("current_attempt") or 1),
                     pending_owner=pending.get("owner"),
                     pending_interaction_id=pending.get("interaction_id"),

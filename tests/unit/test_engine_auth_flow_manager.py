@@ -18,6 +18,11 @@ from server.services.engine_management.engine_auth_flow_manager import EngineAut
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
 from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="requires POSIX PTY/shell semantics",
+)
+
 
 @pytest.fixture(autouse=True)
 def _stub_openai_callback_listener(monkeypatch):

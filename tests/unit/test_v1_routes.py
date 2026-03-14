@@ -138,6 +138,61 @@ async def test_v1_jobs_file_routes_available(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_v1_local_runtime_status_route_available():
+    response = await _request("GET", "/v1/local-runtime/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert "enabled" in body
+    assert "ttl_seconds" in body
+    assert "active_leases" in body
+
+
+@pytest.mark.asyncio
+async def test_v1_local_runtime_lease_roundtrip(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.local_runtime.local_runtime_lease_service.enabled",
+        lambda: True,
+    )
+    acquire = await _request(
+        "POST",
+        "/v1/local-runtime/lease/acquire",
+        json={"owner_id": "pytest-client", "metadata": {"source": "test"}},
+    )
+    assert acquire.status_code == 200
+    lease_id = acquire.json()["lease_id"]
+
+    heartbeat = await _request(
+        "POST",
+        "/v1/local-runtime/lease/heartbeat",
+        json={"lease_id": lease_id},
+    )
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["lease_id"] == lease_id
+
+    release = await _request(
+        "POST",
+        "/v1/local-runtime/lease/release",
+        json={"lease_id": lease_id},
+    )
+    assert release.status_code == 200
+    assert release.json()["released"] is True
+
+
+@pytest.mark.asyncio
+async def test_v1_local_runtime_lease_rejected_when_not_local(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.local_runtime.local_runtime_lease_service.enabled",
+        lambda: False,
+    )
+    response = await _request(
+        "POST",
+        "/v1/local-runtime/lease/acquire",
+        json={"owner_id": "pytest"},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_v1_engines_route_available(monkeypatch):
     monkeypatch.setattr(
         "server.routers.engines.model_registry.list_engines",

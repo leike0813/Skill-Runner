@@ -35,6 +35,7 @@
     "index_subtitle_suffix": "そして Schema 駆動の実行フォームを開きます。",
     "index_table_engines": "エンジン",
     "index_table_health": "ヘルス",
+    "index_health_aria": "ヘルス状態",
     "index_table_skill": "Skill",
     "index_table_version": "バージョン",
     "index_title": "利用可能な Skills",
@@ -299,6 +300,8 @@
         "engine": "Engine",
         "models": "モデル",
         "models_manage": "モデル管理",
+        "status": "状態",
+        "status_aria": "Engine {engine} の状態: {status}",
         "start_tui": "TUI 起動",
         "upgrade": "アップグレード"
       },
@@ -332,6 +335,12 @@
       "unavailable": "プレビュー不可"
     },
     "index": {
+      "engine_status_error": "利用不可",
+      "engine_status_healthy": "正常",
+      "engine_status_led_aria": "Engine {engine} の状態: {status}",
+      "engine_status_subtitle": "状態は bootstrap/ensure のエンジンキャッシュスナップショットを表示します（静的表示・自動更新なし）。",
+      "engine_status_title": "エンジン状態",
+      "engine_status_warning": "バージョン未解決",
       "install_action": "アップロードしてインストール",
       "install_title": "Skill パッケージをインストール",
       "installed_skills": "インストール済み Skills",
@@ -551,9 +560,12 @@
         "browse": "閲覧",
         "empty": "インストール済み Skill はありません。",
         "engines": "エンジン",
+        "execution_modes": "実行モード",
         "health": "ヘルス",
+        "health_aria": "ヘルス状態",
         "id": "ID",
         "name": "Name",
+        "skill": "Skill",
         "version": "Version"
       }
     }

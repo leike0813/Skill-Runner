@@ -291,7 +291,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             run_status.run_id,
             status=RunStatus.QUEUED.value,
         )
-        request_record = await maybe_await(run_store.get_request(request_id))
+        request_record: dict[str, Any] | None = await maybe_await(
+            run_store.get_request(request_id)
+        )
         run_dir = workspace_manager.get_run_dir(run_status.run_id)
         if run_dir is None:
             raise HTTPException(status_code=500, detail="Run directory not found")
@@ -392,7 +394,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
 
 @router.get("/{request_id}", response_model=RequestStatusResponse)
 async def get_run_status(request_id: str):
-    request_record = await maybe_await(run_store.get_request(request_id))
+    request_record: dict[str, Any] | None = await maybe_await(
+        run_store.get_request(request_id)
+    )
     if not request_record:
         raise HTTPException(status_code=404, detail="Request not found")
     run_id = request_record.get("run_id")
@@ -403,9 +407,15 @@ async def get_run_status(request_id: str):
         raise HTTPException(status_code=404, detail="Run not found")
     
     
-    projection_payload = await maybe_await(run_store.get_current_projection(request_id))
-    state_payload = await maybe_await(run_store.get_run_state(request_id))
-    dispatch_payload = await maybe_await(run_store.get_dispatch_state(request_id))
+    projection_payload: dict[str, Any] | None = await maybe_await(
+        run_store.get_current_projection(request_id)
+    )
+    state_payload: dict[str, Any] | None = await maybe_await(
+        run_store.get_run_state(request_id)
+    )
+    dispatch_payload: dict[str, Any] | None = await maybe_await(
+        run_store.get_dispatch_state(request_id)
+    )
     status_file = run_dir / ".state" / "state.json"
 
     current_status = RunStatus.QUEUED
@@ -484,7 +494,9 @@ async def get_run_status(request_id: str):
     if parsed_created_at is not None:
         created_at = parsed_created_at
     updated_at_dt = _parse_datetime_utc(updated_at, default_now=True) or datetime.now(timezone.utc)
-    auto_stats = await maybe_await(run_store.get_auto_decision_stats(request_id))
+    auto_stats: dict[str, Any] = await maybe_await(
+        run_store.get_auto_decision_stats(request_id)
+    )
     last_auto_decision_at_obj = auto_stats.get("last_auto_decision_at")
     last_auto_decision_at = _parse_datetime_utc(last_auto_decision_at_obj)
     pending_interaction_id = (
@@ -524,8 +536,12 @@ async def get_run_status(request_id: str):
         effective_runtime_options=effective_runtime_options,
         client_metadata=request_record.get("client_metadata"),
     )
-    interaction_count = await maybe_await(run_store.get_interaction_count(request_id))
-    recovery_info = await maybe_await(run_store.get_recovery_info(run_id))
+    interaction_count: int = int(
+        await maybe_await(run_store.get_interaction_count(request_id)) or 0
+    )
+    recovery_info: dict[str, Any] = await maybe_await(
+        run_store.get_recovery_info(run_id)
+    )
     recovered_at = _parse_datetime_utc(recovery_info.get("recovered_at"))
 
     return RequestStatusResponse(
@@ -1204,7 +1220,9 @@ async def upload_file(
 
 
 async def _read_pending_interaction_id(request_id: str) -> int | None:
-    pending = await maybe_await(run_store.get_pending_interaction(request_id))
+    pending: dict[str, Any] | None = await maybe_await(
+        run_store.get_pending_interaction(request_id)
+    )
     if not isinstance(pending, dict):
         return None
     value = pending.get("interaction_id")
@@ -1220,7 +1238,9 @@ async def _read_pending_interaction_id(request_id: str) -> int | None:
 
 
 async def _read_pending_auth_session_id(request_id: str) -> str | None:
-    pending = await maybe_await(run_store.get_pending_auth(request_id))
+    pending: dict[str, Any] | None = await maybe_await(
+        run_store.get_pending_auth(request_id)
+    )
     if not isinstance(pending, dict):
         return None
     value = pending.get("auth_session_id")

@@ -2,6 +2,7 @@
     <thead>
         <tr>
             <th>{{ t("ui.engines.table.engine", default="Engine") }}</th>
+            <th><span class="sr-only">{{ t("ui.engines.table.status", default="Status") }}</span></th>
             <th>{{ t("ui.engines.table.cli_version", default="CLI Version") }}</th>
             <th>{{ t("ui.engines.table.models", default="Models") }}</th>
             <th>{{ t("ui.engines.table.actions", default="Actions") }}</th>
@@ -11,6 +12,19 @@
     {% for row in rows %}
         <tr>
             <td>{{ row.engine }}</td>
+            {% set status_level = row.status_level or "warning" %}
+            {% if status_level == "healthy" %}
+                {% set status_text = t("ui.index.engine_status_healthy", default="healthy") %}
+            {% elif status_level == "error" %}
+                {% set status_text = t("ui.index.engine_status_error", default="error") %}
+            {% else %}
+                {% set status_text = t("ui.index.engine_status_warning", default="warning") %}
+            {% endif %}
+            <td>
+                <span class="health-indicator" aria-label="{{ t('ui.engines.table.status_aria', default='Engine {engine} status: {status}', engine=row.engine, status=status_text) }}">
+                    <span class="health-led health-led-{{ status_level }}"></span>
+                </span>
+            </td>
             <td>{{ row.cli_version or "-" }}</td>
             <td>{{ row.models_count }}</td>
             <td>
@@ -24,7 +38,9 @@
                     <input type="hidden" name="engine" value="{{ row.engine }}">
                     <button class="btn btn-primary" type="submit">{{ t("ui.engines.table.upgrade", default="升级") }}</button>
                 </form>
+                {% if ttyd_available %}
                 <button class="btn btn-primary" type="button" data-engine-start="{{ row.engine }}">{{ t("ui.engines.table.start_tui", default="启动TUI") }}</button>
+                {% endif %}
                 {% if row.engine == "codex" %}
                 <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="codex">{{ t("ui.engines.table.auth_codex", default="鉴权(Codex)") }}</button>
                 {% elif row.engine == "gemini" %}

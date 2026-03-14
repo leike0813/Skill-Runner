@@ -3,7 +3,7 @@ services:
   api:
     image: __IMAGE_REPO__:__IMAGE_TAG__
     ports:
-      - "8000:8000"
+      - "9813:9813"
       # Keep ttyd host/container ports identical.
       # Do not split-mutate this mapping (e.g. 28081:17681), or embedded shell URL resolution will break.
       - "17681:17681"
@@ -39,12 +39,12 @@ services:
   #   image: __IMAGE_REPO__:__IMAGE_TAG__
   #   entrypoint: ["/entrypoint_e2e.sh"]
   #   ports:
-  #     - "8011:8011"
+  #     - "9814:9814"
   #   environment:
   #     SKILL_RUNNER_RUNTIME_MODE: container
   #     SKILL_RUNNER_E2E_CLIENT_HOST: 0.0.0.0
-  #     SKILL_RUNNER_E2E_CLIENT_PORT: 8011
-  #     SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL: http://api:8000
+  #     SKILL_RUNNER_E2E_CLIENT_PORT: 9814
+  #     SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL: http://api:9813
   #   depends_on:
   #     - api
   #   volumes:

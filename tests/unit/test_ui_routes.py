@@ -51,6 +51,14 @@ def _read_ui_template(path: str) -> str:
 async def test_ui_index_available_when_auth_disabled(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_skills",
+        lambda: SimpleNamespace(skills=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {},
+    )
 
     response = await _request("GET", "/ui")
     assert response.status_code == 200
@@ -61,6 +69,14 @@ async def test_ui_index_available_when_auth_disabled(monkeypatch):
 async def test_ui_language_query_sets_cookie_and_preserves_query(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_skills",
+        lambda: SimpleNamespace(skills=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {},
+    )
 
     response = await _request("GET", "/ui?foo=1&bar=2&lang=en")
     assert response.status_code == 200
@@ -78,11 +94,51 @@ async def test_ui_language_query_sets_cookie_and_preserves_query(monkeypatch):
 async def test_ui_index_links_to_settings_and_hides_danger_zone(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_skills",
+        lambda: SimpleNamespace(skills=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {},
+    )
 
     response = await _request("GET", "/ui")
     assert response.status_code == 200
     assert "Danger Zone：重置项目数据" not in response.text
     assert "/ui/settings" in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_skills",
+        lambda: SimpleNamespace(skills=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {
+            "codex": SimpleNamespace(present=True, version="0.89.0"),
+            "gemini": SimpleNamespace(present=True, version=""),
+            "iflow": SimpleNamespace(present=False, version=None),
+            "opencode": SimpleNamespace(present=True, version=None),
+        },
+    )
+
+    response = await _request("GET", "/ui")
+    assert response.status_code == 200
+    assert "引擎状态</h2>" in response.text
+    assert "引擎状态指示器" not in response.text
+    assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
+    assert 'id="engine-status-indicator"' in response.text
+    assert 'data-engine-status-refresh="static"' in response.text
+    assert 'data-engine-count="4"' in response.text
+    assert "style=\"--engine-count: 4;\"" in response.text
+    assert 'data-engine="codex" data-status-level="healthy"' in response.text
+    assert 'data-engine="gemini" data-status-level="warning"' in response.text
+    assert 'data-engine="iflow" data-status-level="error"' in response.text
 
 
 @pytest.mark.asyncio
@@ -346,6 +402,12 @@ async def test_ui_skills_table_highlight(monkeypatch):
     response = await _request("GET", "/ui/skills/table?highlight_skill_id=skill-b")
     assert response.status_code == 200
     assert "Skill B" in response.text
+    assert "<code>skill-b</code>" in response.text
+    assert "skill-mode-pill" in response.text
+    assert "health-led-" in response.text
+    assert "sr-only" in response.text
+    assert 'class="btn btn-secondary"' in response.text
+    assert "/ui/skills/skill-b" in response.text
     assert "background:#ecfdf5;" in response.text
 
 
@@ -447,6 +509,7 @@ async def test_ui_skill_preview_binary_and_large_and_invalid_path(monkeypatch, t
 async def test_ui_engines_page(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.agent_cli_manager.profile",
         SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
@@ -477,9 +540,34 @@ async def test_ui_engines_page(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_engines_page_hides_terminal_panel_when_ttyd_missing(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.profile",
+        SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(engines=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_auth_flow_manager.get_active_session_snapshot",
+        lambda: {"active": False},
+    )
+
+    response = await _request("GET", "/ui/engines")
+    assert response.status_code == 200
+    assert "当前环境未检测到 ttyd" in response.text
+    assert 'class="terminal-wrap" style="display:none;"' in response.text
+
+
+@pytest.mark.asyncio
 async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.agent_cli_manager.profile",
         SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
@@ -546,6 +634,7 @@ async def test_ui_engine_auth_shell_route_is_removed(monkeypatch):
 async def test_ui_engine_tui_session_endpoints(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.get_session_snapshot",
         lambda: {"active": True, "status": "running", "session_id": "s-1"},
@@ -582,6 +671,7 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
 async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
 
     from server.services.ui.ui_shell_manager import UiShellBusyError
 
@@ -599,6 +689,7 @@ async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
 async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
         lambda engine: {
@@ -618,9 +709,29 @@ async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_engine_tui_start_returns_503_when_ttyd_unavailable(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: False)
+
+    called = {"start": False}
+
+    def _start(_engine: str):
+        called["start"] = True
+        return {"active": True}
+
+    monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _start)
+    response = await _request("POST", "/ui/engines/tui/session/start", data={"engine": "codex"})
+    assert response.status_code == 503
+    assert "ttyd not found" in response.json()["detail"].lower()
+    assert called["start"] is False
+
+
+@pytest.mark.asyncio
 async def test_ui_engines_table_partial(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.management_router.list_management_engines",
         lambda: SimpleNamespace(
@@ -637,6 +748,13 @@ async def test_ui_engines_table_partial(monkeypatch):
                 ),
             ]
         ),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {
+            "codex": SimpleNamespace(present=True, version="0.89.0"),
+            "iflow": SimpleNamespace(present=True, version=""),
+        },
     )
 
     response = await _request("GET", "/ui/engines/table")
@@ -655,7 +773,33 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert ("Auth (iFlow)" in response.text) or ("鉴权(iFlow)" in response.text)
     assert "启动TUI" in response.text
     assert "升级" in response.text
+    assert "health-led-healthy" in response.text
+    assert "health-led-warning" in response.text
     assert 'data-engine-auth-start=' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engines_table_hides_tui_start_when_ttyd_missing(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(
+            engines=[
+                SimpleNamespace(
+                    engine="codex",
+                    cli_version="0.89.0",
+                    models_count=12,
+                )
+            ]
+        ),
+    )
+
+    response = await _request("GET", "/ui/management/engines/table")
+    assert response.status_code == 200
+    assert 'data-engine-start="codex"' not in response.text
+    assert "启动TUI" not in response.text
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from server import main
 
 
 @pytest.mark.asyncio
-async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
+async def test_lifespan_requests_opencode_model_refresh_async_when_enabled(monkeypatch):
     monkeypatch.setattr("server.main.setup_logging", lambda: None)
     monkeypatch.setattr(
         "server.main.get_runtime_profile",
@@ -36,10 +36,14 @@ async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
         "server.engines.opencode.models.catalog_service.opencode_model_catalog.start",
         Mock(),
     )
-    refresh_mock = AsyncMock()
     monkeypatch.setattr(
-        "server.engines.opencode.models.catalog_service.opencode_model_catalog.refresh",
-        refresh_mock,
+        "server.services.engine_management.engine_model_catalog_lifecycle.engine_model_catalog_lifecycle.runtime_probe_engines",
+        Mock(return_value=("opencode",)),
+    )
+    request_refresh_mock = Mock(return_value=object())
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_model_catalog_lifecycle.engine_model_catalog_lifecycle.request_refresh_async",
+        request_refresh_mock,
     )
     monkeypatch.setattr(
         "server.engines.opencode.models.catalog_service.opencode_model_catalog.stop",
@@ -75,4 +79,4 @@ async def test_lifespan_awaits_opencode_model_refresh_when_enabled(monkeypatch):
     async with main.lifespan(main.app):
         pass
 
-    refresh_mock.assert_awaited_once_with(reason="startup")
+    request_refresh_mock.assert_called_once_with("opencode", reason="startup")

@@ -84,19 +84,22 @@ Every skill declares its supported execution modes in `runner.json`:
 
 ```bash
 mkdir -p skills data
-docker compose up --build
+docker compose up -d --build
 ```
 
-- **API**: http://localhost:8000/v1
-- **Admin UI**: http://localhost:8000/ui
+- **API**: http://localhost:9813/v1
+- **Admin UI**: http://localhost:9813/ui
 
 Or run independently:
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 9813:9813 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
+  leike0813/skill-runner:latest
 ```
 
-### Local Development
+### Local Deployment
 
 ```bash
 # Linux / macOS
@@ -106,10 +109,71 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 .\scripts\deploy_local.ps1
 ```
 
-Containerized harness entrypoint:
+Prerequisites:
+
+- `uv`
+- `Node.js` and `npm`
+- `ttyd` (optional, required only for Inline TUI in `/ui/engines`)
+
+Plugin-oriented control CLI:
 
 ```bash
-./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+# Linux / macOS
+./scripts/skill-runnerctl status --mode local --json
+./scripts/skill-runnerctl up --mode local --json
+./scripts/skill-runnerctl down --mode local --json
+sh ./scripts/skill-runner-uninstall.sh --json
+sh ./scripts/skill-runner-uninstall.sh --clear-data --clear-agent-home --json
+
+# Windows (PowerShell)
+.\scripts\skill-runnerctl.ps1 status --mode local --json
+.\scripts\skill-runner-uninstall.ps1 -Json
+.\scripts\skill-runner-uninstall.ps1 -ClearData -ClearAgentHome -Json
+```
+
+`skill-runnerctl` local mode defaults to a platform local root (`$HOME/.local/share/skill-runner` on Linux/macOS, `%LOCALAPPDATA%\SkillRunner` on Windows), with data under `<LocalRoot>/data`.  
+`skill-runnerctl` local mode default port is `29813` with fallback scan `29813-29823` (configurable via `SKILL_RUNNER_LOCAL_PORT` / `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN`).  
+Service general default port remains `9813` (for `deploy_local.*` / container entrypoint when `PORT` is not set).  
+`deploy_local.*` keeps its existing `PROJECT_ROOT/data` default unless overridden by env vars.
+
+Release installers (for fixed-tag assets + SHA256 verification):
+
+```bash
+# Linux / macOS
+./scripts/skill-runner-install.sh --version v0.4.3
+
+# Windows (PowerShell)
+.\scripts\skill-runner-install.ps1 -Version v0.4.3
+```
+
+The installers download these GitHub Release assets for the selected tag:
+
+- `skill-runner-<version>.tar.gz`
+- `skill-runner-<version>.tar.gz.sha256`
+
+Deploy directly from a release compose asset:
+
+```bash
+VERSION=v0.4.3
+curl -fL -o docker-compose.release.yml \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
+curl -fL -o docker-compose.release.yml.sha256 \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml.sha256"
+# Optional integrity check:
+sha256sum -c docker-compose.release.yml.sha256
+docker compose -f docker-compose.release.yml up -d
+```
+
+Containerized harness entrypoint:
+
+- TUI Mode
+```bash
+./scripts/agent_harness_container.sh start codex
+```
+
+- Non-interactive Mode (or requiring parameter passthrough)
+```bash
+./scripts/agent_harness_container.sh start codex -- --json --full-auto "hello"
 ```
 
 <details>
@@ -119,20 +183,24 @@ Containerized harness entrypoint:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SKILL_RUNNER_DATA_DIR` | Run data directory | `data/` |
+| `SKILL_RUNNER_DATA_DIR` | Run data directory | `skill-runnerctl`: `<LocalRoot>/data`; `deploy_local.*`: `data/` |
 | `SKILL_RUNNER_AGENT_HOME` | Isolated agent config home | auto |
 | `SKILL_RUNNER_AGENT_CACHE_DIR` | Agent cache root | auto |
 | `SKILL_RUNNER_NPM_PREFIX` | Managed CLI install prefix | auto |
 | `SKILL_RUNNER_RUNTIME_MODE` | `local` or `container` | auto |
+| `SKILL_RUNNER_LOCAL_PORT` | `skill-runnerctl` local default port | `29813` |
+| `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN` | `skill-runnerctl` local fallback span | `10` |
 
 #### UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.4.0
+  leike0813/skill-runner:latest
 ```
 
 </details>
@@ -144,7 +212,7 @@ Access the built-in management interface at `/ui`:
 - **Skill Browser** — View installed skills, inspect package structure and files
 - **Engine Management** — Monitor engine status, trigger upgrades, view logs
 - **Model Catalog** — Browse and manage engine model snapshots
-- **Inline TUI** — Launch engine terminals directly in the browser (single managed session)
+- **Inline TUI** — Launch engine terminals directly in the browser (single managed session, requires `ttyd`)
 
 ## 🔑 Engine Authentication
 
@@ -177,7 +245,7 @@ Available from the same Admin UI engine management interface.
 <details>
 <summary>Click to expand legacy methods</summary>
 
-**Inline TUI** — The Admin UI embeds engine terminals (`/ui/engines`) where you can run CLI login commands directly in the browser.
+**Inline TUI** — The Admin UI embeds engine terminals (`/ui/engines`) where you can run CLI login commands directly in the browser (requires `ttyd`).
 
 **Container CLI login**:
 ```bash
@@ -194,10 +262,10 @@ Skill Runner validates the uploaded files and writes them into the isolated Agen
 
 ```bash
 # List available skills
-curl -sS http://localhost:8000/v1/skills
+curl -sS http://localhost:9813/v1/skills
 
 # Create a job
-curl -sS -X POST http://localhost:8000/v1/jobs \
+curl -sS -X POST http://localhost:9813/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
@@ -207,7 +275,7 @@ curl -sS -X POST http://localhost:8000/v1/jobs \
   }'
 
 # Get results
-curl -sS http://localhost:8000/v1/jobs/<request_id>/result
+curl -sS http://localhost:9813/v1/jobs/<request_id>/result
 ```
 
 ### Building a Frontend
@@ -286,6 +354,7 @@ graph TD
 | [API Reference](docs/api_reference.md) | REST API specification |
 | [Frontend Design Guide](docs/developer/frontend_design_guide.md) | Building frontend clients |
 | [Containerization](docs/containerization.md) | Docker deployment guide |
+| [Zotero Plugin Integration Contract](docs/zotero_plugin_integration_contract.md) | One-click deploy and local lease lifecycle contract |
 | [Developer Guide](docs/dev_guide.md) | Contributing and development |
 
 ## ⚠️ Disclaimer

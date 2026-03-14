@@ -119,6 +119,15 @@ from .runtime_event import (ChatReplayEventEnvelope, ChatReplayKind, ChatReplayR
                             FcmpEventType, InteractionHistoryEventType, InteractiveResolutionMode,
                             OrchestratorEventType, RuntimeEventCategory, RuntimeEventEnvelope,
                             RuntimeEventIdentity, RuntimeEventRef, RuntimeEventSource)
+from .local_runtime import (
+    LocalLeaseAcquireRequest,
+    LocalLeaseAcquireResponse,
+    LocalLeaseHeartbeatRequest,
+    LocalLeaseHeartbeatResponse,
+    LocalLeaseReleaseRequest,
+    LocalLeaseReleaseResponse,
+    LocalRuntimeStatusResponse,
+)
 from .skill import ManifestArtifact, RuntimeDefinition, SkillManifest
 __all__ = [
     "AdapterTurnInteraction",
@@ -180,6 +189,13 @@ __all__ = [
     "InteractionReplyResponse",
     "InteractiveErrorCode",
     "InteractiveResolutionMode",
+    "LocalLeaseAcquireRequest",
+    "LocalLeaseAcquireResponse",
+    "LocalLeaseHeartbeatRequest",
+    "LocalLeaseHeartbeatResponse",
+    "LocalLeaseReleaseRequest",
+    "LocalLeaseReleaseResponse",
+    "LocalRuntimeStatusResponse",
     "ManagementEngineDetail",
     "ManagementEngineAuthImportSpecResponse",
     "ManagementEngineAuthImportSubmitResponse",

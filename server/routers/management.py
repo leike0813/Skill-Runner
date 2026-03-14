@@ -33,6 +33,7 @@ from ..models import (
     ManagementSkillListResponse,
     ManagementSkillSchemasResponse,
     ManagementSkillSummary,
+    ManagementLoggingSettingsResponse,
     RecoveryState,
     RunStatus,
     SkillManifest,
@@ -72,8 +73,9 @@ install_runtime_observability_ports()
 
 def _build_system_settings_response() -> ManagementSystemSettingsResponse:
     logging_payload = get_logging_settings_payload()
+    logging_settings = ManagementLoggingSettingsResponse.model_validate(logging_payload)
     return ManagementSystemSettingsResponse(
-        logging=logging_payload,
+        logging=logging_settings,
         engine_auth_session_log_persistence_enabled=bool(
             config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED
         ),
@@ -365,21 +367,27 @@ async def list_management_runs(
     page_size: int = Query(default=20, ge=1, le=200),
     limit: int | None = Query(default=None, ge=1, le=1000),
 ):
+    paging_payload: dict[str, Any]
     if limit is not None:
-        rows = await run_observability_service.list_runs(limit=limit)
+        listed_rows = await run_observability_service.list_runs(limit=limit)
         paging_payload = {
-            "runs": rows,
+            "runs": listed_rows,
             "page": 1,
             "page_size": limit,
-            "total": len(rows),
-            "total_pages": 1 if rows else 0,
+            "total": len(listed_rows),
+            "total_pages": 1 if listed_rows else 0,
         }
     else:
         paging_payload = await run_observability_service.list_runs_paginated(
             page=page,
             page_size=page_size,
         )
-    rows = paging_payload["runs"]
+    rows_obj = paging_payload.get("runs")
+    rows: list[dict[str, Any]] = []
+    if isinstance(rows_obj, list):
+        for item in rows_obj:
+            if isinstance(item, dict):
+                rows.append(item)
     runs: list[ManagementRunConversationState] = []
     for row in rows:
         request_id_obj = row.get("request_id")
@@ -416,10 +424,10 @@ async def list_management_runs(
         )
     return ManagementRunListResponse(
         runs=runs,
-        page=int(paging_payload.get("page") or 1),
-        page_size=int(paging_payload.get("page_size") or 20),
-        total=int(paging_payload.get("total") or 0),
-        total_pages=int(paging_payload.get("total_pages") or 0),
+        page=_coerce_int_or_default(paging_payload.get("page"), 1),
+        page_size=_coerce_int_or_default(paging_payload.get("page_size"), 20),
+        total=_coerce_int_or_default(paging_payload.get("total"), 0),
+        total_pages=_coerce_int_or_default(paging_payload.get("total_pages"), 0),
     )
 
 
@@ -907,3 +915,14 @@ def _parse_recovery_state(raw: Any) -> RecoveryState:
         except ValueError:
             return RecoveryState.NONE
     return RecoveryState.NONE
+
+
+def _coerce_int_or_default(raw: Any, default: int) -> int:
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    return default

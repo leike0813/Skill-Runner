@@ -1,12 +1,28 @@
 import asyncio
+import ctypes
+import ctypes.wintypes as wintypes
 import logging
 import os
-import resource
+import platform
 import threading
 from pathlib import Path
 from typing import Any, Dict
 
 from server.config import config
+
+try:
+    import psutil  # type: ignore[import-untyped]
+except ImportError:
+    psutil = None  # type: ignore[assignment]
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows has no resource module
+    resource = None  # type: ignore[assignment]
+
+
+class _WindowsConcurrencyProbeFatal(RuntimeError):
+    """Fatal probe error on Windows; caller should fail fast."""
 
 
 class ConcurrencyManager:
@@ -185,26 +201,48 @@ class ConcurrencyManager:
             mem_available_mb = self._mem_available_mb()
             mem_budget = max(1, mem_available_mb - int(policy["mem_reserve_mb"]))
             mem_limit = max(1, mem_budget // max(1, int(policy["estimated_mem_per_run_mb"])))
-
-            fd_soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-            fd_budget = max(1, int(fd_soft) - int(policy["fd_reserve"]))
-            fd_limit = max(1, fd_budget // max(1, int(policy["estimated_fd_per_run"])))
-
-            nproc_soft, _ = resource.getrlimit(resource.RLIMIT_NPROC)
-            if nproc_soft < 0:
-                pid_limit = int(policy["max_concurrent_hard_cap"])
-            else:
-                pid_budget = max(1, int(nproc_soft) - int(policy["pid_reserve"]))
-                pid_limit = max(1, pid_budget // max(1, int(policy["estimated_pid_per_run"])))
-
             hard_cap = max(1, int(policy["max_concurrent_hard_cap"]))
+
+            if self._is_windows():
+                fd_limit = self._windows_fd_limit(policy, hard_cap)
+                pid_limit = self._windows_pid_limit(policy, hard_cap)
+            else:
+                getrlimit = getattr(resource, "getrlimit", None)
+                rlimit_nofile = getattr(resource, "RLIMIT_NOFILE", None)
+                rlimit_nproc = getattr(resource, "RLIMIT_NPROC", None)
+                if (
+                    getrlimit is None
+                    or rlimit_nofile is None
+                    or rlimit_nproc is None
+                ):
+                    fd_limit = int(policy["max_concurrent_hard_cap"])
+                    pid_limit = int(policy["max_concurrent_hard_cap"])
+                else:
+                    fd_soft, _ = getrlimit(rlimit_nofile)
+                    fd_budget = max(1, int(fd_soft) - int(policy["fd_reserve"]))
+                    fd_limit = max(1, fd_budget // max(1, int(policy["estimated_fd_per_run"])))
+
+                    nproc_soft, _ = getrlimit(rlimit_nproc)
+                    if nproc_soft < 0:
+                        pid_limit = int(policy["max_concurrent_hard_cap"])
+                    else:
+                        pid_budget = max(1, int(nproc_soft) - int(policy["pid_reserve"]))
+                        pid_limit = max(1, pid_budget // max(1, int(policy["estimated_pid_per_run"])))
+
             limit = min(cpu_limit, mem_limit, fd_limit, pid_limit, hard_cap)
             return max(1, limit)
+        except _WindowsConcurrencyProbeFatal:
+            raise
         except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             logger.exception("Resource probe failed, using fallback concurrency")
             return fallback
 
+    def _is_windows(self) -> bool:
+        return platform.system().lower().startswith("win")
+
     def _mem_available_mb(self) -> int:
+        if self._is_windows():
+            return self._windows_mem_available_mb()
         meminfo = Path("/proc/meminfo")
         if not meminfo.exists():
             raise RuntimeError("/proc/meminfo not found")
@@ -214,6 +252,143 @@ class ConcurrencyManager:
                 kb = int(parts[1])
                 return max(1, kb // 1024)
         raise RuntimeError("MemAvailable not found")
+
+    def _windows_mem_available_mb(self) -> int:
+        if psutil is None:
+            raise _WindowsConcurrencyProbeFatal(
+                "psutil is required on Windows for concurrency probe; install project dependencies."
+            )
+        try:
+            available = int(psutil.virtual_memory().available // 1024 // 1024)
+        except (AttributeError, OSError, TypeError, ValueError, RuntimeError) as exc:
+            raise _WindowsConcurrencyProbeFatal(
+                f"failed to probe Windows available memory via psutil: {type(exc).__name__}"
+            ) from exc
+        if available <= 0:
+            raise _WindowsConcurrencyProbeFatal("invalid Windows available memory probe result")
+        return available
+
+    def _windows_fd_limit(self, policy: Dict[str, Any], hard_cap: int) -> int:
+        max_stdio = self._windows_max_stdio()
+        fd_budget = max(1, max_stdio - int(policy["fd_reserve"]))
+        return max(1, fd_budget // max(1, int(policy["estimated_fd_per_run"])))
+
+    def _windows_pid_limit(self, policy: Dict[str, Any], hard_cap: int) -> int:
+        active_limit = self._windows_active_process_limit()
+        if active_limit is None:
+            return hard_cap
+        pid_budget = max(1, active_limit - int(policy["pid_reserve"]))
+        return max(1, pid_budget // max(1, int(policy["estimated_pid_per_run"])))
+
+    def _windows_max_stdio(self) -> int:
+        last_error: Exception | None = None
+        for dll_name in ("ucrtbase", "msvcrt"):
+            try:
+                crt = ctypes.CDLL(dll_name)
+                getter = getattr(crt, "_getmaxstdio", None)
+                if getter is None:
+                    continue
+                getter.restype = ctypes.c_int
+                value = int(getter())
+                if value > 0:
+                    return value
+                last_error = RuntimeError(f"_getmaxstdio from {dll_name} returned non-positive value")
+            except (AttributeError, OSError, TypeError, ValueError) as exc:
+                last_error = exc
+        raise _WindowsConcurrencyProbeFatal(
+            "failed to probe Windows stdio upper bound via _getmaxstdio"
+        ) from last_error
+
+    def _windows_active_process_limit(self) -> int | None:
+        job_object_extended_limit_information = 9
+        job_object_limit_active_process = 0x00000008
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _JobObjectBasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _JobObjectExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _JobObjectBasicLimitInformation),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        except OSError as exc:  # pragma: no cover - Windows runtime only
+            raise _WindowsConcurrencyProbeFatal("failed to load kernel32 for job limit probe") from exc
+
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.IsProcessInJob.restype = wintypes.BOOL
+        kernel32.IsProcessInJob.argtypes = [
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.BOOL),
+        ]
+        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+        kernel32.QueryInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+
+        current_process = kernel32.GetCurrentProcess()
+        if not current_process:
+            raise _WindowsConcurrencyProbeFatal("GetCurrentProcess failed during job limit probe")
+
+        in_job = wintypes.BOOL()
+        if not kernel32.IsProcessInJob(current_process, None, ctypes.byref(in_job)):
+            err_code = ctypes.get_last_error()
+            raise _WindowsConcurrencyProbeFatal(f"IsProcessInJob failed with code={err_code}")
+        if not bool(in_job.value):
+            return None
+
+        info = _JobObjectExtendedLimitInformation()
+        returned_length = wintypes.DWORD()
+        ok = kernel32.QueryInformationJobObject(
+            None,
+            job_object_extended_limit_information,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+            ctypes.byref(returned_length),
+        )
+        if not ok:
+            err_code = ctypes.get_last_error()
+            raise _WindowsConcurrencyProbeFatal(
+                f"QueryInformationJobObject failed with code={err_code}"
+            )
+
+        flags = int(info.BasicLimitInformation.LimitFlags)
+        active_limit = int(info.BasicLimitInformation.ActiveProcessLimit)
+        if (flags & job_object_limit_active_process) and active_limit > 0:
+            return active_limit
+        return None
 
     def _env_int(self, key: str, default: int) -> int:
         raw = os.environ.get(key)

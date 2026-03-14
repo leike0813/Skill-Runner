@@ -309,6 +309,8 @@
         "engine": "Engine",
         "models": "Models",
         "models_manage": "Manage Models",
+        "status": "Status",
+        "status_aria": "Engine {engine} status: {status}",
         "start_tui": "Start TUI",
         "upgrade": "Upgrade"
       },
@@ -342,6 +344,12 @@
       "unavailable": "Not previewable"
     },
     "index": {
+      "engine_status_error": "Unavailable",
+      "engine_status_healthy": "Healthy",
+      "engine_status_led_aria": "Engine {engine} status: {status}",
+      "engine_status_subtitle": "Status is sourced from bootstrap/ensure engine cache snapshot (static view, no auto refresh).",
+      "engine_status_title": "Engine Status",
+      "engine_status_warning": "Version unresolved",
       "install_action": "Upload and Install",
       "install_title": "Install Skill Package",
       "installed_skills": "Installed Skills",
@@ -562,8 +570,11 @@
         "empty": "No installed skills.",
         "engines": "Engines",
         "health": "Health",
+        "health_aria": "Health status",
         "id": "ID",
         "name": "Name",
+        "skill": "Skill",
+        "execution_modes": "Execution Modes",
         "version": "Version"
       }
     }

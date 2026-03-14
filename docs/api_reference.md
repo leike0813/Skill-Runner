@@ -6,11 +6,11 @@
 不影响本文档中的对外 API 契约。
 
 ## Base URL
-默认为 `http://localhost:8000` (取决于部署配置)。
+默认为 `http://localhost:9813` (取决于部署配置)。
 建议使用版本化前缀：`/v1`。
 
 示例：
-`http://localhost:8000/v1`
+`http://localhost:9813/v1`
 
 ---
 
@@ -53,9 +53,71 @@
 - `POST /v1/management/runs/{request_id}/reply`：提交交互回复
 - `POST /v1/management/runs/{request_id}/cancel`：取消运行
 
+### Local Runtime 租约（本地模式）
+- `GET /v1/local-runtime/status`：读取本地租约管理状态（是否启用、TTL、活跃租约数）
+- `POST /v1/local-runtime/lease/acquire`：申请租约（返回 `lease_id`、`expires_at`）
+- `POST /v1/local-runtime/lease/heartbeat`：续租
+- `POST /v1/local-runtime/lease/release`：释放租约
+
 说明：
 - 管理 API 是推荐的前端消费面。
 - 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*`、`/v1/temp-skill-runs*` 保持兼容，用于执行链路与存量调用。
+- `local-runtime` 接口仅在 `SKILL_RUNNER_RUNTIME_MODE=local` 下可用；非 local 模式返回 `409`。
+
+### 本地运行租约接口
+`GET /v1/local-runtime/status`
+
+**Response** (`LocalRuntimeStatusResponse`):
+```json
+{
+  "enabled": true,
+  "ttl_seconds": 60,
+  "heartbeat_interval_seconds": 20,
+  "active_leases": 1,
+  "has_ever_had_lease": true
+}
+```
+
+`POST /v1/local-runtime/lease/acquire`
+
+**Request Body** (`LocalLeaseAcquireRequest`):
+```json
+{
+  "owner_id": "zotero-plugin",
+  "metadata": {
+    "client": "zotero"
+  }
+}
+```
+
+**Response** (`LocalLeaseAcquireResponse`):
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2",
+  "ttl_seconds": 60,
+  "heartbeat_interval_seconds": 20,
+  "expires_at": "2026-03-12T12:01:00Z",
+  "active_leases": 1
+}
+```
+
+`POST /v1/local-runtime/lease/heartbeat`
+
+**Request Body**:
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2"
+}
+```
+
+`POST /v1/local-runtime/lease/release`
+
+**Request Body**:
+```json
+{
+  "lease_id": "f85e88f5-bf4e-4fd5-b66e-f490d4f156f2"
+}
+```
 
 ### 获取系统设置
 `GET /v1/management/system/settings`
@@ -1083,11 +1145,11 @@
 
 ### 内建 E2E 示例客户端服务（独立端口）
 
-内建 E2E 示例客户端是独立 FastAPI 服务（默认端口 `8011`），用于模拟真实前端调用链路，不复用 `/ui/*` 路由。
+内建 E2E 示例客户端是独立 FastAPI 服务（默认端口 `9814`），用于模拟真实前端调用链路，不复用 `/ui/*` 路由。
 
 配置：
-- `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `8011`；无效值回退到 `8011`。
-- `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:8000`。
+- `SKILL_RUNNER_E2E_CLIENT_PORT`：客户端端口，默认 `9814`；无效值回退到 `9814`。
+- `SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL`：后端 API 地址，默认 `http://127.0.0.1:9813`。
 
 主要页面与接口：
 - `GET /`：读取并展示 Skill 列表。

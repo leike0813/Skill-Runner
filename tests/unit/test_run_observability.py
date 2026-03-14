@@ -91,8 +91,8 @@ async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
 
     tail = await service.get_logs_tail("req-1", max_bytes=5)
     assert tail["poll"] is True
-    assert tail["stdout"].endswith("ne2\n")
-    assert "err1" in tail["stderr"]
+    assert tail["stdout"].replace("\r\n", "\n").endswith("ne2\n")
+    assert tail["stderr"].replace("\r\n", "\n").endswith("rr1\n")
 
 
 @pytest.mark.asyncio

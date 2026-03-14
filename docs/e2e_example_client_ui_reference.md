@@ -12,8 +12,8 @@ Goals:
 ## 2. Service Boundary
 
 - Service is standalone (`e2e_client/app.py`) and runs on a dedicated port.
-- Default port is `8011`.
-- `SKILL_RUNNER_E2E_CLIENT_PORT` overrides the port; invalid values fallback to `8011`.
+- Default port is `9814`.
+- `SKILL_RUNNER_E2E_CLIENT_PORT` overrides the port; invalid values fallback to `9814`.
 - Client accesses backend only through HTTP APIs (`/v1/management/*`, `/v1/jobs*`, `/v1/temp-skill-runs*`).
 - Fixture skill root defaults to `tests/fixtures/skills` and can be overridden by `SKILL_RUNNER_E2E_CLIENT_FIXTURES_SKILLS_DIR`.
 

@@ -58,7 +58,11 @@ def _write_dummy_command(path: Path) -> Path:
     return path
 
 
-def test_driver_matrix_registration_and_method_resolution(tmp_path: Path) -> None:
+def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.detect_pywinpty_support",
+        lambda: (True, None),
+    )
     profile = _Profile(tmp_path)
     command = _write_dummy_command(tmp_path / "dummy-cli")
     manager = EngineAuthFlowManager(

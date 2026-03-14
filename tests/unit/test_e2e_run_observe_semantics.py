@@ -56,8 +56,12 @@ def test_run_observe_template_maps_user_input_required_to_agent_semantics():
     content = _read_template()
     assert "applyPendingPrompt(payload)" in content
     assert "renderActionButtons(" in content
+    assert "resolveInteractionActionResponse" in content
+    assert 'if (kind === "confirm" && options.length === 0)' in content
+    assert '{ label: "是", value: "是" }' in content
+    assert '{ label: "否", value: "否" }' in content
+    assert "response: resolveInteractionActionResponse(kind, option)" in content
     assert "mode: \"interaction\"" in content
-    assert "response: option.value" in content
     assert "successText" not in content
     assert "successKey" not in content
 

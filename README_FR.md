@@ -84,7 +84,7 @@ Chaque skill déclare ses modes supportés dans `runner.json` :
 
 ```bash
 mkdir -p skills data
-docker compose up --build
+docker compose up -d --build
 ```
 
 - **API** : http://localhost:8000/v1
@@ -93,10 +93,13 @@ docker compose up --build
 Ou exécution indépendante :
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
+  leike0813/skill-runner:latest
 ```
 
-### Développement local
+### Déploiement local
 
 ```bash
 # Linux / macOS
@@ -106,10 +109,22 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 .\scripts\deploy_local.ps1
 ```
 
+Prérequis du déploiement local :
+
+- `uv`
+- `Node.js` et `npm`
+- `ttyd` (optionnel, requis uniquement pour le TUI intégré dans `/ui/engines`)
+
 Entrée officielle du harness en déploiement conteneurisé :
 
+- Mode TUI
 ```bash
-./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+./scripts/agent_harness_container.sh start codex
+```
+
+- Mode non interactif (ou nécessite le passage de paramètres)）
+```bash
+./scripts/agent_harness_container.sh start codex -- --json --full-auto "hello"
 ```
 
 <details>
@@ -129,13 +144,28 @@ Entrée officielle du harness en déploiement conteneurisé :
 
 ```bash
 docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.4.0
+  leike0813/skill-runner:latest
 ```
 
 </details>
+
+Déployer directement depuis le fichier compose de release :
+
+```bash
+VERSION=v0.4.3
+curl -fL -o docker-compose.release.yml \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
+curl -fL -o docker-compose.release.yml.sha256 \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml.sha256"
+# Vérification d'intégrité (optionnelle) :
+sha256sum -c docker-compose.release.yml.sha256
+docker compose -f docker-compose.release.yml up -d
+```
 
 ## 🖥️ Interface d'Administration Web
 
@@ -144,7 +174,7 @@ Accédez à l'interface de gestion intégrée via `/ui` :
 - **Navigateur de Skills** — Visualiser les skills installés, inspecter la structure et les fichiers
 - **Gestion des moteurs** — Surveiller l'état, déclencher les mises à jour, consulter les journaux
 - **Catalogue de modèles** — Parcourir et gérer les instantanés de modèles
-- **TUI intégré** — Lancer des terminaux moteur directement dans le navigateur (session unique gérée)
+- **TUI intégré** — Lancer des terminaux moteur directement dans le navigateur (session unique gérée, nécessite `ttyd`)
 
 ## 🔑 Authentification des Moteurs
 
@@ -177,7 +207,7 @@ Disponible depuis la même interface de gestion des moteurs.
 <details>
 <summary>Cliquer pour afficher les méthodes alternatives</summary>
 
-**TUI intégré** — L'UI d'administration embarque des terminaux moteur (`/ui/engines`) où vous pouvez exécuter des commandes de connexion CLI directement dans le navigateur.
+**TUI intégré** — L'UI d'administration embarque des terminaux moteur (`/ui/engines`) où vous pouvez exécuter des commandes de connexion CLI directement dans le navigateur (nécessite `ttyd`).
 
 **Connexion CLI dans le conteneur** :
 ```bash

@@ -38,7 +38,7 @@ def test_opencode_adapter_builds_start_and_parses_stream(monkeypatch) -> None:
         options={"model": "openai/gpt-5"},
     )
     assert command == [
-        "/usr/bin/opencode",
+        str(Path("/usr/bin/opencode")),
         "run",
         "--format",
         "json",

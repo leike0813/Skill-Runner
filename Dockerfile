@@ -59,6 +59,6 @@ COPY scripts/agent_manager.py /app/scripts/agent_manager.py
 COPY scripts/deploy_local.sh /app/scripts/deploy_local.sh
 RUN chmod +x /entrypoint.sh /entrypoint_e2e.sh /app/scripts/agent_manager.sh /app/scripts/deploy_local.sh
 
-EXPOSE 8000 8011 17681
+EXPOSE 9813 9814 17681
 
 ENTRYPOINT ["/entrypoint.sh"]

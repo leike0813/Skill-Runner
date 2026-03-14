@@ -11,7 +11,11 @@ class _StubManager:
     pass
 
 
-def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path) -> None:
+def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.detect_pywinpty_support",
+        lambda: (True, None),
+    )
     manager = _StubManager()
     bundle = build_engine_auth_bootstrap(manager, agent_home=tmp_path / "agent_home")
 
@@ -40,3 +44,79 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path) -> None:
     assert hasattr(manager, "_codex_oauth_proxy_flow")
     assert hasattr(manager, "_gemini_oauth_proxy_flow")
     assert hasattr(manager, "_openai_device_proxy_flow")
+
+
+def test_engine_auth_bootstrap_disables_windows_cli_delegate_without_pywinpty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.platform.system",
+        lambda: "Windows",
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.detect_pywinpty_support",
+        lambda: (False, "import_error:ModuleNotFoundError"),
+    )
+    manager = _StubManager()
+    bundle = build_engine_auth_bootstrap(manager, agent_home=tmp_path / "agent_home")
+
+    assert bundle.driver_registry.supports(
+        transport="oauth_proxy",
+        engine="iflow",
+        auth_method="auth_code_or_url",
+    )
+    assert not bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="iflow",
+        auth_method="auth_code_or_url",
+    )
+    assert not bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="gemini",
+        auth_method="auth_code_or_url",
+    )
+    assert not bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="opencode",
+        auth_method="callback",
+        provider_id="openai",
+    )
+    assert bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="codex",
+        auth_method="auth_code_or_url",
+    )
+
+
+def test_engine_auth_bootstrap_keeps_windows_cli_delegate_with_pywinpty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.platform.system",
+        lambda: "Windows",
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_bootstrap.detect_pywinpty_support",
+        lambda: (True, None),
+    )
+    manager = _StubManager()
+    bundle = build_engine_auth_bootstrap(manager, agent_home=tmp_path / "agent_home")
+
+    assert bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="iflow",
+        auth_method="auth_code_or_url",
+    )
+    assert bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="gemini",
+        auth_method="auth_code_or_url",
+    )
+    assert bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="opencode",
+        auth_method="callback",
+        provider_id="openai",
+    )

@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from fastapi import BackgroundTasks, HTTPException  # type: ignore[import-not-found]
+from pydantic import ValidationError
 
 from server.models import (
+    AskUserHintPayload,
     AuthChallengeKind,
     AuthMethod,
     AuthMethodSelection,
@@ -22,6 +24,7 @@ from server.models import (
     AuthSubmissionKind,
     InteractiveErrorCode,
     InteractionReplyResponse,
+    InteractionOption,
     OrchestratorEventType,
     PendingAuth,
     PendingAuthMethodSelection,
@@ -1401,6 +1404,23 @@ class RunAuthOrchestrationService:
         hint_text = "Choose an authentication method."
         if any(self._is_conversation_method_high_risk(engine, provider_id, method) for method in methods):
             hint_text = f"{hint_text} {_HIGH_RISK_SHORT_LABEL} {_HIGH_RISK_NOTICE}"
+        ask_user = AskUserHintPayload(
+            kind="choose_one",
+            prompt=prompt_text,
+            hint=hint_text,
+            options=[
+                InteractionOption(
+                    label=self._render_method_label(
+                        method=method,
+                        base_label=method_labels.get(method, str(method.value)),
+                        engine=engine,
+                        provider_id=provider_id,
+                    ),
+                    value=method.value,
+                )
+                for method in methods
+            ],
+        )
         return PendingAuthMethodSelection(
             engine=engine,
             provider_id=provider_id,
@@ -1411,23 +1431,7 @@ class RunAuthOrchestrationService:
             source_attempt=source_attempt,
             phase=AuthSessionPhase.METHOD_SELECTION,
             ui_hints={"widget": "choice", "hint": hint_text},
-            ask_user={
-                "kind": "choose_one",
-                "prompt": prompt_text,
-                "hint": hint_text,
-                "options": [
-                    {
-                        "label": self._render_method_label(
-                            method=method,
-                            base_label=method_labels.get(method, str(method.value)),
-                            engine=engine,
-                            provider_id=provider_id,
-                        ),
-                        "value": method.value,
-                    }
-                    for method in methods
-                ],
-            },
+            ask_user=ask_user,
         )
 
     def _build_pending_auth_from_snapshot(
@@ -1486,10 +1490,10 @@ class RunAuthOrchestrationService:
             provider_id=provider_id,
             auth_method=AuthMethod.IMPORT,
             challenge_kind=AuthChallengeKind.IMPORT_FILES,
-            prompt=self._normalize_string(ask_user.get("prompt")) or "Upload credential files to complete authentication.",
+            prompt=self._normalize_string(ask_user.prompt) or "Upload credential files to complete authentication.",
             auth_url=None,
             user_code=None,
-            instructions=self._normalize_string(ask_user.get("hint")) or "Use the import action and upload required auth files.",
+            instructions=self._normalize_string(ask_user.hint) or "Use the import action and upload required auth files.",
             accepts_chat_input=False,
             input_kind=None,
             last_error=None,
@@ -1506,7 +1510,7 @@ class RunAuthOrchestrationService:
         *,
         engine: str,
         provider_id: str | None,
-    ) -> dict[str, Any]:
+    ) -> AskUserHintPayload:
         try:
             payload = auth_import_service.get_import_spec(
                 engine=engine,
@@ -1516,14 +1520,17 @@ class RunAuthOrchestrationService:
             payload = None
         ask_user = payload.get("ask_user") if isinstance(payload, dict) else None
         if isinstance(ask_user, dict):
-            return ask_user
-        return {
-            "kind": "upload_files",
-            "prompt": "Upload credential files to complete authentication.",
-            "hint": "Upload required auth files to continue.",
-            "files": [],
-            "ui_hints": {},
-        }
+            try:
+                return AskUserHintPayload.model_validate(ask_user)
+            except ValidationError:
+                pass
+        return AskUserHintPayload(
+            kind="upload_files",
+            prompt="Upload credential files to complete authentication.",
+            hint="Upload required auth files to continue.",
+            files=[],
+            ui_hints={},
+        )
 
     def _build_auth_resume_context(
         self,

@@ -23,6 +23,21 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 - `scripts/agent_manager.sh`: thin shell wrapper to `agent_manager.py`.
 - `scripts/agent_harness_container.sh`: host-side wrapper to run containerized `agent-harness` through `docker compose exec api`.
 - `scripts/deploy_local.sh` / `scripts/deploy_local.ps1`: one-click local deployment.
+- `scripts/skill-runnerctl` / `scripts/skill-runnerctl.ps1`: plugin-friendly lifecycle control CLI (`install/preflight/up/down/status/doctor`).
+- `scripts/skill-runner-install.sh` / `scripts/skill-runner-install.ps1`: release installer scripts with SHA256 verification.
+- `scripts/skill-runner-uninstall.sh` / `scripts/skill-runner-uninstall.ps1`: plugin-friendly uninstall scripts with optional data/agent-home cleanup.
+
+## Release Assets (Tag Builds)
+
+For each `v*` tag, CI publishes installer-facing release assets:
+
+- `docker-compose.release.yml`
+- `docker-compose.release.yml.sha256`
+- `skill-runner-<version>.tar.gz`
+- `skill-runner-<version>.tar.gz.sha256`
+
+The source package includes repository files plus `skills/*` submodule contents, and embeds
+`release_integrity_manifest.json` for file-level preflight integrity verification.
 
 ## Volumes
 
@@ -59,6 +74,45 @@ docker compose exec api python3 /app/scripts/agent_manager.py --upgrade
 ```
 
 Legacy helper wrappers were moved out of `scripts/` and are no longer recommended as the primary entrypoint.
+
+## Plugin integration lifecycle (local mode)
+
+For Zotero/local desktop integration, prefer `skill-runnerctl` instead of calling `deploy_local.*` directly:
+
+```bash
+./scripts/skill-runnerctl install --json
+./scripts/skill-runnerctl preflight --json
+./scripts/skill-runnerctl up --mode local --json
+sh ./scripts/skill-runner-uninstall.sh --json
+```
+
+Recommended plugin chain is `preflight -> up -> acquire lease` (no regular status polling).  
+`preflight` now includes file-level integrity verification against `release_integrity_manifest.json`; integrity failures should be handled as blocking and trigger reinstall guidance.  
+If `up` fails, call `status --mode local --json` and `doctor --json` for diagnostics.
+
+`skill-runnerctl` local defaults:
+
+- Linux/macOS LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}`
+- Windows LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-%LOCALAPPDATA%\\SkillRunner}`
+- `SKILL_RUNNER_DATA_DIR` default: `<LocalRoot>/data` (override still supported via env var)
+- `SKILL_RUNNER_LOCAL_PORT` default: `29813`
+- `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN` default: `10` (tries `29813-29823`)
+- `deploy_local.*` default data dir remains `PROJECT_ROOT/data`
+- service general default port remains `9813` when `PORT` is unset
+
+Uninstall options:
+
+- `--clear-data` / `-ClearData`: also remove `<LocalRoot>/data`
+- `--clear-agent-home` / `-ClearAgentHome`: also remove `<LocalRoot>/agent-cache/agent-home`
+- both enabled: attempt to remove whole `<LocalRoot>`
+
+Local mode defaults to loopback bind (`127.0.0.1`) and supports lease-driven lifecycle APIs:
+
+- `POST /v1/local-runtime/lease/acquire`
+- `POST /v1/local-runtime/lease/heartbeat`
+- `POST /v1/local-runtime/lease/release`
+
+If all leases expire or are released, local runtime can self-terminate (TTL default: 60s).
 
 ## Agent CLI status
 
@@ -123,7 +177,7 @@ services:
 
 Example docker run:
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
@@ -253,11 +307,11 @@ For local development, use the repository compose file (build-first):
 docker compose up --build
 ```
 
-The API will be available at `http://localhost:8000/v1`.
+The API will be available at `http://localhost:9813/v1`.
 
 To enable the built-in E2E example client, uncomment the `e2e_client` service block in
 `docker-compose.yml` and restart compose. The E2E UI will be available at
-`http://localhost:8011`.
+`http://localhost:9814`.
 
 ### Bootstrap diagnostics (agent install / startup)
 
@@ -292,7 +346,7 @@ docker build -t skill-runner:local .
 Run the container with the same mounts as compose (example):
 
 ```
-docker run --rm -p 8000:8000 \
+docker run --rm -p 9813:9813 \
   -e UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache \
   -e UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv \
   -e SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner \
@@ -308,8 +362,8 @@ docker run --rm -p 8000:8000 \
 Run the built-in E2E client from the same image:
 
 ```bash
-docker run --rm -p 8011:8011 \
+docker run --rm -p 9814:9814 \
   --entrypoint /entrypoint_e2e.sh \
-  -e SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL=http://host.docker.internal:8000 \
+  -e SKILL_RUNNER_E2E_CLIENT_BACKEND_BASE_URL=http://host.docker.internal:9813 \
   skill-runner:local
 ```

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 from uuid import uuid4
 
 from server.models import (
@@ -210,26 +210,33 @@ class RunStateService:
         )
 
     def _state_to_projection(self, state_payload: Dict[str, Any]) -> Dict[str, Any]:
-        pending = state_payload.get("pending") if isinstance(state_payload.get("pending"), dict) else {}
-        resume = state_payload.get("resume") if isinstance(state_payload.get("resume"), dict) else {}
-        runtime = state_payload.get("runtime") if isinstance(state_payload.get("runtime"), dict) else {}
-        phase = state_payload.get("state_phase") if isinstance(state_payload.get("state_phase"), dict) else {}
+        pending_obj = state_payload.get("pending")
+        resume_obj = state_payload.get("resume")
+        runtime_obj = state_payload.get("runtime")
+        pending: Dict[str, Any] = pending_obj if isinstance(pending_obj, dict) else {}
+        resume: Dict[str, Any] = resume_obj if isinstance(resume_obj, dict) else {}
+        runtime: Dict[str, Any] = runtime_obj if isinstance(runtime_obj, dict) else {}
+        pending_owner_raw = pending.get("owner")
+        resume_cause_raw = resume.get("resume_cause")
+        conversation_mode_raw = runtime.get("conversation_mode")
+        requested_execution_mode_raw = runtime.get("requested_execution_mode")
+        effective_execution_mode_raw = runtime.get("effective_execution_mode")
         projection = CurrentRunProjection(
             request_id=str(state_payload.get("request_id") or ""),
             run_id=str(state_payload.get("run_id") or ""),
             status=RunStatus(str(state_payload.get("status") or RunStatus.QUEUED.value)),
             updated_at=datetime.fromisoformat(str(state_payload.get("updated_at"))),
             current_attempt=int(state_payload.get("current_attempt") or 1),
-            pending_owner=PendingOwner(str(pending["owner"])) if isinstance(pending.get("owner"), str) else None,
+            pending_owner=PendingOwner(str(pending_owner_raw)) if isinstance(pending_owner_raw, str) else None,
             pending_interaction_id=pending.get("interaction_id") if isinstance(pending.get("interaction_id"), int) else None,
             pending_auth_session_id=pending.get("auth_session_id") if isinstance(pending.get("auth_session_id"), str) else None,
             resume_ticket_id=resume.get("resume_ticket_id") if isinstance(resume.get("resume_ticket_id"), str) else None,
-            resume_cause=ResumeCause(str(resume["resume_cause"])) if isinstance(resume.get("resume_cause"), str) else None,
+            resume_cause=ResumeCause(str(resume_cause_raw)) if isinstance(resume_cause_raw, str) else None,
             source_attempt=resume.get("source_attempt") if isinstance(resume.get("source_attempt"), int) else None,
             target_attempt=resume.get("target_attempt") if isinstance(resume.get("target_attempt"), int) else None,
-            conversation_mode=ClientConversationMode(str(runtime["conversation_mode"])) if isinstance(runtime.get("conversation_mode"), str) else None,
-            requested_execution_mode=ExecutionMode(str(runtime["requested_execution_mode"])) if isinstance(runtime.get("requested_execution_mode"), str) else None,
-            effective_execution_mode=ExecutionMode(str(runtime["effective_execution_mode"])) if isinstance(runtime.get("effective_execution_mode"), str) else None,
+            conversation_mode=ClientConversationMode(str(conversation_mode_raw)) if isinstance(conversation_mode_raw, str) else None,
+            requested_execution_mode=ExecutionMode(str(requested_execution_mode_raw)) if isinstance(requested_execution_mode_raw, str) else None,
+            effective_execution_mode=ExecutionMode(str(effective_execution_mode_raw)) if isinstance(effective_execution_mode_raw, str) else None,
             effective_interactive_require_user_reply=runtime.get("effective_interactive_require_user_reply")
             if isinstance(runtime.get("effective_interactive_require_user_reply"), bool)
             else None,
@@ -328,7 +335,8 @@ class RunStateService:
         state_payload = await self._get_run_state(run_store_backend, request_id)
         if isinstance(state_payload, dict):
             state_payload = dict(state_payload)
-            phase_payload = state_payload.get("state_phase") if isinstance(state_payload.get("state_phase"), dict) else {}
+            state_phase_obj = state_payload.get("state_phase")
+            phase_payload: Dict[str, Any] = dict(state_phase_obj) if isinstance(state_phase_obj, dict) else {}
             phase_payload["dispatch_phase"] = phase.value
             state_payload["state_phase"] = phase_payload
             state_payload["updated_at"] = now.isoformat()
@@ -394,7 +402,12 @@ class RunStateService:
         )
         if effective_session_timeout_sec is not None:
             runtime_state.effective_session_timeout_sec = effective_session_timeout_sec
-        phase_payload = dict(existing_state.get("state_phase") or {})
+        state_phase_obj = existing_state.get("state_phase")
+        phase_payload: Dict[str, Any] = dict(state_phase_obj) if isinstance(state_phase_obj, dict) else {}
+        existing_resume_obj = existing_state.get("resume")
+        existing_resume: Dict[str, Any] = (
+            dict(existing_resume_obj) if isinstance(existing_resume_obj, dict) else {}
+        )
         if status != RunStatus.QUEUED:
             phase_payload["dispatch_phase"] = None
         if pending_owner == PendingOwner.WAITING_AUTH_METHOD_SELECTION:
@@ -422,16 +435,16 @@ class RunStateService:
                 pending_auth_method_selection=pending_auth_method_selection,
             ),
             resume=self._build_resume_state(
-                resume_ticket_id=resume_ticket_id if resume_ticket_id is not None else existing_state.get("resume", {}).get("resume_ticket_id"),
+                resume_ticket_id=resume_ticket_id if resume_ticket_id is not None else existing_resume.get("resume_ticket_id"),
                 resume_cause=resume_cause
                 if resume_cause is not None
                 else (
-                    ResumeCause(existing_state.get("resume", {}).get("resume_cause"))
-                    if isinstance(existing_state.get("resume", {}).get("resume_cause"), str)
+                    ResumeCause(existing_resume.get("resume_cause"))
+                    if isinstance(existing_resume.get("resume_cause"), str)
                     else None
                 ),
-                source_attempt=source_attempt if source_attempt is not None else existing_state.get("resume", {}).get("source_attempt"),
-                target_attempt=target_attempt if target_attempt is not None else existing_state.get("resume", {}).get("target_attempt"),
+                source_attempt=source_attempt if source_attempt is not None else existing_resume.get("source_attempt"),
+                target_attempt=target_attempt if target_attempt is not None else existing_resume.get("target_attempt"),
             ),
             runtime=runtime_state,
             error=error,
@@ -483,7 +496,15 @@ class RunStateService:
             warnings=warnings,
             run_store_backend=run_store_backend,
         )
-        terminal_status = "success" if status == RunStatus.SUCCEEDED else status.value
+        terminal_status: Literal["success", "succeeded", "failed", "canceled"]
+        if status == RunStatus.SUCCEEDED:
+            terminal_status = "success"
+        elif status == RunStatus.FAILED:
+            terminal_status = "failed"
+        elif status == RunStatus.CANCELED:
+            terminal_status = "canceled"
+        else:
+            terminal_status = "succeeded"
         terminal_model = TerminalRunResult(status=terminal_status, **terminal_result)
         terminal_payload = terminal_model.model_dump(mode="json")
         validate_terminal_run_result(terminal_payload)

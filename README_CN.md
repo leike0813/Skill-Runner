@@ -84,7 +84,7 @@ my-skill/
 
 ```bash
 mkdir -p skills data
-docker compose up --build
+docker compose up -d --build
 ```
 
 - **API 地址**：http://localhost:8000/v1
@@ -93,10 +93,13 @@ docker compose up --build
 或独立运行：
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
+docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
+  leike0813/skill-runner:latest
 ```
 
-### 本地开发
+### 本地部署
 
 ```bash
 # Linux / macOS
@@ -106,10 +109,22 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 .\scripts\deploy_local.ps1
 ```
 
+本地部署依赖：
+
+- `uv`
+- `Node.js` 与 `npm`
+- `ttyd`（可选，仅在 `/ui/engines` 使用内嵌 TUI 时需要）
+
 容器化部署下的 harness 正式入口：
 
+- TUI模式
 ```bash
-./scripts/agent_harness_container.sh start codex --json --full-auto -p skill-runner-harness "hello"
+./scripts/agent_harness_container.sh start codex
+```
+
+- 非交互模式（或需要透传参数）
+```bash
+./scripts/agent_harness_container.sh start codex -- --json --full-auto "hello"
 ```
 
 <details>
@@ -129,13 +144,28 @@ docker run --rm -p 8000:8000 -p 17681:17681 leike0813/skill-runner:v0.4.0
 
 ```bash
 docker run --rm -p 8000:8000 -p 17681:17681 \
+  -v "$(pwd)/skills:/app/skills" \
+  -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
   -e UI_BASIC_AUTH_USERNAME=admin \
   -e UI_BASIC_AUTH_PASSWORD=change-me \
-  leike0813/skill-runner:v0.4.0
+  leike0813/skill-runner:latest
 ```
 
 </details>
+
+直接下载 release 版 compose 文件并部署：
+
+```bash
+VERSION=v0.4.3
+curl -fL -o docker-compose.release.yml \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
+curl -fL -o docker-compose.release.yml.sha256 \
+  "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml.sha256"
+# 可选：完整性校验
+sha256sum -c docker-compose.release.yml.sha256
+docker compose -f docker-compose.release.yml up -d
+```
 
 ## 🖥️ Web 管理界面
 
@@ -144,7 +174,7 @@ docker run --rm -p 8000:8000 -p 17681:17681 \
 - **Skill 浏览器** — 查看已安装技能，浏览包结构与文件内容
 - **引擎管理** — 监控引擎状态，触发升级，查看升级日志
 - **模型目录** — 浏览和管理引擎模型快照
-- **内嵌 TUI** — 在浏览器中直接启动引擎终端（受控单会话）
+- **内嵌 TUI** — 在浏览器中直接启动引擎终端（受控单会话，需要 `ttyd`）
 
 ## 🔑 引擎鉴权
 
@@ -177,7 +207,7 @@ CLI Delegate（委托编排）启动引擎的原生登录流程。与 OAuth Prox
 <details>
 <summary>点击展开传统鉴权方式</summary>
 
-**内嵌 TUI** — 管理 UI 内嵌了引擎终端（`/ui/engines`），可以直接在浏览器中运行 CLI 登录命令。
+**内嵌 TUI** — 管理 UI 内嵌了引擎终端（`/ui/engines`），可以直接在浏览器中运行 CLI 登录命令（需要 `ttyd`）。
 
 **容器内 CLI 登录**：
 ```bash

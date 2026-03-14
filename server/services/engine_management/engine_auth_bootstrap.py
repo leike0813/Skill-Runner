@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,12 @@ from server.engines.opencode.auth.callbacks.antigravity_local_callback_server im
 )
 from server.engines.opencode.auth.runtime_handler import OpencodeAuthRuntimeHandler
 from server.runtime.auth.callbacks import CallbackListenerRegistry
+from server.runtime.auth.cli_pty_runtime import detect_pywinpty_support
 from server.runtime.auth.driver_registry import AuthDriverRegistry
 from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
+
+logger = logging.getLogger(__name__)
+_WINDOWS_PYWINPTY_ENGINES = frozenset({"gemini", "iflow", "opencode"})
 
 
 @dataclass(frozen=True)
@@ -57,9 +63,12 @@ def _register_auth_driver(
     )
 
 
-def _build_driver_registry() -> AuthDriverRegistry:
+def _build_driver_registry(*, disabled_cli_delegate_engines: set[str] | None = None) -> AuthDriverRegistry:
+    disabled = disabled_cli_delegate_engines or set()
     registry = AuthDriverRegistry()
     for entry in engine_auth_strategy_service.iter_driver_entries():
+        if entry.transport == "cli_delegate" and entry.engine in disabled:
+            continue
         _register_auth_driver(
             registry,
             transport=entry.transport,
@@ -70,6 +79,22 @@ def _build_driver_registry() -> AuthDriverRegistry:
             execution_mode=entry.execution_mode,
         )
     return registry
+
+
+def _resolve_disabled_cli_delegate_engines() -> set[str]:
+    if not platform.system().lower().startswith("win"):
+        return set()
+    available, detail = detect_pywinpty_support()
+    if available:
+        return set()
+    disabled = set(_WINDOWS_PYWINPTY_ENGINES)
+    reason = detail or "unknown_reason"
+    logger.warning(
+        "pywinpty is unavailable on Windows; disabling cli_delegate for engines=%s reason=%s fix=install_pywinpty_in_runtime_env",
+        ",".join(sorted(disabled)),
+        reason,
+    )
+    return disabled
 
 
 def _build_callback_listener_registry() -> CallbackListenerRegistry:
@@ -83,6 +108,7 @@ def _build_callback_listener_registry() -> CallbackListenerRegistry:
 
 def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootstrapBundle:
     agent_home.mkdir(parents=True, exist_ok=True)
+    disabled_cli_delegate_engines = _resolve_disabled_cli_delegate_engines()
     # Flows are attached on manager because runtime handlers access them via manager attributes.
     manager._gemini_flow = GeminiAuthCliFlow()  # noqa: SLF001
     manager._gemini_oauth_proxy_flow = GeminiOAuthProxyFlow(agent_home)  # noqa: SLF001
@@ -103,7 +129,7 @@ def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootst
         "opencode": OpencodeAuthRuntimeHandler(manager),
     }
     return AuthBootstrapBundle(
-        driver_registry=_build_driver_registry(),
+        driver_registry=_build_driver_registry(disabled_cli_delegate_engines=disabled_cli_delegate_engines),
         callback_listener_registry=_build_callback_listener_registry(),
         engine_auth_handlers=handlers,
     )

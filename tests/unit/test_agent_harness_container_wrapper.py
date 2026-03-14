@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="POSIX-only shell wrapper test",
+)
 
 
 def _write_fake_docker(tmp_path: Path, *, exec_exit_code: int = 0) -> Path:

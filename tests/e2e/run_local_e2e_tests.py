@@ -108,7 +108,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run Local E2E Tests: start local deploy chain then run container-style E2E against it."
     )
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Target service base URL")
+    parser.add_argument("--base-url", default="http://localhost:9813", help="Target service base URL")
     parser.add_argument(
         "--startup-timeout",
         type=int,
