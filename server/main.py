@@ -37,7 +37,7 @@ def _load_shared_engine_auth_env_files() -> None:
 _load_shared_engine_auth_env_files()
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[import-not-found]
-from fastapi.responses import JSONResponse  # type: ignore[import-not-found]
+from fastapi.responses import JSONResponse, Response  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .routers import skills, jobs, engines, management, local_runtime, oauth_callback, skill_packages, ui
@@ -234,6 +234,12 @@ app.include_router(v1_router)
 app.include_router(ui.router)
 app.include_router(oauth_callback.router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "assets" / "static")), name="static")
+
+
+@app.api_route("/v1/system/ping", methods=["GET", "HEAD"], include_in_schema=False)
+async def system_ping() -> Response:
+    return Response(status_code=204)
+
 
 @app.get("/")
 async def root():

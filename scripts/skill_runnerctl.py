@@ -29,6 +29,7 @@ from server.services.engine_management.runtime_profile import get_runtime_profil
 WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 DEFAULT_SERVICE_PORT = 9813
 DEFAULT_PLUGIN_LOCAL_PORT = 29813
+HEALTH_PROBE_PATH = "/v1/system/ping"
 INTEGRITY_MANIFEST_NAME = "release_integrity_manifest.json"
 
 
@@ -811,8 +812,8 @@ def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
         port = int(args.port)
     pid = int(state.get("pid") or 0)
     pid_alive = _is_pid_alive(pid)
-    status_code, health_payload = _http_json("GET", _build_service_url(host, port, "/"))
-    healthy = status_code == 200 and isinstance(health_payload, dict)
+    status_code, _ = _http_json("GET", _build_service_url(host, port, HEALTH_PROBE_PATH))
+    healthy = status_code == 204
     status = "running" if healthy else ("starting" if pid_alive else "stopped")
     payload = {
         "ok": True,
@@ -979,8 +980,8 @@ def _cmd_up_local(args: argparse.Namespace) -> int:
     deadline = time.monotonic() + float(args.wait_seconds)
     healthy = False
     while time.monotonic() < deadline:
-        code, _ = _http_json("GET", _build_service_url(host, selected_port, "/"), timeout=1.5)
-        if code == 200:
+        code, _ = _http_json("GET", _build_service_url(host, selected_port, HEALTH_PROBE_PATH), timeout=1.5)
+        if code == 204:
             healthy = True
             break
         if not _is_pid_alive(pid):

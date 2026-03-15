@@ -79,6 +79,16 @@ async def test_legacy_routes_return_404(path):
 
 
 @pytest.mark.asyncio
+async def test_v1_system_ping_route_available():
+    get_response = await _request("GET", "/v1/system/ping")
+    assert get_response.status_code == 204
+    assert get_response.text == ""
+
+    head_response = await _request("HEAD", "/v1/system/ping")
+    assert head_response.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_v1_skills_route_available(monkeypatch):
     monkeypatch.setattr(
         "server.routers.skills.skill_registry.list_skills",

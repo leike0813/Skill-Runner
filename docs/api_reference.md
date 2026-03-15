@@ -14,6 +14,20 @@
 
 ---
 
+## 可达性探测（Reachability Probe）
+
+- `GET /v1/system/ping`：极轻量可达性探测（无响应体）
+- `HEAD /v1/system/ping`：极轻量可达性探测（无响应体）
+
+`GET /v1/system/ping`
+
+**Response**:
+- `204 No Content`
+- 响应体为空
+- 不依赖数据库、技能扫描或引擎状态探测，适合作为 liveness/readiness 的快速探测入口
+
+---
+
 ## 0. 管理 API（Management，推荐）
 <a id="management-api-recommended"></a>
 
