@@ -45,7 +45,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY server ./server
 COPY e2e_client ./e2e_client
-COPY skills ./skills
+COPY skills_builtin ./skills_builtin
 
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \

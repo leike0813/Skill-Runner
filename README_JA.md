@@ -66,7 +66,7 @@ my-skill/
 - **エンジン非依存**：一度書けば、任意のサポートエンジンで実行可能。同じスキルが Codex、Gemini、iFlow、OpenCode で動作。
 - **スキーマ駆動 I/O**：入力、パラメータ、出力すべてが JSON Schema で定義 — Runner が自動検証。
 - **分離実行**：各 Run は独自のワークスペースと標準化された I/O コントラクトを取得 — Run 間の干渉なし。
-- **ゼロ統合インストール**：スキルディレクトリを `skills/` に配置（または API/UI でアップロード）するだけで即座に利用可能。
+- **ゼロ統合インストール**：ユーザーディレクトリ `skills/` にスキルを配置（または API/UI でアップロード）するだけで即座に利用可能。内蔵 skills は `skills_builtin/` に同梱されます。
 - **キャッシュ再利用**：同一入力・パラメータの場合、以前の結果を再利用 — エンジンの重複呼び出しなし。
 
 ### 実行モード
@@ -83,12 +83,14 @@ my-skill/
 ### Docker（推奨）
 
 ```bash
-mkdir -p skills data
+mkdir -p data
 docker compose up -d --build
 ```
 
 - **API**: http://localhost:8000/v1
 - **管理 UI**: http://localhost:8000/ui
+- Docker Compose はデフォルトでユーザー skills 用に bind mount `./skills:/app/skills` を使用します。
+- イメージ内蔵 skills は `/app/skills_builtin` に同梱され、このマウントでは上書きされません。
 
 または単独で実行：
 
@@ -282,7 +284,8 @@ graph TD
     end
 
     subgraph ストレージ
-        Registry --> Skills[skills/]
+        Registry --> BuiltinSkills[skills_builtin/]
+        Registry --> UserSkills[skills/]
         Workspace --> Runs[data/runs/]
     end
 

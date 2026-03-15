@@ -15,11 +15,13 @@ class ManagementSkillSummary(BaseModel):
 
     id: str
     name: str
+    description: Optional[str] = None
     version: str
     engines: List[str] = Field(default_factory=list)
     unsupported_engines: List[str] = Field(default_factory=list)
     effective_engines: List[str] = Field(default_factory=list)
     execution_modes: List[str] = Field(default_factory=list)
+    is_builtin: bool = False
     installed_at: Optional[datetime] = None
     health: str = "healthy"
     health_error: Optional[str] = None

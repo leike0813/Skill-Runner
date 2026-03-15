@@ -7,9 +7,9 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 
 - Use a Debian-based Node.js base image.
 - Keep agent CLIs (codex/gemini/iflow/opencode) out of the image for fast upgrades.
-- Mount `skills/` from the host for hot updates.
+- Use host bind mount `./skills:/app/skills` by default for user skill management.
 - Persist data, configs, and CLI installs via volumes.
-- Centralize caches/packages under a single named volume.
+- Centralize caches/packages under managed named volumes.
 
 ## Files
 
@@ -36,16 +36,19 @@ For each `v*` tag, CI publishes installer-facing release assets:
 - `skill-runner-<version>.tar.gz`
 - `skill-runner-<version>.tar.gz.sha256`
 
-The source package includes repository files plus `skills/*` submodule contents, and embeds
+The source package includes repository files plus `skills_builtin/*` submodule contents, and embeds
 `release_integrity_manifest.json` for file-level preflight integrity verification.
 
 ## Volumes
 
 The default compose file mounts:
 
-- `./skills:/app/skills` (skills registry)
+- `./skills:/app/skills` (user skills registry; editable from host)
 - `skillrunner_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
 - *(optional)* `./data:/data` (runs.db, runs/, logs, settings)
+
+Builtin skills are packaged in-image under `/app/skills_builtin` (read-only source).
+User-installable skills live under `/app/skills` (volume/bind mount target).
 
 ## Agent CLI installation
 

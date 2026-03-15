@@ -59,7 +59,7 @@ from ..services.platform.system_settings_service import (
     system_settings_service,
 )
 from ..services.platform.system_log_explorer_service import system_log_explorer_service
-from ..services.skill.skill_registry import skill_registry
+from ..services.skill.skill_registry import is_builtin_skill_path, skill_registry
 from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
@@ -700,6 +700,7 @@ def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
     installed_at: datetime | None = None
     skill_path_raw = getattr(skill, "path", None)
     skill_path = Path(skill_path_raw) if skill_path_raw else None
+    is_builtin = is_builtin_skill_path(skill_path)
     if skill_path is None:
         issues.append("missing skill path")
     elif not skill_path.exists() or not skill_path.is_dir():
@@ -716,11 +717,17 @@ def _build_skill_summary(skill: SkillManifest) -> ManagementSkillSummary:
     return ManagementSkillSummary(
         id=str(getattr(skill, "id", "")),
         name=str(getattr(skill, "name", None) or getattr(skill, "id", "")),
+        description=(
+            str(getattr(skill, "description", "")).strip()
+            if getattr(skill, "description", None) is not None
+            else None
+        ) or None,
         version=str(getattr(skill, "version", "")),
         engines=engine_policy.declared_engines,
         unsupported_engines=engine_policy.unsupported_engines,
         effective_engines=engine_policy.effective_engines,
         execution_modes=_normalize_execution_modes(getattr(skill, "execution_modes", [])),
+        is_builtin=is_builtin,
         installed_at=installed_at,
         health="healthy" if not issues else "degraded",
         health_error="; ".join(issues) if issues else None,

@@ -7,7 +7,8 @@
 ```
 Skill-Runner/
 ├── server/                 # FastAPI 服务主包
-├── skills/                 # 已安装 Skill 包
+├── skills_builtin/         # 内建 Skill 包（随仓库发布）
+├── skills/                 # 用户 Skill 包（运行时安装/覆盖）
 ├── tests/                  # 测试套件
 ├── agent_harness/          # 外部运行时 harness
 ├── e2e_client/             # 内建 E2E 示例客户端
@@ -184,7 +185,8 @@ server/
 
 | 目录 | 说明 |
 |------|------|
-| `skills/` | 已安装的 Skill 包（每个 skill 一个子目录，含 `SKILL.md` + `assets/runner.json`） |
+| `skills_builtin/` | 内建 Skill 包（每个 skill 一个子目录，含 `SKILL.md` + `assets/runner.json`） |
+| `skills/` | 用户 Skill 包（运行时安装目录；同 `skill_id` 时覆盖内建） |
 | `tests/` | 测试套件（`unit/`、`integration/`、`common/`、`e2e/`、`suites/`） |
 | `agent_harness/` | 外部运行时 harness（独立 CLI 测试环境） |
 | `e2e_client/` | 内建 E2E 示例客户端（端口 9814） |

@@ -66,7 +66,7 @@ my-skill/
 - **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, iFlow, or OpenCode.
 - **Schema-driven I/O**: Input, parameter, and output are all defined by JSON Schema — the runner validates automatically.
 - **Isolated execution**: Each run gets its own workspace with standardized I/O contracts — no cross-run interference.
-- **Zero-integration install**: Drop a skill directory into `skills/` (or upload via API/UI) and it's immediately available.
+- **Zero-integration install**: Drop a skill directory into user dir `skills/` (or upload via API/UI) and it's immediately available. Built-in skills ship in `skills_builtin/`.
 - **Cache reuse**: Identical inputs and parameters can reuse previous results — no redundant engine invocations.
 
 ### Execution Modes
@@ -83,12 +83,14 @@ Every skill declares its supported execution modes in `runner.json`:
 ### Docker (recommended)
 
 ```bash
-mkdir -p skills data
+mkdir -p data
 docker compose up -d --build
 ```
 
 - **API**: http://localhost:9813/v1
 - **Admin UI**: http://localhost:9813/ui
+- Docker Compose defaults to bind mount `./skills:/app/skills` for user skills.
+- Built-in skills are bundled in-image at `/app/skills_builtin` and are not overridden by this path.
 
 Or run independently:
 
@@ -320,7 +322,8 @@ graph TD
     end
 
     subgraph Storage
-        Registry --> Skills[skills/]
+        Registry --> BuiltinSkills[skills_builtin/]
+        Registry --> UserSkills[skills/]
         Workspace --> Runs[data/runs/]
     end
 

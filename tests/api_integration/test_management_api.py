@@ -103,6 +103,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
     skills_res = await _request("GET", "/v1/management/skills")
     assert skills_res.status_code == 200
     assert skills_res.json()["skills"][0]["id"] == "demo-skill"
+    assert skills_res.json()["skills"][0]["is_builtin"] is False
 
     skill_detail_res = await _request("GET", "/v1/management/skills/demo-skill")
     assert skill_detail_res.status_code == 200

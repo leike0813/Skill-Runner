@@ -15,7 +15,7 @@ class SkillRegistry:
     Registry for discovering and managing available skills.
     
     Capabilities:
-    - Scans `skills/` directory for valid skill packages.
+    - Scans builtin/user skill directories for valid skill packages.
     - Loads definitions from `assets/runner.json`.
     - Provides lookup by ID.
     """
@@ -25,38 +25,44 @@ class SkillRegistry:
 
     def scan_skills(self):
         """
-        Scans the SKILLS_DIR for valid skills and updates the internal cache.
+        Scans builtin + user skills directories and updates the internal cache.
         A skill is valid if it has a `SKILL.md` file.
         """
         self._skills.clear()
-        skills_dir = Path(config.SYSTEM.SKILLS_DIR)
-        if not skills_dir.exists():
-            return
-
         invalid_dirs: List[str] = []
+        # Resolve in deterministic order: builtin first, then user.
+        # User skills override builtin skills when ids collide.
+        for scope, skills_dir in self._iter_skill_dirs():
+            if not skills_dir.exists():
+                continue
+            for skill_dir in skills_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
+                if skill_dir.name.startswith("."):
+                    continue
 
-        for skill_dir in skills_dir.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith("."):
-                continue
-            
-            # Check for SKILL.md and assets/runner.json
-            skill_md = skill_dir / "SKILL.md"
-            runner_json = skill_dir / "assets" / "runner.json"
-            
-            if not skill_md.exists() or not runner_json.exists():
-                invalid_dirs.append(skill_dir.name)
-                continue
-                
-            manifest = self._load_skill_manifest(skill_dir, runner_json)
-            if manifest:
-                self._skills[manifest.id] = manifest
-            else:
-                invalid_dirs.append(skill_dir.name)
+                # Check for SKILL.md and assets/runner.json
+                skill_md = skill_dir / "SKILL.md"
+                runner_json = skill_dir / "assets" / "runner.json"
+
+                if not skill_md.exists() or not runner_json.exists():
+                    invalid_dirs.append(f"{scope}:{skill_dir.name}")
+                    continue
+
+                manifest = self._load_skill_manifest(skill_dir, runner_json)
+                if manifest:
+                    self._skills[manifest.id] = manifest
+                else:
+                    invalid_dirs.append(f"{scope}:{skill_dir.name}")
 
         if invalid_dirs:
             logger.warning("Ignored invalid skill directories: %s", ", ".join(sorted(set(invalid_dirs))))
+
+    def _iter_skill_dirs(self) -> list[tuple[str, Path]]:
+        return [
+            ("builtin", Path(config.SYSTEM.SKILLS_BUILTIN_DIR)),
+            ("user", Path(config.SYSTEM.SKILLS_DIR)),
+        ]
 
     def _load_skill_manifest(self, skill_dir: Path, runner_json_path: Path) -> Optional[SkillManifest]:
         """Loads a skill manifest from disk."""
@@ -89,3 +95,13 @@ class SkillRegistry:
         return self._skills.get(skill_id)
 
 skill_registry = SkillRegistry()
+
+
+def is_builtin_skill_path(path: Path | None) -> bool:
+    if path is None:
+        return False
+    try:
+        builtin_root = Path(config.SYSTEM.SKILLS_BUILTIN_DIR).resolve()
+        return path.resolve().is_relative_to(builtin_root)
+    except (OSError, RuntimeError, ValueError):
+        return False

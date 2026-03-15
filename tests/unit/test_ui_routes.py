@@ -386,6 +386,7 @@ async def test_ui_skills_table_highlight(monkeypatch):
                     name="Skill A",
                     version="1.0.0",
                     engines=["gemini"],
+                    is_builtin=True,
                     health="healthy",
                 ),
                 SimpleNamespace(
@@ -393,6 +394,7 @@ async def test_ui_skills_table_highlight(monkeypatch):
                     name="Skill B",
                     version="1.1.0",
                     engines=["codex"],
+                    is_builtin=False,
                     health="healthy",
                 ),
             ]
@@ -409,6 +411,8 @@ async def test_ui_skills_table_highlight(monkeypatch):
     assert 'class="btn btn-secondary"' in response.text
     assert "/ui/skills/skill-b" in response.text
     assert "background:#ecfdf5;" in response.text
+    assert response.text.count("skill-origin-pill") == 1
+    assert "内建" in response.text
 
 
 @pytest.mark.asyncio

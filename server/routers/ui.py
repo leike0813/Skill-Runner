@@ -308,6 +308,16 @@ def _normalize_execution_modes(raw: object) -> list[str]:
     return list(dict.fromkeys(modes))
 
 
+def _coerce_bool(raw: object) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _normalize_health_indicator(raw: object) -> dict[str, str]:
     text = raw.strip() if isinstance(raw, str) else ""
     normalized = text.lower()
@@ -344,6 +354,7 @@ def _normalize_ui_skills_rows(rows: list[object]) -> list[dict[str, object]]:
                 "version": _coerce_non_empty_str(payload.get("version"), "-"),
                 "engines": engines,
                 "execution_modes": _normalize_execution_modes(payload.get("execution_modes")),
+                "is_builtin": _coerce_bool(payload.get("is_builtin")),
                 "health_level": health["level"],
                 "health_fallback": health["fallback"],
             }

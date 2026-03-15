@@ -557,6 +557,7 @@
     "skills": {
       "table": {
         "actions": "Actions",
+        "builtin": "Intégré",
         "browse": "Parcourir",
         "empty": "Aucun Skill installé.",
         "engines": "Moteurs",

@@ -138,7 +138,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `server/services/skill/skill_registry.py` | Skill 注册表：扫描 `skills/` 目录，加载 manifest，提供元数据查询 |
+| `server/services/skill/skill_registry.py` | Skill 注册表：扫描 `skills_builtin/` + `skills/`，加载 manifest，并按用户目录优先覆盖 |
 | `server/services/skill/skill_package_manager.py` | Skill 包管理（上传/安装/卸载） |
 | `server/services/skill/skill_package_validator.py` | 包校验（meta-schema 预检） |
 | `server/services/skill/skill_patcher.py` | Skill 运行时补丁（prompt 注入、输出约束） |

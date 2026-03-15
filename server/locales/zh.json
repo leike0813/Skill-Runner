@@ -566,6 +566,7 @@
     "skills": {
       "table": {
         "actions": "操作",
+        "builtin": "内建",
         "browse": "浏览",
         "empty": "暂无已安装 Skill。",
         "engines": "引擎",

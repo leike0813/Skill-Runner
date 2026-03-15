@@ -557,6 +557,7 @@
     "skills": {
       "table": {
         "actions": "Actions",
+        "builtin": "内蔵",
         "browse": "閲覧",
         "empty": "インストール済み Skill はありません。",
         "engines": "エンジン",

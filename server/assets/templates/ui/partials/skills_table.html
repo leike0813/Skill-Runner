@@ -14,7 +14,12 @@
     {% for skill in skills %}
         <tr style="{% if highlight_skill_id and skill.id == highlight_skill_id %}background:#ecfdf5;{% endif %}">
             <td>
-                <div><strong>{{ skill.display_name }}</strong></div>
+                <div class="row">
+                    <strong>{{ skill.display_name }}</strong>
+                    {% if skill.is_builtin %}
+                        <span class="skill-origin-pill">{{ t("ui.skills.table.builtin", default="Built-in") }}</span>
+                    {% endif %}
+                </div>
                 <div class="muted"><code>{{ skill.raw_name }}</code></div>
             </td>
             <td>{{ skill.version or "-" }}</td>

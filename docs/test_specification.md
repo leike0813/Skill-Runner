@@ -74,7 +74,7 @@ pytest tests/unit/
 
 **覆盖范围**:
 - 新技能安装成功并可被 `/v1/skills/{skill_id}` 发现
-- 升版更新时旧版本归档 (`skills/.archive/{skill_id}/{old_version}`)
+- 升版更新时旧版本归档（用户目录：`skills/.archive/{skill_id}/{old_version}`）
 - 降级更新被拒绝
 - 非法技能包（缺少必需文件）被拒绝
 
@@ -95,7 +95,7 @@ bash tests/api_integration/run_api_integration_tests.sh -q tests/api_integration
 **覆盖范围**:
 - 创建临时请求 -> 上传临时 skill 包 -> 启动执行
 - 状态/结果接口与 jobs 语义对齐
-- 临时 skill 不进入持久 `skills/` 注册表
+- 临时 skill 不进入持久注册表（`skills_builtin/` + `skills/`）
 - 终态后临时 skill 包与解压目录清理
 - 非法临时 skill 包上传返回 400
 

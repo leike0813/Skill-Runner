@@ -9,6 +9,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
+from server.config import config
 from server.models import (
     CancelResponse,
     InteractionPendingResponse,
@@ -80,6 +81,7 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     manifest = SkillManifest(
         id="demo-skill",
         name="Demo Skill",
+        description="Demo skill description",
         version="1.2.3",
         engines=["gemini", "codex"],
         unsupported_engines=["codex"],
@@ -111,6 +113,8 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert body["skills"][0]["engines"] == ["gemini", "codex"]
     assert body["skills"][0]["unsupported_engines"] == ["codex"]
     assert body["skills"][0]["effective_engines"] == ["gemini"]
+    assert body["skills"][0]["is_builtin"] is False
+    assert body["skills"][0]["description"] == "Demo skill description"
 
     detail_res = await _request("GET", "/v1/management/skills/demo-skill")
     assert detail_res.status_code == 200
@@ -119,8 +123,46 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert detail["schemas"]["output"] == "assets/output.schema.json"
     assert detail["entrypoints"]["type"] == "prompt"
     assert detail["files"][0]["path"] == "SKILL.md"
+    assert detail["description"] == "Demo skill description"
     assert detail["execution_modes"] == ["auto", "interactive"]
     assert detail["effective_engines"] == ["gemini"]
+    assert detail["is_builtin"] is False
+
+
+@pytest.mark.asyncio
+async def test_management_skills_list_marks_builtin_skill(monkeypatch, tmp_path: Path):
+    builtin_dir = tmp_path / "skills_builtin"
+    skill_dir = builtin_dir / "builtin-skill"
+    (skill_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "assets" / "runner.json").write_text("{}", encoding="utf-8")
+    (skill_dir / "assets" / "output.schema.json").write_text("{}", encoding="utf-8")
+    manifest = SkillManifest(
+        id="builtin-skill",
+        name="Builtin Skill",
+        version="1.0.0",
+        engines=["gemini"],
+        execution_modes=["auto"],
+        schemas={"output": "assets/output.schema.json"},
+        path=skill_dir,
+    )
+    monkeypatch.setattr(
+        "server.routers.management.skill_registry.list_skills",
+        lambda: [manifest],
+    )
+    old_builtin_dir = config.SYSTEM.SKILLS_BUILTIN_DIR
+    config.defrost()
+    config.SYSTEM.SKILLS_BUILTIN_DIR = str(builtin_dir)
+    config.freeze()
+    try:
+        list_res = await _request("GET", "/v1/management/skills")
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_BUILTIN_DIR = old_builtin_dir
+        config.freeze()
+    assert list_res.status_code == 200
+    body = list_res.json()
+    assert body["skills"][0]["id"] == "builtin-skill"
+    assert body["skills"][0]["is_builtin"] is True
 
 
 @pytest.mark.asyncio

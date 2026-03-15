@@ -66,7 +66,7 @@ my-skill/
 - **引擎无关**：一次编写，在任意支持的引擎上运行。同一个 Skill 可以在 Codex、Gemini、iFlow 或 OpenCode 上执行。
 - **Schema 驱动的 I/O**：输入、参数和输出均由 JSON Schema 定义 — Runner 自动校验。
 - **隔离执行**：每次 Run 拥有独立的工作区和标准化的输入输出合同 — 不存在跨 Run 干扰。
-- **零集成安装**：将 Skill 目录放入 `skills/`（或通过 API/UI 上传）即可立即使用。
+- **零集成安装**：将 Skill 目录放入用户目录 `skills/`（或通过 API/UI 上传）即可立即使用；内建 skills 位于 `skills_builtin/`。
 - **缓存复用**：相同输入和参数可以复用已有结果 — 无需重复调用引擎。
 
 ### 执行模式
@@ -83,12 +83,14 @@ my-skill/
 ### Docker（推荐）
 
 ```bash
-mkdir -p skills data
+mkdir -p data
 docker compose up -d --build
 ```
 
 - **API 地址**：http://localhost:8000/v1
 - **管理界面**：http://localhost:8000/ui
+- Docker Compose 默认使用 bind mount：`./skills:/app/skills`（用户 skills 目录）。
+- 镜像内建 skills 固定在 `/app/skills_builtin`，不受该挂载路径覆盖。
 
 或独立运行：
 
@@ -282,7 +284,8 @@ graph TD
     end
 
     subgraph 存储层
-        Registry --> Skills[skills/]
+        Registry --> BuiltinSkills[skills_builtin/]
+        Registry --> UserSkills[skills/]
         Workspace --> Runs[data/runs/]
     end
 

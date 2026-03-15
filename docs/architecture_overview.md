@@ -27,7 +27,8 @@ graph TD
     end
     
     subgraph Storage [文件系统]
-        SkillsDir[skills/ 技能定义]
+        BuiltinSkillsDir[skills_builtin/ 内建技能定义]
+        UserSkillsDir[skills/ 用户技能定义]
         RunsDir[data/runs/ 执行沙箱]
     end
     
@@ -46,7 +47,8 @@ graph TD
     Orchestrator --> IFlowAdapter
     Orchestrator --> OpenCodeAdapter
     
-    Registry --> SkillsDir
+    Registry --> BuiltinSkillsDir
+    Registry --> UserSkillsDir
     Workspace --> RunsDir
     CodexAdapter --> CodexCLI
     GeminiAdapter --> GeminiCLI
@@ -62,11 +64,14 @@ graph TD
 
 系统的核心逻辑高度依赖于文件系统的目录结构，主要分为两部分：
 
-### 1. 技能库 (`skills/`)
-存放所有可用技能的定义。每个技能一个子目录，目录名为 `skill_id`。
+### 1. 技能库（`skills_builtin/` + `skills/`）
+- `skills_builtin/`: 内建技能定义（随仓库发布，默认只读来源）。
+- `skills/`: 用户技能定义（运行时安装目录，允许覆盖同 `skill_id` 的内建技能）。
+
+每个技能一个子目录，目录名为 `skill_id`。
 
 ```text
-skills/
+skills_builtin/ 或 skills/
 ├── demo-prime-number/       # 技能 ID
 │   ├── assets/
 │   │   ├── runner.json          # 核心配置文件：定义元数据、Schema、Prompt等

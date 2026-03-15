@@ -66,7 +66,7 @@ cases:
 ```
 
 字段说明：
-- `skill_source=installed`: 使用 `skills/` 目录中已安装 skill。
+- `skill_source=installed`: 使用注册器解析后的已安装 skill（来源可能是 `skills_builtin/` 或用户目录 `skills/`，同 ID 用户优先）。
 - `skill_source=temp`: 从 `tests/fixtures/skills/<skill_fixture>/` 打包后走临时 skill 执行路径。
 
 ## 4. 核心组件：Test Runner (`tests/engine_integration/run_engine_integration_tests.py`)

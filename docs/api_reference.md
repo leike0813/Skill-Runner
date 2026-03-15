@@ -26,7 +26,7 @@
 - `POST /v1/management/system/reset-data`：执行数据重置（**破坏性操作**，需确认文本）
 
 ### Skill 管理
-- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupported_engines/effective_engines/health`）
+- `GET /v1/management/skills`：技能摘要列表（`id/name/version/engines/unsupported_engines/effective_engines/is_builtin/health`）
 - `GET /v1/management/skills/{skill_id}`：技能详情（额外包含 `schemas/entrypoints/files/execution_modes`）
 - `GET /v1/management/skills/{skill_id}/schemas`：返回 `input/parameter/output` schema 内容（用于动态表单构建）
 
@@ -544,11 +544,12 @@
 - `runner.json` 必须包含可解析的 `version`。
 
 **更新规则**:
+- 持久注册表采用双目录：`skills_builtin/`（内建）与 `skills/`（用户）；同 `skill_id` 时用户目录优先。
 - 若 `skill_id` 已存在，则只允许严格升版（`new_version > installed_version`）。
 - 不允许降级或同版本覆盖。
-- 更新时旧版本会归档到 `skills/.archive/{skill_id}/{old_version}/`。
+- 更新时旧版本会归档到用户目录 `skills/.archive/{skill_id}/{old_version}/`。
 - 若目标归档路径已存在，则更新失败并保持现有技能不变。
-- 若目录已存在但不是有效已安装结构（例如缺失 `assets/runner.json`），会被视为“无已安装版本”，并先移动到 `skills/.invalid/` 后按全新安装处理。
+- 若用户目录已存在但不是有效已安装结构（例如缺失 `assets/runner.json`），会被视为“无已安装版本”，并先移动到 `skills/.invalid/` 后按全新安装处理。
 - 安装/更新落地前，系统会清理技能包内名称精确为 `.git` 的文件或目录；非 `.git` 的隐藏文件（如 `.gitignore`、`.github/`）不会被该规则删除。
 
 ---

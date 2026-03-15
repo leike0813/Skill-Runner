@@ -1,7 +1,28 @@
 import json
+from contextlib import contextmanager
+from pathlib import Path
 
 from server.config import config
 from server.services.skill.skill_registry import SkillRegistry
+
+
+@contextmanager
+def _skill_dirs(user_dir: Path, *, builtin_dir: Path | None = None):
+    old_user_dir = config.SYSTEM.SKILLS_DIR
+    old_builtin_dir = config.SYSTEM.SKILLS_BUILTIN_DIR
+    effective_builtin = builtin_dir or (user_dir.parent / "skills_builtin_empty")
+    effective_builtin.mkdir(parents=True, exist_ok=True)
+    config.defrost()
+    config.SYSTEM.SKILLS_DIR = str(user_dir)
+    config.SYSTEM.SKILLS_BUILTIN_DIR = str(effective_builtin)
+    config.freeze()
+    try:
+        yield
+    finally:
+        config.defrost()
+        config.SYSTEM.SKILLS_DIR = old_user_dir
+        config.SYSTEM.SKILLS_BUILTIN_DIR = old_builtin_dir
+        config.freeze()
 
 
 def test_scan_artifacts_from_output_schema(tmp_path):
@@ -35,12 +56,7 @@ def test_scan_artifacts_from_output_schema(tmp_path):
     }
     (assets_dir / "runner.json").write_text(json.dumps(runner))
 
-    old_skills_dir = config.SYSTEM.SKILLS_DIR
-    config.defrost()
-    config.SYSTEM.SKILLS_DIR = str(skills_dir)
-    config.freeze()
-
-    try:
+    with _skill_dirs(skills_dir):
         registry = SkillRegistry()
         registry.scan_skills()
         skill = registry.get_skill("demo-skill")
@@ -52,10 +68,6 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False
-    finally:
-        config.defrost()
-        config.SYSTEM.SKILLS_DIR = old_skills_dir
-        config.freeze()
 
 
 def test_scan_skips_excluded_and_invalid_dirs(tmp_path):
@@ -89,21 +101,12 @@ def test_scan_skips_excluded_and_invalid_dirs(tmp_path):
     (valid_assets / "parameter.schema.json").write_text(json.dumps({"type": "object"}))
     (valid_assets / "output.schema.json").write_text(json.dumps({"type": "object"}))
 
-    old_skills_dir = config.SYSTEM.SKILLS_DIR
-    config.defrost()
-    config.SYSTEM.SKILLS_DIR = str(skills_dir)
-    config.freeze()
-
-    try:
+    with _skill_dirs(skills_dir):
         registry = SkillRegistry()
         skills = registry.list_skills()
         ids = {skill.id for skill in skills}
         assert "valid-skill" in ids
         assert "broken-skill" not in ids
-    finally:
-        config.defrost()
-        config.SYSTEM.SKILLS_DIR = old_skills_dir
-        config.freeze()
 
 
 def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
@@ -124,12 +127,7 @@ def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
     )
     (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
 
-    old_skills_dir = config.SYSTEM.SKILLS_DIR
-    config.defrost()
-    config.SYSTEM.SKILLS_DIR = str(skills_dir)
-    config.freeze()
-
-    try:
+    with _skill_dirs(skills_dir):
         registry = SkillRegistry()
         caplog.set_level("WARNING")
         registry.scan_skills()
@@ -137,10 +135,6 @@ def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
         assert skill is not None
         assert [mode.value for mode in skill.execution_modes] == ["auto"]
         assert "missing runner.json.execution_modes" in caplog.text
-    finally:
-        config.defrost()
-        config.SYSTEM.SKILLS_DIR = old_skills_dir
-        config.freeze()
 
 
 def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
@@ -161,22 +155,13 @@ def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
     )
     (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
 
-    old_skills_dir = config.SYSTEM.SKILLS_DIR
-    config.defrost()
-    config.SYSTEM.SKILLS_DIR = str(skills_dir)
-    config.freeze()
-
-    try:
+    with _skill_dirs(skills_dir):
         registry = SkillRegistry()
         registry.scan_skills()
         skill = registry.get_skill("legacy-engine-skill")
         assert skill is not None
         assert skill.effective_engines == ["codex", "gemini", "iflow", "opencode"]
         assert skill.engines == []
-    finally:
-        config.defrost()
-        config.SYSTEM.SKILLS_DIR = old_skills_dir
-        config.freeze()
 
 
 def test_scan_loads_manifest_max_attempt(tmp_path):
@@ -199,18 +184,79 @@ def test_scan_loads_manifest_max_attempt(tmp_path):
     )
     (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
 
-    old_skills_dir = config.SYSTEM.SKILLS_DIR
-    config.defrost()
-    config.SYSTEM.SKILLS_DIR = str(skills_dir)
-    config.freeze()
-
-    try:
+    with _skill_dirs(skills_dir):
         registry = SkillRegistry()
         registry.scan_skills()
         skill = registry.get_skill("interactive-max-attempt-skill")
         assert skill is not None
         assert skill.max_attempt == 7
-    finally:
-        config.defrost()
-        config.SYSTEM.SKILLS_DIR = old_skills_dir
-        config.freeze()
+
+
+def test_scan_skills_falls_back_to_builtin_when_user_dir_empty(tmp_path):
+    user_dir = tmp_path / "skills"
+    user_dir.mkdir()
+    builtin_dir = tmp_path / "skills_builtin"
+    skill_dir = builtin_dir / "builtin-only-skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Builtin only")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "builtin-only-skill",
+                "version": "1.0.0",
+                "engines": ["gemini"],
+                "execution_modes": ["auto"],
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    with _skill_dirs(user_dir, builtin_dir=builtin_dir):
+        registry = SkillRegistry()
+        skill = registry.get_skill("builtin-only-skill")
+        assert skill is not None
+        assert skill.path == skill_dir
+
+
+def test_scan_skills_user_overrides_builtin_on_same_skill_id(tmp_path):
+    user_dir = tmp_path / "skills"
+    builtin_dir = tmp_path / "skills_builtin"
+    user_skill_dir = user_dir / "duplicate-skill"
+    builtin_skill_dir = builtin_dir / "duplicate-skill"
+    (user_skill_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (builtin_skill_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (user_skill_dir / "SKILL.md").write_text("# User")
+    (builtin_skill_dir / "SKILL.md").write_text("# Builtin")
+    (user_skill_dir / "assets" / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "duplicate-skill",
+                "version": "2.0.0",
+                "engines": ["codex"],
+                "execution_modes": ["auto"],
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (builtin_skill_dir / "assets" / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "duplicate-skill",
+                "version": "1.0.0",
+                "engines": ["gemini"],
+                "execution_modes": ["auto"],
+                "schemas": {"output": "assets/output.schema.json"},
+            }
+        )
+    )
+    (user_skill_dir / "assets" / "output.schema.json").write_text(json.dumps({"type": "object"}))
+    (builtin_skill_dir / "assets" / "output.schema.json").write_text(json.dumps({"type": "object"}))
+
+    with _skill_dirs(user_dir, builtin_dir=builtin_dir):
+        registry = SkillRegistry()
+        skill = registry.get_skill("duplicate-skill")
+        assert skill is not None
+        assert skill.version == "2.0.0"
+        assert skill.path == user_skill_dir

@@ -566,6 +566,7 @@
     "skills": {
       "table": {
         "actions": "Actions",
+        "builtin": "Built-in",
         "browse": "Browse",
         "empty": "No installed skills.",
         "engines": "Engines",

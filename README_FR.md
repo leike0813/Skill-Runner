@@ -66,7 +66,7 @@ my-skill/
 - **Indépendant du moteur** : Écrire une fois, exécuter sur n'importe quel moteur supporté.
 - **E/S pilotées par schéma** : Entrée, paramètres et sortie définis par JSON Schema — validation automatique.
 - **Exécution isolée** : Chaque exécution obtient son propre espace de travail avec des contrats d'E/S standardisés — aucune interférence entre exécutions.
-- **Installation sans intégration** : Déposer un répertoire skill dans `skills/` (ou téléverser via API/UI) et il est immédiatement disponible.
+- **Installation sans intégration** : Déposer un répertoire skill dans le répertoire utilisateur `skills/` (ou téléverser via API/UI) et il est immédiatement disponible. Les skills intégrés sont fournis dans `skills_builtin/`.
 - **Réutilisation du cache** : Les entrées identiques peuvent réutiliser les résultats précédents.
 
 ### Modes d'exécution
@@ -83,12 +83,14 @@ Chaque skill déclare ses modes supportés dans `runner.json` :
 ### Docker (recommandé)
 
 ```bash
-mkdir -p skills data
+mkdir -p data
 docker compose up -d --build
 ```
 
 - **API** : http://localhost:8000/v1
 - **Interface d'admin** : http://localhost:8000/ui
+- Docker Compose utilise par défaut le bind mount `./skills:/app/skills` pour les skills utilisateur.
+- Les skills intégrés de l'image sont fournis sous `/app/skills_builtin` et ne sont pas écrasés par ce chemin.
 
 Ou exécution indépendante :
 
@@ -282,7 +284,8 @@ graph TD
     end
 
     subgraph Stockage
-        Registry --> Skills[skills/]
+        Registry --> BuiltinSkills[skills_builtin/]
+        Registry --> UserSkills[skills/]
         Workspace --> Runs[data/runs/]
     end
 
