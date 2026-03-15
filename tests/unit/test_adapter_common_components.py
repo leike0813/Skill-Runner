@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from server.models import SkillManifest
 from server.runtime.adapter.common.prompt_builder_common import (
+    _normalize_prompt_file_path,
     build_prompt_contexts,
+    normalize_prompt_file_input_context,
     render_template,
     resolve_template_text,
 )
@@ -48,6 +50,44 @@ def test_prompt_builder_common_resolves_template_and_context(tmp_path: Path) -> 
     )
     rendered = render_template(template_text, skill=skill, skill_id=skill.id, run_dir=str(tmp_path))
     assert rendered.startswith("demo::")
+
+
+def test_normalize_prompt_file_path_for_windows_and_posix() -> None:
+    raw_windows = r"C:\runs\abc\uploads\inputs\source_path\paper.md"
+    raw_posix = "C:/runs/abc/uploads/inputs/source_path/paper.md"
+    assert _normalize_prompt_file_path(raw_posix, platform_name="nt") == raw_windows
+    assert _normalize_prompt_file_path(raw_windows, platform_name="posix") == raw_posix
+
+
+def test_normalize_prompt_file_input_context_only_updates_file_sources(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "input.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "x-input-source": "file"},
+                    "language": {"type": "string", "x-input-source": "inline"},
+                },
+                "required": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(id="demo", path=skill_dir, schemas={"input": "input.schema.json"})
+    input_ctx = {
+        "source_path": "C:/runs/abc/uploads/inputs/source_path/paper.md",
+        "language": "zh-CN",
+    }
+    normalized = normalize_prompt_file_input_context(
+        skill=skill,
+        input_ctx=input_ctx,
+        platform_name="nt",
+    )
+    assert normalized["source_path"] == r"C:\runs\abc\uploads\inputs\source_path\paper.md"
+    assert normalized["language"] == "zh-CN"
+    assert input_ctx["source_path"] == "C:/runs/abc/uploads/inputs/source_path/paper.md"
 
 
 def test_session_codec_common_helpers() -> None:

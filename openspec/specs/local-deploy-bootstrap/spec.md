@@ -4,7 +4,7 @@
 定义本地一键部署脚本的依赖检查、路径初始化和运行时解析统一规则。
 ## Requirements
 ### Requirement: 系统 MUST 提供本地一键部署脚本
-系统 MUST 提供 Linux/macOS 与 Windows 两套本地一键部署脚本，完成基础目录初始化与服务启动准备。系统同时 MUST 保持 `scripts/` 目录只包含正式支持的部署、启动、发布或受支持运维脚本；历史兼容、排障和实验脚本 MUST 迁出主目录。
+系统 MUST 保留 `deploy_local.sh/.ps1` 作为本地部署底层入口，但插件集成 SHOULD 调用稳定控制命令而非直接耦合脚本。
 
 #### Scenario: Linux/macOS 一键部署
 - **WHEN** 用户执行 `scripts/deploy_local.sh`
@@ -21,6 +21,11 @@
 - **THEN** 服务默认绑定 `127.0.0.1`
 - **AND** 可通过环境变量显式覆盖 bind host
 
+#### Scenario: optional ttyd dependency does not block core service startup
+- **WHEN** 运行环境缺失 `ttyd`
+- **THEN** 脚本输出可操作提示
+- **AND** 核心 API 服务仍可启动
+- 
 #### Scenario: supported scripts remain in scripts directory
 - **WHEN** 用户查看项目根目录 `scripts/`
 - **THEN** 其中仅包含当前正式支持的部署/启动/运维入口
@@ -192,3 +197,127 @@
 - **WHEN** compose 同时启用主服务与可选客户端服务
 - **THEN** 两个服务使用同一镜像标签
 - **AND** 分别执行各自角色对应的启动命令
+
+### Requirement: 系统 MUST 提供 bootstrap 控制命令并与 ensure 语义一致
+系统 MUST 提供 `skill-runnerctl bootstrap`，并复用 `agent_manager --ensure` 的容错语义：单引擎安装失败可记为 `partial_failure`，但不阻断后续启动链路。
+
+#### Scenario: bootstrap command follows ensure tolerance semantics
+- **WHEN** 用户执行 `skill-runnerctl bootstrap --json`
+- **THEN** 系统执行与 `agent_manager --ensure` 一致的引擎安装检查
+- **AND** 单引擎安装失败时返回可继续结果并落盘诊断信息
+
+### Requirement: release 安装器 MUST 自动执行 bootstrap 且失败仅告警
+系统 MUST 在 release 安装器解压后自动执行一次 bootstrap；bootstrap 非零返回 MUST 仅告警，不阻断安装完成态。
+
+#### Scenario: installer bootstrap failure is warning-only
+- **WHEN** 安装器自动执行 bootstrap 且命令返回非零
+- **THEN** 安装器输出明确 warning 与排障指引
+- **AND** 安装流程保持完成态（不回滚已解压内容）
+
+### Requirement: 发布/本地部署链路 MUST 在 uv run 前注入 runtime profile 环境
+系统在发布/本地部署链路中调用 `uv run` 前 MUST 注入 runtime profile 关键环境，包括 `UV_CACHE_DIR` 与 `UV_PROJECT_ENVIRONMENT`，避免解压目录生成漂移 `.venv`。
+
+#### Scenario: wrapper injects uv cache and project environment
+- **WHEN** 用户通过 `scripts/skill-runnerctl` 或 `scripts/skill-runnerctl.ps1` 触发运行控制命令
+- **THEN** 包装脚本先注入 runtime profile 目录变量并创建目标目录
+- **AND** 后续 `uv run` 使用注入后的缓存与环境目录
+
+### Requirement: bootstrap/ensure MUST warm up opencode models after CLI is available
+系统在 `agent_manager --ensure` 期间，当 OpenCode CLI 可用时 MUST 同步执行一次 `opencode models` 预热，以覆盖首装数据库初始化；该预热失败 MUST 仅告警并写入诊断，不阻断 ensure/bootstrap 主流程。
+
+#### Scenario: opencode warmup succeeds after ensure
+- **GIVEN** `opencode` CLI 已安装或可解析
+- **WHEN** bootstrap/ensure 完成引擎安装检查
+- **THEN** 系统执行一次 `opencode models` 预热并等待其自然结束
+- **AND** 诊断报告包含 `opencode_warmup` 执行结果
+
+#### Scenario: opencode warmup failure is warning-only
+- **GIVEN** `opencode` 预热命令执行失败
+- **WHEN** bootstrap/ensure 汇总结果
+- **THEN** 系统记录 warning 与 `opencode_warmup` 失败信息
+- **AND** 不改变 ensure/bootstrap 的“可继续启动”语义
+
+### Requirement: README 部署文档 MUST 与实际默认部署行为保持一致
+四语 README 中的 Docker 与本地部署说明 MUST 反映当前默认行为与依赖，避免用户按过时命令执行。
+
+#### Scenario: direct docker run guidance uses current tag and mounts
+- **WHEN** 用户参考 README 中“直接 docker run”命令
+- **THEN** 镜像 tag 为 `latest`
+- **AND** 命令包含与 compose 默认一致的挂载（`skills` 与 `skillrunner_cache`）
+
+#### Scenario: local deployment and release compose are both documented
+- **WHEN** 用户阅读 README 本地部署章节
+- **THEN** 文档明确列出 `uv`、`node/npm` 与可选 `ttyd` 依赖
+- **AND** 文档提供下载 release `docker-compose.release.yml` 并部署的方法（含可选 sha256 校验）
+
+### Requirement: 系统 MUST 提供插件友好的宿主机控制入口
+系统 MUST 提供稳定的宿主机控制命令用于插件调用，覆盖 install/up/down/status/doctor。
+
+#### Scenario: plugin calls control CLI for local lifecycle
+- **WHEN** 插件调用 `skill-runnerctl up --mode local`
+- **THEN** 系统启动本地服务并返回机器可读状态
+- **AND** 插件可通过 `status/down` 完成生命周期控制
+
+### Requirement: 系统 MUST 提供 release 固定版本安装器并校验完整性
+系统 MUST 提供跨平台安装器脚本并对下载资产执行 SHA256 校验。
+
+#### Scenario: installer rejects checksum mismatch
+- **WHEN** 下载资产哈希与发布校验值不一致
+- **THEN** 安装器拒绝继续执行
+- **AND** 返回明确错误信息
+
+#### Scenario: tag release publishes installer source package assets
+- **WHEN** CI 处理 `v*` tag 发布
+- **THEN** Release 资产包含 `skill-runner-<version>.tar.gz` 与对应 `.sha256`
+- **AND** 该源码包包含 `skills/*` 子模块内容
+
+### Requirement: Windows command resolution MUST prefer executable wrappers over shim scripts
+在 Windows 上，系统解析 engine CLI 与 ttyd 命令时 MUST 优先使用可执行包装器（`.cmd/.exe/.bat`），避免命中不可直接执行的无扩展 shim。
+
+#### Scenario: managed engine command resolution on Windows
+- **GIVEN** managed npm prefix 同时存在 `opencode` 与 `opencode.cmd`
+- **WHEN** 系统解析 engine command
+- **THEN** 结果 MUST 优先为 `opencode.cmd`（或其他可执行包装器）
+- **AND** 不应优先返回无扩展 shim
+
+#### Scenario: ttyd command resolution on Windows
+- **GIVEN** PATH 中存在多个 ttyd 名称变体
+- **WHEN** 系统解析 ttyd command
+- **THEN** 解析顺序 MUST 优先 `.cmd/.exe/.bat`
+
+### Requirement: Engine status probing MUST degrade gracefully on Windows process launch errors
+在 Windows 上，命令探测与版本读取遇到 `OSError`（如 `WinError 193`）时，系统 MUST 退化为“该命令不可用/版本未知”，而不是中断启动流程。
+
+#### Scenario: read_version hits WinError 193
+- **GIVEN** 版本探测命令触发 `OSError`
+- **WHEN** 系统执行 status 收集
+- **THEN** `read_version` MUST 返回空值
+- **AND** status 写入流程 MUST continue without uncaught exception
+
+### Requirement: Windows concurrency probing MUST use parity resource sources
+在 Windows 上，并发预算 MUST 使用平台等价资源探测，而不是静态 hard-cap fallback。
+
+#### Scenario: Windows runtime computes concurrency budget from parity probes
+- **GIVEN** runtime platform is Windows
+- **WHEN** 系统计算并发上限
+- **THEN** 内存维度 MUST 使用 `psutil.virtual_memory().available`
+- **AND** fd 维度 MUST 使用 `_getmaxstdio`（`ucrtbase` 优先，`msvcrt` 备选）
+- **AND** pid 维度 MUST 使用 Job Object `ActiveProcessLimit`
+- **AND** 总上限 MUST 仍按 `min(cpu, mem, fd, pid, hard_cap)` 计算
+
+#### Scenario: Windows runtime has no active-process job limit
+- **GIVEN** runtime platform is Windows
+- **AND** 当前进程不在受限 job 或 job 未设置 `ActiveProcessLimit`
+- **WHEN** 系统计算 pid 维度
+- **THEN** pid 维度 MUST NOT 额外收紧（按 `hard_cap` 参与最小值）
+
+### Requirement: Windows parity probe dependency failures MUST fail fast
+在 Windows 上，若并发等价探测依赖缺失或关键 API 不可用，系统 MUST fail-fast，禁止静默降级到固定 fallback。
+
+#### Scenario: psutil missing on Windows
+- **GIVEN** runtime platform is Windows
+- **AND** `psutil` 不可用
+- **WHEN** 服务初始化并发管理组件
+- **THEN** 启动流程 MUST fail fast with actionable error
+- **AND** 系统 MUST NOT silently fallback to fixed hard-cap concurrency
+

@@ -44,6 +44,12 @@ class OpencodeConfigComposer:
         question_mode = "allow" if execution_mode == "interactive" else "deny"
         return {"permission": {"question": question_mode}}
 
+    def _model_overlay(self, options: dict[str, Any]) -> dict[str, Any]:
+        model_obj = options.get("model")
+        if isinstance(model_obj, str) and model_obj.strip():
+            return {"model": model_obj.strip()}
+        return {}
+
     def compose(self, ctx: AdapterExecutionContext) -> Path:
         skill = ctx.skill
         run_dir = ctx.run_dir
@@ -76,6 +82,7 @@ class OpencodeConfigComposer:
         if isinstance(options.get("opencode_config"), dict):
             runtime_override = options["opencode_config"]
         layers.append(runtime_override)
+        layers.append(self._model_overlay(options))
 
         enforced_path = self._adapter.profile.resolve_enforced_config_path()
         layers.append(self._load_json_config(enforced_path, label="opencode enforced"))

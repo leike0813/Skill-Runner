@@ -173,6 +173,14 @@ parser/materialization diagnostics。
 
 该文件不再作为 runtime 关键执行数据读取入口。
 
+首个 attempt（`attempt=1`）会在该 JSON 对象内追加：
+
+- `rendered_prompt_first_attempt`: 首次实际调用引擎时的最终渲染 prompt 文本（含 `__prompt_override` 覆盖结果）。
+
+若该文件缺失、内容不是 JSON 对象，或回写失败，则降级写入：
+
+- `.audit/prompt.1.txt`
+
 ### 4.2 `.<engine>/skills/<skill_id>/...`
 
 run-local skill snapshot。

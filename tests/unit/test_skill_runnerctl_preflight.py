@@ -21,6 +21,10 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _write_text_lf(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
 def _write_integrity_manifest(module, project_root: Path, file_entries: list[tuple[str, str]]) -> None:
     manifest_path = project_root / module.INTEGRITY_MANIFEST_NAME
     payload = {
@@ -54,8 +58,8 @@ def _prepare_preflight_runtime(monkeypatch, module, tmp_path: Path) -> tuple[Sim
     agent_manager = scripts_dir / "agent_manager.py"
     api_content = "app = object()\n"
     manager_content = "print('ok')\n"
-    api_entry.write_text(api_content, encoding="utf-8")
-    agent_manager.write_text(manager_content, encoding="utf-8")
+    _write_text_lf(api_entry, api_content)
+    _write_text_lf(agent_manager, manager_content)
     monkeypatch.setattr(
         module,
         "_preflight_required_files",
@@ -240,7 +244,7 @@ def test_preflight_integrity_hash_mismatch_returns_exit_2(monkeypatch, capsys, t
             ("scripts/agent_manager.py", "print('original')\n"),
         ],
     )
-    required_files["agent_manager"].write_text("print('changed')\n", encoding="utf-8")
+    _write_text_lf(required_files["agent_manager"], "print('changed')\n")
 
     exit_code = module.main(["preflight", "--json"])
 

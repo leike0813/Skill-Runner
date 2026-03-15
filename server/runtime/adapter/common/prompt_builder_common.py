@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,31 @@ from ....services.platform.schema_validator import schema_validator
 from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
+
+
+def _normalize_prompt_file_path(value: str, *, platform_name: str | None = None) -> str:
+    target = platform_name or os.name
+    if target == "nt":
+        return value.replace("/", "\\")
+    return value.replace("\\", "/")
+
+
+def normalize_prompt_file_input_context(
+    *,
+    skill: SkillManifest,
+    input_ctx: dict[str, Any],
+    platform_name: str | None = None,
+) -> dict[str, Any]:
+    file_keys = schema_validator.get_input_keys_by_source(skill, "file")
+    if not file_keys:
+        return dict(input_ctx)
+    normalized_ctx = dict(input_ctx)
+    for key in file_keys:
+        raw_value = normalized_ctx.get(key)
+        if not isinstance(raw_value, str):
+            continue
+        normalized_ctx[key] = _normalize_prompt_file_path(raw_value, platform_name=platform_name)
+    return normalized_ctx
 
 
 def build_prompt_contexts(
@@ -24,6 +50,7 @@ def build_prompt_contexts(
     if missing_required:
         raise ValueError(f"Missing required input files: {', '.join(missing_required)}")
 
+    input_ctx = normalize_prompt_file_input_context(skill=skill, input_ctx=input_ctx)
     parameter_ctx = schema_validator.build_parameter_context(skill, input_data)
     if merge_input_if_no_parameter_schema and resolve_schema_asset(skill, "parameter").path is None:
         parameter_ctx.update(input_data.get("input", {}))

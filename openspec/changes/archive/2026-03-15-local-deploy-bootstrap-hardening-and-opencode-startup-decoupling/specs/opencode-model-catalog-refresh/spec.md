@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Opencode model catalog startup probe MUST NOT block API startup
 系统 MUST 在服务启动阶段异步触发 `opencode` 模型目录刷新，而不是在 lifespan 中 `await` 刷新完成。

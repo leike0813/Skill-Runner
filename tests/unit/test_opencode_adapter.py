@@ -49,6 +49,28 @@ def test_construct_config_auto_mode_uses_engine_default_and_enforced(tmp_path):
     assert payload["permission"]["skill"] == "allow"
 
 
+def test_construct_config_model_from_request_overrides_default_and_skill(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_assets = skill_dir / "assets"
+    skill_assets.mkdir(parents=True)
+    (skill_assets / "opencode_config.json").write_text(
+        json.dumps({"model": "openai/gpt-5-mini"}),
+        encoding="utf-8",
+    )
+    skill = SkillManifest(id="test-skill", path=skill_dir)
+    adapter = OpencodeExecutionAdapter()
+
+    config_path = adapter._construct_config(
+        skill,
+        run_dir,
+        options={"execution_mode": "auto", "model": "anthropic/claude-sonnet-4.5"},
+    )
+    payload = _read_json(config_path)
+    assert payload["model"] == "anthropic/claude-sonnet-4.5"
+
+
 def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

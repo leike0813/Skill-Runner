@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Engine 管理页内嵌终端在 ttyd 缺失时 MUST 前后端同时禁用
 系统在 `ttyd` 不可用时 MUST 同时禁用 UI 入口和启动接口，避免用户触发不可恢复的运行时错误。

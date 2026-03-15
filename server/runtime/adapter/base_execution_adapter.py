@@ -6,11 +6,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
 from ...config import config
@@ -99,6 +100,17 @@ class EngineExecutionAdapter:
         prompt_override = options.get("__prompt_override")
         if isinstance(prompt_override, str) and prompt_override.strip():
             prompt = prompt_override
+        attempt_number_obj = options.get("__attempt_number")
+        attempt_number = (
+            attempt_number_obj
+            if isinstance(attempt_number_obj, int) and attempt_number_obj > 0
+            else 1
+        )
+        self._persist_first_attempt_prompt_audit(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            prompt=prompt,
+        )
 
         process_result = await self._execute_process(
             prompt,
@@ -136,6 +148,185 @@ class EngineExecutionAdapter:
             runtime_warnings=process_result.runtime_warnings,
             auth_signal_snapshot=cast(RuntimeAuthSignal | None, process_result.auth_signal_snapshot),
         )
+
+    def _persist_first_attempt_prompt_audit(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        prompt: str,
+    ) -> None:
+        if attempt_number != 1:
+            return
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        request_input_path = audit_dir / "request_input.json"
+        fallback_path = audit_dir / "prompt.1.txt"
+        field_name = "rendered_prompt_first_attempt"
+        try:
+            self._append_request_input_audit_fields(
+                request_input_path=request_input_path,
+                fields={field_name: prompt},
+            )
+            return
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            logger.warning(
+                "[%s] failed to persist first-attempt prompt into request_input.json; writing fallback",
+                self.process_prefix,
+                exc_info=True,
+            )
+
+        try:
+            temp_path = fallback_path.with_name(f"{fallback_path.name}.tmp")
+            temp_path.write_text(prompt, encoding="utf-8")
+            temp_path.replace(fallback_path)
+        except OSError:
+            logger.warning(
+                "[%s] failed to persist first-attempt prompt fallback file",
+                self.process_prefix,
+                exc_info=True,
+            )
+
+    def _append_request_input_audit_fields(
+        self,
+        *,
+        request_input_path: Path,
+        fields: dict[str, Any],
+    ) -> None:
+        payload = json.loads(request_input_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("request_input snapshot must be a JSON object")
+        payload.update(fields)
+        temp_path = request_input_path.with_name(f"{request_input_path.name}.tmp")
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(request_input_path)
+
+    def _persist_first_attempt_spawn_command_audit(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        original_command: list[str],
+        effective_command: list[str],
+        normalization_applied: bool,
+        normalization_reason: str,
+    ) -> None:
+        if attempt_number != 1:
+            return
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        request_input_path = audit_dir / "request_input.json"
+        fallback_path = audit_dir / "argv.1.json"
+        payload = {
+            "spawn_command_original_first_attempt": list(original_command),
+            "spawn_command_effective_first_attempt": list(effective_command),
+            "spawn_command_normalization_applied_first_attempt": bool(normalization_applied),
+            "spawn_command_normalization_reason_first_attempt": normalization_reason,
+        }
+        try:
+            self._append_request_input_audit_fields(
+                request_input_path=request_input_path,
+                fields=payload,
+            )
+            return
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            logger.warning(
+                "[%s] failed to persist first-attempt spawn command into request_input.json; writing fallback",
+                self.process_prefix,
+                exc_info=True,
+            )
+
+        try:
+            temp_path = fallback_path.with_name(f"{fallback_path.name}.tmp")
+            temp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temp_path.replace(fallback_path)
+        except OSError:
+            logger.warning(
+                "[%s] failed to persist first-attempt spawn command fallback file",
+                self.process_prefix,
+                exc_info=True,
+            )
+
+    def _is_windows_runtime(self) -> bool:
+        return os.name == "nt"
+
+    def _resolve_cmd_shim_path(self, command: str, *, env: dict[str, str]) -> Path | None:
+        candidate = Path(command)
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+        resolved = shutil.which(command, path=env.get("PATH"))
+        if resolved:
+            return Path(resolved)
+        return None
+
+    def _split_windows_cmd_argument_fragment(self, fragment: str) -> list[str]:
+        if not fragment.strip():
+            return []
+        tokens = re.findall(r'"[^"]*"|\S+', fragment)
+        parsed: list[str] = []
+        for token in tokens:
+            item = token.strip()
+            if len(item) >= 2 and item[0] == '"' and item[-1] == '"':
+                item = item[1:-1]
+            if item:
+                parsed.append(item)
+        return parsed
+
+    def _normalize_windows_npm_cmd_shim(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str],
+    ) -> tuple[list[str], bool, str]:
+        normalized = [str(token) for token in command]
+        if not self._is_windows_runtime():
+            return normalized, False, "not_applicable"
+        if not normalized:
+            return normalized, False, "not_applicable"
+        command_head = normalized[0].strip()
+        if not command_head.lower().endswith(".cmd"):
+            return normalized, False, "not_applicable"
+
+        shim_path = self._resolve_cmd_shim_path(command_head, env=env)
+        if shim_path is None:
+            return normalized, False, "parse_failed_fallback"
+
+        try:
+            shim_text = shim_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            logger.warning(
+                "[%s] failed to read npm cmd shim for normalization: %s",
+                self.process_prefix,
+                shim_path,
+                exc_info=True,
+            )
+            return normalized, False, "parse_failed_fallback"
+
+        match = re.search(
+            r'"%_prog%"\s*(?P<fixed>.*?)"%dp0%\\(?P<entry>[^"]+)"\s*%\*',
+            shim_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if match is None:
+            return normalized, False, "parse_failed_fallback"
+
+        entry_relpath = match.group("entry")
+        entry_parts = [part for part in PureWindowsPath(entry_relpath).parts if part not in {"\\", "/"}]
+        if not entry_parts:
+            return normalized, False, "parse_failed_fallback"
+        entry_path = shim_path.parent.joinpath(*entry_parts)
+
+        fixed_args = self._split_windows_cmd_argument_fragment(match.group("fixed"))
+        node_path = shim_path.parent / "node.exe"
+        node_command = str(node_path) if node_path.exists() else "node"
+        rewritten = [node_command, str(entry_path), *fixed_args, *normalized[1:]]
+        return rewritten, True, "npm_cmd_shim_rewritten"
 
     def build_start_command(
         self,
@@ -300,8 +491,13 @@ class EngineExecutionAdapter:
             command = self.build_start_command(prompt=prompt, options=options)
 
         env = self.build_subprocess_env(os.environ.copy())
+        original_command = [str(token) for token in command]
+        normalized_command, normalization_applied, normalization_reason = self._normalize_windows_npm_cmd_shim(
+            original_command,
+            env=env,
+        )
         runtime_dependencies = self._resolve_runtime_dependencies(skill)
-        command_to_execute = command
+        command_to_execute = list(normalized_command)
         if runtime_dependencies:
             probe_ok, probe_error_summary = await self._probe_uv_dependency_injection(
                 run_dir=run_dir,
@@ -311,7 +507,7 @@ class EngineExecutionAdapter:
             )
             if probe_ok:
                 command_to_execute = self._wrap_command_with_uv(
-                    command=command,
+                    command=normalized_command,
                     dependencies=runtime_dependencies,
                 )
             else:
@@ -326,6 +522,21 @@ class EngineExecutionAdapter:
                     ",".join(runtime_dependencies),
                     warning_payload["detail"],
                 )
+
+        attempt_number_obj = options.get("__attempt_number")
+        attempt_number = (
+            attempt_number_obj
+            if isinstance(attempt_number_obj, int) and attempt_number_obj > 0
+            else 1
+        )
+        self._persist_first_attempt_spawn_command_audit(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            original_command=original_command,
+            effective_command=command_to_execute,
+            normalization_applied=normalization_applied,
+            normalization_reason=normalization_reason,
+        )
 
         proc = await self._create_subprocess(*command_to_execute, cwd=run_dir, env=env)
         process_result = await self._capture_process_output(

@@ -340,6 +340,78 @@ async def test_runtime_dependencies_probe_success_wraps_command(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_runtime_dependencies_probe_success_wraps_normalized_command(tmp_path: Path):
+    adapter = EngineExecutionAdapter(
+        config_composer=_NoopComposer(),
+        run_folder_validator=_NoopRunFolderValidator(),
+        prompt_builder=_NoopPromptBuilder(),
+        command_builder=_NoopCommandBuilder(),
+        stream_parser=_NoopStreamParser(),
+        session_codec=_NoopSessionCodec(),
+        process_prefix="Test",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, object] = {}
+
+    async def _fake_probe(**kwargs):  # type: ignore[no-untyped-def]
+        _ = kwargs
+        return True, None
+
+    async def _fake_create_subprocess(*cmd: str, cwd: Path, env: dict[str, str]):  # type: ignore[no-untyped-def]
+        _ = cwd, env
+        captured["cmd"] = list(cmd)
+        return object()
+
+    async def _fake_capture_process_output(*args, **kwargs):  # type: ignore[no-untyped-def]
+        _ = args, kwargs
+        return ProcessExecutionResult(exit_code=0, raw_stdout="", raw_stderr="")
+
+    def _fake_normalize(command: list[str], *, env: dict[str, str]) -> tuple[list[str], bool, str]:
+        _ = command, env
+        return ["node", "entry.js", "run", "--format", "json", "prompt payload"], True, "npm_cmd_shim_rewritten"
+
+    adapter.build_start_command = lambda **kwargs: [  # type: ignore[method-assign]
+        r"C:\Users\runner\AppData\Local\SkillRunner\agent-cache\npm\opencode.cmd",
+        "run",
+        "--format",
+        "json",
+        "prompt payload",
+    ]
+    adapter._normalize_windows_npm_cmd_shim = _fake_normalize  # type: ignore[method-assign]
+    adapter._probe_uv_dependency_injection = _fake_probe  # type: ignore[method-assign]
+    adapter._create_subprocess = _fake_create_subprocess  # type: ignore[method-assign]
+    adapter._capture_process_output = _fake_capture_process_output  # type: ignore[method-assign]
+
+    skill = SkillManifest(
+        id="x",
+        runtime={"language": "python", "version": "3.11", "dependencies": ["pymupdf4llm"]},
+    )
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        skill,
+        {},
+    )
+
+    assert result.runtime_warnings == []
+    assert captured["cmd"] == [
+        "uv",
+        "run",
+        "--with",
+        "pymupdf4llm",
+        "--",
+        "node",
+        "entry.js",
+        "run",
+        "--format",
+        "json",
+        "prompt payload",
+    ]
+    assert all(not str(token).lower().endswith(".cmd") for token in captured["cmd"])
+
+
+@pytest.mark.asyncio
 async def test_runtime_dependencies_probe_failure_falls_back_and_warns(tmp_path: Path):
     adapter = EngineExecutionAdapter(
         config_composer=_NoopComposer(),
@@ -385,3 +457,107 @@ async def test_runtime_dependencies_probe_failure_falls_back_and_warns(tmp_path:
     assert captured["cmd"] == ["python", "-c", "print('ok')"]
     assert len(result.runtime_warnings) == 1
     assert result.runtime_warnings[0]["code"] == RUNTIME_DEPENDENCIES_INJECTION_FAILED
+
+
+@pytest.mark.parametrize(
+    ("shim_name", "shim_line", "expected_entry_suffix", "expected_fixed_args"),
+    [
+        (
+            "opencode.cmd",
+            'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\opencode-ai\\bin\\opencode" %*',
+            "node_modules/opencode-ai/bin/opencode",
+            [],
+        ),
+        (
+            "codex.cmd",
+            'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+            "node_modules/@openai/codex/bin/codex.js",
+            [],
+        ),
+        (
+            "gemini.cmd",
+            'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" --no-warnings=DEP0040 "%dp0%\\node_modules\\@google\\gemini-cli\\dist\\index.js" %*',
+            "node_modules/@google/gemini-cli/dist/index.js",
+            ["--no-warnings=DEP0040"],
+        ),
+        (
+            "iflow.cmd",
+            'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@iflow-ai\\iflow-cli\\bundle\\entry.js" %*',
+            "node_modules/@iflow-ai/iflow-cli/bundle/entry.js",
+            [],
+        ),
+    ],
+)
+def test_normalize_windows_npm_cmd_shim_rewrites(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shim_name: str,
+    shim_line: str,
+    expected_entry_suffix: str,
+    expected_fixed_args: list[str],
+):
+    adapter = EngineExecutionAdapter()
+    monkeypatch.setattr(adapter, "_is_windows_runtime", lambda: True)
+
+    shim_dir = tmp_path / "npm"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    shim_path = shim_dir / shim_name
+    shim_path.write_text(
+        "@ECHO off\nGOTO start\n:start\nSETLOCAL\n" + shim_line + "\n",
+        encoding="utf-8",
+    )
+
+    command = [str(shim_path), "run", "--format", "json", "prompt payload"]
+    normalized, applied, reason = adapter._normalize_windows_npm_cmd_shim(
+        command,
+        env={"PATH": str(shim_dir)},
+    )
+
+    assert applied is True
+    assert reason == "npm_cmd_shim_rewritten"
+    assert normalized[0] == "node"
+    assert normalized[1].replace("\\", "/").endswith(expected_entry_suffix)
+    assert normalized[2 : 2 + len(expected_fixed_args)] == expected_fixed_args
+    assert normalized[2 + len(expected_fixed_args) :] == command[1:]
+
+
+def test_normalize_windows_npm_cmd_shim_non_windows_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    adapter = EngineExecutionAdapter()
+    monkeypatch.setattr(adapter, "_is_windows_runtime", lambda: False)
+    shim_path = tmp_path / "opencode.cmd"
+    shim_path.write_text("not-used", encoding="utf-8")
+    command = [str(shim_path), "run", "prompt"]
+
+    normalized, applied, reason = adapter._normalize_windows_npm_cmd_shim(
+        command,
+        env={"PATH": str(tmp_path)},
+    )
+
+    assert normalized == command
+    assert applied is False
+    assert reason == "not_applicable"
+
+
+def test_normalize_windows_npm_cmd_shim_parse_failure_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    adapter = EngineExecutionAdapter()
+    monkeypatch.setattr(adapter, "_is_windows_runtime", lambda: True)
+    shim_dir = tmp_path / "npm"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    shim_path = shim_dir / "broken.cmd"
+    shim_path.write_text("@ECHO off\nREM not npm shim\n", encoding="utf-8")
+    command = [str(shim_path), "run", "prompt"]
+
+    normalized, applied, reason = adapter._normalize_windows_npm_cmd_shim(
+        command,
+        env={"PATH": str(shim_dir)},
+    )
+
+    assert normalized == command
+    assert applied is False
+    assert reason == "parse_failed_fallback"

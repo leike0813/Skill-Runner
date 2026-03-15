@@ -260,6 +260,151 @@ async def test_run_missing_file_strict(adapter, mock_skill, tmp_path):
         mock_patch.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_run_persists_first_attempt_prompt_to_request_input(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {"__attempt_number": 1}
+    template_file = tmp_path / "template.j2"
+    template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
+    skill_with_prompt = mock_skill.model_copy(
+        update={"entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}}
+    )
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(skill_with_prompt, input_data, run_dir, options)
+
+        args, _ = mock_exec.call_args
+        prompt_content = args[-1]
+        spawn_command = list(args)
+        payload = json.loads(request_input_path.read_text(encoding="utf-8"))
+        assert payload["rendered_prompt_first_attempt"] == prompt_content
+        assert payload["spawn_command_original_first_attempt"] == spawn_command
+        assert payload["spawn_command_effective_first_attempt"] == spawn_command
+        assert payload["spawn_command_normalization_applied_first_attempt"] is False
+        assert payload["spawn_command_normalization_reason_first_attempt"] == "not_applicable"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_persist_prompt_after_first_attempt(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {"__attempt_number": 2}
+    template_file = tmp_path / "template.j2"
+    template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
+    skill_with_prompt = mock_skill.model_copy(
+        update={"entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}}
+    )
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(skill_with_prompt, input_data, run_dir, options)
+
+    payload = json.loads(request_input_path.read_text(encoding="utf-8"))
+    assert "rendered_prompt_first_attempt" not in payload
+    assert "spawn_command_original_first_attempt" not in payload
+    assert "spawn_command_effective_first_attempt" not in payload
+    assert "spawn_command_normalization_applied_first_attempt" not in payload
+    assert "spawn_command_normalization_reason_first_attempt" not in payload
+    assert not (audit_dir / "prompt.1.txt").exists()
+    assert not (audit_dir / "argv.1.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_persists_first_attempt_prompt_to_fallback_when_request_input_invalid(
+    adapter,
+    mock_skill,
+    tmp_path,
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text("not-json", encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {"__attempt_number": 1}
+    template_file = tmp_path / "template.j2"
+    template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
+    skill_with_prompt = mock_skill.model_copy(
+        update={"entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}}
+    )
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(skill_with_prompt, input_data, run_dir, options)
+        args, _ = mock_exec.call_args
+        prompt_content = args[-1]
+        spawn_command = list(args)
+
+    fallback_path = audit_dir / "prompt.1.txt"
+    assert fallback_path.exists()
+    assert fallback_path.read_text(encoding="utf-8") == prompt_content
+    argv_fallback_path = audit_dir / "argv.1.json"
+    assert argv_fallback_path.exists()
+    argv_payload = json.loads(argv_fallback_path.read_text(encoding="utf-8"))
+    assert argv_payload["spawn_command_original_first_attempt"] == spawn_command
+    assert argv_payload["spawn_command_effective_first_attempt"] == spawn_command
+    assert argv_payload["spawn_command_normalization_applied_first_attempt"] is False
+    assert argv_payload["spawn_command_normalization_reason_first_attempt"] == "not_applicable"
+
+
 def test_extract_session_handle_missing_session_id_raises(adapter):
     with pytest.raises(RuntimeError, match="SESSION_RESUME_FAILED"):
         adapter.extract_session_handle('{"response":{"text":"ok"}}', turn_index=1)
