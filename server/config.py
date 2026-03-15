@@ -107,7 +107,7 @@ _C.SYSTEM.NPM_PREFIX = os.environ.get(
 )
 
 _C.SYSTEM.SKILLS_BUILTIN_DIR = os.path.join(_C.SYSTEM.ROOT, "skills_builtin")
-_C.SYSTEM.SKILLS_DIR = os.path.join(_C.SYSTEM.ROOT, "skills")
+_C.SYSTEM.SKILLS_DIR = os.environ.get("SKILL_RUNNER_SKILLS_DIR", os.path.join(_C.SYSTEM.ROOT, "skills"))
 _C.SYSTEM.RUNS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "runs")
 _C.SYSTEM.REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "requests")
 _C.SYSTEM.TMP_UPLOADS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "tmp_uploads")

@@ -98,6 +98,7 @@ If `up` fails, call `status --mode local --json` and `doctor --json` for diagnos
 - Linux/macOS LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}`
 - Windows LocalRoot: `${SKILL_RUNNER_LOCAL_ROOT:-%LOCALAPPDATA%\\SkillRunner}`
 - `SKILL_RUNNER_DATA_DIR` default: `<LocalRoot>/data` (override still supported via env var)
+- `SKILL_RUNNER_SKILLS_DIR` default: `<LocalRoot>/skills` (override still supported via env var)
 - `SKILL_RUNNER_LOCAL_PORT` default: `29813`
 - `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN` default: `10` (tries `29813-29823`)
 - `deploy_local.*` default data dir remains `PROJECT_ROOT/data`

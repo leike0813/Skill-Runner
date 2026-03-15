@@ -44,6 +44,7 @@
   - Linux/macOS: `${SKILL_RUNNER_LOCAL_ROOT:-$HOME/.local/share/skill-runner}`
   - Windows: `${SKILL_RUNNER_LOCAL_ROOT:-%LOCALAPPDATA%\\SkillRunner}`
 - `skill-runnerctl` 默认 `SKILL_RUNNER_DATA_DIR=<LocalRoot>/data`（可被显式环境变量覆盖）
+- `skill-runnerctl` 默认 `SKILL_RUNNER_SKILLS_DIR=<LocalRoot>/skills`（可被显式环境变量覆盖）
 - `skill-runnerctl` 默认 `SKILL_RUNNER_LOCAL_PORT=29813`、`SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN=10`
 - 依赖要求：`uv`、`node`、`npm`（`ttyd` 为可选，仅内嵌 TUI 需要）
 
@@ -55,6 +56,7 @@
   - `SKILL_RUNNER_LOCAL_PORT=29813`
   - `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN=10`
   - `SKILL_RUNNER_DATA_DIR=<LocalRoot>/data`
+  - `SKILL_RUNNER_SKILLS_DIR=<LocalRoot>/skills`
   - `SKILL_RUNNER_AGENT_CACHE_DIR=<LocalRoot>/agent-cache`
   - `SKILL_RUNNER_AGENT_HOME=<LocalRoot>/agent-cache/agent-home`
 - wrapper 会确保上述目录存在后再调用 `uv run python scripts/skill_runnerctl.py ...`。
