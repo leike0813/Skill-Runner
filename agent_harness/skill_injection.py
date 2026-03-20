@@ -91,6 +91,7 @@ def inject_all_skill_packages(
 
     source_roots = [
         (project_root / "skills").resolve(),
+        (project_root / "skills_builtin").resolve(),
         (project_root / "tests" / "fixtures" / "skills").resolve(),
     ]
     target_root = (run_directory / mapped).resolve()
