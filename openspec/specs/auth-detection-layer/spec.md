@@ -42,9 +42,9 @@ Execution lifecycle MUST consume only the execution-stage `auth_signal_snapshot`
 - **AND** it MUST NOT invoke rule-based detect over terminal output text again.
 
 ### Requirement: Waiting-auth transition MUST be high-confidence only
-Only high-confidence auth signal MUST drive `waiting_auth` entry.
+Only high-confidence auth signal MUST drive `waiting_auth` entry and terminal auth-required attribution.
 
-Low-confidence auth signal is diagnostic-only and MUST NOT force `waiting_auth`.
+Low-confidence auth signal is diagnostic-only and MUST NOT force `waiting_auth` or rewrite a terminal non-auth failure into `AUTH_REQUIRED`.
 
 #### Scenario: High-confidence auth signal enters waiting_auth
 - **GIVEN** `auth_signal.required=true` and `confidence=high`
@@ -55,6 +55,13 @@ Low-confidence auth signal is diagnostic-only and MUST NOT force `waiting_auth`.
 - **GIVEN** `auth_signal.required=true` and `confidence=low`
 - **THEN** runtime MUST keep it as diagnostic evidence only
 - **AND** MUST NOT transition to `waiting_auth` based solely on that signal.
+
+#### Scenario: Low-confidence auth signal does not rewrite terminal failure
+- **GIVEN** `auth_signal.required=true` and `confidence=low`
+- **AND** the process exits non-zero for a non-auth failure
+- **WHEN** lifecycle normalizes the terminal result
+- **THEN** terminal error code MUST NOT be `AUTH_REQUIRED`
+- **AND** the low-confidence signal MUST remain available in audit diagnostics
 
 ### Requirement: RASP auth diagnostics MUST carry structured auth signal payload
 RASP keeps existing diagnostic event envelope and MUST carry auth signal detail in `diagnostic.warning.data.auth_signal`.
@@ -81,4 +88,3 @@ runtime auth detection MUST be parser-signal driven, with evidence declarations 
 - **GIVEN** engine-specific evidence is not matched
 - **AND** common fallback evidence is matched
 - **THEN** parser MUST emit `auth_signal.required=true` and `confidence=low`.
-

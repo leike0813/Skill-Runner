@@ -14,6 +14,12 @@ _ALLOWED_SUBCATEGORIES: set[AuthSubcategory] = {
 }
 
 
+def is_high_confidence_auth_signal(auth_signal: RuntimeAuthSignal | None) -> bool:
+    if not isinstance(auth_signal, dict):
+        return False
+    return bool(auth_signal.get("required")) and auth_signal.get("confidence") == "high"
+
+
 def extract_auth_signal(runtime_parse_result: dict[str, Any] | None) -> RuntimeAuthSignal | None:
     if not isinstance(runtime_parse_result, dict):
         return None
@@ -45,9 +51,7 @@ def extract_auth_signal(runtime_parse_result: dict[str, Any] | None) -> RuntimeA
 
 def is_high_confidence_auth_required(runtime_parse_result: dict[str, Any] | None) -> bool:
     signal = extract_auth_signal(runtime_parse_result)
-    if not isinstance(signal, dict):
-        return False
-    return bool(signal.get("required")) and signal.get("confidence") == "high"
+    return is_high_confidence_auth_signal(signal)
 
 
 def auth_detection_result_from_runtime_parse(

@@ -24,7 +24,10 @@ from server.models import (
 )
 from server.runtime.logging.run_context import bind_run_logging_context
 from server.runtime.logging.structured_trace import log_event
-from server.runtime.auth_detection.signal import auth_detection_result_from_auth_signal
+from server.runtime.auth_detection.signal import (
+    auth_detection_result_from_auth_signal,
+    is_high_confidence_auth_signal,
+)
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.protocol.factories import make_diagnostic_warning_payload
 from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
@@ -669,14 +672,14 @@ class _RunJobLifecyclePipeline:
                     raw_stdout=process_raw_stdout,
                     raw_stderr=process_raw_stderr,
                 )
+                auth_signal_snapshot = getattr(result, "auth_signal_snapshot", None)
                 auth_detection_result = auth_detection_result_from_auth_signal(
                     engine=engine_name,
-                    auth_signal=getattr(result, "auth_signal_snapshot", None),
+                    auth_signal=auth_signal_snapshot,
                 )
-                auth_detection_high = (
-                    auth_detection_result.detected
-                    and auth_detection_result.confidence == "high"
-                )
+                auth_detection_high = is_high_confidence_auth_signal(auth_signal_snapshot)
+                if process_failure_reason == "AUTH_REQUIRED" and not auth_detection_high:
+                    process_failure_reason = None
                 if await run_store.is_cancel_requested(run_id):
                     raise RunCanceled()
 
@@ -978,12 +981,12 @@ class _RunJobLifecyclePipeline:
                         forced_failure_reason = "AUTH_REQUIRED"
                 elif auth_detection_high:
                     forced_failure_reason = "AUTH_REQUIRED"
-                elif result.failure_reason in {
+                elif process_failure_reason in {
                     "AUTH_REQUIRED",
                     "TIMEOUT",
                     InteractiveErrorCode.SESSION_RESUME_FAILED.value,
                 }:
-                    forced_failure_reason = result.failure_reason
+                    forced_failure_reason = process_failure_reason
                 else:
                     forced_failure_reason = None
 

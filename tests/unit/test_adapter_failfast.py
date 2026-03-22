@@ -76,6 +76,22 @@ class _NoopStreamParser:
                     "matched_pattern_id": "test_server_oauth2_required",
                 },
             }
+        if "LOW_AUTH_FALLBACK" in combined:
+            return {
+                "parser": "test_noop",
+                "confidence": 0.4,
+                "session_id": None,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": [],
+                "auth_signal": {
+                    "required": True,
+                    "confidence": "low",
+                    "subcategory": None,
+                    "matched_pattern_id": "generic_token_expired_text_fallback",
+                },
+            }
         return {
             "parser": "test_noop",
             "confidence": 0.3,
@@ -162,6 +178,27 @@ async def test_capture_process_output_auth_required_classified(tmp_path: Path):
         },
     )
     assert result.failure_reason == "AUTH_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_low_confidence_auth_does_not_override_nonzero_exit(tmp_path: Path):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        SkillManifest(id="x"),
+        {
+            "__engine_name": "opencode",
+            "command": ["python", "-c", "import sys; sys.stderr.write('LOW_AUTH_FALLBACK'); sys.exit(1)"],
+            "hard_timeout_seconds": 10,
+        },
+    )
+    assert result.exit_code == 1
+    assert result.failure_reason is None
+    assert result.auth_signal_snapshot is not None
+    assert result.auth_signal_snapshot["confidence"] == "low"
 
 
 @pytest.mark.asyncio

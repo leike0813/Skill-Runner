@@ -17,7 +17,7 @@
 - **AND** 任务状态不应长期停留在 `running`
 
 ### Requirement: 系统 MUST 对超时失败进行 AUTH_REQUIRED/TIMEOUT 分类
-系统 MUST 基于已捕获输出进行归类，并将 `failure_reason` 作为终态判定的最高优先级。`AUTH_REQUIRED` 的主来源 MUST 为 `auth_detection` 层，而不是仅靠 `_looks_like_auth_required()`。
+系统 MUST 基于已捕获输出进行归类，并将 `failure_reason` 作为终态判定的最高优先级。`AUTH_REQUIRED` 的主来源 MUST 为 `auth_detection` 层，而不是仅靠 `_looks_like_auth_required()`。普通非零退出仅允许在 `auth_detection.confidence=high` 时升级为 `AUTH_REQUIRED`。
 
 #### Scenario: 高置信度 auth detection 触发 AUTH_REQUIRED
 - **GIVEN** `auth_detection.confidence=high`
@@ -25,9 +25,9 @@
 - **THEN** `failure_reason` 必须为 `AUTH_REQUIRED`
 - **AND** run 必须进入 `failed`
 
-#### Scenario: medium detection 不自动升级 AUTH_REQUIRED
-- **GIVEN** `auth_detection.confidence=medium`
-- **WHEN** 输出属于问题样本层
+#### Scenario: 低置信度 detection 不自动升级 AUTH_REQUIRED
+- **GIVEN** `auth_detection.confidence=low`
+- **WHEN** 输出属于问题样本层并伴随普通非零退出
 - **THEN** run 不得自动升级为 `AUTH_REQUIRED`
 - **AND** detection 结果必须保留到审计中
 
@@ -50,4 +50,3 @@
 #### Scenario: Timeout 后调试文件保留
 - **WHEN** timeout 发生前已产生部分日志或 artifacts
 - **THEN** 这些文件应保留在 run 目录中供调试查看
-

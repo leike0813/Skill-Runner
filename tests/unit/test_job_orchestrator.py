@@ -143,6 +143,12 @@ class AuthRequiredAdapter:
             raw_stderr="SERVER_OAUTH2_REQUIRED",
             artifacts_created=[],
             failure_reason="AUTH_REQUIRED",
+            auth_signal_snapshot={
+                "required": True,
+                "confidence": "high",
+                "subcategory": "oauth_reauth",
+                "matched_pattern_id": "test_server_oauth2_required",
+            },
         )
 
 
@@ -167,6 +173,33 @@ class TimeoutSuccessLikeAdapter:
             raw_stdout='{"value":"ok"}',
             artifacts_created=[artifacts_dir / "partial.txt"],
             failure_reason="TIMEOUT",
+        )
+
+
+class LowConfidenceAuthRequiredAdapter:
+    def parse_runtime_stream(self, **_kwargs):
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "low",
+                "subcategory": None,
+                "matched_pattern_id": "generic_token_expired_text_fallback",
+            }
+        }
+
+    async def run(self, skill, input_data, run_dir, options):
+        return EngineRunResult(
+            exit_code=143,
+            raw_stdout="The citation_scope.json file isn't being created.",
+            raw_stderr="",
+            artifacts_created=[],
+            failure_reason="AUTH_REQUIRED",
+            auth_signal_snapshot={
+                "required": True,
+                "confidence": "low",
+                "subcategory": None,
+                "matched_pattern_id": "generic_token_expired_text_fallback",
+            },
         )
 
 
@@ -833,6 +866,65 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
         assert terminal_data["status"] == "failed"
         assert terminal_data["code"] == "AUTH_REQUIRED"
         assert "authentication is required" in terminal_data["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_does_not_mark_low_confidence_auth_as_auth_required(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": LowConfidenceAuthRequiredAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, "test-skill", "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        orchestrator_events = [
+            json.loads(line)
+            for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        terminal_rows = [
+            row
+            for row in orchestrator_events
+            if row.get("type") == "lifecycle.run.terminal"
+        ]
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] is None
+        assert result_data["error"]["message"] == "Exit code 143"
+        assert meta_data["process"]["failure_reason"] is None
+        assert terminal_rows
+        terminal_data = terminal_rows[-1]["data"]
+        assert terminal_data["status"] == "failed"
+        assert "code" not in terminal_data
+        assert terminal_data["message"] == "Exit code 143"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

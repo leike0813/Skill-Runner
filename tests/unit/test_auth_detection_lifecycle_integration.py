@@ -179,6 +179,43 @@ class _ExitOneAdapter:
         )
 
 
+class _LowConfidenceAttributedAuthAdapter:
+    def __init__(self, stdout_text: str = "", stderr_text: str = ""):
+        self.stdout_text = stdout_text
+        self.stderr_text = stderr_text
+        self.stream_parser = object()
+
+    def parse_runtime_stream(self, **_kwargs):
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "low",
+                "subcategory": None,
+                "matched_pattern_id": "generic_token_expired_text_fallback",
+            }
+        }
+
+    async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
+        _ = skill
+        _ = input_data
+        _ = run_dir
+        _ = options
+        _ = live_runtime_emitter
+        return EngineRunResult(
+            exit_code=143,
+            raw_stdout=self.stdout_text,
+            raw_stderr=self.stderr_text,
+            artifacts_created=[],
+            failure_reason="AUTH_REQUIRED",
+            auth_signal_snapshot={
+                "required": True,
+                "confidence": "low",
+                "subcategory": None,
+                "matched_pattern_id": "generic_token_expired_text_fallback",
+            },
+        )
+
+
 def _build_interactive_skill(tmp_path: Path, *, skill_id: str, engine: str) -> SkillManifest:
     skill_dir = tmp_path / skill_id
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -356,6 +393,58 @@ async def test_low_confidence_auth_detection_is_audited_without_forcing_waiting_
         assert result_data["error"]["code"] is None
         assert meta_data["auth_detection"]["classification"] == "auth_required"
         assert meta_data["auth_detection"]["subcategory"] is None
+        assert meta_data["auth_detection"]["confidence"] == "low"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_auth_signal_does_not_translate_terminal_failure_to_auth_required(
+    tmp_path: Path,
+) -> None:
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-low-terminal", engine="opencode")
+        run_id = _create_run(skill, "opencode")
+        await _seed_interactive_request(
+            local_store,
+            request_id="req-auth-low-terminal",
+            run_id=run_id,
+            skill_id=skill.id,
+            engine="opencode",
+        )
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "opencode": _LowConfidenceAttributedAuthAdapter(
+                stdout_text="The citation_scope.json file isn't being created.",
+            )
+        }
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "opencode",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        assert result_data["status"] == "failed"
+        assert result_data["error"]["code"] is None
+        assert result_data["error"]["message"] == "Exit code 143"
+        assert meta_data["process"]["failure_reason"] is None
+        assert meta_data["auth_detection"]["classification"] == "auth_required"
         assert meta_data["auth_detection"]["confidence"] == "low"
     finally:
         config.defrost()

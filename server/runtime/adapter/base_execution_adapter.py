@@ -27,7 +27,7 @@ from ...models import (
 from ..protocol.contracts import LiveRuntimeEmitter
 from ...services.platform.process_supervisor import process_supervisor
 from ...services.platform.process_termination import terminate_asyncio_process_tree
-from ..auth_detection.signal import extract_auth_signal
+from ..auth_detection.signal import extract_auth_signal, is_high_confidence_auth_signal
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
@@ -668,17 +668,18 @@ class EngineExecutionAdapter:
                 signal = extract_auth_signal(runtime_parse_result)
                 if isinstance(signal, dict):
                     auth_signal = signal
-                if (
-                    isinstance(signal, dict)
-                    and bool(signal.get("required"))
-                    and signal.get("confidence") == "high"
-                ):
+                if is_high_confidence_auth_signal(signal):
+                    matched_pattern = (
+                        str(signal.get("matched_pattern_id") or "<none>")
+                        if isinstance(signal, dict)
+                        else "<none>"
+                    )
                     if not auth_detection_armed:
                         logger.info(
                             "[%s] auth detection armed engine=%s matched_pattern=%s",
                             prefix,
                             auth_engine,
-                            str(signal.get("matched_pattern_id") or "<none>"),
+                            matched_pattern,
                         )
                     auth_detection_armed = True
 
@@ -828,11 +829,7 @@ class EngineExecutionAdapter:
         failure_reason: str | None = None
         if auth_early_exit:
             failure_reason = "AUTH_REQUIRED"
-        elif (
-            isinstance(auth_signal, dict)
-            and bool(auth_signal.get("required"))
-            and returncode != 0
-        ):
+        elif is_high_confidence_auth_signal(auth_signal) and returncode != 0:
             failure_reason = "AUTH_REQUIRED"
         elif timed_out:
             failure_reason = "TIMEOUT"
