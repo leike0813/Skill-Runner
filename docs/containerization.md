@@ -209,6 +209,10 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
     - `cli_auth_credentials_store = "file"`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/opencode.json` with:
     - `plugin = ["opencode-antigravity-auth"]`
+  - Runtime-generated OpenCode run config (`run_dir/opencode.json`) also applies an enforced provider policy:
+    - known provider `options.timeout = false`
+    - this is intentional to avoid long-running SSE responses being aborted by OpenCode's default 5-minute provider timeout
+    - enforced config has higher priority than skill defaults and runtime `opencode_config` overrides
   - Entry-point trust bootstrap (idempotent):
     - Creates/repairs `${SKILL_RUNNER_AGENT_HOME}/.gemini/trustedFolders.json` as a JSON object.
     - Adds runs parent trust to Gemini:

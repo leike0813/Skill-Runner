@@ -117,6 +117,33 @@ def test_construct_config_interactive_mode_sets_question_allow(tmp_path):
     assert payload["permission"]["question"] == "allow"
 
 
+def test_construct_config_enforced_provider_timeout_disables_runtime_override(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+    adapter = OpencodeExecutionAdapter()
+
+    config_path = adapter._construct_config(
+        skill,
+        run_dir,
+        options={
+            "execution_mode": "auto",
+            "opencode_config": {
+                "provider": {
+                    "google": {
+                        "options": {
+                            "timeout": 600000
+                        }
+                    }
+                }
+            },
+        },
+    )
+    payload = _read_json(config_path)
+
+    assert payload["provider"]["google"]["options"]["timeout"] is False
+
+
 def test_parse_runtime_stream_keeps_latest_step_only():
     adapter = OpencodeExecutionAdapter()
     parsed = adapter.parse_runtime_stream(

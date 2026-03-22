@@ -294,6 +294,7 @@ _parse_output(raw_stdout) → AdapterTurnResult
 - Gemini：`run_dir/.gemini/settings.json`
 - iFlow：`run_dir/.iflow/settings.json`
 - OpenCode：`run_dir/opencode.json`，按模式覆盖 `permission.question`（auto=deny, interactive=allow）
+- OpenCode：enforced config 还会为已知 provider 强制写入 `provider.<id>.options.timeout=false`，用于禁用 OpenCode 默认的 provider 请求超时，避免长时间 SSE 流式响应被 5 分钟默认超时提前中断
 
 ### 6.3 各引擎策略
 
@@ -313,6 +314,8 @@ _parse_output(raw_stdout) → AdapterTurnResult
 
 **OpenCodeAdapter**：
 - 配置文件 `opencode.json` 写入 run_dir。
+- 合并优先级为：engine default -> skill defaults -> runtime `opencode_config` -> model overlay -> enforced config -> mode overlay。
+- 因此 provider timeout disable 属于硬约束，skill 包与 runtime override 不能重新开启。
 - 按执行模式设置 `permission.question`（auto=deny, interactive=allow）。
 - 支持 Google 和 OpenAI 双 OAuth 代理鉴权。
 

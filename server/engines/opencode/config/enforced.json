@@ -1,4 +1,61 @@
 {
+  "provider": {
+    "openai": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "google": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "deepseek": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "iflowcn": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "minimax": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "moonshotai": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "opencode": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "openrouter": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "zai-coding-plan": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "alibaba-coding-plan": {
+      "options": {
+        "timeout": false
+      }
+    },
+    "alibaba-coding-plan-cn": {
+      "options": {
+        "timeout": false
+      }
+    }
+  },
   "permission": {
     "skill": "allow",
     "bash": "allow",
