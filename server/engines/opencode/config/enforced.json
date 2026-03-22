@@ -54,6 +54,11 @@
       "options": {
         "timeout": false
       }
+    },
+    "llama.cpp": {
+      "options": {
+        "timeout": false
+      }
     }
   },
   "permission": {
