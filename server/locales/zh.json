@@ -135,6 +135,7 @@
     "run_form_file_temp_hint": "所选样例 Skill 会动态打包并通过以下接口上传：",
     "run_form_file_temp_hint_2": "输入文件会写入 uploads/<字段名>/<原文件名>，并在请求 input 中使用该相对路径。",
     "run_form_file_upload": "文件上传",
+    "run_form_hard_timeout": "硬超时（秒）",
     "run_form_inline_input": "内联输入",
     "run_form_model": "模型",
     "run_form_model_hint": "模型列表从管理端引擎详情加载。",

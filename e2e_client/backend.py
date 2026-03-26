@@ -36,6 +36,9 @@ class BackendClient:
     async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def get_runtime_options(self) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def get_skill_schemas(self, skill_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -235,6 +238,9 @@ class HttpBackendClient(BackendClient):
 
     async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
         return await self._request_json("GET", f"/v1/management/skills/{skill_id}")
+
+    async def get_runtime_options(self) -> dict[str, Any]:
+        return await self._request_json("GET", "/v1/management/runtime-options")
 
     async def get_skill_schemas(self, skill_id: str) -> dict[str, Any]:
         return await self._request_json(

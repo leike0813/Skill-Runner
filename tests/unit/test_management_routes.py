@@ -15,6 +15,7 @@ from server.models import (
     InteractionPendingResponse,
     InteractionReplyResponse,
     PendingInteraction,
+    RuntimeDefinition,
     RunStatus,
     SkillManifest,
 )
@@ -89,6 +90,7 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
         execution_modes=["auto", "interactive"],
         schemas={"output": "assets/output.schema.json"},
         entrypoint={"type": "prompt"},
+        runtime=RuntimeDefinition(default_options={"hard_timeout_seconds": 1800}),
         path=skill_dir,
     )
     monkeypatch.setattr(
@@ -127,6 +129,24 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert detail["execution_modes"] == ["auto", "interactive"]
     assert detail["effective_engines"] == ["gemini"]
     assert detail["is_builtin"] is False
+    assert detail["runtime"]["default_options"]["hard_timeout_seconds"] == 1800
+
+
+@pytest.mark.asyncio
+async def test_management_runtime_options_endpoint():
+    old_value = config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS
+    config.defrost()
+    config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = 2340
+    config.freeze()
+    try:
+        res = await _request("GET", "/v1/management/runtime-options")
+    finally:
+        config.defrost()
+        config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = old_value
+        config.freeze()
+    assert res.status_code == 200
+    body = res.json()
+    assert body["service_defaults"]["hard_timeout_seconds"] == 2340
 
 
 @pytest.mark.asyncio

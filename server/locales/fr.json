@@ -126,6 +126,7 @@
     "run_form_file_temp_hint": "Le Skill fixture sélectionné est empaqueté dynamiquement puis envoyé via",
     "run_form_file_temp_hint_2": "Les fichiers d'entrée sont zippés sous uploads/<champ>/<nom_original>, et l'input de la requête utilise ce chemin relatif.",
     "run_form_file_upload": "Upload de fichier",
+    "run_form_hard_timeout": "Délai dur (secondes)",
     "run_form_inline_input": "Entrée inline",
     "run_form_model": "Modèle",
     "run_form_model_hint": "Les modèles sont chargés depuis le détail moteur du panneau d'administration.",

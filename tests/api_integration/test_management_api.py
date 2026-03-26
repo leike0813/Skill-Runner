@@ -8,7 +8,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
-from server.models import SkillManifest
+from server.models import RuntimeDefinition, SkillManifest
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -37,6 +37,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
         version="1.0.0",
         engines=["gemini"],
         execution_modes=["auto", "interactive"],
+        runtime=RuntimeDefinition(default_options={"hard_timeout_seconds": 1800}),
         schemas={
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
@@ -109,6 +110,11 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
     assert skill_detail_res.status_code == 200
     assert skill_detail_res.json()["files"][0]["path"] == "SKILL.md"
     assert skill_detail_res.json()["execution_modes"] == ["auto", "interactive"]
+    assert skill_detail_res.json()["runtime"]["default_options"]["hard_timeout_seconds"] == 1800
+
+    runtime_options_res = await _request("GET", "/v1/management/runtime-options")
+    assert runtime_options_res.status_code == 200
+    assert runtime_options_res.json()["service_defaults"]["hard_timeout_seconds"] > 0
 
     schemas_res = await _request("GET", "/v1/management/skills/demo-skill/schemas")
     assert schemas_res.status_code == 200

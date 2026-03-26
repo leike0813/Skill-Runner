@@ -6,6 +6,11 @@
         "auto"
     ],
     "entrypoint": {},
+    "runtime": {
+        "default_options": {
+            "hard_timeout_seconds": 2400
+        }
+    },
     "schemas": {
         "input": "assets/input.schema.json",
         "parameter": "assets/parameter.schema.json",

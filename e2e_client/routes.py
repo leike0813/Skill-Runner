@@ -54,7 +54,7 @@ templates.env.globals["lang"] = _template_lang
 router = APIRouter(tags=["e2e-client"])
 
 RUNTIME_BOOL_OPTIONS = ("no_cache", "interactive_auto_reply")
-RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec",)
+RUNTIME_TIMEOUT_OPTIONS = ("interactive_reply_timeout_sec", "hard_timeout_seconds")
 VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
 ENGINE_DEFAULT_PROVIDER = {
     "codex": "openai",
@@ -140,6 +140,7 @@ async def run_form_page(
     backend: BackendClient = Depends(get_backend_client),
 ):
     detail, schemas = await _load_skill_bundle(backend, skill_id)
+    service_runtime_defaults = await _load_service_runtime_defaults(backend)
     engine_models_by_engine = await _load_engine_models(backend, detail)
     return templates.TemplateResponse(
         request=request,
@@ -147,6 +148,7 @@ async def run_form_page(
         context=_build_run_form_context(
             skill=detail,
             schemas=schemas,
+            service_runtime_defaults=service_runtime_defaults,
             engine_models_by_engine=engine_models_by_engine,
             errors=[],
             run_source=RUN_SOURCE_INSTALLED,
@@ -172,6 +174,7 @@ async def fixture_run_form_page(
     backend: BackendClient = Depends(get_backend_client),
 ):
     supported_engines = await _load_supported_engines(backend)
+    service_runtime_defaults = await _load_service_runtime_defaults(backend)
     detail, schemas = _load_fixture_skill_bundle(
         settings,
         fixture_skill_id,
@@ -184,6 +187,7 @@ async def fixture_run_form_page(
         context=_build_run_form_context(
             skill=detail,
             schemas=schemas,
+            service_runtime_defaults=service_runtime_defaults,
             engine_models_by_engine=engine_models_by_engine,
             errors=[],
             run_source=RUN_SOURCE_TEMP,
@@ -208,6 +212,7 @@ async def submit_run(
     backend: BackendClient = Depends(get_backend_client),
 ):
     detail, schemas = await _load_skill_bundle(backend, skill_id)
+    service_runtime_defaults = await _load_service_runtime_defaults(backend)
     engine_models_by_engine = await _load_engine_models(backend, detail)
     submission = await _collect_run_submission(
         request=request,
@@ -223,6 +228,7 @@ async def submit_run(
             context=_build_run_form_context(
                 skill=detail,
                 schemas=schemas,
+                service_runtime_defaults=service_runtime_defaults,
                 engine_models_by_engine=engine_models_by_engine,
                 errors=cast(list[str], submission["errors"]),
                 run_source=RUN_SOURCE_INSTALLED,
@@ -283,6 +289,7 @@ async def submit_fixture_run(
     backend: BackendClient = Depends(get_backend_client),
 ):
     supported_engines = await _load_supported_engines(backend)
+    service_runtime_defaults = await _load_service_runtime_defaults(backend)
     detail, schemas = _load_fixture_skill_bundle(
         settings,
         fixture_skill_id,
@@ -303,6 +310,7 @@ async def submit_fixture_run(
             context=_build_run_form_context(
                 skill=detail,
                 schemas=schemas,
+                service_runtime_defaults=service_runtime_defaults,
                 engine_models_by_engine=engine_models_by_engine,
                 errors=cast(list[str], submission["errors"]),
                 run_source=RUN_SOURCE_TEMP,
@@ -816,6 +824,24 @@ async def _load_skill_bundle(
     return detail, schemas
 
 
+async def _load_service_runtime_defaults(
+    backend: BackendClient,
+) -> dict[str, int]:
+    try:
+        payload = await backend.get_runtime_options()
+    except BackendApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Invalid runtime options payload")
+    service_defaults = payload.get("service_defaults")
+    if not isinstance(service_defaults, dict):
+        raise HTTPException(status_code=502, detail="Invalid runtime options payload")
+    hard_timeout_value = _coerce_non_negative_int(service_defaults.get("hard_timeout_seconds"))
+    if hard_timeout_value is None:
+        raise HTTPException(status_code=502, detail="Invalid runtime options payload")
+    return {"hard_timeout_seconds": hard_timeout_value}
+
+
 async def _load_engine_models(
     backend: BackendClient,
     skill_detail: Mapping[str, Any],
@@ -1017,6 +1043,7 @@ def _load_fixture_skill_bundle_from_dir(
         "engines": declared_engines,
         "effective_engines": effective_engines,
         "execution_modes": execution_modes,
+        "runtime": _normalize_fixture_runtime(runner.get("runtime")),
         "fixture_skill_id": fixture_skill_id,
     }
     schemas = {
@@ -1094,6 +1121,38 @@ def _coerce_non_empty_str(raw: Any, default: str) -> str:
     return default
 
 
+def _coerce_non_negative_int(raw: Any) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            parsed = int(text)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _normalize_fixture_runtime(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"default_options": {}}
+    default_options_obj = raw.get("default_options")
+    if not isinstance(default_options_obj, dict):
+        return {"default_options": {}}
+    return {
+        "default_options": {
+            str(key): value
+            for key, value in default_options_obj.items()
+            if isinstance(key, str)
+        }
+    }
+
+
 def _build_fixture_skill_package_zip(
     settings: E2EClientSettings,
     fixture_skill_id: str,
@@ -1144,6 +1203,7 @@ def _build_run_form_context(
     *,
     skill: dict[str, Any],
     schemas: dict[str, Any],
+    service_runtime_defaults: dict[str, int],
     engine_models_by_engine: dict[str, list[dict[str, Any]]],
     errors: list[str],
     run_source: RunSource,
@@ -1170,6 +1230,12 @@ def _build_run_form_context(
     submitted_runtime_options = submitted.get("runtime_options", {})
     if not isinstance(submitted_runtime_options, dict):
         submitted_runtime_options = {}
+    submitted_runtime_options = dict(submitted_runtime_options)
+    submitted_runtime_options["hard_timeout_seconds"] = _resolve_hard_timeout_form_value(
+        submitted_runtime_options=submitted_runtime_options,
+        skill=skill,
+        service_runtime_defaults=service_runtime_defaults,
+    )
     return {
         "skill": skill,
         "schemas": schemas,
@@ -1387,6 +1453,46 @@ def _extract_management_engine_names(payload: Mapping[str, Any]) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def _extract_skill_runtime_default_options(detail: Mapping[str, Any]) -> dict[str, Any]:
+    runtime_obj = detail.get("runtime")
+    if not isinstance(runtime_obj, Mapping):
+        return {}
+    default_options_obj = runtime_obj.get("default_options")
+    if not isinstance(default_options_obj, Mapping):
+        return {}
+    return {
+        str(key): value
+        for key, value in default_options_obj.items()
+        if isinstance(key, str)
+    }
+
+
+def _resolve_hard_timeout_form_value(
+    *,
+    submitted_runtime_options: Mapping[str, Any],
+    skill: Mapping[str, Any],
+    service_runtime_defaults: Mapping[str, Any],
+) -> str:
+    raw_submitted = submitted_runtime_options.get("hard_timeout_seconds")
+    if isinstance(raw_submitted, str):
+        submitted_text = raw_submitted.strip()
+        if submitted_text:
+            return submitted_text
+    elif isinstance(raw_submitted, int):
+        return str(raw_submitted)
+
+    skill_default = _coerce_non_negative_int(
+        _extract_skill_runtime_default_options(skill).get("hard_timeout_seconds")
+    )
+    if skill_default is not None:
+        return str(skill_default)
+
+    service_default = _coerce_non_negative_int(service_runtime_defaults.get("hard_timeout_seconds"))
+    if service_default is not None:
+        return str(service_default)
+    return ""
+
+
 def _extract_engine_model_ids(
     engine_models_by_engine: dict[str, list[dict[str, Any]]],
     engine: str,
@@ -1429,6 +1535,15 @@ def _build_runtime_options(
     errors: list[str] = []
     if bool(submitted.get("no_cache")):
         options["no_cache"] = True
+    raw_hard_timeout = submitted.get("hard_timeout_seconds")
+    if not isinstance(raw_hard_timeout, str) or not raw_hard_timeout.strip():
+        errors.append("hard_timeout_seconds must be a non-negative integer")
+    else:
+        hard_timeout = _coerce_non_negative_int(raw_hard_timeout)
+        if hard_timeout is None:
+            errors.append("hard_timeout_seconds must be a non-negative integer")
+        else:
+            options["hard_timeout_seconds"] = hard_timeout
     if execution_mode == "interactive":
         interactive_auto_reply = bool(submitted.get("interactive_auto_reply"))
         options["interactive_auto_reply"] = interactive_auto_reply

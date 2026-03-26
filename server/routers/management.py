@@ -29,8 +29,10 @@ from ..models import (
     ManagementRunFilePreviewResponse,
     ManagementRunFilesResponse,
     ManagementRunListResponse,
+    ManagementRuntimeOptionsResponse,
     ManagementSkillDetail,
     ManagementSkillListResponse,
+    ManagementSkillRuntimeView,
     ManagementSkillSchemasResponse,
     ManagementSkillSummary,
     ManagementLoggingSettingsResponse,
@@ -205,6 +207,15 @@ async def list_management_skills():
     )
 
 
+@router.get("/runtime-options", response_model=ManagementRuntimeOptionsResponse)
+async def get_management_runtime_options():
+    return ManagementRuntimeOptionsResponse(
+        service_defaults={
+            "hard_timeout_seconds": int(config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS),
+        }
+    )
+
+
 @router.get("/skills/{skill_id}", response_model=ManagementSkillDetail)
 async def get_management_skill(skill_id: str):
     skill = skill_registry.get_skill(skill_id)
@@ -220,6 +231,7 @@ async def get_management_skill(skill_id: str):
     summary = _build_skill_summary(skill)
     return ManagementSkillDetail(
         **summary.model_dump(),
+        runtime=_build_skill_runtime(skill),
         schemas=_normalize_schemas(skill.schemas),
         entrypoints=skill.entrypoint if isinstance(skill.entrypoint, dict) else {},
         files=list_skill_entries(skill_root),
@@ -742,6 +754,21 @@ def _normalize_schemas(raw: Any) -> dict[str, str]:
         if isinstance(key, str) and isinstance(value, str):
             normalized[key] = value
     return normalized
+
+
+def _build_skill_runtime(skill: SkillManifest) -> ManagementSkillRuntimeView:
+    runtime_obj = getattr(skill, "runtime", None)
+    if runtime_obj is None:
+        return ManagementSkillRuntimeView()
+    default_options = getattr(runtime_obj, "default_options", None)
+    if not isinstance(default_options, dict):
+        return ManagementSkillRuntimeView()
+    normalized = {
+        str(key): value
+        for key, value in default_options.items()
+        if isinstance(key, str)
+    }
+    return ManagementSkillRuntimeView(default_options=normalized)
 
 
 def _normalize_execution_modes(raw: Any) -> list[str]:

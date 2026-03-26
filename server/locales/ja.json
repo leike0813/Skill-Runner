@@ -126,6 +126,7 @@
     "run_form_file_temp_hint": "選択したフィクスチャ Skill は動的にパッケージ化され、次の経路でアップロードされます：",
     "run_form_file_temp_hint_2": "入力ファイルは uploads/<field>/<original_filename> として zip 化され、request input にはその相対パスを指定します。",
     "run_form_file_upload": "ファイルアップロード",
+    "run_form_hard_timeout": "ハードタイムアウト（秒）",
     "run_form_inline_input": "インライン入力",
     "run_form_model": "モデル",
     "run_form_model_hint": "モデルは管理 UI のエンジン詳細から読み込みます。",

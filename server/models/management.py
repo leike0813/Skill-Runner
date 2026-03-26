@@ -30,9 +30,28 @@ class ManagementSkillSummary(BaseModel):
 class ManagementSkillDetail(ManagementSkillSummary):
     """Skill detail payload used by management API."""
 
+    runtime: "ManagementSkillRuntimeView" = Field(default_factory=lambda: ManagementSkillRuntimeView())
     schemas: Dict[str, str] = Field(default_factory=dict)
     entrypoints: Dict[str, Any] = Field(default_factory=dict)
     files: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ManagementSkillRuntimeView(BaseModel):
+    """Skill runtime view exposed by management API."""
+
+    default_options: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ManagementServiceRuntimeDefaults(BaseModel):
+    """Service-level runtime option defaults exposed by management API."""
+
+    hard_timeout_seconds: int = Field(gt=0)
+
+
+class ManagementRuntimeOptionsResponse(BaseModel):
+    """Runtime option defaults payload used by management API."""
+
+    service_defaults: ManagementServiceRuntimeDefaults
 
 
 class ManagementSkillSchemasResponse(BaseModel):

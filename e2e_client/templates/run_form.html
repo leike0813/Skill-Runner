@@ -98,6 +98,13 @@
 
         <div class="card" style="margin-top: 16px;">
             <h3 style="margin-top: 0;">{{ t("client.run_form_runtime_options", default="Runtime Options") }}</h3>
+            <div class="row" style="margin-bottom: 12px;">
+                <div style="flex: 1 1 260px;">
+                    <label for="runtime__hard_timeout_seconds"><strong>{{ t("client.run_form_hard_timeout", default="Hard timeout (seconds)") }}</strong></label><br>
+                    <input id="runtime__hard_timeout_seconds" name="runtime__hard_timeout_seconds" type="number" min="0" step="60" value="{{ submitted_runtime_options.get('hard_timeout_seconds', '') }}"
+                           style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--neutral-200); background:#fff;">
+                </div>
+            </div>
             <div class="row">
                 <div style="flex: 1 1 260px;">
                     <label><input id="runtime__no_cache" type="checkbox" name="runtime__no_cache" {% if submitted_runtime_options.get("no_cache") %}checked{% endif %}> {{ t("client.run_form_no_cache", default="Disable cache") }}</label><br>

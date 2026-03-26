@@ -25,6 +25,7 @@ class FakeBackend:
         self.create_payloads: list[dict[str, Any]] = []
         self.temp_create_payloads: list[dict[str, Any]] = []
         self.temp_upload_payloads: list[dict[str, Any]] = []
+        self.service_hard_timeout_seconds = 1200
 
     @staticmethod
     def _is_temp_request(request_id: str) -> bool:
@@ -83,6 +84,14 @@ class FakeBackend:
             "version": "1.0.0",
             "engines": ["gemini"],
             "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
+        }
+
+    async def get_runtime_options(self) -> dict[str, Any]:
+        return {
+            "service_defaults": {
+                "hard_timeout_seconds": self.service_hard_timeout_seconds,
+            }
         }
 
     async def get_skill_schemas(self, skill_id: str) -> dict[str, Any]:
@@ -407,6 +416,19 @@ class FakeBackendEffectiveEnginesOnly(FakeBackend):
             "engines": [],
             "effective_engines": ["gemini"],
             "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
+        }
+
+
+class FakeBackendNoSkillRuntimeDefault(FakeBackend):
+    async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
+        assert skill_id == "demo-skill"
+        return {
+            "id": "demo-skill",
+            "name": "Demo Skill",
+            "version": "1.0.0",
+            "engines": ["gemini"],
+            "execution_modes": ["auto", "interactive"],
         }
 
 
@@ -439,6 +461,7 @@ class FakeBackendOpencode(FakeBackend):
             "version": "1.0.0",
             "engines": ["opencode"],
             "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
         }
 
     async def get_engine_detail(self, engine: str) -> dict[str, Any]:
@@ -530,6 +553,11 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert "内联输入" in run_form.text
         assert "执行模式" in run_form.text
         assert "模型" in run_form.text
+        assert 'name="runtime__hard_timeout_seconds"' in run_form.text
+        assert 'type="number"' in run_form.text
+        assert 'min="0"' in run_form.text
+        assert 'step="60"' in run_form.text
+        assert 'value="1800"' in run_form.text
 
         create = await _request(
             app,
@@ -541,6 +569,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
                 "model": "gemini-2.5-pro",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
                 "runtime__no_cache": "on",
             },
             files={
@@ -553,6 +582,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
+        assert fake_backend.create_payloads[-1]["runtime_options"]["hard_timeout_seconds"] == 1800
         assert fake_backend.create_payloads[-1]["input"]["input_file"] == "input_file/input.txt"
         assert "interactive_reply_timeout_sec" not in fake_backend.create_payloads[-1]["runtime_options"]
 
@@ -693,6 +723,8 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         run_form = await _request(app, "GET", "/fixtures/demo-prime-number/run")
         assert run_form.status_code == 200
         assert "Run 来源：</strong> temp" in run_form.text
+        assert 'name="runtime__hard_timeout_seconds"' in run_form.text
+        assert 'value="2400"' in run_form.text
 
         create = await _request(
             app,
@@ -702,6 +734,7 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
                 "engine": "gemini",
                 "execution_mode": "auto",
                 "parameter__divisor": "3",
+                "runtime__hard_timeout_seconds": "2400",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -712,6 +745,7 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         assert create.headers.get("location") == "/runs/req-temp-1"
         assert fake_backend.temp_create_payloads
         assert fake_backend.temp_create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
+        assert fake_backend.temp_create_payloads[-1]["runtime_options"]["hard_timeout_seconds"] == 2400
         assert fake_backend.temp_create_payloads[-1]["input"]["input_file"] == "input_file/input.txt"
         assert fake_backend.temp_upload_payloads
         assert "demo-prime-number/SKILL.md" in fake_backend.temp_upload_payloads[-1]["skill_entries"]
@@ -800,12 +834,16 @@ async def test_e2e_example_client_fixture_fallbacks_to_management_engines_when_o
         assert 'option value="gemini"' in run_form.text
         assert 'option value="codex"' in run_form.text
         assert "gemini-2.5-pro" in run_form.text
+        assert 'value="1200"' in run_form.text
 
         create = await _request(
             app,
             "POST",
             "/fixtures/demo-auto-skill/run",
-            data={"execution_mode": "auto"},
+            data={
+                "execution_mode": "auto",
+                "runtime__hard_timeout_seconds": "1200",
+            },
             follow_redirects=False,
         )
         assert create.status_code == 303
@@ -830,6 +868,7 @@ async def test_e2e_example_client_rejects_invalid_execution_mode(tmp_path: Path)
                 "execution_mode": "unsupported-mode",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -858,6 +897,7 @@ async def test_e2e_example_client_rejects_invalid_model_for_engine(tmp_path: Pat
                 "model": "not-exist-model",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -893,6 +933,7 @@ async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path
                 "execution_mode": "auto",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -929,6 +970,7 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
                 "model": "gemini-2.5-pro",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
             },
             files={
                 "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
@@ -937,6 +979,82 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
         )
         assert create.status_code == 303
         assert fake_backend.create_payloads[-1]["engine"] == "gemini"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_example_client_installed_form_hard_timeout_falls_back_to_service_default():
+    app = create_app()
+    fake_backend = FakeBackendNoSkillRuntimeDefault()
+    fake_backend.service_hard_timeout_seconds = 1260
+    _install_backend_override(app, fake_backend)
+    try:
+        run_form = await _request(app, "GET", "/skills/demo-skill/run")
+        assert run_form.status_code == 200
+        assert 'name="runtime__hard_timeout_seconds"' in run_form.text
+        assert 'value="1260"' in run_form.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "submitted_value",
+    ["", "-60", "1.5", "abc"],
+)
+async def test_e2e_example_client_rejects_invalid_hard_timeout(submitted_value: str):
+    app = create_app()
+    fake_backend = FakeBackend()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data={
+                "engine": "gemini",
+                "execution_mode": "auto",
+                "input__prompt": "hello",
+                "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": submitted_value,
+            },
+            files={
+                "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+        assert "hard_timeout_seconds must be a non-negative integer" in response.text
+        assert not fake_backend.create_payloads
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_example_client_accepts_zero_hard_timeout():
+    app = create_app()
+    fake_backend = FakeBackend()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data={
+                "engine": "gemini",
+                "execution_mode": "auto",
+                "input__prompt": "hello",
+                "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "0",
+            },
+            files={
+                "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert fake_backend.create_payloads[-1]["runtime_options"]["hard_timeout_seconds"] == 0
     finally:
         app.dependency_overrides.clear()
 
