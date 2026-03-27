@@ -7,6 +7,7 @@ services:
       # Keep ttyd host/container ports identical.
       # Do not split-mutate this mapping (e.g. 28081:17681), or embedded shell URL resolution will break.
       - "17681:17681"
+    restart: unless-stopped
     environment:
       SKILL_RUNNER_RUNTIME_MODE: container
       SKILL_RUNNER_DATA_DIR: /data
@@ -40,6 +41,7 @@ services:
   #   entrypoint: ["/entrypoint_e2e.sh"]
   #   ports:
   #     - "9814:9814"
+  #   restart: unless-stopped
   #   environment:
   #     SKILL_RUNNER_RUNTIME_MODE: container
   #     SKILL_RUNNER_E2E_CLIENT_HOST: 0.0.0.0
