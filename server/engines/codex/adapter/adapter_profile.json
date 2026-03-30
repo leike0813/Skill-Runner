@@ -87,6 +87,25 @@
             }
           ]
         }
+      },
+      {
+        "id": "codex_refresh_token_reauth_required",
+        "enabled": true,
+        "priority": 895,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(refresh_token_reused|refresh\\s+token.*used.*generate\\s+a\\s+new\\s+access\\s+token)"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(sign\\s+in\\s+again|log\\s+out\\s+and\\s+sign\\s+in\\s+again|authentication\\s+token\\s+is\\s+expired)"
+            }
+          ]
+        }
       }
     ]
   },

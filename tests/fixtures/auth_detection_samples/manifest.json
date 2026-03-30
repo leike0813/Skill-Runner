@@ -76,6 +76,14 @@
       "expected_subcategory": "api_key_missing"
     },
     {
+      "sample_id": "openai_refresh_token_reused_401",
+      "engine": "codex",
+      "provider_id": "openai",
+      "source_run_id": "9440bc11-f476-4e3d-a01f-05a3151bdcef",
+      "expected_classification": "auth_required",
+      "expected_subcategory": null
+    },
+    {
       "sample_id": "auth_method_not_configured",
       "engine": "gemini",
       "provider_id": null,

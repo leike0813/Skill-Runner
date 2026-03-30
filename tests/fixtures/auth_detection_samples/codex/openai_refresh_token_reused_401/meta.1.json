@@ -1,0 +1,26 @@
+{
+  "run_id": "9440bc11-f476-4e3d-a01f-05a3151bdcef",
+  "engine": "codex",
+  "status": "failed",
+  "exit_code": 1,
+  "attempt_number": 1,
+  "started_at": "2026-03-29T17:43:07.206193",
+  "finished_at": "2026-03-29T17:43:12.384833",
+  "completion": {
+    "state": "interrupted",
+    "reason_code": "PROCESS_EXIT_NONZERO",
+    "exit_code": 1
+  },
+  "launch": {
+    "command": [
+      "$NPM_BIN/codex",
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "--full-auto",
+      "Execute literature-digest."
+    ],
+    "execution_mode": "auto"
+  },
+  "source_capture_type": "run_audit"
+}

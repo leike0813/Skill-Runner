@@ -147,6 +147,42 @@ class _CodexHighAuthExitOneAdapter:
         )
 
 
+class _CodexRefreshReauthExitOneAdapter:
+    def __init__(self, stdout_text: str = "", stderr_text: str = ""):
+        self.stdout_text = stdout_text
+        self.stderr_text = stderr_text
+        self.stream_parser = object()
+
+    def parse_runtime_stream(self, **_kwargs):
+        return {
+            "auth_signal": {
+                "required": True,
+                "confidence": "high",
+                "subcategory": None,
+                "matched_pattern_id": "codex_refresh_token_reauth_required",
+            }
+        }
+
+    async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
+        _ = skill
+        _ = input_data
+        _ = run_dir
+        _ = options
+        _ = live_runtime_emitter
+        return EngineRunResult(
+            exit_code=1,
+            raw_stdout=self.stdout_text,
+            raw_stderr=self.stderr_text,
+            artifacts_created=[],
+            auth_signal_snapshot={
+                "required": True,
+                "confidence": "high",
+                "subcategory": None,
+                "matched_pattern_id": "codex_refresh_token_reauth_required",
+            },
+        )
+
+
 class _ExitOneAdapter:
     def __init__(
         self,
@@ -571,6 +607,62 @@ async def test_opencode_high_confidence_auth_with_null_detection_provider_uses_m
         assert state_data["pending"]["payload"]["provider_id"] == "deepseek"
         assert meta_data["auth_detection"]["provider_id"] is None
         assert meta_data["auth_session"]["provider_id"] == "deepseek"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_codex_refresh_token_reauth_high_confidence_enters_waiting_auth(
+    tmp_path: Path,
+) -> None:
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-codex-refresh-reauth", engine="codex")
+        run_id = _create_run(skill, "codex")
+        await _seed_interactive_request(
+            local_store,
+            request_id="req-auth-codex-refresh-reauth",
+            run_id=run_id,
+            skill_id=skill.id,
+            engine="codex",
+        )
+        fixture = load_sample("codex", "openai_refresh_token_reused_401")
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "codex": _CodexRefreshReauthExitOneAdapter(
+                stdout_text=fixture["stdout"],
+                stderr_text=fixture["stderr"],
+            )
+        }
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        state_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        pending_selection = state_data["pending"]["payload"]
+        assert state_data["status"] == RunStatus.WAITING_AUTH.value
+        assert state_data["error"] is None
+        assert state_data["pending"]["owner"] == "waiting_auth.method_selection"
+        assert "callback" in pending_selection["available_methods"]
+        assert "device_auth" in pending_selection["available_methods"]
+        assert meta_data["auth_detection"]["classification"] == "auth_required"
+        assert meta_data["auth_detection"]["confidence"] == "high"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
