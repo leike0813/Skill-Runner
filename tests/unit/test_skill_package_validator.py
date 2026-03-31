@@ -28,6 +28,7 @@ def _build_skill_zip(
     parameter_schema_override: dict[str, Any] | None = None,
     output_schema_override: dict[str, Any] | None = None,
     runtime_override: dict[str, Any] | None = None,
+    entrypoint_override: dict[str, Any] | None = None,
 ) -> bytes:
     top = top_level or skill_id
     name = skill_name or skill_id
@@ -58,6 +59,8 @@ def _build_skill_zip(
         runner["engine_configs"] = engine_configs_override
     if runtime_override is not None:
         runner["runtime"] = runtime_override
+    if entrypoint_override is not None:
+        runner["entrypoint"] = entrypoint_override
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
@@ -130,6 +133,25 @@ def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
     validator.extract_zip_safe(zip_path, tmp_path / "stage_no_artifacts")
     skill_id, version = validator.validate_skill_dir(
         tmp_path / "stage_no_artifacts" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_accepts_result_json_filename_in_runner_entrypoint(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "skill_result_filename.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            entrypoint_override={"result_json_filename": "final-output.json"}
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_result_filename")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_result_filename" / top,
+        top,
+        require_version=False,
     )
     assert skill_id == "demo-temp-skill"
     assert version is None

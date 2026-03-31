@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -93,6 +94,160 @@ class NoOutputAdapter:
             raw_stdout="",
             raw_stderr="",
             artifacts_created=[]
+        )
+
+
+def _write_result_file(path: Path, payload: str, *, mtime_ns: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
+    if mtime_ns is not None:
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+
+
+class ResultFileFallbackSuccessAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        _write_result_file(
+            run_dir / f"{skill.id}.result.json",
+            json.dumps({"value": "ok"}),
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class ResultFileFallbackSchemaRepairAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        _write_result_file(
+            run_dir / f"{skill.id}.result.json",
+            json.dumps({"value": 7}),
+        )
+        return _final_engine_result(final_data={"value": "bad"})
+
+
+class ResultFileFallbackDeclaredNameAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        _write_result_file(
+            run_dir / "custom-output.json",
+            json.dumps({"value": "ok"}),
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class ResultFileFallbackMultipleCandidatesAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        older_ns = 1_700_000_000_000_000_000
+        newer_ns = 1_700_000_100_000_000_000
+        _write_result_file(
+            run_dir / "nested" / f"{skill.id}.result.json",
+            json.dumps({"value": "older"}),
+            mtime_ns=older_ns,
+        )
+        _write_result_file(
+            run_dir / "latest" / f"{skill.id}.result.json",
+            json.dumps({"value": "newer"}),
+            mtime_ns=newer_ns,
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class ResultFileFallbackTieBreakAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        same_ns = 1_700_000_200_000_000_000
+        _write_result_file(
+            run_dir / "b" / "deep" / f"{skill.id}.result.json",
+            json.dumps({"value": "deep"}),
+            mtime_ns=same_ns,
+        )
+        _write_result_file(
+            run_dir / "a" / f"{skill.id}.result.json",
+            json.dumps({"value": "shallow"}),
+            mtime_ns=same_ns,
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class ResultFileFallbackInvalidJsonAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        _write_result_file(
+            run_dir / f"{skill.id}.result.json",
+            '{"value":',
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class ResultFileFallbackSchemaInvalidAdapter:
+    async def run(self, skill, input_data, run_dir, options):
+        _write_result_file(
+            run_dir / f"{skill.id}.result.json",
+            json.dumps({"value": "bad"}),
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout="",
+            raw_stderr="",
+            artifacts_created=[],
+        )
+
+
+class AskUserWithResultFileAdapter:
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        _write_result_file(
+            run_dir / f"{skill.id}.result.json",
+            json.dumps({"value": "ok"}),
+        )
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
+        return _ask_user_engine_result(
+            interaction={
+                "interaction_id": 1,
+                "kind": "choose_one",
+                "prompt": "continue?",
+                "options": [{"label": "Yes", "value": "yes"}],
+            },
+            raw_stdout=raw_stdout,
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
+        )
+
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="thread-1",
+            created_at_turn=turn_index,
         )
 
 
@@ -583,6 +738,427 @@ async def test_run_job_fails_when_output_json_missing(tmp_path):
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert "Output JSON missing" in result_data["error"]["message"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_recovers_output_from_result_file_when_stdout_missing(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackSuccessAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "succeeded"
+        assert result_data["data"] == {"value": "ok"}
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_recovers_output_from_result_file_when_stdout_schema_invalid(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackSchemaRepairAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "succeeded"
+        assert result_data["data"] == {"value": 7}
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_respects_declared_filename(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        entrypoint={"result_json_filename": "custom-output.json"},
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackDeclaredNameAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert result_data["status"] == "success"
+        assert result_data["data"] == {"value": "ok"}
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_prefers_latest_mtime(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackMultipleCandidatesAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert result_data["data"] == {"value": "newer"}
+        assert "OUTPUT_RESULT_FILE_MULTIPLE_CANDIDATES" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_uses_shallow_path_when_mtime_ties(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackTieBreakAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert result_data["data"] == {"value": "shallow"}
+        assert "OUTPUT_RESULT_FILE_MULTIPLE_CANDIDATES" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_invalid_json_still_fails(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackInvalidJsonAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "failed"
+        assert "OUTPUT_RESULT_FILE_INVALID_JSON" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_schema_invalid_still_fails(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": ResultFileFallbackSchemaInvalidAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
+            await orchestrator.run_job(run_id, skill.id, "codex", options={})
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "failed"
+        assert "OUTPUT_RESULT_FILE_SCHEMA_INVALID" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_does_not_override_waiting_user(tmp_path):
+    skill = _build_interactive_skill(tmp_path)
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_request(
+            request_id="req-interactive",
+            skill_id=skill.id,
+            engine="codex",
+            parameter={},
+            engine_options={},
+            runtime_options={"execution_mode": "interactive"},
+            input_data={},
+        )
+        await local_store.update_request_run_id("req-interactive", run_id)
+        await local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AskUserWithResultFileAdapter()}
+        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
+            reason="probe_ok",
+            session_timeout_sec=session_timeout_sec,
+        )
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        assert status_data["status"] == "waiting_user"
+        assert status_data["pending"]["owner"] == "waiting_user"
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" not in status_data["warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_result_file_fallback_does_not_override_waiting_auth(tmp_path):
+    skill = _build_interactive_skill(tmp_path)
+
+    class AuthRequiredWithResultFileAdapter:
+        async def run(self, skill, input_data, run_dir, options):
+            _write_result_file(
+                run_dir / f"{skill.id}.result.json",
+                json.dumps({"value": "ok"}),
+            )
+            return EngineRunResult(
+                exit_code=1,
+                raw_stdout="",
+                raw_stderr="SERVER_OAUTH2_REQUIRED",
+                artifacts_created=[],
+                failure_reason="AUTH_REQUIRED",
+                auth_signal_snapshot={
+                    "required": True,
+                    "confidence": "high",
+                    "subcategory": "oauth_reauth",
+                    "matched_pattern_id": "test_server_oauth2_required",
+                },
+            )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_request(
+            request_id="req-auth",
+            skill_id=skill.id,
+            engine="codex",
+            parameter={},
+            engine_options={},
+            runtime_options={"execution_mode": "interactive"},
+            input_data={},
+        )
+        await local_store.update_request_run_id("req-auth", run_id)
+        await local_store.create_run(run_id, None, "queued")
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": AuthRequiredWithResultFileAdapter()}
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        assert status_data["status"] == "waiting_auth"
+        assert status_data["pending"]["owner"] == "waiting_auth.method_selection"
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" not in status_data["warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

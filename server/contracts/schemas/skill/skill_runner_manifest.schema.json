@@ -62,6 +62,22 @@
       },
       "additionalProperties": true
     },
+    "entrypoint": {
+      "type": "object",
+      "properties": {
+        "prompts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "result_json_filename": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
     "engine_configs": {
       "type": "object",
       "properties": {

@@ -84,6 +84,10 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
   - 仅系统允许的 runtime option 键会生效（例如 `execution_mode`、`no_cache`、`interactive_auto_reply`、`interactive_reply_timeout_sec`、`hard_timeout_seconds`）；
   - 请求体 `runtime_options` 同名键会覆盖 skill 默认值；
   - 非法默认值会被忽略并记录 warning，不阻断执行。
+- `entrypoint.result_json_filename` 是可选的最终结果文件名声明：
+  - 默认文件名是 `<skill-id>.result.json`；
+  - 当 stdout/stream 最终 JSON 缺失或 schema 非法时，系统会在 run 工作目录内递归扫描这个文件名作为最后一层恢复；
+  - 建议只声明文件名本身，不要声明目录路径或 glob。
 
 ### 2.4 输入/参数/输出协议
 
@@ -156,7 +160,7 @@ interactive 模式关键约束：
    - `output.schema.json`：放结构化输出与 artifact 定义
 
 5. 编写 `runner.json`  
-   声明 `engines`、schema 路径、版本等。
+   声明 `engines`、schema 路径、版本等；若最终结果由脚本强制落盘，也在这里声明 `entrypoint.result_json_filename`。
 
 6. 做本地校验  
    检查身份一致性、schema 文件存在性、字段 required 合理性、artifact 是否可实际产出。

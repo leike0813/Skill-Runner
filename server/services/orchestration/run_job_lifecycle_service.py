@@ -38,6 +38,9 @@ from server.services.orchestration.run_artifact_path_autofix import (
     collect_run_artifacts,
     resolve_output_artifact_paths,
 )
+from server.services.orchestration.run_result_file_fallback import (
+    resolve_result_file_fallback,
+)
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
@@ -893,6 +896,31 @@ class _RunJobLifecyclePipeline:
                         final_status = RunStatus.QUEUED
                         final_validation_warnings = list(warnings)
                         return RunJobOutcome(run_id=run_id, final_status=RunStatus.QUEUED)
+
+                should_try_result_file_fallback = (
+                    result.exit_code == 0
+                    and not auth_detection_high
+                    and pending_interaction_candidate is None
+                    and not ask_user_signal_detected
+                    and (not has_structured_output or bool(schema_output_errors))
+                )
+                if should_try_result_file_fallback:
+                    result_file_fallback = resolve_result_file_fallback(
+                        skill=skill,
+                        run_dir=run_dir,
+                    )
+                    for fallback_warning in result_file_fallback.warnings:
+                        _append_validation_warning(
+                            fallback_warning.code,
+                            detail=fallback_warning.detail,
+                        )
+                    if isinstance(result_file_fallback.payload, dict):
+                        output_data = dict(result_file_fallback.payload)
+                        schema_output_errors = []
+                        has_structured_output = True
+                        done_signal_found = True
+                        structured_output_source = "result_file_fallback"
+                        turn_payload_for_completion = dict(output_data)
 
                 # 6.1 Normalization (N0)
                 # Create standard envelope
