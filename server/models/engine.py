@@ -197,6 +197,7 @@ class EngineUpgradeEngineResult(BaseModel):
     """Per-engine execution output for upgrade tasks."""
 
     status: str
+    action: Optional[str] = None
     stdout: str = ""
     stderr: str = ""
     error: Optional[str] = None

@@ -39,6 +39,12 @@
 - **AND** 缺失版本以 `null` 或 `-` 表示
 - **AND** 不在读路径上临时触发 CLI probe
 
+#### Scenario: subset bootstrap keeps uninstalled engines readable
+- **WHEN** bootstrap/install 仅对 engine 子集执行 ensure
+- **THEN** 未请求安装的 engine 在缓存/UI/API 中仍以稳定结构呈现
+- **AND** 未安装 engine 表现为 `present=false` 与空版本
+- **AND** 读路径不会因其缺失而触发临时安装或探测
+
 ### Requirement: 旧 auth probe API MUST 下线
 系统 MUST 下线 engine 管理域的旧 auth probe API，避免继续暴露误导性摘要能力。
 

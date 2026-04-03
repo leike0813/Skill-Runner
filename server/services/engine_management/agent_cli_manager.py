@@ -129,6 +129,7 @@ def _load_engine_profile(engine: str) -> AdapterProfile:
 
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
+DEFAULT_BOOTSTRAP_ENGINES: tuple[str, ...] = ("opencode", "codex")
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,42 @@ class AgentCliManager:
 
     def supported_engines(self) -> tuple[str, ...]:
         return _supported_engines()
+
+    def default_bootstrap_engines(self) -> tuple[str, ...]:
+        return tuple(engine for engine in DEFAULT_BOOTSTRAP_ENGINES if engine in self.supported_engines())
+
+    def resolve_bootstrap_targets(self, engine_spec: str | None = None) -> dict[str, Any]:
+        raw_spec = engine_spec
+        if raw_spec is None:
+            raw_spec = os.environ.get("SKILL_RUNNER_BOOTSTRAP_ENGINES", "")
+        normalized_spec = str(raw_spec or "").strip().lower()
+        supported = list(self.supported_engines())
+
+        if not normalized_spec:
+            requested = list(self.default_bootstrap_engines())
+            resolved_mode = "subset"
+            effective_spec = ",".join(requested)
+        elif normalized_spec == "all":
+            requested = supported
+            resolved_mode = "all"
+            effective_spec = "all"
+        elif normalized_spec == "none":
+            requested = []
+            resolved_mode = "none"
+            effective_spec = "none"
+        else:
+            requested = self._normalize_engine_spec_list(normalized_spec)
+            resolved_mode = "subset"
+            effective_spec = ",".join(requested)
+
+        skipped = [engine for engine in supported if engine not in set(requested)]
+        return {
+            "raw_spec": str(raw_spec or ""),
+            "effective_spec": effective_spec,
+            "resolved_mode": resolved_mode,
+            "requested_engines": requested,
+            "skipped_engines": skipped,
+        }
 
     def ensure_layout(self) -> None:
         profile = self.profile
@@ -263,9 +300,10 @@ class AgentCliManager:
             return match.group(0)
         return text
 
-    def ensure_installed(self) -> Dict[str, CommandResult]:
+    def ensure_installed(self, engine_spec: str | None = None) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
-        for engine in self.supported_engines():
+        targets = self.resolve_bootstrap_targets(engine_spec)["requested_engines"]
+        for engine in targets:
             if self.resolve_managed_engine_command(engine) is None:
                 results[engine] = self.install_package(self.engine_package(engine))
         return results
@@ -771,6 +809,28 @@ class AgentCliManager:
         if normalized not in self.supported_engines():
             return None
         return _load_engine_profile(normalized)
+
+    def _normalize_engine_spec_list(self, raw: str) -> list[str]:
+        requested: list[str] = []
+        seen: set[str] = set()
+        supported = set(self.supported_engines())
+        for item in raw.split(","):
+            engine = item.strip().lower()
+            if not engine:
+                continue
+            if engine in {"all", "none"}:
+                raise ValueError("engine spec must not mix 'all' or 'none' with engine names")
+            if engine not in supported:
+                raise ValueError(
+                    "Unsupported engine in bootstrap set: "
+                    f"{engine}. Supported: {', '.join(self.supported_engines())}"
+                )
+            if engine not in seen:
+                seen.add(engine)
+                requested.append(engine)
+        if not requested:
+            raise ValueError("bootstrap engine set must not be empty unless using 'none'")
+        return requested
 
 
 def format_status_payload(status: Dict[str, EngineStatus]) -> Dict[str, Dict[str, object]]:

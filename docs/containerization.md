@@ -328,9 +328,14 @@ Container startup now writes structured bootstrap diagnostics to:
 - `${SKILL_RUNNER_DATA_DIR}/logs/bootstrap.log`
 - `${SKILL_RUNNER_DATA_DIR}/agent_bootstrap_report.json`
 
+By default, container bootstrap only ensures `opencode,codex`. Override with
+`SKILL_RUNNER_BOOTSTRAP_ENGINES=all`, `none`, or a comma-separated subset such as
+`gemini,iflow`.
+
 If startup prints `Failed to install <engine>: exit=1` or later warns
 `opencode CLI not found`, inspect the two files above first. The report includes
-per-engine `exit_code`, `duration_ms`, and summarized stderr output.
+per-engine `exit_code`, `duration_ms`, summarized stderr output, and the
+requested/skipped engine sets for that bootstrap run.
 
 ## Release compose asset (tag-only)
 

@@ -82,6 +82,17 @@
 - **AND** 当端口占用时可在 `29813-29823` 范围内自动回退到可用端口
 - **AND** 显式传入 `--port` 或环境变量覆盖时仍以外部配置为准
 
+#### Scenario: bootstrap/install default to managed subset
+- **WHEN** 客户端调用 `skill-runnerctl bootstrap --json` 或 `skill-runnerctl install --json` 且未显式传入 `--engines`
+- **THEN** 系统默认仅对 `opencode,codex` 执行 ensure
+- **AND** 不再默认对全部受管 engine 做安装
+
+#### Scenario: bootstrap/install supports explicit engine subset
+- **WHEN** 客户端调用 `skill-runnerctl bootstrap --engines <csv|all|none> --json`
+- **THEN** 系统按该目标集合执行 ensure
+- **AND** `all` 保持全量 ensure
+- **AND** `none` 仅执行布局初始化、状态刷新与报告落盘
+
 ### Requirement: 系统 MUST 提供可选清理策略的跨平台卸载脚本
 系统 MUST 提供 Linux/macOS 与 Windows 两套卸载脚本，支持默认清理缓存/发布目录，并按选项清理 data 与 agent home。
 
@@ -206,6 +217,12 @@
 - **THEN** 系统执行与 `agent_manager --ensure` 一致的引擎安装检查
 - **AND** 单引擎安装失败时返回可继续结果并落盘诊断信息
 
+#### Scenario: bootstrap diagnostics record requested and skipped engines
+- **WHEN** 用户执行 `skill-runnerctl bootstrap --json`
+- **THEN** 诊断报告包含 `summary.requested_engines`
+- **AND** 包含 `summary.skipped_engines`
+- **AND** 包含 `summary.resolved_mode`
+
 ### Requirement: release 安装器 MUST 自动执行 bootstrap 且失败仅告警
 系统 MUST 在 release 安装器解压后自动执行一次 bootstrap；bootstrap 非零返回 MUST 仅告警，不阻断安装完成态。
 
@@ -213,6 +230,11 @@
 - **WHEN** 安装器自动执行 bootstrap 且命令返回非零
 - **THEN** 安装器输出明确 warning 与排障指引
 - **AND** 安装流程保持完成态（不回滚已解压内容）
+
+#### Scenario: installer bootstrap defaults to opencode and codex
+- **WHEN** 安装器自动执行 bootstrap 且未显式覆盖 engine 集合
+- **THEN** 默认仅 ensure `opencode,codex`
+- **AND** 其余 engine 保持未安装态直到后续显式 bootstrap/install
 
 ### Requirement: 发布/本地部署链路 MUST 在 uv run 前注入 runtime profile 环境
 系统在发布/本地部署链路中调用 `uv run` 前 MUST 注入 runtime profile 关键环境，包括 `UV_CACHE_DIR` 与 `UV_PROJECT_ENVIRONMENT`，避免解压目录生成漂移 `.venv`。
@@ -320,4 +342,3 @@
 - **WHEN** 服务初始化并发管理组件
 - **THEN** 启动流程 MUST fail fast with actionable error
 - **AND** 系统 MUST NOT silently fallback to fixed hard-cap concurrency
-

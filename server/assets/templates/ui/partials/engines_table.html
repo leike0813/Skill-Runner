@@ -36,7 +36,13 @@
                 >
                     <input type="hidden" name="mode" value="single">
                     <input type="hidden" name="engine" value="{{ row.engine }}">
-                    <button class="btn btn-primary" type="submit">{{ t("ui.engines.table.upgrade", default="升级") }}</button>
+                    <button class="btn btn-primary" type="submit">
+                        {% if row.managed_present %}
+                        {{ t("ui.engines.table.upgrade", default="升级") }}
+                        {% else %}
+                        {{ t("ui.engines.table.install", default="安装") }}
+                        {% endif %}
+                    </button>
                 </form>
                 {% if ttyd_available %}
                 <button class="btn btn-primary" type="button" data-engine-start="{{ row.engine }}">{{ t("ui.engines.table.start_tui", default="启动TUI") }}</button>

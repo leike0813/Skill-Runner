@@ -9,6 +9,16 @@
 - **THEN** `ensure/upgrade` 逻辑仍按 managed 缺失处理
 - **AND** 安装目标为 managed prefix
 
+#### Scenario: single task installs when managed engine missing
+- **WHEN** 客户端创建 `mode=single` 的 engine 任务且目标 engine 在 managed prefix 下不存在
+- **THEN** 系统执行 single-engine ensure/install
+- **AND** 任务结果显式标记 `action=install`
+
+#### Scenario: single task upgrades when managed engine exists
+- **WHEN** 客户端创建 `mode=single` 的 engine 任务且目标 engine 已在 managed prefix 下存在
+- **THEN** 系统执行现有 single-engine upgrade
+- **AND** 任务结果显式标记 `action=upgrade`
+
 ### Requirement: 系统 MUST 提供升级任务状态查询接口
 系统 MUST 提供按 `request_id` 查询升级任务状态的接口。
 
@@ -24,6 +34,11 @@
 - **WHEN** 某 engine 安装到 managed prefix 失败
 - **THEN** 返回该 engine 的 `status=failed`
 - **AND** `stderr` 中包含安装失败上下文
+
+#### Scenario: single-engine task result distinguishes action type
+- **WHEN** 客户端查询单 engine 任务结果
+- **THEN** per-engine 结果除 `status/stdout/stderr/error` 外还包含 `action`
+- **AND** `action` 值为 `install` 或 `upgrade`
 
 ### Requirement: 系统 MUST 限制同一时刻仅一个升级任务
 系统 MUST 保证同一时刻只有一个升级任务处于 running 状态。
@@ -91,4 +106,3 @@
 #### Scenario: opencode snapshots 写入被拒绝
 - **WHEN** 客户端请求 `POST /v1/engines/opencode/models/snapshots`
 - **THEN** 系统返回不支持手工快照写入的明确错误
-

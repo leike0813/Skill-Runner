@@ -35,7 +35,15 @@ def test_ensure_with_diagnostics_reports_partial_failure() -> None:
             self._managed = {"codex": Path("/managed/codex"), "gemini": None}
 
         def supported_engines(self):
-            return ["codex", "gemini"]
+            return ["codex", "gemini", "iflow", "opencode"]
+
+        def resolve_bootstrap_targets(self, engine_spec=None):
+            assert engine_spec is None
+            return {
+                "requested_engines": ["opencode", "codex"],
+                "skipped_engines": ["gemini", "iflow"],
+                "resolved_mode": "subset",
+            }
 
         def resolve_managed_engine_command(self, engine: str):
             return self._managed.get(engine)
@@ -51,11 +59,52 @@ def test_ensure_with_diagnostics_reports_partial_failure() -> None:
 
     report = module._ensure_with_diagnostics(FakeManager())
     assert report["summary"]["outcome"] == "partial_failure"
-    assert report["summary"]["failed_engines"] == ["gemini"]
+    assert report["summary"]["requested_engines"] == ["opencode", "codex"]
+    assert report["summary"]["skipped_engines"] == ["gemini", "iflow"]
+    assert report["summary"]["resolved_mode"] == "subset"
+    assert report["summary"]["failed_engines"] == ["opencode"]
     assert report["opencode_warmup"]["attempted"] is False
     codex = report["engines"]["codex"]
-    gemini = report["engines"]["gemini"]
+    opencode = report["engines"]["opencode"]
     assert codex["outcome"] == "already_present"
+    assert opencode["outcome"] == "install_failed"
+    assert "abc" not in opencode["stderr_summary"]
+    assert "token=***" in opencode["stderr_summary"]
+
+
+def test_ensure_with_diagnostics_honors_explicit_engine_subset() -> None:
+    module = _load_agent_manager_module()
+
+    class FakeManager:
+        def supported_engines(self):
+            return ["codex", "gemini", "iflow", "opencode"]
+
+        def resolve_bootstrap_targets(self, engine_spec=None):
+            assert engine_spec == "gemini"
+            return {
+                "requested_engines": ["gemini"],
+                "skipped_engines": ["codex", "iflow", "opencode"],
+                "resolved_mode": "subset",
+            }
+
+        def resolve_managed_engine_command(self, engine: str):
+            return None
+
+        def engine_package(self, engine: str) -> str:
+            return f"{engine}-pkg"
+
+        def install_package(self, package: str) -> CommandResult:
+            return CommandResult(returncode=1, stdout="", stderr=f"{package} token=abc fail")
+
+        def resolve_engine_command(self, engine: str):  # noqa: ARG002
+            return None
+
+    report = module._ensure_with_diagnostics(FakeManager(), "gemini")
+    assert report["summary"]["requested_engines"] == ["gemini"]
+    assert report["summary"]["skipped_engines"] == ["codex", "iflow", "opencode"]
+    assert report["summary"]["resolved_mode"] == "subset"
+    assert report["summary"]["failed_engines"] == ["gemini"]
+    gemini = report["engines"]["gemini"]
     assert gemini["outcome"] == "install_failed"
     assert "abc" not in gemini["stderr_summary"]
     assert "token=***" in gemini["stderr_summary"]
@@ -70,6 +119,14 @@ def test_ensure_with_diagnostics_opencode_warmup_failure_is_warning_only(monkeyp
 
         def supported_engines(self):
             return ["opencode"]
+
+        def resolve_bootstrap_targets(self, engine_spec=None):
+            assert engine_spec is None
+            return {
+                "requested_engines": ["opencode"],
+                "skipped_engines": [],
+                "resolved_mode": "subset",
+            }
 
         def resolve_managed_engine_command(self, engine: str):  # noqa: ARG002
             return Path("/managed/opencode")

@@ -414,6 +414,7 @@ def _with_engine_status_rows(rows: list[dict[str, object]]) -> list[dict[str, ob
         status = snapshot.get(engine)
         present = bool(getattr(status, "present", False))
         version = getattr(status, "version", None)
+        item["managed_present"] = present
         item["status_level"] = _engine_status_level(present=present, version=version)
         enriched.append(item)
     return enriched

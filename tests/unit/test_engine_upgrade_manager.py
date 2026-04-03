@@ -49,12 +49,13 @@ async def test_run_task_single_success(tmp_path, monkeypatch):
     manager._running_request_id = "req-1"  # type: ignore[attr-defined]
     refreshed_engines: list[str] = []
 
-    async def _fake_run(_engine: str):
-        return {"status": "succeeded", "stdout": "ok", "stderr": "", "error": None}
+    async def _fake_run(_engine: str, *, mode: str):
+        assert mode == "single"
+        return {"status": "succeeded", "action": "upgrade", "stdout": "ok", "stderr": "", "error": None}
     async def _noop_refresh_status(_engine: str):
         return None
 
-    monkeypatch.setattr(manager, "_run_single_engine_upgrade", _fake_run)
+    monkeypatch.setattr(manager, "_run_single_engine_task", _fake_run)
     monkeypatch.setattr(manager, "_refresh_engine_status_cache", _noop_refresh_status)
     monkeypatch.setattr(
         "server.services.engine_management.engine_upgrade_manager.model_registry.refresh",
@@ -66,6 +67,7 @@ async def test_run_task_single_success(tmp_path, monkeypatch):
     assert record is not None
     assert record["status"] == "succeeded"
     assert record["results"]["gemini"]["status"] == "succeeded"
+    assert record["results"]["gemini"]["action"] == "upgrade"
     assert "gemini" in refreshed_engines
 
 
@@ -75,14 +77,15 @@ async def test_run_task_all_with_failure(tmp_path, monkeypatch):
     await store.create_task("req-2", "all", None)
     manager._running_request_id = "req-2"  # type: ignore[attr-defined]
 
-    async def _fake_run(engine: str):
+    async def _fake_run(engine: str, *, mode: str):
+        assert mode == "all"
         if engine == "gemini":
-            return {"status": "failed", "stdout": "", "stderr": "boom", "error": "failed"}
-        return {"status": "succeeded", "stdout": "ok", "stderr": "", "error": None}
+            return {"status": "failed", "action": "upgrade", "stdout": "", "stderr": "boom", "error": "failed"}
+        return {"status": "succeeded", "action": "upgrade", "stdout": "ok", "stderr": "", "error": None}
     async def _noop_refresh_status(_engine: str):
         return None
 
-    monkeypatch.setattr(manager, "_run_single_engine_upgrade", _fake_run)
+    monkeypatch.setattr(manager, "_run_single_engine_task", _fake_run)
     monkeypatch.setattr(manager, "_refresh_engine_status_cache", _noop_refresh_status)
     await manager._run_task("req-2")
 
@@ -90,3 +93,16 @@ async def test_run_task_all_with_failure(tmp_path, monkeypatch):
     assert record is not None
     assert record["status"] == "failed"
     assert record["results"]["gemini"]["status"] == "failed"
+    assert record["results"]["gemini"]["action"] == "upgrade"
+
+
+def test_single_engine_action_uses_install_when_managed_missing(tmp_path, monkeypatch):
+    manager, _store = _build_manager_with_store(tmp_path)
+    monkeypatch.setattr(manager._cli_manager, "resolve_managed_engine_command", lambda _engine: None)
+    assert manager._resolve_single_engine_action("codex") == "install"
+
+
+def test_single_engine_action_uses_upgrade_when_managed_present(tmp_path, monkeypatch):
+    manager, _store = _build_manager_with_store(tmp_path)
+    monkeypatch.setattr(manager._cli_manager, "resolve_managed_engine_command", lambda _engine: object())
+    assert manager._resolve_single_engine_action("codex") == "upgrade"

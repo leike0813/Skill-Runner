@@ -1280,7 +1280,7 @@ UI 层提供的引擎鉴权前端流程接口（代理后端 V2 Auth API）：
 ### Engine 升级状态轮询（HTML partial）
 `GET /ui/engines/upgrades/{request_id}/status`
 
-用于轮询展示升级任务状态，以及 per-engine 的 stdout/stderr/error。
+用于轮询展示升级任务状态，以及 per-engine 的 `action/stdout/stderr/error`。
 
 ### Engine 模型管理页面
 `GET /ui/engines/{engine}/models`
@@ -1707,12 +1707,17 @@ OpenCode 兼容视图说明：
   "requested_engine": null,
   "status": "failed",
   "results": {
-    "codex": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null},
-    "gemini": {"status": "failed", "stdout": "...", "stderr": "...", "error": "Upgrade command exited with code 1"},
-    "iflow": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null},
-    "opencode": {"status": "succeeded", "stdout": "...", "stderr": "", "error": null}
+    "codex": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
+    "gemini": {"status": "failed", "action": "install", "stdout": "...", "stderr": "...", "error": "Install command exited with code 1"},
+    "iflow": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
+    "opencode": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null}
   },
   "created_at": "2026-02-12T10:00:00.000000",
   "updated_at": "2026-02-12T10:00:12.000000"
 }
 ```
+
+说明：
+- 单 engine 任务在 managed prefix 缺失时，会自动走 `action=install`；
+- 单 engine 任务在 managed prefix 已存在时，走 `action=upgrade`；
+- `mode=all` 仍按升级语义处理。

@@ -206,6 +206,9 @@
       "title": "Gestion des modèles : {engine}"
     },
     "engine_upgrade": {
+      "action": "Action :",
+      "action_install": "installer",
+      "action_upgrade": "mettre à niveau",
       "error": "Erreur :",
       "error_lower": "erreur :",
       "request_id": "ID de requête :",
@@ -290,7 +293,7 @@
       "status_unknown": "Inconnu",
       "status_waiting_orchestrator": "En attente d'orchestration",
       "status_waiting_user": "En attente d'une action utilisateur",
-      "subtitle": "Consultez les versions d'engine en cache, lancez des mises à niveau et gérez les instantanés de modèles.",
+      "subtitle": "Consultez les versions d'engine en cache, installez les engines manquants, lancez des mises à niveau et gérez les instantanés de modèles.",
       "table": {
         "actions": "Actions",
         "auth_codex": "Auth (Codex)",
@@ -299,6 +302,7 @@
         "auth_opencode": "Auth (OpenCode)",
         "cli_version": "Version CLI",
         "engine": "Engine",
+        "install": "Installer",
         "models": "Modèles",
         "models_manage": "Gérer les modèles",
         "status": "Statut",

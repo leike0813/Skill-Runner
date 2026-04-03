@@ -55,6 +55,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Optional bootstrap diagnostics report path (JSON)",
     )
+    parser.add_argument(
+        "--engines",
+        type=str,
+        default="",
+        help="Comma-separated bootstrap target engines, or one of: all, none",
+    )
     return parser
 
 
@@ -182,11 +188,16 @@ def _write_auth_status(manager: AgentCliManager, status_file: Path | None) -> di
     return payload
 
 
-def _ensure_with_diagnostics(manager: AgentCliManager) -> dict[str, Any]:
+def _ensure_with_diagnostics(manager: AgentCliManager, engine_spec: str | None = None) -> dict[str, Any]:
     engines_payload: dict[str, Any] = {}
     failed_engines: list[str] = []
     started_at = time.perf_counter()
-    for engine in manager.supported_engines():
+    targets = manager.resolve_bootstrap_targets(engine_spec)
+    requested_engines = list(targets["requested_engines"])
+    skipped_engines = list(targets["skipped_engines"])
+    resolved_mode = str(targets["resolved_mode"])
+
+    for engine in requested_engines:
         engine_started_at = time.perf_counter()
         managed_before = manager.resolve_managed_engine_command(engine)
         payload: dict[str, Any] = {
@@ -254,12 +265,26 @@ def _ensure_with_diagnostics(manager: AgentCliManager) -> dict[str, Any]:
         total_duration_ms,
         ",".join(failed_engines) if failed_engines else "none",
     )
-    opencode_warmup = _run_opencode_warmup(manager)
+    opencode_warmup = (
+        _run_opencode_warmup(manager)
+        if "opencode" in requested_engines
+        else {
+            "attempted": False,
+            "outcome": "skipped_not_requested",
+            "returncode": None,
+            "duration_ms": 0,
+            "stderr_summary": "",
+            "stdout_summary": "",
+        }
+    )
     return {
         "generated_at": _utc_now_iso(),
         "summary": {
             "outcome": outcome,
-            "engines_total": len(manager.supported_engines()),
+            "engines_total": len(requested_engines),
+            "requested_engines": requested_engines,
+            "skipped_engines": skipped_engines,
+            "resolved_mode": resolved_mode,
             "failed_engines": failed_engines,
             "total_duration_ms": total_duration_ms,
         },
@@ -282,7 +307,11 @@ def main() -> int:
         return 0
 
     if args.ensure:
-        report_payload = _ensure_with_diagnostics(manager)
+        try:
+            report_payload = _ensure_with_diagnostics(manager, args.engines or None)
+        except ValueError as exc:
+            logger.error(str(exc))
+            return 2
         _write_bootstrap_report(bootstrap_report_file, report_payload)
     elif args.upgrade:
         results = manager.upgrade_all()

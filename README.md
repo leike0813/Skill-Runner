@@ -225,9 +225,10 @@ Skill Runner provides multiple authentication methods, from fully managed to man
 The preferred approach — authenticate engines through the built-in OAuth Proxy in the Admin UI (`/ui/engines`):
 
 1. Open the engine management page.
-2. Select an engine and choose **OAuth Proxy** as the auth method.
-3. Complete the browser-based OAuth flow.
-4. Credentials are automatically stored and managed.
+2. If the target engine is not installed yet, use the same per-engine action button to install it first.
+3. Select an engine and choose **OAuth Proxy** as the auth method.
+4. Complete the browser-based OAuth flow.
+5. Credentials are automatically stored and managed.
 
 This also works during active runs: if an engine requires authentication mid-execution, the frontend can present an **in-session auth challenge** — the run pauses, the user completes OAuth, and execution resumes automatically.
 

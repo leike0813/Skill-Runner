@@ -50,3 +50,36 @@ def test_bootstrap_returns_continue_result_for_partial_failure(monkeypatch, caps
     assert "partial_failure" in captured.err
     assert payload["bootstrap_report_file"].endswith("agent_bootstrap_report.json")
     assert "--bootstrap-report-file" in payload["command"]
+    assert "--engines" not in payload["command"]
+
+
+def test_bootstrap_forwards_explicit_engine_subset(monkeypatch, capsys, tmp_path: Path) -> None:
+    module = _load_skill_runnerctl_module()
+
+    profile = SimpleNamespace(mode="local", data_dir=tmp_path)
+    monkeypatch.setattr(module, "_runtime_env", lambda: (profile, {"PATH": "fake"}))
+    monkeypatch.setattr(
+        module,
+        "_runtime_dependency_checks",
+        lambda: {"uv": True, "node": True, "npm": True},
+    )
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+
+        def wait(self) -> int:
+            return self.returncode
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())  # noqa: ARG005
+
+    exit_code = module.main(["bootstrap", "--engines", "gemini", "--json"])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out.strip())
+    assert payload["requested_bootstrap_engines"] == "gemini"
+    assert "--engines" in payload["command"]
+    assert "gemini" in payload["command"]

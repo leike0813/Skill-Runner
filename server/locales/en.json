@@ -215,6 +215,9 @@
       "title": "Model Management: {engine}"
     },
     "engine_upgrade": {
+      "action": "Action:",
+      "action_install": "install",
+      "action_upgrade": "upgrade",
       "error": "Error:",
       "error_lower": "error:",
       "request_id": "Request ID:",
@@ -299,7 +302,7 @@
       "status_unknown": "Unknown",
       "status_waiting_orchestrator": "Waiting for orchestration",
       "status_waiting_user": "Waiting for user action",
-      "subtitle": "View cached engine versions, trigger upgrades, and manage model snapshots.",
+      "subtitle": "View cached engine versions, install missing engines, trigger upgrades, and manage model snapshots.",
       "table": {
         "actions": "Actions",
         "auth_codex": "Auth (Codex)",
@@ -308,6 +311,7 @@
         "auth_opencode": "Auth (OpenCode)",
         "cli_version": "CLI Version",
         "engine": "Engine",
+        "install": "Install",
         "models": "Models",
         "models_manage": "Manage Models",
         "status": "Status",

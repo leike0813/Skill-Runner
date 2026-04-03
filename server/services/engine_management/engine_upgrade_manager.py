@@ -10,6 +10,7 @@ import sys
 
 from server.config import config
 from server.models import EngineUpgradeTaskStatus
+from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.model_registry import model_registry
 from server.services.engine_management.engine_status_cache_service import engine_status_cache_service
 from server.services.engine_management.engine_upgrade_store import engine_upgrade_store
@@ -36,6 +37,7 @@ class EngineUpgradeManager:
         self._state_lock = threading.Lock()
         self._running_request_id: Optional[str] = None
         self._script_path = Path(config.SYSTEM.ROOT) / "scripts" / "agent_manager.py"
+        self._cli_manager = AgentCliManager()
 
     async def create_task(self, mode: str, requested_engine: Optional[str]) -> str:
         normalized_mode = mode.strip().lower()
@@ -81,7 +83,7 @@ class EngineUpgradeManager:
 
         try:
             for engine in engines:
-                results[engine] = await self._run_single_engine_upgrade(engine)
+                results[engine] = await self._run_single_engine_task(engine, mode=mode)
                 if results[engine]["status"] == "succeeded":
                     await self._refresh_engine_status_cache(engine)
                     self._refresh_engine_model_registry(engine)
@@ -108,9 +110,17 @@ class EngineUpgradeManager:
             return [requested_engine]
         return list(self.SUPPORTED_ENGINES)
 
-    async def _run_single_engine_upgrade(self, engine: str) -> Dict[str, Optional[str]]:
+    def _resolve_single_engine_action(self, engine: str) -> str:
+        managed_cmd = self._cli_manager.resolve_managed_engine_command(engine)
+        return "upgrade" if managed_cmd is not None else "install"
+
+    async def _run_single_engine_task(self, engine: str, *, mode: str) -> Dict[str, Optional[str]]:
+        action = "upgrade" if mode == "all" else self._resolve_single_engine_action(engine)
         profile = get_runtime_profile()
-        cmd = [sys.executable, str(self._script_path), "--upgrade-engine", engine]
+        if action == "install":
+            cmd = [sys.executable, str(self._script_path), "--ensure", "--engines", engine]
+        else:
+            cmd = [sys.executable, str(self._script_path), "--upgrade-engine", engine]
         env = profile.build_subprocess_env(os.environ.copy())
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -126,20 +136,23 @@ class EngineUpgradeManager:
             if proc.returncode == 0:
                 return {
                     "status": "succeeded",
+                    "action": action,
                     "stdout": stdout,
                     "stderr": stderr,
                     "error": None,
                 }
             return {
                 "status": "failed",
+                "action": action,
                 "stdout": stdout,
                 "stderr": stderr,
-                "error": f"Upgrade command exited with code {proc.returncode}",
+                "error": f"{action.capitalize()} command exited with code {proc.returncode}",
             }
         except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError) as exc:
-            logger.exception("Engine upgrade execution failed for %s", engine)
+            logger.exception("Engine %s execution failed for %s", action, engine)
             return {
                 "status": "failed",
+                "action": action,
                 "stdout": "",
                 "stderr": "",
                 "error": str(exc),

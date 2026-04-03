@@ -300,7 +300,7 @@ def _forward_stream_to_stderr(stream: Any, sink: Any, collector: list[str]) -> N
             pass
 
 
-def _run_agent_bootstrap(profile: Any, env: dict[str, str]) -> dict[str, Any]:
+def _run_agent_bootstrap(profile: Any, env: dict[str, str], engines_spec: str | None = None) -> dict[str, Any]:
     report_path = profile.data_dir / "agent_bootstrap_report.json"
     ensure_cmd = [
         "uv",
@@ -311,6 +311,8 @@ def _run_agent_bootstrap(profile: Any, env: dict[str, str]) -> dict[str, Any]:
         "--bootstrap-report-file",
         str(report_path),
     ]
+    if isinstance(engines_spec, str) and engines_spec.strip():
+        ensure_cmd.extend(["--engines", engines_spec.strip()])
     try:
         proc = subprocess.Popen(
             ensure_cmd,
@@ -393,8 +395,10 @@ def _run_bootstrap_command(
             },
             as_json=args.json,
         )
-    payload = _run_agent_bootstrap(profile, env)
+    requested_engines = str(getattr(args, "engines", "") or "").strip()
+    payload = _run_agent_bootstrap(profile, env, requested_engines or None)
     payload["checks"] = checks
+    payload["requested_bootstrap_engines"] = requested_engines or None
     payload["message"] = success_message if payload["ok"] else failure_message
     return _emit(payload, as_json=args.json)
 
@@ -1152,6 +1156,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     install = sub.add_parser("install", help="Install/ensure local runtime prerequisites")
+    install.add_argument("--engines", default="", help="Comma-separated bootstrap target engines, or one of: all, none")
     install.add_argument("--json", action="store_true", help="Output JSON")
     install.set_defaults(func=_cmd_install)
 
@@ -1187,6 +1192,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(func=_cmd_doctor)
 
     bootstrap = sub.add_parser("bootstrap", help="Run startup bootstrap (same strategy as ensure)")
+    bootstrap.add_argument("--engines", default="", help="Comma-separated bootstrap target engines, or one of: all, none")
     bootstrap.add_argument("--json", action="store_true", help="Output JSON")
     bootstrap.set_defaults(func=_cmd_bootstrap)
     return parser

@@ -757,7 +757,7 @@ async def test_ui_engines_table_partial(monkeypatch):
         "server.routers.ui.engine_status_cache_service.get_snapshot",
         lambda: {
             "codex": SimpleNamespace(present=True, version="0.89.0"),
-            "iflow": SimpleNamespace(present=True, version=""),
+            "iflow": SimpleNamespace(present=False, version=""),
         },
     )
 
@@ -777,8 +777,9 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert ("Auth (iFlow)" in response.text) or ("鉴权(iFlow)" in response.text)
     assert "启动TUI" in response.text
     assert "升级" in response.text
+    assert "安装" in response.text or "Install" in response.text
     assert "health-led-healthy" in response.text
-    assert "health-led-warning" in response.text
+    assert "health-led-error" in response.text
     assert 'data-engine-auth-start=' not in response.text
 
 
@@ -1116,7 +1117,7 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
         AsyncMock(return_value={
             "status": "running",
             "results": {
-                "gemini": {"status": "succeeded", "stdout": "ok", "stderr": "", "error": None}
+                "gemini": {"status": "succeeded", "action": "install", "stdout": "ok", "stderr": "", "error": None}
             },
         }),
     )
@@ -1126,6 +1127,7 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
     assert "请求 ID：" in response.text
     assert "gemini" in response.text
     assert "stdout" in response.text
+    assert "安装" in response.text or "install" in response.text
 
 
 @pytest.mark.asyncio

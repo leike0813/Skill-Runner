@@ -206,6 +206,9 @@
       "title": "モデル管理: {engine}"
     },
     "engine_upgrade": {
+      "action": "操作:",
+      "action_install": "インストール",
+      "action_upgrade": "アップグレード",
       "error": "エラー:",
       "error_lower": "エラー:",
       "request_id": "リクエスト ID:",
@@ -290,7 +293,7 @@
       "status_unknown": "不明",
       "status_waiting_orchestrator": "オーケストレーション待ち",
       "status_waiting_user": "ユーザー操作待ち",
-      "subtitle": "キャッシュされた engine バージョンを確認し、アップグレードの実行とモデルスナップショットの管理を行います。",
+      "subtitle": "キャッシュされた engine バージョンを確認し、未インストールの engine を導入し、アップグレードの実行とモデルスナップショットの管理を行います。",
       "table": {
         "actions": "操作",
         "auth_codex": "Auth (Codex)",
@@ -299,6 +302,7 @@
         "auth_opencode": "Auth (OpenCode)",
         "cli_version": "CLI バージョン",
         "engine": "Engine",
+        "install": "インストール",
         "models": "モデル",
         "models_manage": "モデル管理",
         "status": "状態",

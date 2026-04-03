@@ -17,7 +17,13 @@
     <div style="margin-top:10px;">
         {% for engine, result in results.items() %}
         <div style="border-top:1px solid #e5e7eb; padding-top:8px; margin-top:8px;">
-            <div><strong>{{ engine }}</strong> — {{ result.status }}</div>
+            <div>
+                <strong>{{ engine }}</strong>
+                {% if result.action %}
+                — {{ t("ui.engine_upgrade.action", default="Action:") }} {{ t("ui.engine_upgrade.action_" ~ result.action, default=result.action) }}
+                {% endif %}
+                — {{ result.status }}
+            </div>
             {% if result.error %}
             <div style="color:#b91c1c; margin-top:4px;"><strong>{{ t("ui.engine_upgrade.error_lower", default="error:") }}</strong> {{ result.error }}</div>
             {% endif %}

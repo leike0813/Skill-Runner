@@ -1,0 +1,8 @@
+- [x] 扩展 `agent_manager.py --ensure` 支持 engine 子集解析与报告输出
+- [x] 在 `AgentCliManager` 中收敛 bootstrap target 解析逻辑
+- [x] 扩展 `skill-runnerctl bootstrap/install` 支持 `--engines`
+- [x] 调整 release installer 与 container entrypoint 的默认 bootstrap 集合
+- [x] 扩展 engine upgrade 任务域支持 single-engine install-or-upgrade
+- [x] 更新管理 UI engine 表格与升级状态面板
+- [x] 补充脚本、manager、UI、upgrade manager 回归测试
+- [x] 更新插件契约与容器化文档

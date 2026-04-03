@@ -215,6 +215,9 @@
       "title": "模型管理：{engine}"
     },
     "engine_upgrade": {
+      "action": "动作：",
+      "action_install": "安装",
+      "action_upgrade": "升级",
       "error": "错误：",
       "error_lower": "错误：",
       "request_id": "请求 ID：",
@@ -299,7 +302,7 @@
       "status_unknown": "未知",
       "status_waiting_orchestrator": "后台编排中",
       "status_waiting_user": "等待用户操作",
-      "subtitle": "查看缓存化的 Engine 版本、触发升级、管理 Model Manifest。",
+      "subtitle": "查看缓存化的 Engine 版本、安装缺失引擎、触发升级、管理 Model Manifest。",
       "table": {
         "actions": "操作",
         "auth_codex": "鉴权(Codex)",
@@ -308,6 +311,7 @@
         "auth_opencode": "鉴权(OpenCode)",
         "cli_version": "CLI 版本",
         "engine": "引擎",
+        "install": "安装",
         "models": "模型",
         "models_manage": "模型管理",
         "status": "状态",

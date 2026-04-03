@@ -13,6 +13,7 @@
   - `skill-runner-<version>.tar.gz`
   - `skill-runner-<version>.tar.gz.sha256`
 - 安装器在解压后会自动执行一次 `skill-runnerctl bootstrap --json`。
+- 若未显式指定 engine 集合，默认仅预装 `opencode,codex`。
 - `bootstrap` 非零时安装器仅告警，不回滚已解压内容；插件应读取诊断报告并给出可见提示。
 - 安装器支持机器可读输出：
   - Linux/macOS: `scripts/skill-runner-install.sh --version <tag> --json`
@@ -75,8 +76,11 @@
 
 公共说明：
 - 二者语义一致，均执行 `agent_manager.py --ensure --bootstrap-report-file <data_dir>/agent_bootstrap_report.json`。
+- 支持可选 `--engines <csv|all|none>`。
+- 未显式传入 `--engines` 时，默认仅 ensure `opencode,codex`。
 - 输出字段基线：
   - `ok`, `exit_code`, `mode`, `command`, `bootstrap_report_file`, `stdout`, `stderr`, `checks`, `message`
+  - `requested_bootstrap_engines`
 
 分支：
 
@@ -261,6 +265,7 @@ warning（可继续）：
 ## 3) Bootstrap/Ensure 语义
 
 - `bootstrap/install` 内部执行 `agent_manager.py --ensure`，行为与 ensure 保持一致。
+- 默认 target set 为 `opencode,codex`；其他 engine 需显式再次执行 `bootstrap/install --engines <engine>`。
 - 引擎级失败会写入诊断报告 `summary.outcome=partial_failure`，但整体进程可返回成功并继续启动链路。
 - `bootstrap/install` 阶段会在 OpenCode CLI 可用时执行一次 `opencode models` 预热（失败仅告警，不阻断后续 `up`）。
 - 诊断报告默认路径：`${SKILL_RUNNER_DATA_DIR}/agent_bootstrap_report.json`。
@@ -343,3 +348,4 @@ JSON 输出字段：
 - `up` 返回非零：插件应执行 `status + doctor` 作为诊断回退，并记录结果用于排查。
 - `bootstrap/install` 返回非零：视为硬失败（依赖缺失或启动前置失败），插件应中止自动启动并提示用户修复环境。
 - `bootstrap/install` 返回零但报告为 `partial_failure`：插件可继续 `up`，同时展示“部分引擎未就绪”警告与报告摘要。
+- 插件若后续需要其他未预装 engine，应先显式调用 `skill-runnerctl bootstrap --engines <engine> --json`。

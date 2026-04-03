@@ -16,6 +16,16 @@
 - **WHEN** 用户点击某引擎的升级按钮
 - **THEN** UI 创建单引擎升级任务并展示任务状态
 
+#### Scenario: upgrade button is reused as install for missing engine
+- **WHEN** 某 engine 在 managed prefix 下未安装
+- **THEN** 表格中的现有单 engine 升级按钮文案显示为“安装”
+- **AND** 点击后复用现有任务通道执行单 engine install
+
+#### Scenario: installed engine keeps upgrade action
+- **WHEN** 某 engine 已在 managed prefix 下安装
+- **THEN** 同一按钮文案显示为“升级”
+- **AND** 点击后执行现有 single-engine upgrade
+
 #### Scenario: 点击全部升级
 - **WHEN** 用户点击“升级全部”
 - **THEN** UI 创建全引擎升级任务并展示任务状态
@@ -27,6 +37,11 @@
 - **WHEN** 升级任务进入 `succeeded` 或 `failed`
 - **THEN** UI 显示每个引擎的执行结果
 - **AND** 显示 per-engine stdout/stderr
+
+#### Scenario: task status panel shows actual action type
+- **WHEN** UI 展示单 engine 任务状态
+- **THEN** 状态面板显示该 engine 本次动作是 `install` 或 `upgrade`
+- **AND** 不得把 install 误标为 upgrade
 
 ### Requirement: Engine 升级管理 MUST 受 Basic Auth 保护
 当 UI Basic Auth 启用时，Engine 管理页面与升级接口 MUST 需要认证。
@@ -655,4 +670,3 @@ Run Detail 在 run 进入 terminal 后，RASP 面板 MUST 以 audit 结果为最
 - **THEN** `present=true` 且 `version` 非空显示绿灯
 - **AND** `present=true` 且 `version` 为空显示黄灯
 - **AND** `present=false` 显示红灯
-
