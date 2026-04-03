@@ -17,7 +17,7 @@ class RunFilesystemSnapshotService:
         self._ignored_files = self._build_ignored_files()
 
     def _build_ignored_prefixes(self) -> tuple[str, ...]:
-        ignored = {".audit/", ".state/"}
+        ignored = {".audit/", ".state/", ".git/"}
         for engine in keys.ENGINE_KEYS:
             profile_path = (
                 Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "adapter" / "adapter_profile.json"

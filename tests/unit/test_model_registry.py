@@ -310,3 +310,46 @@ def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_pat
 
     with pytest.raises(ValueError, match="CLI version not detected"):
         registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])
+
+
+def test_claude_catalog_merges_custom_provider_models_and_marks_sources(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_custom_provider_service.list_model_entries",
+        lambda engine: [
+            type(
+                "_Entry",
+                (),
+                {
+                    "id": "openrouter/qwen-3",
+                    "display_name": "openrouter/qwen-3",
+                    "provider": "openrouter",
+                    "model": "qwen-3",
+                    "source": "custom_provider",
+                },
+            )()
+        ] if engine == "claude" else [],
+    )
+
+    catalog = registry.get_models("claude", refresh=True)
+
+    assert any(item.id == "openrouter/qwen-3" and item.source == "custom_provider" for item in catalog.models)
+    official = next(item for item in catalog.models if item.source == "official")
+    assert official.provider == "anthropic"
+    assert official.model == official.id
+
+
+def test_claude_validate_model_accepts_strict_custom_provider_spec(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+
+    payload = registry.validate_model("claude", "openrouter/qwen-3")
+
+    assert payload == {"model": "openrouter/qwen-3"}

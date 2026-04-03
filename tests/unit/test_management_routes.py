@@ -150,6 +150,84 @@ async def test_management_runtime_options_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_management_engine_custom_provider_crud(monkeypatch):
+    providers = [
+        {
+            "provider_id": "openrouter",
+            "api_key": "sk-test",
+            "base_url": "https://openrouter.example/v1",
+            "models": ("qwen-3",),
+        }
+    ]
+
+    monkeypatch.setattr(
+        "server.routers.management.engine_custom_provider_service.supports",
+        lambda engine: engine == "claude",
+    )
+    monkeypatch.setattr(
+        "server.routers.management.engine_custom_provider_service.list_providers",
+        lambda engine: [
+            SimpleNamespace(**item) for item in providers
+        ],
+    )
+    monkeypatch.setattr(
+        "server.routers.management.engine_custom_provider_service.upsert_provider",
+        lambda **kwargs: SimpleNamespace(
+            provider_id=kwargs["provider_id"],
+            api_key=kwargs["api_key"],
+            base_url=kwargs["base_url"],
+            models=tuple(kwargs["models"]),
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.engine_custom_provider_service.delete_provider",
+        lambda **kwargs: kwargs["provider_id"] == "openrouter",
+    )
+
+    list_res = await _request("GET", "/v1/management/engines/claude/custom-providers")
+    assert list_res.status_code == 200
+    body = list_res.json()
+    assert body["supported"] is True
+    assert body["providers"][0]["provider_id"] == "openrouter"
+    assert body["providers"][0]["models"] == ["qwen-3"]
+
+    unsupported_res = await _request("GET", "/v1/management/engines/codex/custom-providers")
+    assert unsupported_res.status_code == 200
+    assert unsupported_res.json()["supported"] is False
+
+    upsert_res = await _request(
+        "PUT",
+        "/v1/management/engines/claude/custom-providers/openrouter",
+        json={
+            "provider_id": "openrouter",
+            "api_key": "sk-next",
+            "base_url": "https://openrouter.example/v1",
+            "models": ["qwen-3", "qwen-3-plus"],
+        },
+    )
+    assert upsert_res.status_code == 200
+    upsert_body = upsert_res.json()
+    assert upsert_body["provider_id"] == "openrouter"
+    assert upsert_body["models"] == ["qwen-3", "qwen-3-plus"]
+
+    mismatch_res = await _request(
+        "PUT",
+        "/v1/management/engines/claude/custom-providers/openrouter",
+        json={
+            "provider_id": "other",
+            "api_key": "sk-next",
+            "base_url": "https://openrouter.example/v1",
+            "models": ["qwen-3"],
+        },
+    )
+    assert mismatch_res.status_code == 400
+
+    delete_res = await _request("DELETE", "/v1/management/engines/claude/custom-providers/openrouter")
+    assert delete_res.status_code == 200
+    assert delete_res.json()["deleted"] is True
+
+
+@pytest.mark.asyncio
 async def test_management_skills_list_marks_builtin_skill(monkeypatch, tmp_path: Path):
     builtin_dir = tmp_path / "skills_builtin"
     skill_dir = builtin_dir / "builtin-skill"

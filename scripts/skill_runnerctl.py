@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.services.engine_management.runtime_profile import get_runtime_profile
+from server.services.engine_management.agent_cli_manager import AgentCliManager
 
 WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 DEFAULT_SERVICE_PORT = 9813
@@ -285,6 +286,11 @@ def _runtime_dependency_checks() -> dict[str, bool]:
         "node": _command_exists("node"),
         "npm": _command_exists("npm"),
     }
+
+
+def _claude_sandbox_status(profile: Any) -> dict[str, Any]:
+    manager = AgentCliManager(profile)
+    return manager.collect_sandbox_status("claude")
 
 
 def _forward_stream_to_stderr(stream: Any, sink: Any, collector: list[str]) -> None:
@@ -604,6 +610,17 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
                 )
             )
 
+    claude_sandbox = _claude_sandbox_status(profile)
+    if claude_sandbox.get("warning_code"):
+        warnings.append(
+            _preflight_issue(
+                "claude_sandbox_dependency_missing",
+                str(claude_sandbox.get("message") or "Claude sandbox dependencies missing."),
+                missing_dependencies=list(claude_sandbox.get("missing_dependencies") or []),
+                declared_enabled=bool(claude_sandbox.get("declared_enabled")),
+            )
+        )
+
     required_file_checks: dict[str, dict[str, Any]] = {}
     for file_id, path in _preflight_required_files().items():
         exists = path.is_file()
@@ -791,6 +808,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         "message": message,
         "checks": {
             "dependencies": dependency_checks,
+            "claude_sandbox": claude_sandbox,
             "required_files": required_file_checks,
             "integrity": integrity_check,
             "port": port_check,
@@ -831,6 +849,9 @@ def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
         "port": port,
         "url": _build_service_url(host, port, "/"),
         "state_file": str(state_path),
+        "engine_checks": {
+            "claude_sandbox": _claude_sandbox_status(profile),
+        },
     }
     payload["message"] = f"Local runtime status: {status}."
     return payload
@@ -877,6 +898,9 @@ def _cmd_status_docker(args: argparse.Namespace, *, as_json: bool) -> int:
         "mode": "docker",
         "status": status,
         "detail": detail,
+        "engine_checks": {
+            "claude_sandbox": _claude_sandbox_status(get_runtime_profile()),
+        },
         "message": f"Docker runtime status: {status}.",
     }
     if proc.returncode != 0:
@@ -1118,6 +1142,7 @@ def _cmd_down(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     profile, env = _runtime_env()
+    claude_sandbox = _claude_sandbox_status(profile)
     checks = {
         "uv": _command_exists("uv"),
         "node": _command_exists("node"),
@@ -1130,6 +1155,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "exit_code": 0,
         "mode": profile.mode,
         "checks": checks,
+        "engine_checks": {
+            "claude_sandbox": claude_sandbox,
+        },
         "paths": {
             "data_dir": str(profile.data_dir),
             "agent_cache_root": str(profile.agent_cache_root),

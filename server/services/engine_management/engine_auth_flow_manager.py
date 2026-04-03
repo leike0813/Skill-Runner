@@ -31,6 +31,7 @@ from server.services.engine_management.engine_interaction_gate import (
     EngineInteractionGate,
     engine_interaction_gate,
 )
+from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
 from server.services.platform.process_supervisor import process_supervisor
 from server.services.platform.process_termination import terminate_popen_process_tree
@@ -293,6 +294,7 @@ class EngineAuthFlowManager:
         return self._engine_auth_handlers.get(engine.strip().lower())
 
     def _inject_trust_for_session(self, engine: str, session_dir: Path) -> tuple[str, Path]:
+        run_folder_git_initializer.ensure_git_repo(session_dir)
         handler = self._engine_handler_for(engine)
         requires_parent_bootstrap = False
         if handler is not None:

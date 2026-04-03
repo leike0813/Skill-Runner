@@ -1,0 +1,36 @@
+{
+  "includeGitInstructions": false,
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": [
+      "Agent",
+      "Bash",
+      "Edit",
+      "ExitPlanMode",
+      "Glob",
+      "Grep",
+      "KillShell",
+      "LSP",
+      "NotebookEdit",
+      "Read",
+      "Skill",
+      "TaskCreate",
+      "TaskGet",
+      "TaskList",
+      "TaskOutput",
+      "TaskStop",
+      "TaskUpdate",
+      "TodoWrite",
+      "ToolSearch",
+      "Write"
+    ]
+  },
+  "sandbox": {
+    "autoAllowBashIfSandboxed": false,
+    "allowUnsandboxedCommands": false
+  }
+}

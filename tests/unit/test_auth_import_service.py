@@ -129,3 +129,17 @@ def test_import_auth_files_opencode_replaces_only_selected_provider(tmp_path: Pa
     parsed = json.loads(existing_path.read_text(encoding="utf-8"))
     assert parsed["google"]["refresh"] == "google-refresh"
     assert parsed["openai"]["refresh"] == "new-openai-refresh"
+
+
+def test_get_import_spec_claude_uses_credentials_json(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+
+    spec = service.get_import_spec(engine="claude")
+
+    assert spec["engine"] == "claude"
+    assert spec["supported"] is True
+    ask_user = spec["ask_user"]
+    assert ask_user["kind"] == "upload_files"
+    assert [item["name"] for item in ask_user["files"] if item["required"] is True] == [
+        ".credentials.json",
+    ]

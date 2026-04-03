@@ -11,14 +11,17 @@ class RunFolderTrustManager:
         self,
         codex_config_path: Path | None = None,
         gemini_trusted_path: Path | None = None,
+        claude_config_path: Path | None = None,
         runs_root: Path | None = None,
     ) -> None:
         self.codex_config_path = codex_config_path
         self.gemini_trusted_path = gemini_trusted_path
+        self.claude_config_path = claude_config_path
         self.runs_root = (runs_root or Path(config.SYSTEM.RUNS_DIR)).resolve()
         self._registry = create_default_trust_registry(
             codex_config_path=self.codex_config_path,
             gemini_trusted_path=self.gemini_trusted_path,
+            claude_config_path=self.claude_config_path,
             runs_root=self.runs_root,
         )
 

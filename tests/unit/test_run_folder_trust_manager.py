@@ -51,6 +51,30 @@ def test_gemini_register_repairs_malformed_file(tmp_path):
     assert gemini_path.with_name("trustedFolders.json.bak").exists()
 
 
+def test_claude_register_and_remove_run_folder(tmp_path):
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / "run-claude"
+    run_dir.mkdir(parents=True)
+    codex_path = tmp_path / "codex" / "config.toml"
+    gemini_path = tmp_path / "gemini" / "trustedFolders.json"
+    claude_path = tmp_path / "agent_home" / ".claude.json"
+    manager = RunFolderTrustManager(
+        codex_config_path=codex_path,
+        gemini_trusted_path=gemini_path,
+        claude_config_path=claude_path,
+        runs_root=runs_root,
+    )
+
+    manager.register_run_folder("claude", run_dir)
+    payload = json.loads(claude_path.read_text(encoding="utf-8"))
+    projects = payload.get("projects", {})
+    assert projects[str(run_dir.resolve())]["hasTrustDialogAccepted"] is True
+
+    manager.remove_run_folder("claude", run_dir)
+    payload = json.loads(claude_path.read_text(encoding="utf-8"))
+    assert str(run_dir.resolve()) not in payload.get("projects", {})
+
+
 def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     runs_root = tmp_path / "runs"
     active_dir = runs_root / "run-active"
@@ -59,9 +83,11 @@ def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     stale_dir.mkdir(parents=True)
     codex_path = tmp_path / "codex" / "config.toml"
     gemini_path = tmp_path / "gemini" / "trustedFolders.json"
+    claude_path = tmp_path / "agent_home" / ".claude.json"
     manager = RunFolderTrustManager(
         codex_config_path=codex_path,
         gemini_trusted_path=gemini_path,
+        claude_config_path=claude_path,
         runs_root=runs_root,
     )
 
@@ -70,6 +96,8 @@ def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     manager.register_run_folder("codex", stale_dir)
     manager.register_run_folder("gemini", active_dir)
     manager.register_run_folder("gemini", stale_dir)
+    manager.register_run_folder("claude", active_dir)
+    manager.register_run_folder("claude", stale_dir)
 
     manager.cleanup_stale_entries([active_dir])
 
@@ -83,6 +111,12 @@ def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     assert str(active_dir.resolve()) in payload
     assert str(stale_dir.resolve()) not in payload
     assert str(runs_root.resolve()) in payload
+
+    claude_payload = json.loads(claude_path.read_text(encoding="utf-8"))
+    projects = claude_payload.get("projects", {})
+    assert str(active_dir.resolve()) in projects
+    assert str(stale_dir.resolve()) not in projects
+    assert str(runs_root.resolve()) not in projects
 
 
 def test_bootstrap_parent_trust_is_idempotent(tmp_path):
@@ -109,3 +143,24 @@ def test_bootstrap_parent_trust_is_idempotent(tmp_path):
     payload = json.loads(gemini_path.read_text(encoding="utf-8"))
     assert payload[parent_key] == "TRUST_FOLDER"
     assert len([k for k in payload if k == parent_key]) == 1
+
+
+def test_claude_register_repairs_malformed_file(tmp_path):
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / "run-d"
+    run_dir.mkdir(parents=True)
+    claude_path = tmp_path / "agent_home" / ".claude.json"
+    claude_path.parent.mkdir(parents=True, exist_ok=True)
+    claude_path.write_text("not-json", encoding="utf-8")
+    manager = RunFolderTrustManager(
+        codex_config_path=tmp_path / "codex" / "config.toml",
+        gemini_trusted_path=tmp_path / "gemini" / "trustedFolders.json",
+        claude_config_path=claude_path,
+        runs_root=runs_root,
+    )
+
+    manager.register_run_folder("claude", run_dir)
+
+    payload = json.loads(claude_path.read_text(encoding="utf-8"))
+    assert payload["projects"][str(run_dir.resolve())]["hasTrustDialogAccepted"] is True
+    assert claude_path.with_name(".claude.json.bak").exists()

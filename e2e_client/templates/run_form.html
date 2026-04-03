@@ -31,7 +31,7 @@
             <label for="provider"><strong>{{ t("client.run_form_provider", default="Provider") }}</strong></label><br>
             <select id="provider" name="provider" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 200px; background:#fff;">
             </select>
-            <div class="muted">{{ t("client.run_form_provider_hint", default="For non-opencode engines this is a fixed display value.") }}</div>
+            <div class="muted">{{ t("client.run_form_provider_hint", default="Providers are derived from the selected engine model catalog.") }}</div>
         </div>
         <div style="margin-bottom: 14px;">
             <label for="model_value"><strong>{{ t("client.run_form_model", default="Model") }}</strong></label><br>
@@ -138,7 +138,7 @@
     const selectedProvider = {{ selected_provider | tojson }};
     const selectedModel = {{ selected_model | tojson }};
     const runSource = {{ run_source | tojson }};
-    const fixedProviders = {
+    const fallbackProviders = {
         codex: "openai",
         gemini: "google",
         iflow: "iflowcn",
@@ -184,21 +184,17 @@
     function renderProviders() {
         const engine = engineSelect.value;
         const rows = normalizeRows(engine);
+        const seen = new Set();
         let providers = [];
-        if (engine === "opencode") {
-            const seen = new Set();
-            for (const row of rows) {
-                const provider = providerFromRow(row);
-                if (!provider || seen.has(provider)) continue;
-                seen.add(provider);
-                providers.push(provider);
-            }
-            providers = providers.sort();
-            if (!providers.length && selectedProvider) {
-                providers.push(selectedProvider);
-            }
-        } else {
-            const fallbackProvider = fixedProviders[engine] || engine;
+        for (const row of rows) {
+            const provider = providerFromRow(row);
+            if (!provider || seen.has(provider)) continue;
+            seen.add(provider);
+            providers.push(provider);
+        }
+        providers = providers.sort();
+        if (!providers.length) {
+            const fallbackProvider = fallbackProviders[engine] || "";
             if (fallbackProvider) {
                 providers = [fallbackProvider];
             }
@@ -238,7 +234,7 @@
         for (const row of rows) {
             const rowProvider = providerFromRow(row);
             const rowModel = modelNameFromRow(row);
-            if (engine === "opencode" && selectedProviderValue && rowProvider !== selectedProviderValue) {
+            if (selectedProviderValue && rowProvider && rowProvider !== selectedProviderValue) {
                 continue;
             }
             let modelId = typeof row.id === "string" ? row.id.trim() : "";

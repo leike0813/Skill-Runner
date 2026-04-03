@@ -3,20 +3,23 @@ from pathlib import Path
 from server.engines.common.trust_registry import create_default_trust_registry
 
 
-def test_trust_registry_resolves_codex_and_gemini_strategies(tmp_path: Path) -> None:
+def test_trust_registry_resolves_codex_gemini_and_claude_strategies(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     registry = create_default_trust_registry(
         codex_config_path=tmp_path / ".codex" / "config.toml",
         gemini_trusted_path=tmp_path / ".gemini" / "trustedFolders.json",
+        claude_config_path=tmp_path / ".claude.json",
         runs_root=runs_root,
     )
 
     codex_strategy = registry.resolve("codex")
     gemini_strategy = registry.resolve("gemini")
+    claude_strategy = registry.resolve("claude")
     noop_strategy = registry.resolve("iflow")
 
     assert codex_strategy.__class__.__name__ == "CodexTrustFolderStrategy"
     assert gemini_strategy.__class__.__name__ == "GeminiTrustFolderStrategy"
+    assert claude_strategy.__class__.__name__ == "ClaudeTrustFolderStrategy"
     assert noop_strategy.__class__.__name__ == "_NoopTrustFolderStrategy"
 
 
@@ -24,6 +27,7 @@ def test_trust_registry_noop_is_safe_for_unregistered_engine(tmp_path: Path) -> 
     registry = create_default_trust_registry(
         codex_config_path=tmp_path / ".codex" / "config.toml",
         gemini_trusted_path=tmp_path / ".gemini" / "trustedFolders.json",
+        claude_config_path=tmp_path / ".claude.json",
         runs_root=tmp_path / "runs",
     )
     strategy = registry.resolve("opencode")

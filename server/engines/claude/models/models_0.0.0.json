@@ -1,0 +1,26 @@
+{
+  "engine": "claude",
+  "version": "0.0.0",
+  "models": [
+    {
+      "id": "sonnet[1m]",
+      "display_name": "Claude Sonnet 4.6 (1M context)",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high"]
+    },
+    {
+      "id": "opus[1m]",
+      "display_name": "Claude Opus 4.6 (1M context)",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high", "max"]
+    },
+    {
+      "id": "haiku",
+      "display_name": "Claude Haiku 4.5",
+      "deprecated": false,
+      "notes": "pinned snapshot"
+    }
+  ]
+}

@@ -12,7 +12,6 @@ from server.runtime.adapter.common.run_folder_validator_common import (
     ProfiledAttemptRunFolderValidator,
 )
 from server.services.engine_management.agent_cli_manager import AgentCliManager
-from server.services.engine_management.engine_command_profile import engine_command_profile
 from .command_builder import CodexCommandBuilder
 from .config_composer import CodexConfigComposer
 from .stream_parser import CodexStreamParser
@@ -73,4 +72,4 @@ class CodexExecutionAdapter(EngineExecutionAdapter):
     def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
         if not use_profile_defaults:
             return []
-        return engine_command_profile.resolve_args(engine="codex", action=action)
+        return self.profile.resolve_command_defaults(action=action)

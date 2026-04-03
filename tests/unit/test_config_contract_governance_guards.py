@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FORBIDDEN_PATH_SNIPPETS = (
     "server/assets/configs/concurrency_policy.json",
     "server/assets/configs/engine_command_profiles.json",
+    "server/services/engine_management/engine_command_profile.py",
     "server/assets/configs/engine_auth_strategy.yaml",
     "server/assets/configs/options_policy.json",
     "server/assets/configs/system_settings.bootstrap.json",
@@ -18,6 +19,7 @@ FORBIDDEN_PATH_SNIPPETS = (
     "server/assets/auth_detection/",
     "server/assets/models/",
     "server/assets/configs/",
+    "config/command_profile.json",
     "docs/contracts/",
 )
 

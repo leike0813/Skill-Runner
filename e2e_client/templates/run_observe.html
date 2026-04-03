@@ -66,6 +66,41 @@
                 <button id="auth-import-submit" class="btn btn-primary" type="button">{{ t("client.observe_auth_import_submit", default="Import and Continue") }}</button>
             </div>
         </div>
+        <div id="auth-provider-config-panel" class="prompt-list hidden">
+            <div id="auth-provider-config-hint" style="margin-bottom: 8px;"></div>
+            <div id="auth-provider-config-actions" class="action-button-group"></div>
+            <div class="row" style="margin-top: 10px;">
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-select"><strong>{{ t("client.observe_auth_provider", default="provider:") }}</strong></label>
+                    <select id="auth-provider-select" style="width: 100%; margin-top: 4px;"></select>
+                </div>
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-model-select"><strong>{{ t("client.observe_model", default="Model:") }}</strong></label>
+                    <select id="auth-provider-model-select" style="width: 100%; margin-top: 4px;"></select>
+                </div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-id-input"><strong>{{ t("client.observe_provider_id", default="Provider ID") }}</strong></label>
+                    <input id="auth-provider-id-input" type="text" style="width: 100%; margin-top: 4px;" />
+                </div>
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-api-key-input"><strong>{{ t("client.observe_api_key", default="API Key") }}</strong></label>
+                    <input id="auth-provider-api-key-input" type="password" style="width: 100%; margin-top: 4px;" />
+                </div>
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-base-url-input"><strong>{{ t("client.observe_base_url", default="Base URL") }}</strong></label>
+                    <input id="auth-provider-base-url-input" type="text" style="width: 100%; margin-top: 4px;" />
+                </div>
+                <div style="flex: 1 1 220px;">
+                    <label for="auth-provider-model-input"><strong>{{ t("client.observe_model", default="Model:") }}</strong></label>
+                    <input id="auth-provider-model-input" type="text" style="width: 100%; margin-top: 4px;" />
+                </div>
+            </div>
+            <div style="margin-top: 8px;">
+                <button id="auth-provider-config-submit" class="btn btn-primary" type="button">{{ t("client.observe_submit_auth", default="Submit Auth") }}</button>
+            </div>
+        </div>
     </div>
 
     <form id="reply-form" class="reply-box">
@@ -550,6 +585,14 @@
         fileReadFailedHttpPrefix: {{ t("client.observe_file_read_failed_http", default="Read failed: HTTP") | tojson }},
         showFiles: {{ t("client.observe_show_files", default="Show Files") | tojson }},
         hideFiles: {{ t("client.observe_hide_files", default="Hide Files") | tojson }},
+        authProviderConfigSubmit: {{ t("client.observe_auth_provider_config_submit", default="Save and Retry") | tojson }},
+        authProviderConfigSelectAction: {{ t("client.observe_auth_provider_config_select_action", default="Choose an action below, then fill the relevant fields.") | tojson }},
+        authProviderConfigMissingAction: {{ t("client.observe_auth_provider_config_missing_action", default="Choose a custom provider action first.") | tojson }},
+        authProviderConfigMissingProvider: {{ t("client.observe_auth_provider_config_missing_provider", default="Provider is required.") | tojson }},
+        authProviderConfigMissingModel: {{ t("client.observe_auth_provider_config_missing_model", default="Model is required.") | tojson }},
+        authProviderConfigMissingApiKey: {{ t("client.observe_auth_provider_config_missing_api_key", default="API key is required.") | tojson }},
+        authProviderConfigMissingBaseUrl: {{ t("client.observe_auth_provider_config_missing_base_url", default="Base URL is required.") | tojson }},
+        authProviderConfigNoProviders: {{ t("client.observe_auth_provider_config_no_providers", default="No configured providers") | tojson }},
     };
     const requestId = "{{ request_id }}";
     const statusEl = document.getElementById("run-status");
@@ -592,6 +635,16 @@
     const authImportRiskEl = document.getElementById("auth-import-risk");
     const authImportFilesEl = document.getElementById("auth-import-files");
     const authImportSubmitEl = document.getElementById("auth-import-submit");
+    const authProviderConfigPanelEl = document.getElementById("auth-provider-config-panel");
+    const authProviderConfigHintEl = document.getElementById("auth-provider-config-hint");
+    const authProviderConfigActionsEl = document.getElementById("auth-provider-config-actions");
+    const authProviderSelectEl = document.getElementById("auth-provider-select");
+    const authProviderModelSelectEl = document.getElementById("auth-provider-model-select");
+    const authProviderIdInputEl = document.getElementById("auth-provider-id-input");
+    const authProviderApiKeyInputEl = document.getElementById("auth-provider-api-key-input");
+    const authProviderBaseUrlInputEl = document.getElementById("auth-provider-base-url-input");
+    const authProviderModelInputEl = document.getElementById("auth-provider-model-input");
+    const authProviderConfigSubmitEl = document.getElementById("auth-provider-config-submit");
     const fileTreeToggleEl = document.getElementById("file-tree-toggle");
     const fileTreeSectionEl = document.getElementById("file-tree-section");
     const fileTreePanelEl = document.getElementById("file-tree-panel");
@@ -631,6 +684,7 @@
     let waitingAuthWatchdogTimer = null;
     let waitingAuthWatchdogInFlight = false;
     let currentAuthImportSpec = null;
+    let currentAuthProviderConfigState = null;
 
     function apiUrl(path) {
         return path;
@@ -776,6 +830,26 @@
         }
     }
 
+    function clearAuthProviderConfigPanel() {
+        currentAuthProviderConfigState = null;
+        if (authProviderConfigPanelEl) authProviderConfigPanelEl.classList.add("hidden");
+        if (authProviderConfigHintEl) authProviderConfigHintEl.textContent = "";
+        if (authProviderConfigActionsEl) {
+            authProviderConfigActionsEl.innerHTML = "";
+            authProviderConfigActionsEl.classList.add("hidden");
+        }
+        if (authProviderSelectEl) authProviderSelectEl.innerHTML = "";
+        if (authProviderModelSelectEl) authProviderModelSelectEl.innerHTML = "";
+        if (authProviderIdInputEl) authProviderIdInputEl.value = "";
+        if (authProviderApiKeyInputEl) authProviderApiKeyInputEl.value = "";
+        if (authProviderBaseUrlInputEl) authProviderBaseUrlInputEl.value = "";
+        if (authProviderModelInputEl) authProviderModelInputEl.value = "";
+        if (authProviderConfigSubmitEl) {
+            authProviderConfigSubmitEl.disabled = false;
+            authProviderConfigSubmitEl.textContent = I18N.authProviderConfigSubmit;
+        }
+    }
+
     function renderAuthImportPanel(payload, hintText) {
         if (!authImportPanelEl || !authImportFilesEl || !authImportHintEl) return false;
         const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
@@ -820,6 +894,183 @@
         };
         files.forEach((item) => appendItem(item, item.required));
         return true;
+    }
+
+    function renderSelectOptions(selectEl, values, emptyLabel = "") {
+        if (!selectEl) return;
+        selectEl.innerHTML = "";
+        if (emptyLabel) {
+            const emptyOption = document.createElement("option");
+            emptyOption.value = "";
+            emptyOption.textContent = emptyLabel;
+            selectEl.appendChild(emptyOption);
+        }
+        values.forEach((value) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value;
+            selectEl.appendChild(option);
+        });
+    }
+
+    function syncAuthProviderConfigFields() {
+        const state = currentAuthProviderConfigState;
+        if (!state) return;
+        const selectedAction = state.selectedAction;
+        const selectedProvider = authProviderSelectEl ? safeText(authProviderSelectEl.value).trim() : "";
+        const providerRows = Array.isArray(state.providers) ? state.providers : [];
+        const currentProvider = providerRows.find((item) => safeText(item.provider_id).trim() === selectedProvider) || null;
+        const providerModels = currentProvider && Array.isArray(currentProvider.models) ? currentProvider.models : [];
+        renderSelectOptions(
+            authProviderModelSelectEl,
+            providerModels,
+            providerModels.length ? "" : I18N.authProviderConfigNoProviders,
+        );
+        if ((selectedAction === "switch_provider" || selectedAction === "switch_model") && providerModels.length && authProviderModelInputEl && !authProviderModelInputEl.value.trim()) {
+            authProviderModelInputEl.value = providerModels[0];
+        }
+        if (selectedAction === "switch_provider" && currentProvider) {
+            if (authProviderIdInputEl) authProviderIdInputEl.value = currentProvider.provider_id || "";
+            if (authProviderBaseUrlInputEl) authProviderBaseUrlInputEl.value = currentProvider.base_url || "";
+        }
+        const showProviderSelect = selectedAction === "switch_provider";
+        const showProviderFields = selectedAction === "configure_provider";
+        const showApiKeyOnly = selectedAction === "replace_api_key";
+        const showModelChooser = selectedAction === "switch_model" || selectedAction === "switch_provider";
+        if (authProviderSelectEl) authProviderSelectEl.disabled = !showProviderSelect;
+        if (authProviderModelSelectEl) authProviderModelSelectEl.disabled = !showModelChooser;
+        if (authProviderIdInputEl) {
+            authProviderIdInputEl.disabled = !showProviderFields;
+        }
+        if (authProviderBaseUrlInputEl) {
+            authProviderBaseUrlInputEl.disabled = !showProviderFields;
+        }
+        if (authProviderApiKeyInputEl) {
+            authProviderApiKeyInputEl.disabled = !(showProviderFields || showApiKeyOnly);
+        }
+        if (authProviderModelInputEl) {
+            authProviderModelInputEl.disabled = !(showProviderFields || showModelChooser);
+        }
+    }
+
+    function renderAuthProviderConfigPanel(payload, hintText) {
+        if (!authProviderConfigPanelEl || !authProviderConfigHintEl || !authProviderConfigActionsEl) return false;
+        const uiHints = payload && payload.ask_user && payload.ask_user.ui_hints && typeof payload.ask_user.ui_hints === "object"
+            ? payload.ask_user.ui_hints
+            : (payload && payload.ui_hints && typeof payload.ui_hints === "object" ? payload.ui_hints : null);
+        if (!uiHints || safeText(uiHints.widget).trim() !== "provider_config") return false;
+        const providers = Array.isArray(uiHints.providers) ? uiHints.providers : [];
+        const actions = Array.isArray(uiHints.actions) ? uiHints.actions.filter((item) => item && item.enabled === true) : [];
+        const currentProvider = uiHints.current_provider && typeof uiHints.current_provider === "object" ? uiHints.current_provider : null;
+        currentAuthProviderConfigState = {
+            scenario: safeText(uiHints.scenario).trim(),
+            providers,
+            selectedAction: actions.length ? safeText(actions[0].action).trim() : "",
+        };
+        authProviderConfigPanelEl.classList.remove("hidden");
+        authProviderConfigHintEl.textContent = hintText || I18N.authProviderConfigSelectAction;
+        renderActionButtons(
+            authProviderConfigActionsEl,
+            actions.map((item) => ({
+                label: safeText(item.label).trim() || safeText(item.action).trim(),
+                onClick: async () => {
+                    if (!currentAuthProviderConfigState) return;
+                    currentAuthProviderConfigState.selectedAction = safeText(item.action).trim();
+                    syncAuthProviderConfigFields();
+                },
+            })),
+        );
+        const providerIds = providers.map((item) => safeText(item.provider_id).trim()).filter(Boolean);
+        renderSelectOptions(authProviderSelectEl, providerIds, providerIds.length ? "" : I18N.authProviderConfigNoProviders);
+        const requestedProvider = safeText(uiHints.requested_provider).trim();
+        const initialProvider = requestedProvider || (currentProvider ? safeText(currentProvider.provider_id).trim() : "") || (providerIds[0] || "");
+        if (authProviderSelectEl) authProviderSelectEl.value = initialProvider;
+        if (authProviderIdInputEl) authProviderIdInputEl.value = currentProvider ? safeText(currentProvider.provider_id).trim() : requestedProvider;
+        if (authProviderBaseUrlInputEl) authProviderBaseUrlInputEl.value = currentProvider ? safeText(currentProvider.base_url).trim() : "";
+        if (authProviderModelInputEl) authProviderModelInputEl.value = safeText(uiHints.requested_model_name).trim();
+        if (authProviderApiKeyInputEl) authProviderApiKeyInputEl.value = "";
+        syncAuthProviderConfigFields();
+        return true;
+    }
+
+    async function submitAuthProviderConfig() {
+        if (!currentAuthProviderConfigState) return;
+        const action = safeText(currentAuthProviderConfigState.selectedAction).trim();
+        if (!action) {
+            showReplyError(I18N.authProviderConfigMissingAction);
+            return;
+        }
+        const providerId = authProviderIdInputEl ? safeText(authProviderIdInputEl.value).trim() : "";
+        const apiKey = authProviderApiKeyInputEl ? safeText(authProviderApiKeyInputEl.value).trim() : "";
+        const baseUrl = authProviderBaseUrlInputEl ? safeText(authProviderBaseUrlInputEl.value).trim() : "";
+        const modelInput = authProviderModelInputEl ? safeText(authProviderModelInputEl.value).trim() : "";
+        const selectedProvider = authProviderSelectEl ? safeText(authProviderSelectEl.value).trim() : "";
+        const selectedModel = authProviderModelSelectEl ? safeText(authProviderModelSelectEl.value).trim() : "";
+        const payload = { action };
+        if (action === "replace_api_key") {
+            if (!apiKey) {
+                showReplyError(I18N.authProviderConfigMissingApiKey);
+                return;
+            }
+            payload.api_key = apiKey;
+        } else if (action === "switch_model") {
+            const model = modelInput || selectedModel;
+            if (!model) {
+                showReplyError(I18N.authProviderConfigMissingModel);
+                return;
+            }
+            payload.model = model;
+        } else if (action === "switch_provider") {
+            const model = modelInput || selectedModel;
+            if (!selectedProvider) {
+                showReplyError(I18N.authProviderConfigMissingProvider);
+                return;
+            }
+            if (!model) {
+                showReplyError(I18N.authProviderConfigMissingModel);
+                return;
+            }
+            payload.provider_id = selectedProvider;
+            payload.model = model;
+        } else if (action === "configure_provider") {
+            if (!providerId) {
+                showReplyError(I18N.authProviderConfigMissingProvider);
+                return;
+            }
+            if (!apiKey) {
+                showReplyError(I18N.authProviderConfigMissingApiKey);
+                return;
+            }
+            if (!baseUrl) {
+                showReplyError(I18N.authProviderConfigMissingBaseUrl);
+                return;
+            }
+            if (!modelInput) {
+                showReplyError(I18N.authProviderConfigMissingModel);
+                return;
+            }
+            payload.provider_id = providerId;
+            payload.api_key = apiKey;
+            payload.base_url = baseUrl;
+            payload.model = modelInput;
+        }
+        if (authProviderConfigSubmitEl) authProviderConfigSubmitEl.disabled = true;
+        await submitPayload(
+            {
+                mode: "auth",
+                auth_session_id: safeText(authSessionIdEl.value).trim(),
+                submission: {
+                    kind: "custom_provider",
+                    value: JSON.stringify(payload),
+                },
+            },
+            {
+                actionContainer: authProviderConfigActionsEl,
+                disableComposer: true,
+                textEnabled: false,
+            },
+        );
+        if (authProviderConfigSubmitEl) authProviderConfigSubmitEl.disabled = false;
     }
 
     async function submitAuthImport() {
@@ -1250,6 +1501,7 @@
     function clearAuthCard() {
         lastAuthRenderSignature = "";
         clearAuthImportPanel();
+        clearAuthProviderConfigPanel();
         authCardEl.classList.add("hidden");
         authTextEl.textContent = "";
         authHintEl.textContent = "";
@@ -1492,6 +1744,28 @@
                 && typeof askUser.ui_hints === "object"
                 && askUser.ui_hints.risk_notice_required === true
             ),
+            ask_user_widget: (
+                askUser
+                && askUser.ui_hints
+                && typeof askUser.ui_hints === "object"
+                ? safeText(askUser.ui_hints.widget).trim()
+                : ""
+            ),
+            provider_config_scenario: (
+                askUser
+                && askUser.ui_hints
+                && typeof askUser.ui_hints === "object"
+                ? safeText(askUser.ui_hints.scenario).trim()
+                : ""
+            ),
+            provider_config_providers: (
+                askUser
+                && askUser.ui_hints
+                && typeof askUser.ui_hints === "object"
+                && Array.isArray(askUser.ui_hints.providers)
+            )
+                ? askUser.ui_hints.providers
+                : [],
         });
         if (signature && signature === lastAuthRenderSignature && !authCardEl.classList.contains("hidden")) {
             return;
@@ -1499,6 +1773,7 @@
         lastAuthRenderSignature = signature;
 
         clearAuthImportPanel();
+        clearAuthProviderConfigPanel();
         clearPromptCard();
         authCardEl.classList.remove("hidden");
         const authSessionId = safeText(payload.auth_session_id).trim();
@@ -1514,6 +1789,16 @@
             inputKind === "import_files"
             || challengeKind === "import_files"
             || (askUser && safeText(askUser.kind).trim() === "upload_files")
+        );
+        const isProviderConfigChallenge = (
+            inputKind === "custom_provider"
+            || challengeKind === "custom_provider"
+            || (
+                askUser
+                && askUser.ui_hints
+                && typeof askUser.ui_hints === "object"
+                && safeText(askUser.ui_hints.widget).trim() === "provider_config"
+            )
         );
 
         authTextEl.textContent = prompt;
@@ -1605,6 +1890,17 @@
                 setReplyComposerVisible(false);
                 setReplyEnabled(false);
                 showReplyError(`${I18N.authImportFailedPrefix} unsupported import target`);
+            }
+        } else if (isProviderConfigChallenge) {
+            const rendered = renderAuthProviderConfigPanel(payload, hint);
+            if (rendered) {
+                setReplyComposerVisible(false);
+                setReplyEnabled(false);
+                replySubmitEl.textContent = I18N.authProviderConfigSubmit;
+            } else {
+                setReplyComposerVisible(false);
+                setReplyEnabled(false);
+                showReplyError("unsupported provider-config target");
             }
         } else if (acceptsChatInput && inputKind) {
             setReplyComposerVisible(true);
@@ -2078,6 +2374,23 @@
     if (authImportSubmitEl) {
         authImportSubmitEl.addEventListener("click", async () => {
             await submitAuthImport();
+        });
+    }
+    if (authProviderSelectEl) {
+        authProviderSelectEl.addEventListener("change", () => {
+            syncAuthProviderConfigFields();
+        });
+    }
+    if (authProviderModelSelectEl) {
+        authProviderModelSelectEl.addEventListener("change", () => {
+            if (authProviderModelInputEl) {
+                authProviderModelInputEl.value = safeText(authProviderModelSelectEl.value).trim();
+            }
+        });
+    }
+    if (authProviderConfigSubmitEl) {
+        authProviderConfigSubmitEl.addEventListener("click", async () => {
+            await submitAuthProviderConfig();
         });
     }
 

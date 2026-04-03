@@ -41,6 +41,28 @@
     "models_root": "../models",
     "seed_path": "../models/models_seed.json"
   },
+  "command_defaults": {
+    "start": ["--format", "json"],
+    "resume": ["--format", "json"],
+    "ui_shell": []
+  },
+  "ui_shell": {
+    "command_id": "opencode-tui",
+    "label": "OpenCode TUI",
+    "trust_bootstrap_parent": false,
+    "sandbox_arg": null,
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "static_unsupported",
+    "sandbox_probe_message": "OpenCode inline TUI runs without sandbox.",
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "none",
+    "config_assets": {
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
+      "settings_schema_path": null,
+      "target_relpath": "opencode.json"
+    }
+  },
   "cli_management": {
     "package": "opencode-ai",
     "binary_candidates": ["opencode", "opencode.cmd", "opencode.exe"],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
@@ -18,6 +19,7 @@ def _assert_components(adapter: EngineExecutionAdapter) -> None:
 
 def test_engine_execution_adapters_build_directly() -> None:
     adapters = [
+        ClaudeExecutionAdapter(),
         CodexExecutionAdapter(),
         GeminiExecutionAdapter(),
         IFlowExecutionAdapter(),

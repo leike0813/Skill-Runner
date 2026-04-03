@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
@@ -35,6 +36,11 @@ class EngineAdapterRegistry:
                 / "opencode"
                 / "adapter"
                 / "adapter_profile.json",
+                "claude": Path(__file__).resolve().parents[2]
+                / "engines"
+                / "claude"
+                / "adapter"
+                / "adapter_profile.json",
             }
         )
         self._adapters: Dict[str, EngineExecutionAdapter] = {
@@ -42,6 +48,7 @@ class EngineAdapterRegistry:
             "gemini": GeminiExecutionAdapter(),
             "iflow": IFlowExecutionAdapter(),
             "opencode": OpencodeExecutionAdapter(),
+            "claude": ClaudeExecutionAdapter(),
         }
 
     def get(self, engine: str) -> EngineExecutionAdapter | None:

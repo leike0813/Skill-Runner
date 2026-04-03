@@ -7,11 +7,21 @@ import subprocess
 import time
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 from server.config_registry import keys
+from server.config import config
+from server.engines.claude.adapter.sandbox_probe import (
+    CLAUDE_SANDBOX_DEPENDENCY_MISSING,
+    CLAUDE_SANDBOX_PROBE_KIND,
+    CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE,
+    ClaudeSandboxProbeResult,
+    load_claude_sandbox_probe,
+    write_claude_sandbox_probe,
+)
 from server.models import (
     EngineInteractiveProfile,
     EngineResumeCapability,
@@ -40,6 +50,9 @@ _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
         "$schema": "https://opencode.ai/config.json",
         "plugin": ["opencode-antigravity-auth"],
     },
+    "claude": {
+        "hasCompletedOnboarding": True,
+    },
 }
 _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS: dict[str, str] = {
     "codex": 'cli_auth_credentials_store = "file"\n',
@@ -65,6 +78,10 @@ _PATH_RESOLVE_EXCEPTIONS = (
     ValueError,
 )
 _SEMVER_PATTERN = re.compile(r"\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _supported_engines() -> tuple[str, ...]:
@@ -129,7 +146,6 @@ def _load_engine_profile(engine: str) -> AdapterProfile:
 
 UI_XTERM_PACKAGE = "@xterm/xterm@5.5.0"
 UI_XTERM_FIT_PACKAGE = "@xterm/addon-fit@0.10.0"
-DEFAULT_BOOTSTRAP_ENGINES: tuple[str, ...] = ("opencode", "codex")
 
 
 @dataclass(frozen=True)
@@ -153,7 +169,8 @@ class AgentCliManager:
         return _supported_engines()
 
     def default_bootstrap_engines(self) -> tuple[str, ...]:
-        return tuple(engine for engine in DEFAULT_BOOTSTRAP_ENGINES if engine in self.supported_engines())
+        configured = self._configured_default_bootstrap_engines()
+        return tuple(engine for engine in configured if engine in self.supported_engines())
 
     def resolve_bootstrap_targets(self, engine_spec: str | None = None) -> dict[str, Any]:
         raw_spec = engine_spec
@@ -208,12 +225,59 @@ class AgentCliManager:
             else:
                 self._ensure_json_file(bootstrap_path, bootstrap_payload)
             self._apply_layout_normalizer(engine, bootstrap_path, bootstrap_payload)
+            self._ensure_bootstrap_sidecars(engine)
 
     def collect_status(self) -> Dict[str, EngineStatus]:
         result: Dict[str, EngineStatus] = {}
         for engine in self.supported_engines():
             result[engine] = self.collect_engine_status(engine)
         return result
+
+    def collect_sandbox_status(self, engine: str) -> Dict[str, Any]:
+        normalized = engine.strip().lower()
+        if normalized != "claude":
+            return {
+                "available": False,
+                "status": "n/a",
+                "declared_enabled": False,
+                "dependency_status": "n/a",
+                "dependencies": {},
+                "missing_dependencies": [],
+                "warning_code": None,
+                "message": "",
+                "checked_at": None,
+                "probe_kind": None,
+            }
+
+        declared_enabled = self._claude_sandbox_declared_enabled()
+        cached = load_claude_sandbox_probe(self.profile.agent_home)
+        if cached is None:
+            message = "Claude sandbox bootstrap probe has not been recorded yet."
+            return {
+                "available": declared_enabled,
+                "status": "unknown",
+                "declared_enabled": declared_enabled,
+                "dependency_status": "ready" if declared_enabled else "n/a",
+                "dependencies": {},
+                "missing_dependencies": [],
+                "warning_code": None,
+                "message": message,
+                "checked_at": None,
+                "probe_kind": None,
+            }
+
+        return {
+            "available": cached.available,
+            "status": cached.status,
+            "declared_enabled": cached.declared_enabled,
+            "dependency_status": "ready" if cached.available else "warning",
+            "dependencies": dict(cached.dependencies),
+            "missing_dependencies": list(cached.missing_dependencies),
+            "warning_code": cached.warning_code,
+            "message": cached.message,
+            "checked_at": cached.checked_at,
+            "probe_kind": cached.probe_kind,
+        }
 
     def collect_engine_status(self, engine: str) -> EngineStatus:
         return self.check_engine(engine)
@@ -613,6 +677,160 @@ class AgentCliManager:
     def _engine_bootstrap_target_path(self, engine: str) -> Path:
         profile = self._engine_profile(engine)
         return self.profile.agent_home / profile.cli_management.layout.bootstrap_target_relpath
+
+    def _command_exists_any(self, names: Iterable[str]) -> bool:
+        return self._resolve_command_any(names) is not None
+
+    def _resolve_command_any(self, names: Iterable[str]) -> str | None:
+        build_env = getattr(self.profile, "build_subprocess_env", None)
+        env = build_env() if callable(build_env) else dict(os.environ)
+        path_env = env.get("PATH", os.environ.get("PATH", ""))
+        for name in names:
+            resolved = shutil.which(name, path=path_env)
+            if resolved:
+                return resolved
+            resolved = shutil.which(name, path=os.environ.get("PATH", ""))
+            if resolved:
+                return resolved
+        return None
+
+    def _claude_sandbox_declared_enabled(self) -> bool:
+        profile = self._load_engine_profile_or_none("claude")
+        if profile is None:
+            return False
+        enforced_path = profile.resolve_enforced_config_path()
+        try:
+            payload = json.loads(enforced_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        sandbox = payload.get("sandbox")
+        if not isinstance(sandbox, dict):
+            return False
+        return bool(sandbox.get("enabled"))
+
+    def _probe_claude_sandbox_status(self) -> ClaudeSandboxProbeResult:
+        declared_enabled = self._claude_sandbox_declared_enabled()
+        if not declared_enabled:
+            return ClaudeSandboxProbeResult(
+                declared_enabled=False,
+                available=False,
+                status="disabled",
+                warning_code=None,
+                message="Claude sandbox is disabled by enforced configuration.",
+                dependencies={},
+                missing_dependencies=[],
+                checked_at=_utc_now_iso(),
+                probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+            )
+
+        dependency_checks = {
+            "bubblewrap": self._resolve_command_any(("bwrap", "bubblewrap")) is not None,
+            "socat": self._resolve_command_any(("socat",)) is not None,
+        }
+        missing_dependencies = [name for name, present in dependency_checks.items() if not present]
+        checked_at = _utc_now_iso()
+        if missing_dependencies:
+            return ClaudeSandboxProbeResult(
+                declared_enabled=True,
+                available=False,
+                status="unavailable",
+                warning_code=CLAUDE_SANDBOX_DEPENDENCY_MISSING,
+                message=(
+                    "Claude sandbox dependencies missing: "
+                    + ", ".join(missing_dependencies)
+                    + ". Headless runs will disable Claude sandbox."
+                ),
+                dependencies=dependency_checks,
+                missing_dependencies=missing_dependencies,
+                checked_at=checked_at,
+                probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+            )
+
+        bubblewrap_cmd = self._resolve_command_any(("bwrap", "bubblewrap"))
+        if not bubblewrap_cmd:
+            return ClaudeSandboxProbeResult(
+                declared_enabled=True,
+                available=False,
+                status="unavailable",
+                warning_code=CLAUDE_SANDBOX_DEPENDENCY_MISSING,
+                message="Claude sandbox dependencies missing: bubblewrap. Headless runs will disable Claude sandbox.",
+                dependencies=dependency_checks,
+                missing_dependencies=["bubblewrap"],
+                checked_at=checked_at,
+                probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+            )
+
+        result = self._run_command(
+            [
+                bubblewrap_cmd,
+                "--unshare-net",
+                "--ro-bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "/bin/sh",
+                "-lc",
+                "printf sandbox-ok",
+            ],
+            timeout_sec=3,
+        )
+        if result.returncode == 0:
+            return ClaudeSandboxProbeResult(
+                declared_enabled=True,
+                available=True,
+                status="available",
+                warning_code=None,
+                message="Claude sandbox runtime probe succeeded.",
+                dependencies=dependency_checks,
+                missing_dependencies=[],
+                checked_at=checked_at,
+                probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+            )
+
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip()).splitlines()
+        first_line = detail[0] if detail else f"exit={result.returncode}"
+        return ClaudeSandboxProbeResult(
+            declared_enabled=True,
+            available=False,
+            status="unavailable",
+            warning_code=CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE,
+            message=(
+                "Claude sandbox runtime unavailable: "
+                f"{first_line}. Headless runs will disable Claude sandbox."
+            ),
+            dependencies=dependency_checks,
+            missing_dependencies=[],
+            checked_at=checked_at,
+            probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+        )
+
+    def _configured_default_bootstrap_engines(self) -> tuple[str, ...]:
+        raw = config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES
+        if isinstance(raw, str):
+            return tuple(self._normalize_engine_spec_list(raw))
+        if isinstance(raw, Iterable):
+            requested: list[str] = []
+            seen: set[str] = set()
+            for item in raw:
+                normalized = str(item).strip().lower()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                requested.append(normalized)
+            return tuple(requested)
+        return ()
+
+    def _ensure_bootstrap_sidecars(self, engine: str) -> None:
+        if engine != "claude":
+            return
+        self._ensure_json_file(self.profile.agent_home / ".claude" / "settings.json", {})
+        probe = self._probe_claude_sandbox_status()
+        write_claude_sandbox_probe(agent_home=self.profile.agent_home, probe=probe)
 
     def _apply_layout_normalizer(
         self,

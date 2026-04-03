@@ -41,6 +41,28 @@
     "models_root": "../models",
     "seed_path": null
   },
+  "command_defaults": {
+    "start": ["--yolo"],
+    "resume": ["--yolo"],
+    "ui_shell": ["--sandbox", "--approval-mode", "default"]
+  },
+  "ui_shell": {
+    "command_id": "gemini-tui",
+    "label": "Gemini TUI",
+    "trust_bootstrap_parent": true,
+    "sandbox_arg": "--sandbox",
+    "retry_without_sandbox_on_early_exit": true,
+    "sandbox_probe_strategy": "gemini_container",
+    "sandbox_probe_message": null,
+    "auth_hint_strategy": "gemini_api_key_disables_sandbox",
+    "runtime_override_strategy": "gemini_ui_shell",
+    "config_assets": {
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
+      "settings_schema_path": "../schemas/gemini_settings_schema.json",
+      "target_relpath": ".gemini/settings.json"
+    }
+  },
   "cli_management": {
     "package": "@google/gemini-cli",
     "binary_candidates": ["gemini", "gemini.cmd", "gemini.exe"],

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
@@ -15,7 +16,8 @@ def test_registry_exposes_all_supported_adapters() -> None:
     registry = EngineAdapterRegistry()
     adapters = registry.adapter_map()
 
-    assert set(adapters.keys()) == {"codex", "gemini", "iflow", "opencode"}
+    assert set(adapters.keys()) == {"codex", "gemini", "iflow", "opencode", "claude"}
+    assert isinstance(adapters["claude"], ClaudeExecutionAdapter)
     assert isinstance(adapters["codex"], CodexExecutionAdapter)
     assert isinstance(adapters["gemini"], GeminiExecutionAdapter)
     assert isinstance(adapters["iflow"], IFlowExecutionAdapter)

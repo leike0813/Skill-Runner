@@ -92,6 +92,9 @@
         },
         "opencode": {
           "type": "string"
+        },
+        "claude": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -128,6 +131,7 @@
       "type": "string",
       "enum": [
         "codex",
+        "claude",
         "gemini",
         "iflow",
         "opencode"

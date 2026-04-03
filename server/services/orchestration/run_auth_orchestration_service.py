@@ -35,6 +35,9 @@ from server.runtime.auth_detection.types import AuthDetectionResult
 from server.runtime.logging.structured_trace import log_event
 from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
 from server.services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
+from server.services.engine_management.engine_custom_provider_service import (
+    engine_custom_provider_service,
+)
 from server.services.engine_management.auth_import_service import (
     AuthImportError,
     AuthImportValidationError,
@@ -55,6 +58,7 @@ _CONVERSATION_METHOD_MAP: dict[str, AuthMethod] = {
     "authorization_code": AuthMethod.AUTHORIZATION_CODE,
     "import": AuthMethod.IMPORT,
     "api_key": AuthMethod.API_KEY,
+    "custom_provider": AuthMethod.CUSTOM_PROVIDER,
 }
 _HIGH_RISK_SHORT_LABEL = "High risk!"
 _HIGH_RISK_NOTICE = (
@@ -246,6 +250,52 @@ class RunAuthOrchestrationService:
             return selection
         return pending_auth
 
+    async def create_custom_provider_pending_auth(
+        self,
+        *,
+        request_id: str,
+        run_id: str,
+        run_dir: Path,
+        engine_name: str | None = None,
+        engine: str | None = None,
+        requested_model: str,
+        source_attempt: int,
+        run_store_backend: Any = run_store,
+        append_orchestrator_event: Callable[..., None],
+        update_status: Callable[..., None] | None = None,
+    ) -> PendingAuth:
+        resolved_engine = self._normalize_string(engine_name) or self._normalize_string(engine)
+        if resolved_engine is None:
+            raise HTTPException(status_code=422, detail="engine is required")
+        pending_auth = self._build_custom_provider_pending_auth(
+            request_id=request_id,
+            engine=resolved_engine,
+            requested_model=requested_model,
+            source_attempt=source_attempt,
+        )
+        snapshot = {
+            "session_id": pending_auth.auth_session_id,
+            "engine": resolved_engine,
+            "provider_id": pending_auth.provider_id,
+            "auth_method": AuthMethod.CUSTOM_PROVIDER.value,
+            "input_kind": AuthSubmissionKind.CUSTOM_PROVIDER.value,
+            "status": "waiting_user",
+            "created_at": pending_auth.created_at,
+            "expires_at": pending_auth.expires_at,
+        }
+        await self._persist_pending_auth(
+            request_id=request_id,
+            run_id=run_id,
+            run_dir=run_dir,
+            pending_auth=pending_auth,
+            snapshot=snapshot,
+            run_store_backend=run_store_backend,
+            append_orchestrator_event=append_orchestrator_event,
+            event_type=OrchestratorEventType.AUTH_CHALLENGE_UPDATED.value,
+        )
+        _ = update_status
+        return pending_auth
+
     async def select_auth_method(
         self,
         *,
@@ -387,6 +437,49 @@ class RunAuthOrchestrationService:
         current_auth_session_id = pending_payload.get("auth_session_id")
         if current_auth_session_id != auth_session_id:
             raise HTTPException(status_code=409, detail="stale auth session")
+        if (
+            request.kind == AuthSubmissionKind.CUSTOM_PROVIDER
+            and auth_session_id.startswith("provider-config::")
+        ):
+            request_record = await maybe_await(run_store_backend.get_request(request_id))
+            run_dir = workspace_manager.get_run_dir(run_id)
+            if run_dir is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+            source_attempt = self._resolve_source_attempt(pending_payload, None)
+            await self._apply_custom_provider_submission(
+                request_id=request_id,
+                request_record=request_record if isinstance(request_record, dict) else None,
+                submission=request.value,
+                run_store_backend=run_store_backend,
+            )
+            resume_ticket_id = await self._complete_waiting_auth_success(
+                request_id=request_id,
+                run_id=run_id,
+                run_dir=run_dir,
+                auth_session_id=auth_session_id,
+                source_attempt=source_attempt,
+                background_tasks=background_tasks,
+                run_store_backend=run_store_backend,
+                append_orchestrator_event=append_orchestrator_event,
+                resume_run_job=resume_run_job,
+            )
+            log_event(
+                logger,
+                event="auth.completed",
+                phase="auth_orchestration",
+                outcome="ok",
+                request_id=request_id,
+                run_id=run_id,
+                attempt=source_attempt,
+                auth_session_id=auth_session_id,
+                resume_ticket_id=resume_ticket_id,
+            )
+            return InteractionReplyResponse(
+                request_id=request_id,
+                status=RunStatus.QUEUED,
+                accepted=True,
+                mode="auth",
+            )
         resume_context = await maybe_await(run_store_backend.get_auth_resume_context(request_id))
         runtime_kind = self._map_submission_kind_to_runtime_kind(
             submission=request,
@@ -1532,6 +1625,220 @@ class RunAuthOrchestrationService:
             ui_hints={},
         )
 
+    def _build_custom_provider_pending_auth(
+        self,
+        *,
+        request_id: str,
+        engine: str,
+        requested_model: str,
+        source_attempt: int,
+    ) -> PendingAuth:
+        provider_id, model_name = requested_model.split("/", 1)
+        providers = engine_custom_provider_service.list_providers(engine)
+        current_provider = next((item for item in providers if item.provider_id == provider_id), None)
+        provider_exists = current_provider is not None
+        model_exists = current_provider is not None and model_name in current_provider.models
+        if provider_exists and model_exists:
+            scenario = "configured_model"
+        elif provider_exists:
+            scenario = "provider_model_missing"
+        else:
+            scenario = "provider_missing"
+        actions = [
+            {
+                "action": "replace_api_key",
+                "label": "重新配置 API_KEY",
+                "enabled": bool(provider_exists and model_exists),
+            },
+            {
+                "action": "switch_model",
+                "label": "切换模型",
+                "enabled": bool(provider_exists),
+            },
+            {
+                "action": "switch_provider",
+                "label": "切换 provider",
+                "enabled": bool(providers),
+            },
+            {
+                "action": "configure_provider",
+                "label": "配置新的 provider",
+                "enabled": True,
+            },
+        ]
+        provider_rows = [
+            {
+                "provider_id": item.provider_id,
+                "base_url": item.base_url,
+                "models": list(item.models),
+            }
+            for item in providers
+        ]
+        ask_user = AskUserHintPayload(
+            kind="open_text",
+            prompt="需要配置 Claude 的第三方 provider 才能继续执行。",
+            hint="选择一个动作并填写字段，提交后会直接重试当前 run。",
+            ui_hints={
+                "widget": "provider_config",
+                "scenario": scenario,
+                "requested_model": requested_model,
+                "requested_provider": provider_id,
+                "requested_model_name": model_name,
+                "providers": provider_rows,
+                "current_provider": (
+                    {
+                        "provider_id": current_provider.provider_id,
+                        "base_url": current_provider.base_url,
+                        "models": list(current_provider.models),
+                    }
+                    if current_provider is not None
+                    else None
+                ),
+                "actions": actions,
+            },
+        )
+        return PendingAuth(
+            auth_session_id=f"provider-config::{request_id}",
+            engine=engine,
+            provider_id=provider_id,
+            auth_method=AuthMethod.CUSTOM_PROVIDER,
+            challenge_kind=AuthChallengeKind.CUSTOM_PROVIDER,
+            prompt="Claude 自定义 provider 配置是继续当前任务所必需的。",
+            auth_url=None,
+            user_code=None,
+            instructions="提交后会把 provider 配置写入 managed agent home，并立即重试当前 run。",
+            accepts_chat_input=True,
+            input_kind=AuthSubmissionKind.CUSTOM_PROVIDER,
+            last_error=None,
+            source_attempt=source_attempt,
+            phase=AuthSessionPhase.CHALLENGE_ACTIVE,
+            timeout_sec=None,
+            created_at=_utc_iso(),
+            expires_at=None,
+            ask_user=ask_user,
+        )
+
+    async def _apply_custom_provider_submission(
+        self,
+        *,
+        request_id: str,
+        request_record: dict[str, Any] | None,
+        submission: str,
+        run_store_backend: Any,
+    ) -> None:
+        if not isinstance(request_record, dict):
+            raise HTTPException(status_code=404, detail="Request not found")
+        engine = self._normalize_string(request_record.get("engine")) or ""
+        if engine != "claude":
+            raise HTTPException(status_code=422, detail="custom provider session is only supported for claude")
+        payload = self._parse_custom_provider_submission(submission)
+        current_engine_options_obj = request_record.get("engine_options")
+        current_engine_options = (
+            dict(current_engine_options_obj) if isinstance(current_engine_options_obj, dict) else {}
+        )
+        current_model = self._normalize_string(current_engine_options.get("model")) or ""
+        current_provider_id = None
+        if "/" in current_model:
+            current_provider_id = current_model.split("/", 1)[0].strip().lower()
+        providers = {
+            item.provider_id: item
+            for item in engine_custom_provider_service.list_providers(engine)
+        }
+        action = payload["action"]
+        next_model = current_model
+        if action == "replace_api_key":
+            if current_provider_id is None or current_provider_id not in providers:
+                raise HTTPException(status_code=422, detail="current provider is not configured")
+            current = providers[current_provider_id]
+            engine_custom_provider_service.upsert_provider(
+                engine=engine,
+                provider_id=current.provider_id,
+                api_key=payload["api_key"],
+                base_url=current.base_url,
+                models=list(current.models),
+            )
+        elif action == "switch_model":
+            if current_provider_id is None or current_provider_id not in providers:
+                raise HTTPException(status_code=422, detail="current provider is not configured")
+            current = providers[current_provider_id]
+            target_model = payload["model"]
+            next_models = list(current.models)
+            if target_model not in next_models:
+                next_models.append(target_model)
+            updated = engine_custom_provider_service.upsert_provider(
+                engine=engine,
+                provider_id=current.provider_id,
+                api_key=current.api_key,
+                base_url=current.base_url,
+                models=next_models,
+            )
+            next_model = f"{updated.provider_id}/{target_model}"
+        elif action == "switch_provider":
+            target_provider_id = payload["provider_id"]
+            target_model = payload["model"]
+            target = providers.get(target_provider_id)
+            if target is None:
+                raise HTTPException(status_code=422, detail="target provider is not configured")
+            next_models = list(target.models)
+            if target_model not in next_models:
+                next_models.append(target_model)
+                target = engine_custom_provider_service.upsert_provider(
+                    engine=engine,
+                    provider_id=target.provider_id,
+                    api_key=target.api_key,
+                    base_url=target.base_url,
+                    models=next_models,
+                )
+            next_model = f"{target.provider_id}/{target_model}"
+        elif action == "configure_provider":
+            created = engine_custom_provider_service.upsert_provider(
+                engine=engine,
+                provider_id=payload["provider_id"],
+                api_key=payload["api_key"],
+                base_url=payload["base_url"],
+                models=[payload["model"]],
+            )
+            next_model = f"{created.provider_id}/{payload['model']}"
+        else:
+            raise HTTPException(status_code=422, detail="unsupported custom provider action")
+        if next_model:
+            current_engine_options["model"] = next_model
+            await maybe_await(run_store_backend.update_request_engine_options(request_id, current_engine_options))
+
+    def _parse_custom_provider_submission(self, raw: str) -> dict[str, str]:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="custom provider submission must be valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="custom provider submission must be an object")
+        action = self._normalize_string(payload.get("action"))
+        if action not in {
+            "replace_api_key",
+            "switch_model",
+            "switch_provider",
+            "configure_provider",
+        }:
+            raise HTTPException(status_code=422, detail="invalid custom provider action")
+        normalized = {"action": action}
+        for key in ("provider_id", "api_key", "base_url", "model"):
+            value = self._normalize_string(payload.get(key))
+            if value is not None:
+                normalized[key] = value
+        if action == "replace_api_key" and not normalized.get("api_key"):
+            raise HTTPException(status_code=422, detail="api_key is required")
+        if action == "switch_model" and not normalized.get("model"):
+            raise HTTPException(status_code=422, detail="model is required")
+        if action == "switch_provider":
+            if not normalized.get("provider_id") or not normalized.get("model"):
+                raise HTTPException(status_code=422, detail="provider_id and model are required")
+        if action == "configure_provider":
+            required = ("provider_id", "api_key", "base_url", "model")
+            missing = [key for key in required if not normalized.get(key)]
+            if missing:
+                raise HTTPException(status_code=422, detail=f"missing fields: {', '.join(missing)}")
+        return normalized
+
     def _build_auth_resume_context(
         self,
         *,
@@ -1657,6 +1964,13 @@ class RunAuthOrchestrationService:
                 False,
                 None,
                 _append_risk("Import credential files to complete authentication."),
+            )
+        if auth_method == AuthMethod.CUSTOM_PROVIDER:
+            return (
+                AuthChallengeKind.CUSTOM_PROVIDER,
+                True,
+                AuthSubmissionKind.CUSTOM_PROVIDER,
+                "Configure or switch the custom provider to continue.",
             )
         return (
             AuthChallengeKind.API_KEY,
@@ -1804,6 +2118,8 @@ class RunAuthOrchestrationService:
             return AuthMethod.AUTHORIZATION_CODE
         if submission_kind == AuthSubmissionKind.IMPORT_FILES:
             return AuthMethod.IMPORT
+        if submission_kind == AuthSubmissionKind.CUSTOM_PROVIDER:
+            return AuthMethod.CUSTOM_PROVIDER
         return AuthMethod.API_KEY
 
     def _merge_request_options(self, request_record: dict[str, Any]) -> dict[str, Any]:

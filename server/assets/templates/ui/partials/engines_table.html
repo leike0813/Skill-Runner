@@ -11,7 +11,15 @@
     <tbody>
     {% for row in rows %}
         <tr>
-            <td>{{ row.engine }}</td>
+            <td>
+                <div>{{ row.engine }}</div>
+                {% if row.sandbox_warning_code %}
+                <div class="muted small">
+                    {{ t("ui.engines.table.sandbox_warning_prefix", default="Sandbox warning:") }}
+                    {{ row.sandbox_warning_message }}
+                </div>
+                {% endif %}
+            </td>
             {% set status_level = row.status_level or "warning" %}
             {% if status_level == "healthy" %}
                 {% set status_text = t("ui.index.engine_status_healthy", default="healthy") %}
@@ -47,14 +55,8 @@
                 {% if ttyd_available %}
                 <button class="btn btn-primary" type="button" data-engine-start="{{ row.engine }}">{{ t("ui.engines.table.start_tui", default="启动TUI") }}</button>
                 {% endif %}
-                {% if row.engine == "codex" %}
-                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="codex">{{ t("ui.engines.table.auth_codex", default="鉴权(Codex)") }}</button>
-                {% elif row.engine == "gemini" %}
-                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="gemini">{{ t("ui.engines.table.auth_gemini", default="鉴权(Gemini)") }}</button>
-                {% elif row.engine == "iflow" %}
-                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="iflow">{{ t("ui.engines.table.auth_iflow", default="鉴权(iFlow)") }}</button>
-                {% elif row.engine == "opencode" %}
-                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="opencode">{{ t("ui.engines.table.auth_opencode", default="鉴权(OpenCode)") }}</button>
+                {% if row.auth_entry_label %}
+                <button type="button" class="btn btn-primary engine-auth-entry-btn" data-engine-auth-entry="{{ row.engine }}">{{ row.auth_entry_label }}</button>
                 {% endif %}
                 <a class="btn btn-primary" href="/ui/engines/{{ row.engine }}/models">{{ t("ui.engines.table.models_manage", default="模型管理") }}</a>
                 </div>

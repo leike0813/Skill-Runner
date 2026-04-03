@@ -38,8 +38,12 @@ from server.services.orchestration.run_artifact_path_autofix import (
     collect_run_artifacts,
     resolve_output_artifact_paths,
 )
+from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_result_file_fallback import (
     resolve_result_file_fallback,
+)
+from server.services.engine_management.engine_custom_provider_service import (
+    engine_custom_provider_service,
 )
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
@@ -95,6 +99,43 @@ def _resolve_opencode_provider_from_model(
         if provider_id is not None:
             return provider_id
     return None
+
+
+def _resolve_requested_model(
+    *,
+    options: Dict[str, Any],
+    request_record: Dict[str, Any] | None,
+) -> str | None:
+    request_payload = request_record if isinstance(request_record, dict) else {}
+    engine_options = request_payload.get("engine_options")
+    effective_runtime_options = request_payload.get("effective_runtime_options")
+    runtime_options = request_payload.get("runtime_options")
+    for candidate in (
+        engine_options.get("model") if isinstance(engine_options, dict) else None,
+        options.get("model"),
+        effective_runtime_options.get("model") if isinstance(effective_runtime_options, dict) else None,
+        runtime_options.get("model") if isinstance(runtime_options, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _resolve_claude_custom_model(
+    *,
+    engine_name: str,
+    options: Dict[str, Any],
+    request_record: Dict[str, Any] | None,
+) -> str | None:
+    if engine_name.strip().lower() != "claude":
+        return None
+    model = _resolve_requested_model(options=options, request_record=request_record)
+    if not isinstance(model, str) or "/" not in model:
+        return None
+    provider_id, model_name = model.split("/", 1)
+    if not provider_id.strip() or not model_name.strip():
+        return None
+    return model
 
 
 def _opencode_provider_unresolved_detail(
@@ -578,6 +619,7 @@ class _RunJobLifecyclePipeline:
                 if await run_store.is_cancel_requested(run_id):
                     raise RunCanceled()
 
+                run_folder_git_initializer.ensure_git_repo(run_dir)
                 run_folder_trust_manager.register_run_folder(engine_name, run_dir)
                 trust_registered = True
                 run_options = dict(options)
@@ -593,6 +635,36 @@ class _RunJobLifecyclePipeline:
                         options=run_options,
                         run_dir=run_dir,
                     )
+
+                custom_provider_model = _resolve_claude_custom_model(
+                    engine_name=engine_name,
+                    options=options,
+                    request_record=request_record,
+                )
+                if (
+                    custom_provider_model is not None
+                    and request_id
+                    and session_capable
+                    and engine_custom_provider_service.resolve_model(engine_name, custom_provider_model) is None
+                ):
+                    await self.auth_orchestration_service.create_custom_provider_pending_auth(
+                        request_id=request_id,
+                        run_id=run_id,
+                        run_dir=run_dir,
+                        engine_name=engine_name,
+                        requested_model=custom_provider_model,
+                        source_attempt=attempt_number,
+                        run_store_backend=run_store,
+                        append_orchestrator_event=self._append_orchestrator_event,
+                    )
+                    logger.info(
+                        "run_attempt_waiting_auth_custom_provider_bootstrap run_id=%s request_id=%s attempt=%s model=%s",
+                        run_id,
+                        request_id,
+                        attempt_number,
+                        custom_provider_model,
+                    )
+                    return RunJobOutcome(run_id=run_id, final_status=RunStatus.WAITING_AUTH)
 
                 # 5. Execute
                 adapter_stream_parser = getattr(adapter, "stream_parser", adapter)
@@ -1016,6 +1088,28 @@ class _RunJobLifecyclePipeline:
                 }:
                     forced_failure_reason = process_failure_reason
                 else:
+                    forced_failure_reason = None
+
+                if (
+                    pending_auth is None
+                    and pending_auth_method_selection is None
+                    and custom_provider_model is not None
+                    and request_id
+                    and session_capable
+                    and (forced_failure_reason is not None or result.exit_code != 0)
+                ):
+                    pending_auth = (
+                        await self.auth_orchestration_service.create_custom_provider_pending_auth(
+                            request_id=request_id,
+                            run_id=run_id,
+                            run_dir=run_dir,
+                            engine_name=engine_name,
+                            requested_model=custom_provider_model,
+                            source_attempt=attempt_number,
+                            run_store_backend=run_store,
+                            append_orchestrator_event=self._append_orchestrator_event,
+                        )
+                    ).model_dump(mode="json")
                     forced_failure_reason = None
 
                 normalized_status = "success"

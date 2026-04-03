@@ -8,16 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Protocol
 
+from server.config import config
+from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.engine_management.agent_cli_manager import AgentCliManager
-from server.services.engine_management.engine_command_profile import (
-    EngineCommandProfile,
-)
 from server.services.engine_management.engine_catalog import supported_engines
-
-
-def _write_json(path: Path, payload: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+from server.services.ui.ui_shell_session_config import ProfiledJsonSessionSecurity
 
 
 class SandboxProbeStrategy(Protocol):
@@ -26,7 +21,14 @@ class SandboxProbeStrategy(Protocol):
 
 
 class SessionSecurityStrategy(Protocol):
-    def prepare(self, *, session_dir: Path, env: Dict[str, str], sandbox_enabled: bool) -> None:
+    def prepare(
+        self,
+        *,
+        session_dir: Path,
+        env: Dict[str, str],
+        sandbox_enabled: bool,
+        custom_model: str | None = None,
+    ) -> None:
         ...
 
 
@@ -63,6 +65,15 @@ class _StaticUnsupportedSandboxProbe:
     def probe(self, *, agent_manager: AgentCliManager, engine: str) -> tuple[str, str]:
         _ = (agent_manager, engine)
         return ("unsupported", self.message)
+
+
+@dataclass(frozen=True)
+class _StaticSupportedSandboxProbe:
+    message: str
+
+    def probe(self, *, agent_manager: AgentCliManager, engine: str) -> tuple[str, str]:
+        _ = (agent_manager, engine)
+        return ("supported", self.message)
 
 
 class _CodexSandboxProbe:
@@ -116,54 +127,15 @@ class _GeminiSandboxProbe:
 
 
 class _NoopSecurity:
-    def prepare(self, *, session_dir: Path, env: Dict[str, str], sandbox_enabled: bool) -> None:
-        _ = (session_dir, env, sandbox_enabled)
-
-
-class _GeminiSecurity:
-    def prepare(self, *, session_dir: Path, env: Dict[str, str], sandbox_enabled: bool) -> None:
-        _ = env
-        _write_json(
-            session_dir / ".gemini" / "settings.json",
-            {
-                "general": {
-                    "enableAutoUpdate": False,
-                },
-                "tools": {
-                    "sandbox": sandbox_enabled,
-                    "autoAccept": False,
-                    "exclude": ["run_shell_command", "ShellTool"],
-                },
-                "security": {
-                    "disableYoloMode": True,
-                },
-            },
-        )
-
-
-class _IflowSecurity:
-    def prepare(self, *, session_dir: Path, env: Dict[str, str], sandbox_enabled: bool) -> None:
-        _ = (env, sandbox_enabled)
-        _write_json(
-            session_dir / ".iflow" / "settings.json",
-            {
-                "sandbox": False,
-                "autoAccept": False,
-                "approvalMode": "default",
-                "excludeTools": ["ShellTool"],
-            },
-        )
-
-
-class _OpencodeSecurity:
-    def prepare(self, *, session_dir: Path, env: Dict[str, str], sandbox_enabled: bool) -> None:
-        _ = (env, sandbox_enabled)
-        _write_json(
-            session_dir / "opencode.json",
-            {
-                "permission": "deny",
-            },
-        )
+    def prepare(
+        self,
+        *,
+        session_dir: Path,
+        env: Dict[str, str],
+        sandbox_enabled: bool,
+        custom_model: str | None = None,
+    ) -> None:
+        _ = (session_dir, env, sandbox_enabled, custom_model)
 
 
 class _NoopAuthHint:
@@ -222,117 +194,60 @@ class _GeminiAuthHint:
 
 
 class EngineShellCapabilityProvider:
-    def __init__(self, command_profile: EngineCommandProfile | None = None) -> None:
-        self._command_profile = command_profile or EngineCommandProfile()
+    def __init__(self) -> None:
         self._capabilities = self._build_capabilities()
 
-    def _default_launch_args(self, engine: str) -> tuple[str, ...]:
-        defaults: dict[str, tuple[str, ...]] = {
-            "codex": (
-                "--sandbox",
-                "workspace-write",
-                "--ask-for-approval",
-                "never",
-                "-c",
-                "features.shell_tool=false",
-                "-c",
-                "features.unified_exec=false",
-            ),
-            "gemini": (
-                "--sandbox",
-                "--approval-mode",
-                "default",
-            ),
-            "iflow": (),
-            "opencode": (),
-        }
-        return defaults.get(engine, ())
+    def _adapter_profile_path(self, engine: str) -> Path:
+        return Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
 
     def _resolve_launch_args(self, engine: str) -> tuple[str, ...]:
-        args = self._command_profile.resolve_args(engine=engine, action="ui_shell")
-        if args:
-            return tuple(args)
-        return self._default_launch_args(engine)
+        profile = load_adapter_profile(engine, self._adapter_profile_path(engine))
+        return tuple(profile.resolve_command_defaults(action="ui_shell"))
+
+    def _load_profile(self, engine: str) -> AdapterProfile:
+        return load_adapter_profile(engine, self._adapter_profile_path(engine))
+
+    def _resolve_sandbox_probe_strategy(self, profile: AdapterProfile) -> SandboxProbeStrategy:
+        strategy = profile.ui_shell.sandbox_probe_strategy
+        message = profile.ui_shell.sandbox_probe_message or "Sandbox capability is unknown for this engine."
+        if strategy == "codex_landlock":
+            return _CodexSandboxProbe()
+        if strategy == "gemini_container":
+            return _GeminiSandboxProbe()
+        if strategy == "static_supported":
+            return _StaticSupportedSandboxProbe(message=message)
+        return _StaticUnsupportedSandboxProbe(message=message)
+
+    def _resolve_auth_hint_strategy(self, profile: AdapterProfile) -> AuthHintStrategy:
+        if profile.ui_shell.auth_hint_strategy == "gemini_api_key_disables_sandbox":
+            return _GeminiAuthHint()
+        return _NoopAuthHint()
+
+    def _resolve_session_security_strategy(self, profile: AdapterProfile) -> SessionSecurityStrategy:
+        if profile.resolve_ui_shell_target_relpath() is None:
+            return _NoopSecurity()
+        return ProfiledJsonSessionSecurity(profile)
+
+    def _build_capability(self, engine: str) -> EngineShellCapability:
+        profile = self._load_profile(engine)
+        return EngineShellCapability(
+            command_id=profile.ui_shell.command_id,
+            label=profile.ui_shell.label,
+            engine=engine,
+            launch_args=tuple(profile.resolve_command_defaults(action="ui_shell")),
+            trust_bootstrap_parent=profile.ui_shell.trust_bootstrap_parent,
+            sandbox_arg=profile.ui_shell.sandbox_arg,
+            retry_without_sandbox_on_early_exit=profile.ui_shell.retry_without_sandbox_on_early_exit,
+            sandbox_probe_strategy=self._resolve_sandbox_probe_strategy(profile),
+            session_security_strategy=self._resolve_session_security_strategy(profile),
+            auth_hint_strategy=self._resolve_auth_hint_strategy(profile),
+        )
 
     def _build_capabilities(self) -> dict[str, EngineShellCapability]:
-        capabilities: dict[str, EngineShellCapability] = {
-            "codex": EngineShellCapability(
-                command_id="codex-tui",
-                label="Codex TUI",
-                engine="codex",
-                launch_args=self._resolve_launch_args("codex"),
-                trust_bootstrap_parent=True,
-                sandbox_arg="--sandbox",
-                retry_without_sandbox_on_early_exit=False,
-                sandbox_probe_strategy=_CodexSandboxProbe(),
-                session_security_strategy=_NoopSecurity(),
-                auth_hint_strategy=_NoopAuthHint(),
-            ),
-            "gemini": EngineShellCapability(
-                command_id="gemini-tui",
-                label="Gemini TUI",
-                engine="gemini",
-                launch_args=self._resolve_launch_args("gemini"),
-                trust_bootstrap_parent=True,
-                sandbox_arg="--sandbox",
-                retry_without_sandbox_on_early_exit=True,
-                sandbox_probe_strategy=_GeminiSandboxProbe(),
-                session_security_strategy=_GeminiSecurity(),
-                auth_hint_strategy=_GeminiAuthHint(),
-            ),
-            "iflow": EngineShellCapability(
-                command_id="iflow-tui",
-                label="iFlow TUI",
-                engine="iflow",
-                launch_args=self._resolve_launch_args("iflow"),
-                trust_bootstrap_parent=False,
-                sandbox_arg=None,
-                retry_without_sandbox_on_early_exit=False,
-                sandbox_probe_strategy=_StaticUnsupportedSandboxProbe(
-                    message=(
-                        "iFlow inline TUI runs without sandbox. iFlow sandbox requires Docker-image "
-                        "execution, which is intentionally outside this inline TUI design."
-                    )
-                ),
-                session_security_strategy=_IflowSecurity(),
-                auth_hint_strategy=_NoopAuthHint(),
-            ),
-            "opencode": EngineShellCapability(
-                command_id="opencode-tui",
-                label="OpenCode TUI",
-                engine="opencode",
-                launch_args=self._resolve_launch_args("opencode"),
-                trust_bootstrap_parent=False,
-                sandbox_arg=None,
-                retry_without_sandbox_on_early_exit=False,
-                sandbox_probe_strategy=_StaticUnsupportedSandboxProbe(
-                    message="OpenCode inline TUI runs without sandbox."
-                ),
-                session_security_strategy=_OpencodeSecurity(),
-                auth_hint_strategy=_NoopAuthHint(),
-            ),
-        }
-        for engine in supported_engines():
-            if engine not in capabilities:
-                capabilities[engine] = EngineShellCapability(
-                    command_id=f"{engine}-tui",
-                    label=f"{engine} TUI",
-                    engine=engine,
-                    launch_args=self._resolve_launch_args(engine),
-                    trust_bootstrap_parent=False,
-                    sandbox_arg=None,
-                    retry_without_sandbox_on_early_exit=False,
-                    sandbox_probe_strategy=_StaticUnsupportedSandboxProbe(
-                        message="Sandbox capability is unknown for this engine."
-                    ),
-                    session_security_strategy=_NoopSecurity(),
-                    auth_hint_strategy=_NoopAuthHint(),
-                )
-        return capabilities
+        return {engine: self._build_capability(engine) for engine in supported_engines()}
 
     def get(self, engine: str) -> EngineShellCapability | None:
         return self._capabilities.get(engine.strip().lower())
 
     def list_capabilities(self) -> tuple[EngineShellCapability, ...]:
         return tuple(self._capabilities.values())
-

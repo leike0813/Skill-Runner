@@ -13,14 +13,15 @@ from server.config_registry import keys
 from server.config_registry.registry import config_registry
 
 
-_VALID_TRANSPORTS = ("oauth_proxy", "cli_delegate")
-_NON_OPENCODE_ENGINES = ("codex", "gemini", "iflow")
-_ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode")
+_VALID_TRANSPORTS = ("oauth_proxy", "cli_delegate", "provider_config")
+_NON_OPENCODE_ENGINES = tuple(engine for engine in keys.ENGINE_KEYS if engine != "opencode")
+_ENGINE_KEYS = tuple(keys.ENGINE_KEYS)
 _CONVERSATION_TO_RUNTIME_METHOD_MAP: dict[str, str] = {
     "callback": "callback",
     "device_auth": "auth_code_or_url",
     "authorization_code": "auth_code_or_url",
     "api_key": "api_key",
+    "custom_provider": "custom_provider",
 }
 
 
@@ -302,18 +303,18 @@ class EngineAuthStrategyService:
     def list_ui_capabilities(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {
             "oauth_proxy": {
-                "codex": [],
-                "gemini": [],
-                "iflow": [],
                 "opencode": {},
             },
             "cli_delegate": {
-                "codex": [],
-                "gemini": [],
-                "iflow": [],
+                "opencode": {},
+            },
+            "provider_config": {
                 "opencode": {},
             },
         }
+        for transport in _VALID_TRANSPORTS:
+            for engine in _NON_OPENCODE_ENGINES:
+                payload[transport][engine] = []
         for engine in _NON_OPENCODE_ENGINES:
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(
@@ -344,18 +345,18 @@ class EngineAuthStrategyService:
     def list_ui_high_risk_capabilities(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {
             "oauth_proxy": {
-                "codex": [],
-                "gemini": [],
-                "iflow": [],
                 "opencode": {},
             },
             "cli_delegate": {
-                "codex": [],
-                "gemini": [],
-                "iflow": [],
+                "opencode": {},
+            },
+            "provider_config": {
                 "opencode": {},
             },
         }
+        for transport in _VALID_TRANSPORTS:
+            for engine in _NON_OPENCODE_ENGINES:
+                payload[transport][engine] = []
         for engine in _NON_OPENCODE_ENGINES:
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(

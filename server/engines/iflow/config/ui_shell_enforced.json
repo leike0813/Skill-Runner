@@ -1,0 +1,8 @@
+{
+  "sandbox": "false",
+  "autoAccept": false,
+  "approvalMode": "default",
+  "excludeTools": [
+    "ShellTool"
+  ]
+}

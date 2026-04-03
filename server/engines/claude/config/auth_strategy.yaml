@@ -1,0 +1,27 @@
+transports:
+  oauth_proxy:
+    methods:
+      - callback
+      - auth_code_or_url
+    driver:
+      start_method: auth
+      execution_mode: protocol_proxy
+  cli_delegate:
+    methods:
+      - auth_code_or_url
+    driver:
+      start_method: auth
+      execution_mode: cli_delegate
+  provider_config:
+    methods:
+      - custom_provider
+    driver:
+      start_method: auth
+      execution_mode: synthetic
+in_conversation:
+  transport: oauth_proxy
+  methods:
+    - callback
+    - authorization_code
+    - import
+    - custom_provider

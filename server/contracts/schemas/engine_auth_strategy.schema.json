@@ -20,7 +20,8 @@
         "codex",
         "gemini",
         "iflow",
-        "opencode"
+        "opencode",
+        "claude"
       ],
       "properties": {
         "codex": {
@@ -34,6 +35,9 @@
         },
         "opencode": {
           "$ref": "#/$defs/opencode_engine"
+        },
+        "claude": {
+          "$ref": "#/$defs/non_opencode_engine"
         }
       }
     }
@@ -44,7 +48,8 @@
       "enum": [
         "callback",
         "auth_code_or_url",
-        "api_key"
+        "api_key",
+        "custom_provider"
       ]
     },
     "conversation_auth_method": {
@@ -54,14 +59,16 @@
         "device_auth",
         "authorization_code",
         "import",
-        "api_key"
+        "api_key",
+        "custom_provider"
       ]
     },
     "transport": {
       "type": "string",
       "enum": [
         "oauth_proxy",
-        "cli_delegate"
+        "cli_delegate",
+        "provider_config"
       ]
     },
     "driver_policy": {
@@ -118,6 +125,9 @@
           "$ref": "#/$defs/transport_policy"
         },
         "cli_delegate": {
+          "$ref": "#/$defs/transport_policy"
+        },
+        "provider_config": {
           "$ref": "#/$defs/transport_policy"
         }
       },

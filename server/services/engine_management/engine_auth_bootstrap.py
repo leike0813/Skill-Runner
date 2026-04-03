@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.engines.claude.auth import ClaudeAuthCliFlow, ClaudeOAuthProxyFlow
+from server.engines.claude.auth.callbacks.local_callback_server import claude_local_callback_server
+from server.engines.claude.auth.runtime_handler import ClaudeAuthRuntimeHandler
 from server.engines.codex.auth import CodexOAuthProxyFlow
 from server.engines.codex.auth.runtime_handler import CodexAuthRuntimeHandler
 from server.engines.common.callbacks.openai_local_callback_server import openai_local_callback_server
@@ -103,6 +106,7 @@ def _build_callback_listener_registry() -> CallbackListenerRegistry:
     registry.register(channel="gemini", listener=gemini_local_callback_server)
     registry.register(channel="iflow", listener=iflow_local_callback_server)
     registry.register(channel="antigravity", listener=antigravity_local_callback_server)
+    registry.register(channel="claude", listener=claude_local_callback_server)
     return registry
 
 
@@ -115,8 +119,10 @@ def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootst
     manager._iflow_oauth_proxy_flow = IFlowOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._iflow_flow = IFlowAuthCliFlow()  # noqa: SLF001
     manager._opencode_flow = OpencodeAuthCliFlow()  # noqa: SLF001
+    manager._claude_flow = ClaudeAuthCliFlow()  # noqa: SLF001
     manager._openai_device_proxy_flow = OpenAIDeviceProxyFlow()  # noqa: SLF001
     manager._codex_oauth_proxy_flow = CodexOAuthProxyFlow(agent_home)  # noqa: SLF001
+    manager._claude_oauth_proxy_flow = ClaudeOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._opencode_openai_oauth_proxy_flow = OpencodeOpenAIOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._opencode_google_antigravity_oauth_proxy_flow = OpencodeGoogleAntigravityOAuthProxyFlow(  # noqa: SLF001
         agent_home
@@ -127,6 +133,7 @@ def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootst
         "gemini": GeminiAuthRuntimeHandler(manager),
         "iflow": IFlowAuthRuntimeHandler(manager),
         "opencode": OpencodeAuthRuntimeHandler(manager),
+        "claude": ClaudeAuthRuntimeHandler(manager),
     }
     return AuthBootstrapBundle(
         driver_registry=_build_driver_registry(disabled_cli_delegate_engines=disabled_cli_delegate_engines),

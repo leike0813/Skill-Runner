@@ -109,6 +109,8 @@ def snapshot_filesystem(run_dir: Path) -> list[dict[str, Any]]:
     ignored_prefixes = (
         ".audit/",
         ".state/",
+        ".git/",
+        ".claude/",
         ".codex/",
         ".gemini/",
         ".iflow/",

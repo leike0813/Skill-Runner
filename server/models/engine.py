@@ -30,6 +30,7 @@ class EngineModelInfo(BaseModel):
     supported_effort: Optional[List[str]] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    source: Optional[str] = None
 
 
 class EngineModelsResponse(BaseModel):
@@ -225,6 +226,7 @@ class EngineManifestModelInfo(BaseModel):
     supported_effort: Optional[List[str]] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    source: Optional[str] = None
 
 
 class EngineManifestViewResponse(BaseModel):

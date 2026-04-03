@@ -98,6 +98,7 @@ class AuthChallengeKind(str, Enum):
     API_KEY = "api_key"
     BROWSER_CALLBACK_ONLY = "browser_callback_only"
     IMPORT_FILES = "import_files"
+    CUSTOM_PROVIDER = "custom_provider"
 
 
 class AuthMethod(str, Enum):
@@ -108,6 +109,7 @@ class AuthMethod(str, Enum):
     AUTHORIZATION_CODE = "authorization_code"
     API_KEY = "api_key"
     IMPORT = "import"
+    CUSTOM_PROVIDER = "custom_provider"
 
 
 class AuthSessionPhase(str, Enum):
@@ -124,6 +126,7 @@ class AuthSubmissionKind(str, Enum):
     AUTHORIZATION_CODE = "authorization_code"
     API_KEY = "api_key"
     IMPORT_FILES = "import_files"
+    CUSTOM_PROVIDER = "custom_provider"
 
 
 class ResumeCause(str, Enum):

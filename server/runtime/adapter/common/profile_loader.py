@@ -25,6 +25,14 @@ SettingsValidator = Literal["iflow_oauth_settings"]
 BootstrapFormat = Literal["json", "text"]
 NormalizeStrategy = Literal["iflow_settings_v1"]
 ProcessEventType = Literal["reasoning", "tool_call", "command_execution"]
+UiShellSandboxProbeStrategy = Literal[
+    "static_supported",
+    "static_unsupported",
+    "codex_landlock",
+    "gemini_container",
+]
+UiShellAuthHintStrategy = Literal["none", "gemini_api_key_disables_sandbox"]
+UiShellRuntimeOverrideStrategy = Literal["none", "gemini_ui_shell", "claude_ui_shell"]
 ImportValidatorName = Literal[
     "json_object",
     "codex_auth_json",
@@ -86,6 +94,35 @@ class ModelCatalogProfile:
     manifest_path: str | None
     models_root: str | None
     seed_path: str | None
+
+
+@dataclass(frozen=True)
+class CommandDefaultsProfile:
+    start: tuple[str, ...]
+    resume: tuple[str, ...]
+    ui_shell: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class UiShellConfigAssetsProfile:
+    default_path: str | None
+    enforced_path: str | None
+    settings_schema_path: str | None
+    target_relpath: str | None
+
+
+@dataclass(frozen=True)
+class UiShellProfile:
+    command_id: str
+    label: str
+    trust_bootstrap_parent: bool
+    sandbox_arg: str | None
+    retry_without_sandbox_on_early_exit: bool
+    sandbox_probe_strategy: UiShellSandboxProbeStrategy
+    sandbox_probe_message: str | None
+    auth_hint_strategy: UiShellAuthHintStrategy
+    runtime_override_strategy: UiShellRuntimeOverrideStrategy
+    config_assets: UiShellConfigAssetsProfile
 
 
 @dataclass(frozen=True)
@@ -165,6 +202,8 @@ class AdapterProfile:
     attempt_workspace: AttemptWorkspaceProfile
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
+    command_defaults: CommandDefaultsProfile
+    ui_shell: UiShellProfile
     cli_management: CliManagementProfile
     parser_auth_patterns: ParserAuthPatternsProfile
     parser_structured_extract: ParserStructuredExtractProfile | None
@@ -202,6 +241,21 @@ class AdapterProfile:
     def resolve_settings_schema_path(self) -> Path | None:
         return self._resolve_profile_relative_path(self.config_assets.settings_schema_path)
 
+    def resolve_ui_shell_default_config_path(self) -> Path | None:
+        return self._resolve_profile_relative_path(self.ui_shell.config_assets.default_path)
+
+    def resolve_ui_shell_enforced_config_path(self) -> Path | None:
+        return self._resolve_profile_relative_path(self.ui_shell.config_assets.enforced_path)
+
+    def resolve_ui_shell_settings_schema_path(self) -> Path | None:
+        return self._resolve_profile_relative_path(self.ui_shell.config_assets.settings_schema_path)
+
+    def resolve_ui_shell_target_relpath(self) -> str | None:
+        raw = self.ui_shell.config_assets.target_relpath
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        return raw.strip()
+
     def resolve_skill_defaults_path(self, skill_path: Path | None) -> Path | None:
         raw = self.config_assets.skill_defaults_path
         if not isinstance(raw, str) or not raw.strip() or skill_path is None:
@@ -225,6 +279,15 @@ class AdapterProfile:
 
     def resolve_seed_path(self) -> Path | None:
         return self._resolve_profile_relative_path(self.model_catalog.seed_path)
+
+    def resolve_command_defaults(self, *, action: str) -> list[str]:
+        if action == "start":
+            return list(self.command_defaults.start)
+        if action == "resume":
+            return list(self.command_defaults.resume)
+        if action == "ui_shell":
+            return list(self.command_defaults.ui_shell)
+        return []
 
     def skills_root_from(self, run_dir: Path, config_path: Path) -> Path:
         workspace = (
@@ -298,6 +361,8 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     workspace_raw = payload["attempt_workspace"]
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
+    command_defaults_raw = payload["command_defaults"]
+    ui_shell_raw = payload["ui_shell"]
     cli_management_raw = payload["cli_management"]
     parser_auth_patterns_raw = payload["parser_auth_patterns"]
     parser_structured_extract_raw = payload.get("parser_structured_extract")
@@ -345,6 +410,31 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
         label="model_catalog.seed_path",
         raw_value=model_catalog_raw.get("seed_path"),
     )
+    for label, raw_value in (
+        ("ui_shell.config_assets.default_path", ui_shell_raw.get("config_assets", {}).get("default_path")),
+        ("ui_shell.config_assets.enforced_path", ui_shell_raw.get("config_assets", {}).get("enforced_path")),
+        (
+            "ui_shell.config_assets.settings_schema_path",
+            ui_shell_raw.get("config_assets", {}).get("settings_schema_path"),
+        ),
+    ):
+        _validate_resolved_path(
+            profile_path=profile_path,
+            label=label,
+            raw_value=raw_value,
+        )
+
+    ui_shell_target_raw = ui_shell_raw.get("config_assets", {}).get("target_relpath")
+    if ui_shell_target_raw is not None:
+        if not isinstance(ui_shell_target_raw, str) or not ui_shell_target_raw.strip():
+            raise RuntimeError(
+                f"Adapter profile invalid ui_shell.config_assets.target_relpath: empty ({profile_path})"
+            )
+        if _is_absolute_relpath_like(ui_shell_target_raw):
+            raise RuntimeError(
+                f"Adapter profile invalid ui_shell.config_assets.target_relpath: must be relative ({profile_path})"
+            )
+
     for index, item in enumerate(cli_management_raw.get("credential_imports", [])):
         if not isinstance(item, dict):
             raise RuntimeError(
@@ -464,6 +554,52 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
                 str(model_catalog_raw["seed_path"])
                 if model_catalog_raw.get("seed_path") is not None
                 else None
+            ),
+        ),
+        command_defaults=CommandDefaultsProfile(
+            start=tuple(str(item) for item in command_defaults_raw["start"]),
+            resume=tuple(str(item) for item in command_defaults_raw["resume"]),
+            ui_shell=tuple(str(item) for item in command_defaults_raw["ui_shell"]),
+        ),
+        ui_shell=UiShellProfile(
+            command_id=str(ui_shell_raw["command_id"]),
+            label=str(ui_shell_raw["label"]),
+            trust_bootstrap_parent=bool(ui_shell_raw["trust_bootstrap_parent"]),
+            sandbox_arg=(
+                str(ui_shell_raw["sandbox_arg"])
+                if ui_shell_raw.get("sandbox_arg") is not None
+                else None
+            ),
+            retry_without_sandbox_on_early_exit=bool(ui_shell_raw["retry_without_sandbox_on_early_exit"]),
+            sandbox_probe_strategy=ui_shell_raw["sandbox_probe_strategy"],
+            sandbox_probe_message=(
+                str(ui_shell_raw["sandbox_probe_message"])
+                if ui_shell_raw.get("sandbox_probe_message") is not None
+                else None
+            ),
+            auth_hint_strategy=ui_shell_raw["auth_hint_strategy"],
+            runtime_override_strategy=ui_shell_raw["runtime_override_strategy"],
+            config_assets=UiShellConfigAssetsProfile(
+                default_path=(
+                    str(ui_shell_raw["config_assets"]["default_path"])
+                    if ui_shell_raw["config_assets"].get("default_path") is not None
+                    else None
+                ),
+                enforced_path=(
+                    str(ui_shell_raw["config_assets"]["enforced_path"])
+                    if ui_shell_raw["config_assets"].get("enforced_path") is not None
+                    else None
+                ),
+                settings_schema_path=(
+                    str(ui_shell_raw["config_assets"]["settings_schema_path"])
+                    if ui_shell_raw["config_assets"].get("settings_schema_path") is not None
+                    else None
+                ),
+                target_relpath=(
+                    str(ui_shell_raw["config_assets"]["target_relpath"])
+                    if ui_shell_raw["config_assets"].get("target_relpath") is not None
+                    else None
+                ),
             ),
         ),
         cli_management=CliManagementProfile(

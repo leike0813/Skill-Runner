@@ -74,7 +74,7 @@
    - `stream_parser.py`（必须）
 2. 新建 `server/engines/<new>/config/` 并创建：
    - `auth_strategy.yaml`（认证支持矩阵）
-   - `command_profile.json`（TUI shell 命令配置）
+   - `adapter_profile.json` 中的 `command_defaults`（start / resume / ui_shell 默认参数）
 3. 新建 `server/engines/<new>/models/` 并提供：
    - `manifest.json` + 至少一个 `models_*.json` snapshot
 

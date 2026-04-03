@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.stream_parser import CodexStreamParser
 from server.engines.opencode.adapter.stream_parser import OpencodeStreamParser
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
+from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.protocol.live_publish import (
@@ -132,6 +134,72 @@ class _StubOpencodeAdapter:
             "opencode",
             Path("server/engines/opencode/adapter/adapter_profile.json"),
         )
+
+
+class _RecordingNdjsonSession(NdjsonLiveStreamParserSession):
+    def __init__(self) -> None:
+        super().__init__(accepted_streams={"stdout", "pty"})
+        self.rows: list[tuple[str, dict, dict]] = []
+
+    def handle_live_row(self, *, payload: dict, raw_ref: dict, stream: str):
+        self.rows.append((stream, payload, raw_ref))
+        return [
+            {
+                "kind": "diagnostic",
+                "code": f"{stream}:{payload.get('id')}",
+                "raw_ref": raw_ref,
+            }
+        ]
+
+
+def test_ndjson_live_session_keeps_split_chunk_offsets_stable() -> None:
+    session = _RecordingNdjsonSession()
+    payload = '{"id":"row-1"}\n{"id":"row-2"}\n'
+    payload_bytes = payload.encode("utf-8")
+    split = 11
+    first = payload_bytes[:split].decode("utf-8", errors="replace")
+    second = payload_bytes[split:].decode("utf-8", errors="replace")
+
+    emissions_first = session.feed(stream="stdout", text=first, byte_from=0, byte_to=split)
+    emissions_second = session.feed(
+        stream="stdout",
+        text=second,
+        byte_from=split,
+        byte_to=len(payload_bytes),
+    )
+
+    assert emissions_first == []
+    assert [item["code"] for item in emissions_second] == ["stdout:row-1", "stdout:row-2"]
+    assert session.rows[0][2] == {"stream": "stdout", "byte_from": 0, "byte_to": 15}
+    assert session.rows[1][2] == {"stream": "stdout", "byte_from": 15, "byte_to": len(payload_bytes)}
+
+
+def test_ndjson_live_session_ignores_invalid_json_and_routes_multiple_streams() -> None:
+    session = _RecordingNdjsonSession()
+
+    stdout_emissions = session.feed(
+        stream="stdout",
+        text='not-json\n{"id":"row-1"}\n',
+        byte_from=0,
+        byte_to=len('not-json\n{"id":"row-1"}\n'.encode("utf-8")),
+    )
+    stderr_emissions = session.feed(
+        stream="stderr",
+        text='{"id":"ignored"}\n',
+        byte_from=0,
+        byte_to=len('{"id":"ignored"}\n'.encode("utf-8")),
+    )
+    pty_emissions = session.feed(
+        stream="pty",
+        text='{"id":"row-2"}\n',
+        byte_from=0,
+        byte_to=len('{"id":"row-2"}\n'.encode("utf-8")),
+    )
+
+    assert [item["code"] for item in stdout_emissions] == ["stdout:row-1"]
+    assert stderr_emissions == []
+    assert [item["code"] for item in pty_emissions] == ["pty:row-2"]
+    assert [item[0] for item in session.rows] == ["stdout", "pty"]
 
 
 def test_codex_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> None:
@@ -364,3 +432,77 @@ async def test_live_runtime_emitter_delays_raw_until_finish_for_terminal_semanti
         row.get("event", {}).get("type") == "lifecycle.run_handle"
         for row in final_rasp["events"]
     )
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_consume_rows(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-claude-semantic"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-semantic")
+    rasp_live_journal.clear("run-live-claude-semantic")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-semantic",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    first_payload = (
+        '{"type":"system","subtype":"init","session_id":"session-claude-live"}\n'
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"draft plan"},{"type":"text","text":"hello live"}]}}\n'
+        '{"type":"assistant","message":{"content":[{"name":"Bash","input":{"command":"pwd"},"id":"toolu_pwd","type":"tool_use"}]}}\n'
+        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_pwd","content":"/tmp/run","is_error":false}]}}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=first_payload,
+        byte_from=0,
+        byte_to=len(first_payload.encode("utf-8")),
+    )
+
+    running_rasp = rasp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
+    running_types = [row.get("event", {}).get("type") for row in running_rasp["events"]]
+    assert "raw.stdout" not in running_types
+    assert "lifecycle.run_handle" in running_types
+    assert "agent.turn_start" in running_types
+    assert "agent.reasoning" in running_types
+    assert "agent.command_execution" in running_types
+    assert running_types.index("lifecycle.run_handle") < running_types.index("agent.turn_start")
+    assert running_types.index("agent.turn_start") < running_types.index("agent.reasoning")
+    assert running_types.index("agent.reasoning") < running_types.index("agent.command_execution")
+    reasoning_events = [
+        row for row in running_rasp["events"]
+        if row.get("event", {}).get("type") == "agent.reasoning"
+    ]
+    assert any(row.get("data", {}).get("text") == "draft plan" for row in reasoning_events)
+
+    second_payload = (
+        '{"type":"result","subtype":"success","session_id":"session-claude-live","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=second_payload,
+        byte_from=len(first_payload.encode("utf-8")),
+        byte_to=len(first_payload.encode("utf-8")) + len(second_payload.encode("utf-8")),
+    )
+
+    running_fcmp = fcmp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
+    running_fcmp_types = [row.get("type") for row in running_fcmp["events"]]
+    assert "assistant.command_execution" in running_fcmp_types
+    assert "assistant.message.final" in running_fcmp_types
+    reasoning_fcmp = [
+        row for row in running_fcmp["events"]
+        if row.get("type") == "assistant.reasoning"
+    ]
+    assert any(row.get("data", {}).get("text") == "draft plan" for row in reasoning_fcmp)
+
+    await emitter.on_process_exit(exit_code=0, failure_reason=None)
+
+    final_rasp = rasp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
+    assert not any(row.get("event", {}).get("type") == "raw.stdout" for row in final_rasp["events"])
+    assert any(row.get("event", {}).get("type") == "lifecycle.run_handle" for row in final_rasp["events"])

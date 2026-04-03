@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 
-ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode")
+ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode", "claude")
 
-ENGINE_COMMAND_PROFILE_NAME = "command_profile.json"
 ENGINE_AUTH_STRATEGY_NAME = "auth_strategy.yaml"
 
 RUNTIME_CONTRACT_SCHEMA_NAME = "runtime_contract.schema.json"

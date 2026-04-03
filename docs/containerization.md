@@ -207,12 +207,29 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
     - `baseUrl = "https://apis.iflow.cn/v1"`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.codex/config.toml` with:
     - `cli_auth_credentials_store = "file"`
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.claude.json` with:
+    - `hasCompletedOnboarding = true`
+    - Note: Claude bootstrap writes the global state file `.claude.json`, not `.claude/settings.json`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/opencode.json` with:
     - `plugin = ["opencode-antigravity-auth"]`
   - Runtime-generated OpenCode run config (`run_dir/opencode.json`) also applies an enforced provider policy:
     - known provider `options.timeout = false`
     - this is intentional to avoid long-running SSE responses being aborted by OpenCode's default 5-minute provider timeout
     - enforced config has higher priority than skill defaults and runtime `opencode_config` overrides
+  - Claude runtime config remains separate from bootstrap:
+    - bootstrap initializes `${SKILL_RUNNER_AGENT_HOME}/.claude.json`
+    - each run still generates run-local `run_dir/.claude/settings.json`
+    - headless run / harness use run-local settings with:
+      - `permissions.defaultMode = "bypassPermissions"`
+      - `sandbox.enabled = true`
+      - `sandbox.allowUnsandboxedCommands = false`
+      - sandbox filesystem write scope constrained to `run_dir`
+    - Claude sandbox in containerized deployments depends on both `bubblewrap` (`bwrap`) and `socat`
+    - The runtime image installs both dependencies so Claude sandbox can start normally inside Docker
+    - If either dependency is missing, or sandbox initialization later fails at runtime, Skill Runner records a warning/diagnostic but does not block the run
+    - inline UI shell uses a separate session-local `.claude/settings.json` with a much stricter posture:
+      - `permissions.defaultMode = "dontAsk"`
+      - tools denied by default, except lightweight network access used for auth / simple Q&A
   - Entry-point trust bootstrap (idempotent):
     - Creates/repairs `${SKILL_RUNNER_AGENT_HOME}/.gemini/trustedFolders.json` as a JSON object.
     - Adds runs parent trust to Gemini:

@@ -13,6 +13,7 @@ def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
     _write(run_dir / "result" / "result.json", "{}")
     _write(run_dir / ".audit" / "meta.1.json", "{}")
     _write(run_dir / ".state" / "state.json", "{}")
+    _write(run_dir / ".git" / "HEAD", "ref: refs/heads/main")
     _write(run_dir / ".codex" / "config.toml", "x")
     _write(run_dir / ".gemini" / "settings.json", "x")
     _write(run_dir / ".iflow" / "settings.json", "x")
@@ -24,6 +25,7 @@ def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
     assert "result/result.json" in snapshot
     assert ".audit/meta.1.json" not in snapshot
     assert ".state/state.json" not in snapshot
+    assert ".git/HEAD" not in snapshot
     assert ".codex/config.toml" not in snapshot
     assert ".gemini/settings.json" not in snapshot
     assert ".iflow/settings.json" not in snapshot

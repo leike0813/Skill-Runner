@@ -28,7 +28,7 @@ server/engines/demo/
     callbacks/                  ← OAuth 回调处理
   config/
     auth_strategy.yaml          ← 认证支持矩阵
-    command_profile.json        ← TUI shell 命令配置
+    adapter_profile.json        ← 运行时合同与命令默认参数
     bootstrap.json              ← 引导配置默认值
     default.json                ← 默认运行配置
     enforced.json               ← 强制运行配置

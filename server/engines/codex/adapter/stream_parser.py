@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
 from server.runtime.adapter.types import (
     LiveParserEmission,
     RuntimeAssistantMessage,
     RuntimeProcessEvent,
+    RuntimeStreamRawRef,
 )
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
@@ -365,11 +367,10 @@ class CodexStreamParser:
         return _CodexLiveSession(self)
 
 
-class _CodexLiveSession:
+class _CodexLiveSession(NdjsonLiveStreamParserSession):
     def __init__(self, parser: CodexStreamParser) -> None:
+        super().__init__(accepted_streams={"stdout", "pty"})
         self._parser = parser
-        self._buffers: dict[str, str] = {"stdout": "", "pty": ""}
-        self._buffer_byte_start: dict[str, int] = {"stdout": 0, "pty": 0}
         (
             self._turn_start_types,
             self._turn_end_types,
@@ -379,193 +380,118 @@ class _CodexLiveSession:
         self._turn_complete_emitted = False
         self._run_handle_emitted = False
 
-    def feed(
+    def handle_live_row(
         self,
         *,
+        payload: dict[str, Any],
+        raw_ref: RuntimeStreamRawRef,
         stream: str,
-        text: str,
-        byte_from: int,
-        byte_to: int,
     ) -> list[LiveParserEmission]:
-        if stream not in {"stdout", "pty"}:
-            return []
-        previous_tail = self._buffers.get(stream, "")
-        previous_tail_start = self._buffer_byte_start.get(stream, int(byte_from))
-        if previous_tail:
-            combined = f"{previous_tail}{text}"
-            combined_start = previous_tail_start
-        else:
-            combined = text
-            combined_start = int(byte_from)
-        if "\n" not in combined:
-            self._buffers[stream] = combined
-            self._buffer_byte_start[stream] = combined_start
-            return []
-        lines = combined.splitlines(keepends=True)
-        complete = lines[:-1]
-        tail = lines[-1]
-        if tail.endswith("\n"):
-            complete.append(tail)
-            tail = ""
-        self._buffers[stream] = tail
-        cursor = combined_start
-        self._buffer_byte_start[stream] = cursor
         emissions: list[LiveParserEmission] = []
-        for line in complete:
-            clean = line.strip()
-            encoded = line.encode("utf-8", errors="replace")
-            row_from = cursor
-            row_to = cursor + len(encoded)
-            cursor = row_to
-            self._buffer_byte_start[stream] = cursor
-            if not clean:
-                continue
-            try:
-                payload = json.loads(clean)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            payload_type_obj = payload.get("type")
-            payload_type = payload_type_obj if isinstance(payload_type_obj, str) else None
-            session_id = find_session_id(payload)
-            if (
-                payload_type == "thread.started"
-                and not self._run_handle_emitted
-                and isinstance(session_id, str)
-                and session_id.strip()
-            ):
-                self._run_handle_emitted = True
-                emissions.append(
-                    {
-                        "kind": "run_handle",
-                        "handle_id": session_id.strip(),
-                        "raw_ref": {
-                            "stream": stream,
-                            "byte_from": row_from,
-                            "byte_to": row_to,
-                        },
-                    }
-                )
-            if payload_type and payload_type in self._turn_start_types and not self._turn_start_emitted:
-                self._turn_start_emitted = True
-                emissions.append(
-                    {
-                        "kind": "turn_marker",
-                        "marker": "start",
-                        "raw_ref": {
-                            "stream": stream,
-                            "byte_from": row_from,
-                            "byte_to": row_to,
-                        },
-                    }
-                )
-            if payload_type and payload_type in self._turn_end_types and not self._turn_complete_emitted:
-                self._turn_complete_emitted = True
-                turn_complete_data_obj = payload.get("usage")
-                turn_complete_data = (
-                    dict(turn_complete_data_obj)
-                    if isinstance(turn_complete_data_obj, dict)
-                    else None
-                )
-                marker_emission: LiveParserEmission = {
-                    "kind": "turn_marker",
-                    "marker": "complete",
-                    "raw_ref": {
-                        "stream": stream,
-                        "byte_from": row_from,
-                        "byte_to": row_to,
-                    },
+        payload_type_obj = payload.get("type")
+        payload_type = payload_type_obj if isinstance(payload_type_obj, str) else None
+        session_id = find_session_id(payload)
+        if (
+            payload_type == "thread.started"
+            and not self._run_handle_emitted
+            and isinstance(session_id, str)
+            and session_id.strip()
+        ):
+            self._run_handle_emitted = True
+            emissions.append(
+                {
+                    "kind": "run_handle",
+                    "handle_id": session_id.strip(),
+                    "raw_ref": raw_ref,
                 }
-                if isinstance(turn_complete_data, dict):
-                    marker_emission["turn_complete_data"] = turn_complete_data
-                emissions.append(marker_emission)
-                completion_emission: LiveParserEmission = {"kind": "turn_completed"}
-                if isinstance(turn_complete_data, dict):
-                    completion_emission["turn_complete_data"] = turn_complete_data
-                emissions.append(completion_emission)
-
-            item = payload.get("item")
-            if not isinstance(item, dict):
-                continue
-            item_type_obj = item.get("type")
-            item_type = item_type_obj if isinstance(item_type_obj, str) else None
-            if not item_type:
-                continue
-
-            if payload_type == "item.completed" and item_type == "agent_message":
-                text_obj = item.get("text")
-                if not isinstance(text_obj, str) or not text_obj.strip():
-                    continue
-                emission: LiveParserEmission = {
-                    "kind": "assistant_message",
-                    "text": text_obj,
-                    "raw_ref": {
-                        "stream": stream,
-                        "byte_from": row_from,
-                        "byte_to": row_to,
-                    },
-                }
-                item_id = item.get("id")
-                if isinstance(item_id, str) and item_id.strip():
-                    emission["message_id"] = item_id
-                if session_id:
-                    emission["session_id"] = session_id
-                emissions.append(emission)
-                continue
-
-            mapping = self._process_mapping_by_item.get(item_type)
-            if mapping is None or payload_type != "item.completed":
-                continue
-            summary_obj = item.get(mapping.summary_field) if mapping.summary_field else None
-            if isinstance(summary_obj, str) and summary_obj.strip():
-                summary = _summarize(summary_obj)
-            else:
-                summary = f"{item_type} completed"
-            text_obj = item.get(mapping.text_field) if mapping.text_field else None
-            text_value: str | None = None
-            if isinstance(text_obj, str) and text_obj.strip():
-                text_value = text_obj
-            elif text_obj is not None:
-                text_value = json.dumps(text_obj, ensure_ascii=False)
-            details: dict[str, Any] = {
-                "item_type": item_type,
-                "payload_type": payload_type,
+            )
+        if payload_type and payload_type in self._turn_start_types and not self._turn_start_emitted:
+            self._turn_start_emitted = True
+            emissions.append({"kind": "turn_marker", "marker": "start", "raw_ref": raw_ref})
+        if payload_type and payload_type in self._turn_end_types and not self._turn_complete_emitted:
+            self._turn_complete_emitted = True
+            turn_complete_data_obj = payload.get("usage")
+            turn_complete_data = (
+                dict(turn_complete_data_obj)
+                if isinstance(turn_complete_data_obj, dict)
+                else None
+            )
+            marker_emission: LiveParserEmission = {
+                "kind": "turn_marker",
+                "marker": "complete",
+                "raw_ref": raw_ref,
             }
-            for key in ("command", "status", "exit_code", "name"):
-                value = item.get(key)
-                if value is not None:
-                    details[key] = value
-            if "arguments" in item and item.get("arguments") is not None:
-                details["arguments"] = item.get("arguments")
-            process_emission: LiveParserEmission = {
-                "kind": "process_event",
-                "process_type": mapping.process_type,
-                "summary": summary,
-                "classification": mapping.classification or mapping.process_type,
-                "details": details,
-                "raw_ref": {
-                    "stream": stream,
-                    "byte_from": row_from,
-                    "byte_to": row_to,
-                },
+            if isinstance(turn_complete_data, dict):
+                marker_emission["turn_complete_data"] = turn_complete_data
+            emissions.append(marker_emission)
+            completion_emission: LiveParserEmission = {"kind": "turn_completed"}
+            if isinstance(turn_complete_data, dict):
+                completion_emission["turn_complete_data"] = turn_complete_data
+            emissions.append(completion_emission)
+
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            return emissions
+        item_type_obj = item.get("type")
+        item_type = item_type_obj if isinstance(item_type_obj, str) else None
+        if not item_type:
+            return emissions
+
+        if payload_type == "item.completed" and item_type == "agent_message":
+            text_obj = item.get("text")
+            if not isinstance(text_obj, str) or not text_obj.strip():
+                return emissions
+            emission: LiveParserEmission = {
+                "kind": "assistant_message",
+                "text": text_obj,
+                "raw_ref": raw_ref,
             }
             item_id = item.get("id")
             if isinstance(item_id, str) and item_id.strip():
-                process_emission["message_id"] = item_id
-            if isinstance(text_value, str) and text_value:
-                process_emission["text"] = text_value
+                emission["message_id"] = item_id
             if session_id:
-                process_emission["session_id"] = session_id
-            emissions.append(process_emission)
-        return emissions
+                emission["session_id"] = session_id
+            emissions.append(emission)
+            return emissions
 
-    def finish(
-        self,
-        *,
-        exit_code: int,
-        failure_reason: str | None,
-    ) -> list[LiveParserEmission]:
-        _ = exit_code
-        _ = failure_reason
-        return []
+        mapping = self._process_mapping_by_item.get(item_type)
+        if mapping is None or payload_type != "item.completed":
+            return emissions
+        summary_obj = item.get(mapping.summary_field) if mapping.summary_field else None
+        if isinstance(summary_obj, str) and summary_obj.strip():
+            summary = _summarize(summary_obj)
+        else:
+            summary = f"{item_type} completed"
+        text_obj = item.get(mapping.text_field) if mapping.text_field else None
+        text_value: str | None = None
+        if isinstance(text_obj, str) and text_obj.strip():
+            text_value = text_obj
+        elif text_obj is not None:
+            text_value = json.dumps(text_obj, ensure_ascii=False)
+        details: dict[str, Any] = {
+            "item_type": item_type,
+            "payload_type": payload_type,
+        }
+        for key in ("command", "status", "exit_code", "name"):
+            value = item.get(key)
+            if value is not None:
+                details[key] = value
+        if "arguments" in item and item.get("arguments") is not None:
+            details["arguments"] = item.get("arguments")
+        process_emission: LiveParserEmission = {
+            "kind": "process_event",
+            "process_type": mapping.process_type,
+            "summary": summary,
+            "classification": mapping.classification or mapping.process_type,
+            "details": details,
+            "raw_ref": raw_ref,
+        }
+        item_id = item.get("id")
+        if isinstance(item_id, str) and item_id.strip():
+            process_emission["message_id"] = item_id
+        if isinstance(text_value, str) and text_value:
+            process_emission["text"] = text_value
+        if session_id:
+            process_emission["session_id"] = session_id
+        emissions.append(process_emission)
+        return emissions

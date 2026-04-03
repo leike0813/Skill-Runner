@@ -32,6 +32,11 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
         choices=[0, 1, 2, 3],
         help="Translate output level",
     )
+    start.add_argument(
+        "--custom-model",
+        dest="custom_model",
+        help="Claude custom provider model in strict provider/model form",
+    )
     start.add_argument("engine", help="Engine name")
     start.add_argument(
         "passthrough_args",
@@ -71,6 +76,11 @@ def _build_direct_parser() -> argparse.ArgumentParser:
         choices=[0, 1, 2, 3],
         help="Translate output level",
     )
+    parser.add_argument(
+        "--custom-model",
+        dest="custom_model",
+        help="Claude custom provider model in strict provider/model form",
+    )
     parser.add_argument("engine", help="Engine name")
     parser.add_argument(
         "passthrough_args",
@@ -101,6 +111,7 @@ def _run(argv: Sequence[str]) -> dict:
                 translate_level=int(parsed.translate),
                 run_selector=parsed.run_selector,
                 execution_mode="auto" if bool(parsed.auto_mode) else "interactive",
+                custom_model=parsed.custom_model,
             )
             return runtime.start(start_request)
 
@@ -121,6 +132,7 @@ def _run(argv: Sequence[str]) -> dict:
         translate_level=int(parsed.translate),
         run_selector=parsed.run_selector,
         execution_mode="auto" if bool(parsed.auto_mode) else "interactive",
+        custom_model=parsed.custom_model,
     )
     return runtime.start(start_request)
 

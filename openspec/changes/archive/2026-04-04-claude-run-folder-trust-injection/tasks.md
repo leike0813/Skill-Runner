@@ -1,0 +1,7 @@
+- [x] Add `claude-run-folder-trust-injection` change artifacts
+- [x] Add common run-folder git bootstrap helper and wire it into API/auth/harness/UI shell trust entrypoints
+- [x] Add Claude trust folder strategy and register it via trust registry without manager-level engine branching
+- [x] Ensure Claude parent trust bootstrap remains no-op while run/session trust is injected and cleaned up
+- [x] Ignore `.git/` in run snapshot/diff outputs
+- [x] Add regression tests for Claude trust persistence, invocation paths, git bootstrap, and snapshot ignore rules
+- [x] Run targeted pytest and mypy checks

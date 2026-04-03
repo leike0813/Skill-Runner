@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from server.config import config
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
+from server.services.engine_management.engine_custom_provider_service import (
+    EngineCustomProviderModelEntry,
+    engine_custom_provider_service,
+)
 from server.services.engine_management.engine_status_cache_service import engine_status_cache_service
 from server.services.engine_management.engine_model_catalog_lifecycle import (
     engine_model_catalog_lifecycle,
@@ -28,6 +32,7 @@ class ModelEntry:
     supported_effort: Optional[List[str]]
     provider: Optional[str] = None
     model: Optional[str] = None
+    source: str = "official"
 
 
 @dataclass(frozen=True)
@@ -77,7 +82,7 @@ class ModelRegistry:
             [snap["version"] for snap in snapshots]
         )
         snapshot_file = self._snapshot_file(manifest, snapshot_version)
-        models = self._load_models(snapshot_file)
+        models = self._build_manifest_models(engine, snapshot_file)
 
         catalog = ModelCatalog(
             engine=engine,
@@ -114,7 +119,7 @@ class ModelRegistry:
             [snap["version"] for snap in snapshots]
         )
         snapshot_file = self._snapshot_file(manifest, snapshot_version)
-        models = self._load_models(snapshot_file)
+        models = self._build_manifest_models(engine, snapshot_file)
         return {
             "engine": engine,
             "cli_version_detected": cli_version,
@@ -131,6 +136,7 @@ class ModelRegistry:
                     "supported_effort": entry.supported_effort,
                     "provider": entry.provider,
                     "model": entry.model,
+                    "source": entry.source,
                 }
                 for entry in models
             ],
@@ -186,6 +192,17 @@ class ModelRegistry:
         catalog = self.get_models(engine)
         model_name, effort = self._parse_model_spec(engine, model_spec)
         model_entry = self._find_model(catalog.models, model_name)
+        if not model_entry and self._is_claude_custom_model_spec(engine, model_name):
+            model_entry = ModelEntry(
+                id=model_name,
+                display_name=model_name,
+                deprecated=False,
+                notes=None,
+                supported_effort=None,
+                provider=self._provider_from_model_spec(model_name),
+                model=self._model_name_from_model_spec(model_name),
+                source="custom_provider",
+            )
         if not model_entry:
             raise ValueError(f"Model '{model_name}' not allowed for engine '{engine}'")
         if effort:
@@ -260,6 +277,11 @@ class ModelRegistry:
             normalized.append({"version": version, "file": file})
         return normalized
 
+    def _build_manifest_models(self, engine: str, snapshot_file: Path) -> List[ModelEntry]:
+        models = self._load_models(snapshot_file)
+        normalized = self._normalize_official_models(engine, models)
+        return self._merge_custom_provider_models(engine, normalized)
+
     def _load_models(self, path: Path) -> List[ModelEntry]:
         if not path.exists():
             raise ValueError(f"Model snapshot file not found: {path}")
@@ -276,9 +298,66 @@ class ModelRegistry:
                     supported_effort=entry.get("supported_effort"),
                     provider=entry.get("provider"),
                     model=entry.get("model"),
+                    source=str(entry.get("source") or "official"),
                 )
             )
         return models
+
+    def _normalize_official_models(self, engine: str, models: List[ModelEntry]) -> List[ModelEntry]:
+        if engine != "claude":
+            return [
+                ModelEntry(
+                    id=item.id,
+                    display_name=item.display_name,
+                    deprecated=item.deprecated,
+                    notes=item.notes,
+                    supported_effort=item.supported_effort,
+                    provider=item.provider,
+                    model=item.model,
+                    source="official",
+                )
+                for item in models
+            ]
+        normalized: List[ModelEntry] = []
+        for item in models:
+            normalized.append(
+                ModelEntry(
+                    id=item.id,
+                    display_name=item.display_name,
+                    deprecated=item.deprecated,
+                    notes=item.notes,
+                    supported_effort=item.supported_effort,
+                    provider=item.provider or "anthropic",
+                    model=item.model or item.id,
+                    source="official",
+                )
+            )
+        return normalized
+
+    def _merge_custom_provider_models(self, engine: str, models: List[ModelEntry]) -> List[ModelEntry]:
+        custom_entries: list[EngineCustomProviderModelEntry] = engine_custom_provider_service.list_model_entries(engine)
+        if not custom_entries:
+            return models
+        merged = list(models)
+        seen_ids = {item.id for item in merged}
+        for item in custom_entries:
+            if item.id in seen_ids:
+                continue
+            merged.append(
+                ModelEntry(
+                    id=item.id,
+                    display_name=item.display_name,
+                    deprecated=False,
+                    notes=None,
+                    supported_effort=None,
+                    provider=item.provider,
+                    model=item.model,
+                    source=item.source,
+                )
+            )
+            seen_ids.add(item.id)
+        merged.sort(key=lambda item: item.id)
+        return merged
 
     def _get_runtime_probe_models(self, engine: str, *, refresh: bool) -> ModelCatalog:
         if refresh:
@@ -303,6 +382,7 @@ class ModelRegistry:
                         supported_effort=row.get("supported_effort"),
                         provider=row.get("provider"),
                         model=row.get("model"),
+                        source=str(row.get("source") or "official"),
                     )
                 )
         status = snapshot.get("status")
@@ -363,6 +443,7 @@ class ModelRegistry:
                     "supported_effort": entry.supported_effort,
                     "provider": entry.provider,
                     "model": entry.model,
+                    "source": entry.source,
                 }
                 for entry in catalog.models
             ],
@@ -463,6 +544,10 @@ class ModelRegistry:
                     f"Engine '{engine}' requires model format '<provider>/<model>'"
                 )
             return model_spec, None
+        if engine == "claude":
+            if "@" in model_spec:
+                raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
+            return model_spec, None
         if engine != "codex":
             if "@" in model_spec:
                 raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
@@ -482,6 +567,23 @@ class ModelRegistry:
 
     def _default_effort_levels(self) -> List[str]:
         return ["minimal", "low", "medium", "high", "xhigh"]
+
+    def _is_claude_custom_model_spec(self, engine: str, model_spec: str) -> bool:
+        if engine != "claude":
+            return False
+        return re.fullmatch(r"[^/\s]+/[^/\s]+", model_spec) is not None
+
+    def _provider_from_model_spec(self, model_spec: str) -> str | None:
+        if "/" not in model_spec:
+            return None
+        provider, _ = model_spec.split("/", 1)
+        return provider or None
+
+    def _model_name_from_model_spec(self, model_spec: str) -> str | None:
+        if "/" not in model_spec:
+            return None
+        _provider, model = model_spec.split("/", 1)
+        return model or None
 
 
 model_registry = ModelRegistry()

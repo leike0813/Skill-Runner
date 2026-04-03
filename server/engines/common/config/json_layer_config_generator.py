@@ -1,9 +1,12 @@
-from pathlib import Path
-from typing import Dict, Any
-import json
 import logging
+import json
+from pathlib import Path
+from typing import Any, Dict
+
+import jsonschema  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
+
 
 class ConfigGenerator:
     """
@@ -42,7 +45,35 @@ class ConfigGenerator:
                 base[k] = v
         return base
 
-    def validate_config(self, config: Dict[str, Any], schema: Dict[str, Any], path: str = ""):
+    def _is_json_schema(self, schema: Dict[str, Any]) -> bool:
+        if not isinstance(schema, dict):
+            return False
+        return any(
+            key in schema
+            for key in ("$schema", "$id", "$defs", "properties", "type", "anyOf", "allOf", "oneOf")
+        )
+
+    def _format_json_schema_error(self, error: jsonschema.ValidationError) -> str:
+        path_tokens = [str(token) for token in error.absolute_path]
+        path = ".".join(path_tokens)
+        if error.validator == "additionalProperties":
+            detail = error.message
+        else:
+            detail = error.message
+        if path:
+            return f"Config error: '{path}' {detail}"
+        return f"Config error: {detail}"
+
+    def _validate_json_schema_config(self, config: Dict[str, Any], schema: Dict[str, Any]) -> None:
+        validator_cls = jsonschema.validators.validator_for(schema)
+        validator_cls.check_schema(schema)
+        validator = validator_cls(schema)
+        errors = sorted(validator.iter_errors(config), key=lambda item: list(item.absolute_path))
+        if not errors:
+            return
+        raise ValueError(self._format_json_schema_error(errors[0]))
+
+    def _validate_legacy_config(self, config: Dict[str, Any], schema: Dict[str, Any], path: str = "") -> None:
         """
         Validates config against schema. Recursively checks keys and types.
         Schema values should be type strings: "str", "int", "bool", "float", "list", "dict".
@@ -70,13 +101,19 @@ class ConfigGenerator:
             if isinstance(expected_type_str, dict):
                 if not isinstance(v, dict):
                     raise ValueError(f"Config error: '{current_path}' expected dict, got {type(v).__name__}")
-                self.validate_config(v, expected_type_str, current_path)
+                self._validate_legacy_config(v, expected_type_str, current_path)
                 continue
             
             # Handle basic types
             expected_type = type_map.get(expected_type_str)
             if expected_type is not None and not isinstance(v, expected_type):
                  raise ValueError(f"Config error: '{current_path}' expected {expected_type_str}, got {type(v).__name__}")
+
+    def validate_config(self, config: Dict[str, Any], schema: Dict[str, Any], path: str = ""):
+        if self._is_json_schema(schema):
+            self._validate_json_schema_config(config, schema)
+            return
+        self._validate_legacy_config(config, schema, path)
 
     def generate_config(self, schema_name: str, config_layers: list[Dict[str, Any]], output_path: Path) -> Path:
         """

@@ -93,6 +93,21 @@ def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
     assert "resolveAuthImportSpec" not in content
 
 
+def test_run_observe_template_supports_custom_provider_auth_panel():
+    content = _read_template()
+    assert 'id="auth-provider-config-panel"' in content
+    assert 'id="auth-provider-select"' in content
+    assert 'id="auth-provider-model-select"' in content
+    assert 'id="auth-provider-id-input"' in content
+    assert 'id="auth-provider-api-key-input"' in content
+    assert 'id="auth-provider-base-url-input"' in content
+    assert 'id="auth-provider-model-input"' in content
+    assert "renderAuthProviderConfigPanel(payload, hint)" in content
+    assert "submitAuthProviderConfig()" in content
+    assert 'kind: "custom_provider"' in content
+    assert 'widget).trim() === "provider_config"' in content
+
+
 def test_run_observe_auth_import_panel_not_cleared_before_signature_early_return():
     content = _read_template()
     signature_guard = "if (signature && signature === lastAuthRenderSignature && !authCardEl.classList.contains(\"hidden\"))"

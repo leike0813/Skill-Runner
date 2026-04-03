@@ -228,6 +228,12 @@ _C.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED = _env_bool(
 _C.SYSTEM.SESSION_TIMEOUT_SEC = int(
     os.environ.get("SKILL_RUNNER_SESSION_TIMEOUT_SEC", "1200")
 )
+_C.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = (
+    "opencode",
+    "codex",
+    "gemini",
+    "claude",
+)
 
 
 def get_cfg_defaults():

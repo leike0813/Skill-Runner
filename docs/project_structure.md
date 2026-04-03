@@ -112,7 +112,7 @@ server/
 │   │   ├── engine_auth_flow_manager.py # 鉴权流程管理
 │   │   ├── engine_auth_strategy_service.py # 鉴权策略服务
 │   │   ├── engine_catalog.py           # 引擎目录
-│   │   ├── engine_command_profile.py   # 引擎命令配置
+│   │   ├── agent_cli_manager.py        # 引擎安装/布局/状态管理
 │   │   ├── engine_interaction_gate.py  # 引擎交互门控
 │   │   ├── engine_model_catalog_lifecycle.py # 模型目录生命周期
 │   │   ├── engine_policy.py            # 引擎策略

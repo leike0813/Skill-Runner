@@ -151,6 +151,44 @@
             font-size: 14px;
             padding: 8px 12px;
         }
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+        .provider-field {
+            display: grid;
+            gap: 6px;
+        }
+        .provider-field label {
+            font-size: 13px;
+            color: #374151;
+            font-weight: 600;
+        }
+        .provider-field input,
+        .provider-field select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font: inherit;
+            box-sizing: border-box;
+        }
+        .provider-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 12px;
+        }
+        .provider-table-wrap {
+            margin-top: 16px;
+            overflow-x: auto;
+        }
+        .provider-meta {
+            font-size: 12px;
+            color: #6b7280;
+        }
     </style>
 {% endblock %}
 
@@ -183,6 +221,78 @@
             {% include "ui/partials/engines_table.html" %}
         </div>
     </div>
+
+    {% if custom_provider_engines %}
+    <div class="card">
+        <h2>{{ t("ui.engines.custom_providers_title", default="Custom Providers") }}</h2>
+        <div style="font-size:13px; color:#6b7280; margin-bottom:12px;">
+            {{ t("ui.engines.custom_providers_hint", default="维护引擎级第三方 Provider 配置。当前完整 CRUD 仅在本页提供。") }}
+        </div>
+        <div class="provider-grid">
+            <div class="provider-field">
+                <label for="custom-provider-engine">{{ t("ui.engines.custom_providers_engine", default="Engine") }}</label>
+                <select id="custom-provider-engine">
+                    {% for item in custom_provider_engines %}
+                    <option value="{{ item.engine }}">{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="provider-field">
+                <label for="custom-provider-id">{{ t("ui.engines.custom_providers_provider_id", default="Provider ID") }}</label>
+                <input id="custom-provider-id" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="provider-field">
+                <label for="custom-provider-api-key">{{ t("ui.engines.custom_providers_api_key", default="API Key") }}</label>
+                <input id="custom-provider-api-key" type="password" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="provider-field">
+                <label for="custom-provider-base-url">{{ t("ui.engines.custom_providers_base_url", default="Base URL") }}</label>
+                <input id="custom-provider-base-url" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="provider-field" style="grid-column: 1 / -1;">
+                <label for="custom-provider-models">{{ t("ui.engines.custom_providers_models", default="Models (comma separated)") }}</label>
+                <input id="custom-provider-models" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+        </div>
+        <div class="provider-actions">
+            <button id="custom-provider-save-btn" class="btn btn-primary" type="button">{{ t("ui.engines.custom_providers_save", default="Save Provider") }}</button>
+            <button id="custom-provider-reset-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.custom_providers_reset", default="Reset Form") }}</button>
+            <button id="custom-provider-refresh-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.custom_providers_refresh", default="Refresh List") }}</button>
+            <span id="custom-provider-status" class="provider-meta"></span>
+        </div>
+        <div id="custom-provider-error" class="error"></div>
+        <div class="provider-table-wrap">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>{{ t("ui.engines.custom_providers_provider_id", default="Provider ID") }}</th>
+                        <th>{{ t("ui.engines.custom_providers_base_url", default="Base URL") }}</th>
+                        <th>{{ t("ui.engines.custom_providers_models", default="Models (comma separated)") }}</th>
+                        <th>{{ t("ui.engines.table.actions", default="Actions") }}</th>
+                    </tr>
+                </thead>
+                <tbody id="custom-provider-table-body"></tbody>
+            </table>
+        </div>
+        <div id="custom-provider-tui-modal" class="auth-import-modal" aria-hidden="true">
+            <div class="auth-import-card">
+                <div style="font-size:18px; font-weight:700; color:#111827;" id="custom-provider-tui-title">
+                    {{ t("ui.engines.custom_providers_start_tui_title", default="Launch Provider TUI") }}
+                </div>
+                <div style="margin-top:4px; color:#6b7280; font-size:13px;" id="custom-provider-tui-subtitle"></div>
+                <div style="margin-top:12px;" class="provider-field">
+                    <label for="custom-provider-tui-model">{{ t("ui.engines.custom_providers_tui_model", default="Model") }}</label>
+                    <select id="custom-provider-tui-model"></select>
+                </div>
+                <div id="custom-provider-tui-error" class="error" style="display:none;"></div>
+                <div class="auth-import-actions">
+                    <button id="custom-provider-tui-cancel-btn" class="btn btn-secondary" type="button">{{ t("ui.common.cancel", default="取消") }}</button>
+                    <button id="custom-provider-tui-start-btn" class="btn btn-primary" type="button">{{ t("ui.engines.custom_providers_start_tui_action", default="启动TUI") }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <div class="card">
         <h2>{{ t("ui.engines.auth_title", default="Engine Auth") }}</h2>
@@ -293,10 +403,6 @@
         importNoFileSelected: {{ t("ui.engines.import_no_file_selected", default="Please select required files before importing.") | tojson }},
         highRiskShort: {{ t("ui.engines.high_risk_short", default="High risk!") | tojson }},
         highRiskNotice: {{ t("ui.engines.high_risk_notice", default="This third-party login path may violate Google policies and could lead to account suspension.") | tojson }},
-        engineCodex: {{ t("ui.engines.engine_codex", default="Codex") | tojson }},
-        engineGemini: {{ t("ui.engines.engine_gemini", default="Gemini") | tojson }},
-        engineIflow: {{ t("ui.engines.engine_iflow", default="iFlow") | tojson }},
-        engineOpencode: {{ t("ui.engines.engine_opencode", default="OpenCode") | tojson }},
         statusIdle: {{ t("ui.engines.status_idle", default="空闲") | tojson }},
         statusRunning: {{ t("ui.engines.status_running", default="运行中") | tojson }},
         statusStarting: {{ t("ui.engines.status_starting", default="启动中") | tojson }},
@@ -311,8 +417,6 @@
         statusTerminated: {{ t("ui.engines.status_terminated", default="已终止") | tojson }},
         statusUnknown: {{ t("ui.engines.status_unknown", default="未知") | tojson }},
         inputLabelCallback: {{ t("ui.engines.input_label_callback", default="优先等待自动回调；若服务非本地部署，可粘贴登录后的回调 URL 并提交。") | tojson }},
-        inputLabelGemini: {{ t("ui.engines.input_label_gemini", default="请将授权码粘贴至下方并提交") | tojson }},
-        inputLabelIflow: {{ t("ui.engines.input_label_iflow", default="请将授权码或回调 URL 粘贴至下方并提交") | tojson }},
         inputLabelCode: {{ t("ui.engines.input_label_code", default="授权码") | tojson }},
         inputLabelOpencodeGoogle: {{ t("ui.engines.input_label_opencode_google", default="请将登录后浏览器跳转至的 localhost URL 链接整个粘贴至下方并提交") | tojson }},
         inputLabelOpencodeOpenai: {{ t("ui.engines.input_label_opencode_openai", default="请将授权码或回调 URL 粘贴至下方并提交") | tojson }},
@@ -348,6 +452,15 @@
         errorTtydUnavailable: {{ t("ui.engines.error_ttyd_unavailable", default="ttyd 不可用，无法启动内嵌终端。") | tojson }},
         errorStartTuiFailed: {{ t("ui.engines.error_start_tui_failed", default="启动失败（HTTP {status}）") | tojson }},
         errorStopTuiFailed: {{ t("ui.engines.error_stop_tui_failed", default="停止失败（HTTP {status}）") | tojson }},
+        customProvidersStartTui: {{ t("ui.engines.custom_providers_start_tui_action", default="启动TUI") | tojson }},
+        customProvidersStartTuiTitle: {{ t("ui.engines.custom_providers_start_tui_title", default="Launch Provider TUI") | tojson }},
+        customProvidersTuiModel: {{ t("ui.engines.custom_providers_tui_model", default="Model") | tojson }},
+        customProvidersTuiChooseModel: {{ t("ui.engines.custom_providers_tui_choose_model", default="Choose a model") | tojson }},
+        customProvidersTuiSubtitle: {{ t("ui.engines.custom_providers_tui_subtitle", default="Choose a model under provider {provider} for engine {engine}.") | tojson }},
+        customProvidersTuiNoModels: {{ t("ui.engines.custom_providers_tui_no_models", default="No models configured under this provider.") | tojson }},
+        customProvidersTuiUnsupported: {{ t("ui.engines.custom_providers_tui_unsupported", default="The current engine does not support provider-backed TUI.") | tojson }},
+        customProvidersTuiStarting: {{ t("ui.engines.custom_providers_tui_starting", default="Starting provider-backed TUI...") | tojson }},
+        customProvidersTuiInvalidModel: {{ t("ui.engines.custom_providers_tui_invalid_model", default="Please choose a model before starting TUI.") | tojson }},
         copyOk: {{ t("ui.engines.copy_ok", default="已复制") | tojson }},
         copyFailed: {{ t("ui.engines.copy_failed", default="复制失败") | tojson }},
     };
@@ -357,6 +470,8 @@
     const opencodeAuthProviders = {{ opencode_auth_providers | tojson }};
     const authUiCapabilities = {{ auth_ui_capabilities | tojson }};
     const authUiHighRiskCapabilities = {{ auth_ui_high_risk_capabilities | tojson }};
+    const engineUiMetadata = {{ engine_ui_metadata | tojson }};
+    const customProviderEngines = {{ custom_provider_engines | tojson }};
     const transportLabels = {
         oauth_proxy: I18N.transportOauthProxy,
         cli_delegate: I18N.transportCliDelegate,
@@ -367,12 +482,9 @@
         api_key: I18N.methodApiKey,
         import: I18N.methodImport,
     };
-    const engineLabels = {
-        codex: I18N.engineCodex,
-        gemini: I18N.engineGemini,
-        iflow: I18N.engineIflow,
-        opencode: I18N.engineOpencode,
-    };
+    const engineLabels = Object.fromEntries(
+        Object.entries(engineUiMetadata).map(([engine, meta]) => [engine, (meta && meta.label) || engine])
+    );
     const terminalStatuses = new Set(["succeeded", "failed", "canceled", "expired"]);
 
     const stateEl = document.getElementById("terminal-state");
@@ -414,12 +526,32 @@
     const authImportFileListEl = document.getElementById("auth-import-file-list");
     const authImportCancelBtn = document.getElementById("auth-import-cancel-btn");
     const authImportSubmitBtn = document.getElementById("auth-import-submit-btn");
+    const customProviderEngineEl = document.getElementById("custom-provider-engine");
+    const customProviderIdEl = document.getElementById("custom-provider-id");
+    const customProviderApiKeyEl = document.getElementById("custom-provider-api-key");
+    const customProviderBaseUrlEl = document.getElementById("custom-provider-base-url");
+    const customProviderModelsEl = document.getElementById("custom-provider-models");
+    const customProviderSaveBtn = document.getElementById("custom-provider-save-btn");
+    const customProviderResetBtn = document.getElementById("custom-provider-reset-btn");
+    const customProviderRefreshBtn = document.getElementById("custom-provider-refresh-btn");
+    const customProviderStatusEl = document.getElementById("custom-provider-status");
+    const customProviderErrorEl = document.getElementById("custom-provider-error");
+    const customProviderTableBodyEl = document.getElementById("custom-provider-table-body");
+    const customProviderTuiModalEl = document.getElementById("custom-provider-tui-modal");
+    const customProviderTuiTitleEl = document.getElementById("custom-provider-tui-title");
+    const customProviderTuiSubtitleEl = document.getElementById("custom-provider-tui-subtitle");
+    const customProviderTuiModelEl = document.getElementById("custom-provider-tui-model");
+    const customProviderTuiErrorEl = document.getElementById("custom-provider-tui-error");
+    const customProviderTuiCancelBtn = document.getElementById("custom-provider-tui-cancel-btn");
+    const customProviderTuiStartBtn = document.getElementById("custom-provider-tui-start-btn");
 
     let authSubmitLocked = false;
     let authStartPending = false;
     let tuiStartPending = false;
     let authMenuState = null;
     let authImportDialogState = null;
+    let customProviderRows = [];
+    let customProviderTuiState = null;
 
     function showError(text) {
         errorEl.style.display = "block";
@@ -451,6 +583,23 @@
         authErrorEl.textContent = "";
     }
 
+    function showCustomProviderError(text) {
+        if (!customProviderErrorEl) return;
+        customProviderErrorEl.style.display = "block";
+        customProviderErrorEl.textContent = text;
+    }
+
+    function clearCustomProviderError() {
+        if (!customProviderErrorEl) return;
+        customProviderErrorEl.style.display = "none";
+        customProviderErrorEl.textContent = "";
+    }
+
+    function setCustomProviderStatus(text) {
+        if (!customProviderStatusEl) return;
+        customProviderStatusEl.textContent = text || "";
+    }
+
     function mapStatusLabel(status) {
         const labels = {
             idle: I18N.statusIdle,
@@ -480,6 +629,16 @@
         return authMethodLabels[normalized] || normalized || "-";
     }
 
+    function engineMeta(engine) {
+        const normalized = String(engine || "").trim().toLowerCase();
+        return engineUiMetadata[normalized] || {};
+    }
+
+    function resolveEngineLabel(engine) {
+        const normalized = String(engine || "").trim().toLowerCase();
+        return engineLabels[normalized] || normalized || "-";
+    }
+
     function resolveInputKind(session) {
         const explicitKind = String(session.input_kind || "").trim().toLowerCase();
         if (explicitKind === "code" || explicitKind === "api_key" || explicitKind === "text") {
@@ -491,9 +650,11 @@
         if (authMethod === "api_key") return "api_key";
         if (authMethod === "callback") return "text";
         if (authMethod === "auth_code_or_url") {
-            if (engine === "gemini") return "code";
-            if (engine === "iflow") return "text";
             if (engine === "opencode" && providerId === "google") return "text";
+            const fallbackKind = String(engineMeta(engine).default_input_kind || "").trim().toLowerCase();
+            if (fallbackKind === "code" || fallbackKind === "text" || fallbackKind === "api_key") {
+                return fallbackKind;
+            }
             return "";
         }
         return "";
@@ -506,21 +667,17 @@
         if (authMethod === "callback") {
             return I18N.inputLabelCallback;
         }
-        if (engine === "gemini") {
-            return I18N.inputLabelGemini;
-        }
-        if (engine === "iflow") {
-            return I18N.inputLabelIflow;
-        }
-        const kind = resolveInputKind(session);
-        if (kind === "api_key") return I18N.methodApiKey;
-        if (kind === "code") return I18N.inputLabelCode;
         if (engine === "opencode" && providerId === "google") {
             return I18N.inputLabelOpencodeGoogle;
         }
         if (engine === "opencode" && providerId === "openai") {
             return I18N.inputLabelOpencodeOpenai;
         }
+        const metadataLabel = String(engineMeta(engine).default_input_label || "").trim();
+        if (metadataLabel) return metadataLabel;
+        const kind = resolveInputKind(session);
+        if (kind === "api_key") return I18N.methodApiKey;
+        if (kind === "code") return I18N.inputLabelCode;
         return I18N.inputLabelDefault;
     }
 
@@ -596,6 +753,298 @@
             return `${base} (${I18N.highRiskShort})`;
         }
         return base;
+    }
+
+    function selectedCustomProviderEngine() {
+        if (!customProviderEngineEl) return "";
+        return String(customProviderEngineEl.value || "").trim().toLowerCase();
+    }
+
+    function selectedCustomProviderEngineMeta() {
+        const engine = selectedCustomProviderEngine();
+        if (!Array.isArray(customProviderEngines)) return null;
+        return customProviderEngines.find((item) => String(item.engine || "").trim().toLowerCase() === engine) || null;
+    }
+
+    function currentEngineSupportsProviderTui() {
+        const item = selectedCustomProviderEngineMeta();
+        return !!(ttydAvailable && item && item.provider_tui_supported);
+    }
+
+    function resetCustomProviderForm() {
+        if (customProviderIdEl) customProviderIdEl.value = "";
+        if (customProviderApiKeyEl) customProviderApiKeyEl.value = "";
+        if (customProviderBaseUrlEl) customProviderBaseUrlEl.value = "";
+        if (customProviderModelsEl) customProviderModelsEl.value = "";
+        clearCustomProviderError();
+        setCustomProviderStatus("");
+    }
+
+    function hideCustomProviderTuiError() {
+        if (!customProviderTuiErrorEl) return;
+        customProviderTuiErrorEl.style.display = "none";
+        customProviderTuiErrorEl.textContent = "";
+    }
+
+    function showCustomProviderTuiError(text) {
+        if (!customProviderTuiErrorEl) return;
+        customProviderTuiErrorEl.style.display = "block";
+        customProviderTuiErrorEl.textContent = text;
+    }
+
+    function closeCustomProviderTuiDialog() {
+        customProviderTuiState = null;
+        hideCustomProviderTuiError();
+        if (customProviderTuiModelEl) customProviderTuiModelEl.innerHTML = "";
+        if (customProviderTuiModalEl) customProviderTuiModalEl.classList.remove("show");
+    }
+
+    function openCustomProviderTuiDialog(row) {
+        const engine = selectedCustomProviderEngine();
+        if (!currentEngineSupportsProviderTui()) {
+            showCustomProviderError(I18N.customProvidersTuiUnsupported);
+            return;
+        }
+        const providerId = String((row && row.provider_id) || "").trim();
+        const models = Array.isArray(row && row.models)
+            ? row.models.map((item) => String(item || "").trim()).filter(Boolean)
+            : [];
+        if (!providerId || !models.length) {
+            showCustomProviderError(I18N.customProvidersTuiNoModels);
+            return;
+        }
+        customProviderTuiState = { engine, providerId, models };
+        hideCustomProviderTuiError();
+        if (customProviderTuiTitleEl) customProviderTuiTitleEl.textContent = I18N.customProvidersStartTuiTitle;
+        if (customProviderTuiSubtitleEl) {
+            customProviderTuiSubtitleEl.textContent = I18N.customProvidersTuiSubtitle
+                .replace("{provider}", providerId)
+                .replace("{engine}", resolveEngineLabel(engine));
+        }
+        if (customProviderTuiModelEl) {
+            customProviderTuiModelEl.innerHTML = "";
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = I18N.customProvidersTuiChooseModel;
+            customProviderTuiModelEl.appendChild(placeholder);
+            models.forEach((model) => {
+                const option = document.createElement("option");
+                option.value = model;
+                option.textContent = model;
+                customProviderTuiModelEl.appendChild(option);
+            });
+            customProviderTuiModelEl.value = models[0] || "";
+        }
+        if (customProviderTuiModalEl) customProviderTuiModalEl.classList.add("show");
+    }
+
+    async function startCustomProviderTui() {
+        if (!customProviderTuiState) return;
+        const engine = String(customProviderTuiState.engine || "").trim().toLowerCase();
+        const providerId = String(customProviderTuiState.providerId || "").trim();
+        const selectedModel = customProviderTuiModelEl ? String(customProviderTuiModelEl.value || "").trim() : "";
+        if (!selectedModel) {
+            showCustomProviderTuiError(I18N.customProvidersTuiInvalidModel);
+            return;
+        }
+        hideCustomProviderTuiError();
+        setCustomProviderStatus(I18N.customProvidersTuiStarting);
+        const started = await startTui(engine, `${providerId}/${selectedModel}`);
+        if (started) {
+            closeCustomProviderTuiDialog();
+        }
+    }
+
+    function populateCustomProviderForm(row) {
+        if (!row || typeof row !== "object") return;
+        if (customProviderIdEl) customProviderIdEl.value = String(row.provider_id || "");
+        if (customProviderApiKeyEl) customProviderApiKeyEl.value = String(row.api_key || "");
+        if (customProviderBaseUrlEl) customProviderBaseUrlEl.value = String(row.base_url || "");
+        if (customProviderModelsEl) {
+            customProviderModelsEl.value = Array.isArray(row.models) ? row.models.join(", ") : "";
+        }
+        clearCustomProviderError();
+        setCustomProviderStatus("");
+    }
+
+    function parseCustomProviderModels() {
+        if (!customProviderModelsEl) return [];
+        return String(customProviderModelsEl.value || "")
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item, index, values) => item && values.indexOf(item) === index);
+    }
+
+    function renderCustomProviderTable(rows) {
+        if (!customProviderTableBodyEl) return;
+        customProviderTableBodyEl.innerHTML = "";
+        const normalizedRows = Array.isArray(rows) ? rows : [];
+        if (!normalizedRows.length) {
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.colSpan = 4;
+            td.className = "provider-meta";
+            td.textContent = {{ t("ui.engines.custom_providers_empty", default="No custom providers configured.") | tojson }};
+            tr.appendChild(td);
+            customProviderTableBodyEl.appendChild(tr);
+            return;
+        }
+        normalizedRows.forEach((row) => {
+            const tr = document.createElement("tr");
+            const providerTd = document.createElement("td");
+            providerTd.textContent = String(row.provider_id || "");
+            const baseUrlTd = document.createElement("td");
+            baseUrlTd.textContent = String(row.base_url || "");
+            const modelsTd = document.createElement("td");
+            modelsTd.textContent = Array.isArray(row.models) ? row.models.join(", ") : "";
+            const actionsTd = document.createElement("td");
+            const actionsWrap = document.createElement("div");
+            actionsWrap.className = "table-actions";
+            if (currentEngineSupportsProviderTui()) {
+                const startBtn = document.createElement("button");
+                startBtn.type = "button";
+                startBtn.className = "btn btn-primary";
+                startBtn.dataset.customProviderStart = "true";
+                startBtn.textContent = I18N.customProvidersStartTui;
+                const models = Array.isArray(row.models) ? row.models.filter(Boolean) : [];
+                if (!models.length) {
+                    startBtn.disabled = true;
+                    startBtn.title = I18N.customProvidersTuiNoModels;
+                }
+                startBtn.addEventListener("click", () => {
+                    openCustomProviderTuiDialog(row);
+                });
+                actionsWrap.appendChild(startBtn);
+            }
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "btn btn-secondary";
+            editBtn.textContent = {{ t("ui.common.edit", default="Edit") | tojson }};
+            editBtn.addEventListener("click", () => {
+                populateCustomProviderForm(row);
+                if (customProviderIdEl) customProviderIdEl.focus();
+            });
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "btn btn-secondary";
+            deleteBtn.textContent = {{ t("ui.common.delete", default="Delete") | tojson }};
+            deleteBtn.addEventListener("click", async () => {
+                const providerId = String(row.provider_id || "").trim();
+                if (!providerId) return;
+                if (!window.confirm({{ t("ui.engines.custom_providers_delete_confirm", default="Delete this custom provider?") | tojson }})) {
+                    return;
+                }
+                await deleteCustomProvider(providerId);
+            });
+            actionsWrap.appendChild(editBtn);
+            actionsWrap.appendChild(deleteBtn);
+            actionsTd.appendChild(actionsWrap);
+            tr.appendChild(providerTd);
+            tr.appendChild(baseUrlTd);
+            tr.appendChild(modelsTd);
+            tr.appendChild(actionsTd);
+            customProviderTableBodyEl.appendChild(tr);
+        });
+    }
+
+    async function fetchCustomProviders() {
+        const engine = selectedCustomProviderEngine();
+        if (!engine || !customProviderTableBodyEl) return;
+        clearCustomProviderError();
+        setCustomProviderStatus({{ t("ui.engines.custom_providers_loading", default="Loading providers...") | tojson }});
+        try {
+            const response = await fetch(`/v1/management/engines/${encodeURIComponent(engine)}/custom-providers`);
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string"
+                    ? payload.detail
+                    : `HTTP ${response.status}`;
+                showCustomProviderError(detail);
+                renderCustomProviderTable([]);
+                return;
+            }
+            customProviderRows = Array.isArray(payload.providers) ? payload.providers : [];
+            renderCustomProviderTable(customProviderRows);
+            setCustomProviderStatus(
+                customProviderRows.length
+                    ? {{ t("ui.engines.custom_providers_loaded", default="Custom providers loaded.") | tojson }}
+                    : {{ t("ui.engines.custom_providers_empty", default="No custom providers configured.") | tojson }}
+            );
+        } catch (_err) {
+            showCustomProviderError({{ t("ui.engines.custom_providers_fetch_failed", default="Failed to load custom providers.") | tojson }});
+            renderCustomProviderTable([]);
+        }
+    }
+
+    async function saveCustomProvider() {
+        const engine = selectedCustomProviderEngine();
+        const providerId = customProviderIdEl ? String(customProviderIdEl.value || "").trim() : "";
+        const apiKey = customProviderApiKeyEl ? String(customProviderApiKeyEl.value || "").trim() : "";
+        const baseUrl = customProviderBaseUrlEl ? String(customProviderBaseUrlEl.value || "").trim() : "";
+        const models = parseCustomProviderModels();
+        if (!engine || !providerId || !apiKey || !baseUrl || !models.length) {
+            showCustomProviderError({{ t("ui.engines.custom_providers_required", default="provider id, API key, base URL, and at least one model are required.") | tojson }});
+            return;
+        }
+        clearCustomProviderError();
+        setCustomProviderStatus({{ t("ui.engines.custom_providers_saving", default="Saving provider...") | tojson }});
+        if (customProviderSaveBtn) customProviderSaveBtn.disabled = true;
+        try {
+            const response = await fetch(
+                `/v1/management/engines/${encodeURIComponent(engine)}/custom-providers/${encodeURIComponent(providerId)}`,
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        provider_id: providerId,
+                        api_key: apiKey,
+                        base_url: baseUrl,
+                        models,
+                    }),
+                },
+            );
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string"
+                    ? payload.detail
+                    : `HTTP ${response.status}`;
+                showCustomProviderError(detail);
+                return;
+            }
+            populateCustomProviderForm(payload);
+            setCustomProviderStatus({{ t("ui.engines.custom_providers_saved", default="Provider saved.") | tojson }});
+            await fetchCustomProviders();
+        } catch (_err) {
+            showCustomProviderError({{ t("ui.engines.custom_providers_save_failed", default="Failed to save custom provider.") | tojson }});
+        } finally {
+            if (customProviderSaveBtn) customProviderSaveBtn.disabled = false;
+        }
+    }
+
+    async function deleteCustomProvider(providerId) {
+        const engine = selectedCustomProviderEngine();
+        if (!engine || !providerId) return;
+        clearCustomProviderError();
+        setCustomProviderStatus({{ t("ui.engines.custom_providers_deleting", default="Deleting provider...") | tojson }});
+        try {
+            const response = await fetch(
+                `/v1/management/engines/${encodeURIComponent(engine)}/custom-providers/${encodeURIComponent(providerId)}`,
+                { method: "DELETE" },
+            );
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string"
+                    ? payload.detail
+                    : `HTTP ${response.status}`;
+                showCustomProviderError(detail);
+                return;
+            }
+            resetCustomProviderForm();
+            setCustomProviderStatus({{ t("ui.engines.custom_providers_deleted", default="Provider deleted.") | tojson }});
+            await fetchCustomProviders();
+        } catch (_err) {
+            showCustomProviderError({{ t("ui.engines.custom_providers_delete_failed", default="Failed to delete custom provider.") | tojson }});
+        }
     }
 
     function availableOpencodeProviders(transport) {
@@ -778,7 +1227,7 @@
                 authImportTitleEl.textContent = I18N.importDialogTitle;
             }
             if (authImportSubtitleEl) {
-                const engineLabel = engineLabels[normalizedEngine] || normalizedEngine;
+                const engineLabel = resolveEngineLabel(normalizedEngine);
                 const providerLabel = provider ? ` / ${provider}` : "";
                 authImportSubtitleEl.textContent = `${engineLabel}${providerLabel} · ${I18N.importDialogSubtitle}`;
             }
@@ -856,7 +1305,7 @@
                     onClick: () => openAuthImportDialog(anchor, normalizedEngine),
                 },
             ];
-            renderAuthMenuItems(items, `${engineLabels[normalizedEngine] || normalizedEngine} · ${I18N.chooseMethod}`);
+            renderAuthMenuItems(items, `${resolveEngineLabel(normalizedEngine)} · ${I18N.chooseMethod}`);
             authMenuState = { level: "method", engine: normalizedEngine, anchor };
             positionAuthMenu(anchor);
             return;
@@ -957,6 +1406,12 @@
                 button.disabled = lockStarts;
             }
         });
+        document.querySelectorAll("[data-custom-provider-start]").forEach((button) => {
+            if (button instanceof HTMLButtonElement) {
+                const noModels = button.getAttribute("title") === I18N.customProvidersTuiNoModels;
+                button.disabled = lockStarts || noModels;
+            }
+        });
 
         if (authCancelBtn) authCancelBtn.disabled = !authActive;
         if (authTransportSelectEl) authTransportSelectEl.disabled = lockStarts;
@@ -980,7 +1435,7 @@
         const transport = resolveTransportLabel(currentAuthSession.transport || "-");
         const authMethodText = resolveAuthMethodLabel(currentAuthSession.auth_method || "-");
         const authMethodRaw = String(currentAuthSession.auth_method || "-");
-        authEngineRowEl.textContent = `${I18N.authEnginePrefix}${engine}`;
+        authEngineRowEl.textContent = `${I18N.authEnginePrefix}${resolveEngineLabel(engine)}`;
         authTransportRowEl.textContent = `${I18N.authTransportPrefix}${transport}`;
         authMethodRowEl.textContent = `${I18N.authMethodPrefix}${authMethodText}${authMethodRaw !== "-" ? ` (${authMethodRaw})` : ""}`;
         authStateEl.textContent = `${I18N.authStatePrefix}${statusLabel}${terminalSuffix}`;
@@ -1231,18 +1686,21 @@
         applyAuthState(payload.session || {});
     }
 
-    async function startTui(engine) {
+    async function startTui(engine, customModel = "") {
         if (!ttydAvailable) {
             showError(I18N.errorTtydUnavailable);
-            return;
+            return false;
         }
         if (isAuthSessionActive(currentAuthSession) || isTuiSessionActive(currentSession)) {
             showError(I18N.errorBusy);
-            return;
+            return false;
         }
         clearError();
         const form = new URLSearchParams();
         form.set("engine", engine);
+        if (String(customModel || "").trim()) {
+            form.set("custom_model", String(customModel || "").trim());
+        }
         tuiStartPending = true;
         updateInteractiveActionLocks();
         try {
@@ -1259,10 +1717,11 @@
                 } catch (_err) {}
                 showError(detail);
                 await fetchSessionState();
-                return;
+                return false;
             }
             const payload = await res.json();
             applyState(payload);
+            return true;
         } finally {
             tuiStartPending = false;
             updateInteractiveActionLocks();
@@ -1333,6 +1792,38 @@
             submitAuthImportDialog();
         });
     }
+    if (customProviderEngineEl) {
+        customProviderEngineEl.addEventListener("change", () => {
+            resetCustomProviderForm();
+            closeCustomProviderTuiDialog();
+            fetchCustomProviders().catch(() => {});
+        });
+    }
+    if (customProviderRefreshBtn) {
+        customProviderRefreshBtn.addEventListener("click", () => {
+            fetchCustomProviders().catch(() => {});
+        });
+    }
+    if (customProviderResetBtn) {
+        customProviderResetBtn.addEventListener("click", () => {
+            resetCustomProviderForm();
+        });
+    }
+    if (customProviderSaveBtn) {
+        customProviderSaveBtn.addEventListener("click", () => {
+            saveCustomProvider().catch(() => {});
+        });
+    }
+    if (customProviderTuiCancelBtn) {
+        customProviderTuiCancelBtn.addEventListener("click", () => {
+            closeCustomProviderTuiDialog();
+        });
+    }
+    if (customProviderTuiStartBtn) {
+        customProviderTuiStartBtn.addEventListener("click", () => {
+            startCustomProviderTui().catch(() => {});
+        });
+    }
     if (authImportModalEl) {
         authImportModalEl.addEventListener("click", (evt) => {
             if (evt.target === authImportModalEl) {
@@ -1340,9 +1831,19 @@
             }
         });
     }
+    if (customProviderTuiModalEl) {
+        customProviderTuiModalEl.addEventListener("click", (evt) => {
+            if (evt.target === customProviderTuiModalEl) {
+                closeCustomProviderTuiDialog();
+            }
+        });
+    }
     document.addEventListener("keydown", (evt) => {
         if (evt.key === "Escape" && authImportModalEl && authImportModalEl.classList.contains("show")) {
             closeAuthImportDialog();
+        }
+        if (evt.key === "Escape" && customProviderTuiModalEl && customProviderTuiModalEl.classList.contains("show")) {
+            closeCustomProviderTuiDialog();
         }
     });
 
@@ -1398,6 +1899,9 @@
     applyState(currentSession);
     applyAuthState(currentAuthSession);
     updateInteractiveActionLocks();
+    if (Array.isArray(customProviderEngines) && customProviderEngines.length && customProviderEngineEl) {
+        fetchCustomProviders().catch(() => {});
+    }
 })();
 </script>
 {% endblock %}

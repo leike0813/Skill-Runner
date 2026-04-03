@@ -17,6 +17,9 @@ def test_load_adapter_profile_success() -> None:
     assert profile.engine == "codex"
     assert profile.prompt_builder.engine_key == "codex"
     assert profile.session_codec.strategy == "first_json_line"
+    assert profile.command_defaults.start[:2] == ("--skip-git-repo-check", "--json")
+    assert profile.ui_shell.command_id == "codex-tui"
+    assert profile.ui_shell.label == "Codex TUI"
     assert profile.cli_management.package == "@openai/codex"
     assert "codex" in profile.cli_management.binary_candidates
 
@@ -84,6 +87,28 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "models_root": str(models_root),
                     "seed_path": None
                 },
+                "command_defaults": {
+                    "start": ["--yolo"],
+                    "resume": ["--yolo"],
+                    "ui_shell": ["--sandbox", "--approval-mode", "default"]
+                },
+                "ui_shell": {
+                    "command_id": "gemini-tui",
+                    "label": "Gemini TUI",
+                    "trust_bootstrap_parent": True,
+                    "sandbox_arg": "--sandbox",
+                    "retry_without_sandbox_on_early_exit": True,
+                    "sandbox_probe_strategy": "gemini_container",
+                    "sandbox_probe_message": None,
+                    "auth_hint_strategy": "gemini_api_key_disables_sandbox",
+                    "runtime_override_strategy": "gemini_ui_shell",
+                    "config_assets": {
+                        "default_path": None,
+                        "enforced_path": None,
+                        "settings_schema_path": None,
+                        "target_relpath": None
+                    }
+                },
                 "cli_management": {
                     "package": "@google/gemini-cli",
                     "binary_candidates": ["gemini"],
@@ -150,6 +175,28 @@ def test_validate_adapter_profiles_fail_fast(tmp_path: Path) -> None:
                     "manifest_path": None,
                     "models_root": None,
                     "seed_path": None
+                },
+                "command_defaults": {
+                    "start": [],
+                    "resume": [],
+                    "ui_shell": []
+                },
+                "ui_shell": {
+                    "command_id": "codex-tui",
+                    "label": "Codex TUI",
+                    "trust_bootstrap_parent": True,
+                    "sandbox_arg": "--sandbox",
+                    "retry_without_sandbox_on_early_exit": False,
+                    "sandbox_probe_strategy": "codex_landlock",
+                    "sandbox_probe_message": None,
+                    "auth_hint_strategy": "none",
+                    "runtime_override_strategy": "none",
+                    "config_assets": {
+                        "default_path": None,
+                        "enforced_path": None,
+                        "settings_schema_path": None,
+                        "target_relpath": None
+                    }
                 }
             }
         ),
@@ -205,6 +252,28 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                     "manifest_path": str(tmp_path / "missing_manifest.json"),
                     "models_root": str(tmp_path / "missing_models"),
                     "seed_path": None
+                },
+                "command_defaults": {
+                    "start": ["--json"],
+                    "resume": ["--json"],
+                    "ui_shell": []
+                },
+                "ui_shell": {
+                    "command_id": "codex-tui",
+                    "label": "Codex TUI",
+                    "trust_bootstrap_parent": True,
+                    "sandbox_arg": "--sandbox",
+                    "retry_without_sandbox_on_early_exit": False,
+                    "sandbox_probe_strategy": "codex_landlock",
+                    "sandbox_probe_message": None,
+                    "auth_hint_strategy": "none",
+                    "runtime_override_strategy": "none",
+                    "config_assets": {
+                        "default_path": None,
+                        "enforced_path": None,
+                        "settings_schema_path": None,
+                        "target_relpath": None
+                    }
                 },
                 "cli_management": {
                     "package": "@openai/codex",
@@ -300,6 +369,28 @@ def test_load_adapter_profile_fails_when_credential_target_is_absolute(tmp_path:
                     "manifest_path": str(manifest_path),
                     "models_root": str(models_root),
                     "seed_path": None
+                },
+                "command_defaults": {
+                    "start": ["--json"],
+                    "resume": ["--json"],
+                    "ui_shell": []
+                },
+                "ui_shell": {
+                    "command_id": "codex-tui",
+                    "label": "Codex TUI",
+                    "trust_bootstrap_parent": True,
+                    "sandbox_arg": "--sandbox",
+                    "retry_without_sandbox_on_early_exit": False,
+                    "sandbox_probe_strategy": "codex_landlock",
+                    "sandbox_probe_message": None,
+                    "auth_hint_strategy": "none",
+                    "runtime_override_strategy": "none",
+                    "config_assets": {
+                        "default_path": None,
+                        "enforced_path": None,
+                        "settings_schema_path": None,
+                        "target_relpath": None
+                    }
                 },
                 "cli_management": {
                     "package": "@openai/codex",

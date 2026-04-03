@@ -100,6 +100,7 @@ async def list_models(engine: str):
                     supported_effort=entry.supported_effort,
                     provider=entry.provider,
                     model=entry.model,
+                    source=entry.source,
                 )
                 for entry in catalog.models
             ]
@@ -438,6 +439,7 @@ async def get_manifest_view(engine: str):
                     supported_effort=model.get("supported_effort"),
                     provider=model.get("provider"),
                     model=model.get("model"),
+                    source=model.get("source"),
                 )
                 for model in view["models"]
             ],
@@ -475,6 +477,7 @@ async def add_manifest_snapshot(engine: str, body: EngineSnapshotCreateRequest):
                     supported_effort=model.get("supported_effort"),
                     provider=model.get("provider"),
                     model=model.get("model"),
+                    source=model.get("source"),
                 )
                 for model in view["models"]
             ],

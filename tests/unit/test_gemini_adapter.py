@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.models import AdapterTurnOutcome, SkillManifest
+from server.runtime.adapter.contracts import AdapterExecutionContext
 
 
 def _stub_generate_config(_schema_name: str, _layers, output_path: Path):
@@ -208,6 +209,8 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
         # input.input_file should be absolute path
         abs_path = str((uploads_dir / "input_file").absolute())
         assert f"input_file: {abs_path}" in prompt_content
+        assert "prefer calling that tool instead of directly using `read`" in prompt_content
+        assert "./.gemini/skills" in prompt_content
 
         # parameter.divisor should be 5
         assert "divisor: 5" in prompt_content
@@ -300,6 +303,8 @@ async def test_run_persists_first_attempt_prompt_to_request_input(adapter, mock_
         spawn_command = list(args)
         payload = json.loads(request_input_path.read_text(encoding="utf-8"))
         assert payload["rendered_prompt_first_attempt"] == prompt_content
+        assert prompt_content.startswith("If the environment provides a `skill` tool")
+        assert "./.gemini/skills" in prompt_content
         assert payload["spawn_command_original_first_attempt"] == spawn_command
         assert payload["spawn_command_effective_first_attempt"] == spawn_command
         assert payload["spawn_command_normalization_applied_first_attempt"] is False
@@ -349,6 +354,119 @@ async def test_run_does_not_persist_prompt_after_first_attempt(adapter, mock_ski
     assert "spawn_command_normalization_reason_first_attempt" not in payload
     assert not (audit_dir / "prompt.1.txt").exists()
     assert not (audit_dir / "argv.1.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_first_attempt_prompt_override_still_gets_global_prefix(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {"__attempt_number": 1, "__prompt_override": "OVERRIDE PROMPT"}
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(mock_skill, input_data, run_dir, options)
+
+        args, _ = mock_exec.call_args
+        prompt_content = args[-1]
+        assert prompt_content.startswith("If the environment provides a `skill` tool")
+        assert prompt_content.endswith("OVERRIDE PROMPT")
+        assert "\n\nOVERRIDE PROMPT" in prompt_content
+
+
+@pytest.mark.asyncio
+async def test_run_non_first_attempt_prompt_override_does_not_get_global_prefix(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {"__attempt_number": 2, "__prompt_override": "OVERRIDE PROMPT"}
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(mock_skill, input_data, run_dir, options)
+
+        args, _ = mock_exec.call_args
+        prompt_content = args[-1]
+        assert prompt_content == "OVERRIDE PROMPT"
+
+
+def test_build_start_and_resume_command_use_first_attempt_effective_prompt(adapter, mock_skill, tmp_path):
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+    template_file = tmp_path / "template.j2"
+    template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
+    skill_with_prompt = mock_skill.model_copy(
+        update={"entrypoint": {"prompts": {"gemini": template_file.read_text(encoding="utf-8")}}}
+    )
+    ctx = adapter._build_prompt(  # type: ignore[attr-defined]
+        skill_with_prompt,
+        run_dir,
+        {"parameter": {"divisor": 5}},
+        {"__attempt_number": 1},
+    )
+    assert ctx.startswith("If the environment provides a `skill` tool")
+    assert "./.gemini/skills" in ctx
+
+    render_ctx = adapter.build_start_command(
+        AdapterExecutionContext(
+            skill=skill_with_prompt,
+            run_dir=run_dir,
+            input_data={"parameter": {"divisor": 5}},
+            options={"__attempt_number": 1},
+        )
+    )
+    assert render_ctx[-1].startswith("If the environment provides a `skill` tool")
+
+    resume_command = adapter.build_resume_command(
+        AdapterExecutionContext(
+            skill=skill_with_prompt,
+            run_dir=run_dir,
+            input_data={"parameter": {"divisor": 5}},
+            options={"__attempt_number": 1},
+        ),
+        EngineSessionHandle(
+            engine="gemini",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="sess-1",
+            created_at_turn=1,
+        ),
+    )
+    assert resume_command[-1].startswith("If the environment provides a `skill` tool")
 
 
 @pytest.mark.asyncio

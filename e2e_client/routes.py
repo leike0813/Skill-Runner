@@ -1507,12 +1507,11 @@ def _extract_engine_model_ids(
 
 
 def _derive_provider_from_model(model: str, *, engine: str) -> str:
-    if engine != "opencode":
-        return ENGINE_DEFAULT_PROVIDER.get(engine, "")
-    if not model or "/" not in model:
-        return ""
-    provider = model.split("/", 1)[0].strip()
-    return provider
+    if model and "/" in model:
+        provider = model.split("/", 1)[0].strip()
+        if provider:
+            return provider
+    return ENGINE_DEFAULT_PROVIDER.get(engine, "")
 
 
 def _collect_submitted_runtime_options(run_form: Mapping[str, Any]) -> dict[str, Any]:

@@ -200,6 +200,32 @@ class ManagementEngineDetail(ManagementEngineSummary):
     last_error: Optional[str] = None
 
 
+class ManagementEngineCustomProvider(BaseModel):
+    """Managed custom-provider entry for an engine."""
+
+    provider_id: str
+    api_key: str
+    base_url: str
+    models: List[str] = Field(default_factory=list)
+
+
+class ManagementEngineCustomProviderUpsertRequest(BaseModel):
+    """Upsert payload for managed engine custom providers."""
+
+    provider_id: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
+    base_url: str = Field(min_length=1)
+    models: List[str] = Field(default_factory=list, min_length=1)
+
+
+class ManagementEngineCustomProviderListResponse(BaseModel):
+    """List payload for managed engine custom providers."""
+
+    engine: str
+    supported: bool
+    providers: List[ManagementEngineCustomProvider] = Field(default_factory=list)
+
+
 class ManagementEngineListResponse(BaseModel):
     """Response payload for management engine list."""
 

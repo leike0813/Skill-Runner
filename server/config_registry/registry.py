@@ -24,9 +24,6 @@ class ConfigRegistry:
     def contract_invariant_path(self, filename: str) -> Path:
         return self.root / "server" / "contracts" / "invariants" / filename
 
-    def engine_command_profile_paths(self, engine: str) -> tuple[Path, ...]:
-        return (self.engine_config_path(engine=engine, filename=keys.ENGINE_COMMAND_PROFILE_NAME),)
-
     def engine_auth_strategy_paths(self, engine: str) -> tuple[Path, ...]:
         return (self.engine_config_path(engine=engine, filename=keys.ENGINE_AUTH_STRATEGY_NAME),)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
@@ -17,8 +18,11 @@ def test_codex_api_start_command_applies_profile_defaults(monkeypatch) -> None:
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "--full-auto", "-p", "skill-runner"]
+        if use_profile_defaults and action == "start"
+        else [],
     )
 
     command = adapter.build_start_command(
@@ -43,8 +47,11 @@ def test_codex_harness_start_command_passthrough_without_profile(monkeypatch) ->
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--json", "-p", "skill-runner"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "-p", "skill-runner"]
+        if use_profile_defaults and action == "start"
+        else [],
     )
 
     command = adapter.build_start_command(
@@ -62,8 +69,11 @@ def test_codex_start_command_fallbacks_full_auto_to_yolo_when_landlock_disabled(
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.setenv("LANDLOCK_ENABLED", "0")
     monkeypatch.setattr(
-        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "--full-auto", "-p", "skill-runner"]
+        if use_profile_defaults and action == "start"
+        else [],
     )
 
     command = adapter.build_start_command(
@@ -95,8 +105,11 @@ def test_gemini_start_command_profile_can_be_disabled(monkeypatch) -> None:
     adapter = GeminiExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/gemini"))
     monkeypatch.setattr(
-        "server.engines.gemini.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--yolo", "--model", "gemini-default"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--yolo", "--model", "gemini-default"]
+        if use_profile_defaults and action == "start"
+        else [],
     )
 
     with_profile = adapter.build_start_command(
@@ -121,8 +134,11 @@ def test_codex_resume_command_preserves_profile_flags(monkeypatch) -> None:
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
     monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
     monkeypatch.setattr(
-        "server.engines.codex.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--json", "--full-auto", "-p", "skill-runner", "--profile=other"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "--full-auto", "-p", "skill-runner", "--profile=other"]
+        if use_profile_defaults and action == "resume"
+        else [],
     )
 
     command = adapter.build_resume_command(
@@ -159,8 +175,11 @@ def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None
     adapter = IFlowExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/iflow"))
     monkeypatch.setattr(
-        "server.engines.iflow.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--yolo", "--thinking"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--yolo", "--thinking"]
+        if use_profile_defaults and action == "resume"
+        else [],
     )
 
     command = adapter.build_resume_command(
@@ -192,8 +211,11 @@ def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> No
     adapter = OpencodeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
     monkeypatch.setattr(
-        "server.engines.opencode.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--format", "json"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--format", "json"]
+        if use_profile_defaults and action == "start"
+        else [],
     )
 
     command = adapter.build_start_command(
@@ -219,8 +241,11 @@ def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monk
     adapter = OpencodeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
     monkeypatch.setattr(
-        "server.engines.opencode.adapter.execution_adapter.engine_command_profile.resolve_args",
-        lambda **_kwargs: ["--should-not-appear"],
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--should-not-appear"]
+        if use_profile_defaults and action == "resume"
+        else [],
     )
 
     command = adapter.build_resume_command(
@@ -256,4 +281,38 @@ def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monk
         "--model",
         "google/gemini-3.1-pro-preview",
         "next turn",
+    ]
+
+
+def test_claude_start_command_uses_profile_command_defaults(monkeypatch) -> None:
+    adapter = ClaudeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        if use_profile_defaults and action == "start"
+        else [],
+    )
+
+    command = adapter.build_start_command(
+        prompt="hello",
+        options={"model": "claude-sonnet", "model_reasoning_effort": "high"},
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/claude"),
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--effort",
+        "high",
+        "hello",
     ]

@@ -96,6 +96,37 @@ def test_preflight_passes_when_environment_ready(monkeypatch, capsys, tmp_path: 
     assert payload["suggested_next"]["port"] == 29813
 
 
+def test_preflight_claude_sandbox_dependency_warning_is_non_blocking(monkeypatch, capsys, tmp_path: Path) -> None:
+    module = _load_skill_runnerctl_module()
+    profile, _project_root, _required_files = _prepare_preflight_runtime(monkeypatch, module, tmp_path)
+    monkeypatch.setattr(module, "_runtime_dependency_checks", lambda: {"uv": True, "node": True, "npm": True})
+    monkeypatch.setattr(module, "_select_port_with_fallback", lambda _h, _p, _s: (29813, [29813]))
+    monkeypatch.setattr(
+        module,
+        "_claude_sandbox_status",
+        lambda _profile: {
+            "declared_enabled": True,
+            "dependency_status": "warning",
+            "dependencies": {"bubblewrap": False, "socat": False},
+            "missing_dependencies": ["bubblewrap", "socat"],
+            "warning_code": "CLAUDE_SANDBOX_DEPENDENCY_MISSING",
+            "message": "Claude sandbox dependencies missing: bubblewrap, socat. Runs continue with warning-only observability.",
+        },
+    )
+    (profile.data_dir / "agent_bootstrap_report.json").write_text(
+        json.dumps({"summary": {"outcome": "success"}}),
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(["preflight", "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["ok"] is True
+    assert payload["checks"]["claude_sandbox"]["warning_code"] == "CLAUDE_SANDBOX_DEPENDENCY_MISSING"
+    assert any(warning["code"] == "claude_sandbox_dependency_missing" for warning in payload["warnings"])
+
+
 def test_preflight_missing_dependency_returns_exit_2(monkeypatch, capsys, tmp_path: Path) -> None:
     module = _load_skill_runnerctl_module()
     profile, _project_root, _required_files = _prepare_preflight_runtime(monkeypatch, module, tmp_path)

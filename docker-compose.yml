@@ -21,6 +21,8 @@ services:
       UV_PROJECT_ENVIRONMENT: /opt/cache/skill-runner/uv_venv
       NPM_CONFIG_PREFIX: /opt/cache/skill-runner/npm
       UI_SHELL_TTYD_PORT: 17681
+      # Default bootstrap install set. Change to all / none / comma-separated engines as needed.
+      SKILL_RUNNER_BOOTSTRAP_ENGINES: opencode,codex,gemini,claude
       # UI Basic Auth is injected at runtime (not baked into image ENV).
       # Set to "true" and provide username/password for exposed deployments.
       UI_BASIC_AUTH_ENABLED: "false"

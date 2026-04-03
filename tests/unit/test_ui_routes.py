@@ -120,6 +120,7 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     monkeypatch.setattr(
         "server.routers.ui.engine_status_cache_service.get_snapshot",
         lambda: {
+            "claude": SimpleNamespace(present=False, version=None),
             "codex": SimpleNamespace(present=True, version="0.89.0"),
             "gemini": SimpleNamespace(present=True, version=""),
             "iflow": SimpleNamespace(present=False, version=None),
@@ -134,8 +135,8 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
     assert 'id="engine-status-indicator"' in response.text
     assert 'data-engine-status-refresh="static"' in response.text
-    assert 'data-engine-count="4"' in response.text
-    assert "style=\"--engine-count: 4;\"" in response.text
+    assert 'data-engine-count="5"' in response.text
+    assert "style=\"--engine-count: 5;\"" in response.text
     assert 'data-engine="codex" data-status-level="healthy"' in response.text
     assert 'data-engine="gemini" data-status-level="warning"' in response.text
     assert 'data-engine="iflow" data-status-level="error"' in response.text
@@ -539,6 +540,12 @@ async def test_ui_engines_page(monkeypatch):
     assert "OAuth Proxy (oauth_proxy)" in response.text
     assert "CLI Delegate (cli_delegate)" in response.text
     assert "const authUiCapabilities = " in response.text
+    assert "Custom Providers" in response.text
+    assert 'id="custom-provider-engine"' in response.text
+    assert 'id="custom-provider-table-body"' in response.text
+    assert 'id="custom-provider-tui-modal"' in response.text
+    assert "customProvidersStartTui" in response.text
+    assert "fetchCustomProviders" in response.text
     assert "Codex OAuth代理（Callback）" not in response.text
     assert "ttyd" in response.text
 
@@ -565,6 +572,31 @@ async def test_ui_engines_page_hides_terminal_panel_when_ttyd_missing(monkeypatc
     assert response.status_code == 200
     assert "当前环境未检测到 ttyd" in response.text
     assert 'class="terminal-wrap" style="display:none;"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engines_page_exposes_custom_provider_tui_dialog_markup(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.profile",
+        SimpleNamespace(data_dir=Path("/tmp/skill-runner"), managed_bin_dirs=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(engines=[]),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_auth_flow_manager.get_active_session_snapshot",
+        lambda: {"active": False},
+    )
+
+    response = await _request("GET", "/ui/engines")
+    assert response.status_code == 200
+    assert 'id="custom-provider-tui-modal"' in response.text
+    assert 'id="custom-provider-tui-model"' in response.text
+    assert "customProvidersStartTui" in response.text
 
 
 @pytest.mark.asyncio
@@ -645,7 +677,13 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
-        lambda engine: {"active": True, "status": "running", "session_id": "s-1", "engine": engine},
+        lambda engine, custom_model=None: {
+            "active": True,
+            "status": "running",
+            "session_id": "s-1",
+            "engine": engine,
+            "custom_model": custom_model,
+        },
     )
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.stop_session",
@@ -659,6 +697,15 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
     start_res = await _request("POST", "/ui/engines/tui/session/start", data={"engine": "codex"})
     assert start_res.status_code == 200
     assert start_res.json()["engine"] == "codex"
+    assert start_res.json()["custom_model"] is None
+
+    custom_start_res = await _request(
+        "POST",
+        "/ui/engines/tui/session/start",
+        data={"engine": "claude", "custom_model": "bailian/qwen3.5-plus"},
+    )
+    assert custom_start_res.status_code == 200
+    assert custom_start_res.json()["custom_model"] == "bailian/qwen3.5-plus"
 
     input_res = await _request("POST", "/ui/engines/tui/session/input", data={"text": "hello"})
     assert input_res.status_code == 410
@@ -679,7 +726,8 @@ async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
 
     from server.services.ui.ui_shell_manager import UiShellBusyError
 
-    def _raise_busy(_engine: str):
+    def _raise_busy(_engine: str, custom_model=None):
+        _ = custom_model
         raise UiShellBusyError("busy")
 
     monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _raise_busy)
@@ -696,11 +744,12 @@ async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
     monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
-        lambda engine: {
+        lambda engine, custom_model=None: {
             "active": True,
             "status": "running",
             "session_id": "s-2",
             "engine": engine,
+            "custom_model": custom_model,
             "sandbox_status": "unknown",
             "sandbox_message": "probe only",
         },
@@ -713,6 +762,28 @@ async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ui_engine_tui_start_invalid_custom_model_returns_400(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
+
+    from server.services.ui.ui_shell_manager import UiShellValidationError
+
+    def _raise_invalid(_engine: str, custom_model=None):
+        raise UiShellValidationError(f"invalid: {custom_model}")
+
+    monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _raise_invalid)
+
+    response = await _request(
+        "POST",
+        "/ui/engines/tui/session/start",
+        data={"engine": "claude", "custom_model": "qwen3.5-plus"},
+    )
+    assert response.status_code == 400
+    assert "invalid:" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_ui_engine_tui_start_returns_503_when_ttyd_unavailable(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
@@ -720,7 +791,8 @@ async def test_ui_engine_tui_start_returns_503_when_ttyd_unavailable(monkeypatch
 
     called = {"start": False}
 
-    def _start(_engine: str):
+    def _start(_engine: str, custom_model=None):
+        _ = custom_model
         called["start"] = True
         return {"active": True}
 
@@ -760,6 +832,14 @@ async def test_ui_engines_table_partial(monkeypatch):
             "iflow": SimpleNamespace(present=False, version=""),
         },
     )
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.collect_sandbox_status",
+        lambda _engine: {
+            "warning_code": None,
+            "message": "",
+            "missing_dependencies": [],
+        },
+    )
 
     response = await _request("GET", "/ui/engines/table")
     assert response.status_code == 200
@@ -769,7 +849,6 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "/ui/engines/codex/models" in response.text
     assert "/ui/engines/iflow/models" in response.text
     assert "Auth Ready" not in response.text
-    assert "Sandbox" not in response.text
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-entry="codex"' in response.text
     assert 'data-engine-auth-entry="iflow"' in response.text
@@ -781,6 +860,46 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert "health-led-healthy" in response.text
     assert "health-led-error" in response.text
     assert 'data-engine-auth-start=' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engines_table_shows_claude_sandbox_warning(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(
+            engines=[
+                SimpleNamespace(
+                    engine="claude",
+                    cli_version="2.1.0",
+                    models_count=9,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {
+            "claude": SimpleNamespace(present=True, version="2.1.0"),
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.collect_sandbox_status",
+        lambda _engine: {
+            "warning_code": "CLAUDE_SANDBOX_DEPENDENCY_MISSING",
+            "message": "Claude sandbox dependencies missing: bubblewrap, socat. Runs continue with warning-only observability.",
+            "missing_dependencies": ["bubblewrap", "socat"],
+        },
+    )
+
+    response = await _request("GET", "/ui/management/engines/table")
+
+    assert response.status_code == 200
+    assert "claude" in response.text
+    assert ("Sandbox warning:" in response.text) or ("Sandbox告警：" in response.text)
+    assert "bubblewrap, socat" in response.text
 
 
 @pytest.mark.asyncio

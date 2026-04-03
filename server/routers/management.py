@@ -17,6 +17,9 @@ from ..models import (
     InteractionReplyResponse,
     ManagementDataResetRequest,
     ManagementDataResetResponse,
+    ManagementEngineCustomProvider,
+    ManagementEngineCustomProviderListResponse,
+    ManagementEngineCustomProviderUpsertRequest,
     ManagementEngineDetail,
     ManagementEngineAuthImportSpecResponse,
     ManagementEngineAuthImportSubmitResponse,
@@ -41,6 +44,7 @@ from ..models import (
     SkillManifest,
 )
 from ..services.engine_management.model_registry import model_registry
+from ..services.engine_management.engine_custom_provider_service import engine_custom_provider_service
 from ..services.engine_management.auth_import_service import auth_import_service, AuthImportError
 from ..services.engine_management.auth_import_validator_registry import AuthImportValidationError
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
@@ -316,6 +320,7 @@ async def get_management_engine(engine: str):
             supported_effort=entry.supported_effort,
             provider=entry.provider,
             model=entry.model,
+            source=getattr(entry, "source", None),
         )
         for entry in catalog.models
     ]
@@ -327,6 +332,71 @@ async def get_management_engine(engine: str):
         upgrade_status={"state": "idle"},
         last_error=None,
     )
+
+
+@router.get(
+    "/engines/{engine}/custom-providers",
+    response_model=ManagementEngineCustomProviderListResponse,
+)
+async def list_management_engine_custom_providers(engine: str):
+    supported = engine_custom_provider_service.supports(engine)
+    providers = []
+    if supported:
+        providers = [
+            ManagementEngineCustomProvider(
+                provider_id=item.provider_id,
+                api_key=item.api_key,
+                base_url=item.base_url,
+                models=list(item.models),
+            )
+            for item in engine_custom_provider_service.list_providers(engine)
+        ]
+    return ManagementEngineCustomProviderListResponse(
+        engine=engine,
+        supported=supported,
+        providers=providers,
+    )
+
+
+@router.put(
+    "/engines/{engine}/custom-providers/{provider_id}",
+    response_model=ManagementEngineCustomProvider,
+)
+async def upsert_management_engine_custom_provider(
+    engine: str,
+    provider_id: str,
+    request: ManagementEngineCustomProviderUpsertRequest,
+):
+    if provider_id.strip().lower() != request.provider_id.strip().lower():
+        raise HTTPException(status_code=400, detail="provider_id path and body must match")
+    try:
+        item = engine_custom_provider_service.upsert_provider(
+            engine=engine,
+            provider_id=request.provider_id,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            models=request.models,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ManagementEngineCustomProvider(
+        provider_id=item.provider_id,
+        api_key=item.api_key,
+        base_url=item.base_url,
+        models=list(item.models),
+    )
+
+
+@router.delete("/engines/{engine}/custom-providers/{provider_id}")
+async def delete_management_engine_custom_provider(engine: str, provider_id: str):
+    try:
+        deleted = engine_custom_provider_service.delete_provider(
+            engine=engine,
+            provider_id=provider_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"engine": engine, "provider_id": provider_id.strip().lower(), "deleted": deleted}
 
 
 @router.get(

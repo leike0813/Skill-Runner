@@ -41,6 +41,28 @@
     "models_root": "../models",
     "seed_path": null
   },
+  "command_defaults": {
+    "start": ["--yolo", "--thinking"],
+    "resume": ["--yolo", "--thinking"],
+    "ui_shell": []
+  },
+  "ui_shell": {
+    "command_id": "iflow-tui",
+    "label": "iFlow TUI",
+    "trust_bootstrap_parent": false,
+    "sandbox_arg": null,
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "static_unsupported",
+    "sandbox_probe_message": "iFlow inline TUI runs without sandbox. iFlow sandbox requires Docker-image execution, which is intentionally outside this inline TUI design.",
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "none",
+    "config_assets": {
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
+      "settings_schema_path": "../schemas/iflow_settings_schema.json",
+      "target_relpath": ".iflow/settings.json"
+    }
+  },
   "cli_management": {
     "package": "@iflow-ai/iflow-cli",
     "binary_candidates": ["iflow", "iflow.cmd", "iflow.exe"],

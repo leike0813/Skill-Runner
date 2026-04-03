@@ -19,12 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
     python3-pip \
+    bubblewrap \
     ca-certificates \
     curl \
     git \
     ripgrep \
     fd-find \
     fzf \
+    socat \
     sqlite3 \
     procps \
     && rm -rf /var/lib/apt/lists/* \

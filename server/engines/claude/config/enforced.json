@@ -1,0 +1,16 @@
+{
+  "includeGitInstructions": false,
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": true,
+    "filesystem": {
+      "allowWrite": [
+        "//tmp"
+      ]
+    }
+  }
+}

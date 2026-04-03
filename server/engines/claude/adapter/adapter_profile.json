@@ -1,0 +1,134 @@
+{
+  "engine": "claude",
+  "prompt_builder": {
+    "engine_key": "claude",
+    "default_template_path": "../../../assets/templates/claude_default.j2",
+    "fallback_inline": "Please execute the skill named \"{{ skill.id }}\". If Claude sandbox is unavailable in this environment, execute Bash normally without sandbox-first retries. Otherwise prefer Bash inside the sandbox first, and only retry once without sandbox for sandbox runtime failures such as missing bwrap/bubblewrap/socat, Failed RTM_NEWADDR, or creating new namespace failed. Do not use unsandboxed fallback for ordinary policy denials such as disallowed network access, writes outside permitted paths, or access to sensitive/system locations. Return only the final structured result.",
+    "merge_input_if_no_parameter_schema": true,
+    "params_json_source": "combined_input_parameter",
+    "main_prompt_source": "none",
+    "main_prompt_default_template": "Execute skill {skill_id}",
+    "include_input_file_name": true,
+    "include_skill_dir": true
+  },
+  "session_codec": {
+    "strategy": "json_lines_scan",
+    "error_message": "SESSION_RESUME_FAILED: missing claude session_id",
+    "error_prefix": "SESSION_RESUME_FAILED: claude",
+    "required_type": null,
+    "id_field": null,
+    "recursive_key": null,
+    "fallback_text_finder": null,
+    "json_lines_finder": "find_session_id",
+    "regex_pattern": null
+  },
+  "attempt_workspace": {
+    "workspace_subdir": ".claude",
+    "skills_subdir": "skills",
+    "use_config_parent_as_workspace": false,
+    "unknown_fallback": false
+  },
+  "config_assets": {
+    "bootstrap_path": "../config/bootstrap.json",
+    "default_path": "../config/default.json",
+    "enforced_path": "../config/enforced.json",
+    "settings_schema_path": "../schemas/claude_settings_schema.json",
+    "skill_defaults_path": "assets/claude_settings.json"
+  },
+  "model_catalog": {
+    "mode": "manifest",
+    "manifest_path": "../models/manifest.json",
+    "models_root": "../models",
+    "seed_path": null
+  },
+  "command_defaults": {
+    "start": [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose"
+    ],
+    "resume": [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose"
+    ],
+    "ui_shell": []
+  },
+  "ui_shell": {
+    "command_id": "claude-tui",
+    "label": "Claude Code TUI",
+    "trust_bootstrap_parent": false,
+    "sandbox_arg": null,
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "static_supported",
+    "sandbox_probe_message": "Claude UI shell uses session-local settings-managed sandbox restrictions.",
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "claude_ui_shell",
+    "config_assets": {
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
+      "settings_schema_path": "../schemas/claude_settings_schema.json",
+      "target_relpath": ".claude/settings.json"
+    }
+  },
+  "cli_management": {
+    "package": "@anthropic-ai/claude-code",
+    "binary_candidates": ["claude", "claude.cmd", "claude.exe"],
+    "credential_imports": [
+      {
+        "source": ".credentials.json",
+        "target_relpath": ".claude/.credentials.json",
+        "import_validator": "json_object"
+      }
+    ],
+    "credential_policy": {
+      "mode": "all_of_sources",
+      "sources": [".credentials.json"],
+      "settings_validator": null
+    },
+    "resume_probe": {
+      "help_hints": ["--resume"],
+      "dynamic_args": ["--resume", "probe-session", "-p", "ping"]
+    },
+    "layout": {
+      "extra_dirs": [".claude"],
+      "bootstrap_target_relpath": ".claude.json",
+      "bootstrap_format": "json",
+      "normalize_strategy": null
+    }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "claude_not_logged_in",
+        "enabled": true,
+        "priority": 920,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Not\\s+logged\\s+in\\.\\s+Run\\s+claude\\s+auth\\s+login\\s+to\\s+authenticate"
+            }
+          ]
+        }
+      },
+      {
+        "id": "claude_reauth_required",
+        "enabled": true,
+        "priority": 910,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(sign\\s+in\\s+again|log\\s+out\\s+and\\s+sign\\s+in\\s+again|authentication\\s+token\\s+is\\s+expired)"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

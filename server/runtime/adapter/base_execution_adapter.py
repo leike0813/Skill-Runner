@@ -28,6 +28,7 @@ from ..protocol.contracts import LiveRuntimeEmitter
 from ...services.platform.process_supervisor import process_supervisor
 from ...services.platform.process_termination import terminate_asyncio_process_tree
 from ..auth_detection.signal import extract_auth_signal, is_high_confidence_auth_signal
+from .common.prompt_builder_common import render_global_first_attempt_prefix
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
@@ -96,16 +97,8 @@ class EngineExecutionAdapter:
             input_data=input_data,
             options=options,
         )
-        prompt = self.prompt_builder.render(render_ctx)
-        prompt_override = options.get("__prompt_override")
-        if isinstance(prompt_override, str) and prompt_override.strip():
-            prompt = prompt_override
-        attempt_number_obj = options.get("__attempt_number")
-        attempt_number = (
-            attempt_number_obj
-            if isinstance(attempt_number_obj, int) and attempt_number_obj > 0
-            else 1
-        )
+        prompt = self._resolve_effective_prompt(render_ctx)
+        attempt_number = self._resolve_attempt_number(options)
         self._persist_first_attempt_prompt_audit(
             run_dir=run_dir,
             attempt_number=attempt_number,
@@ -343,7 +336,7 @@ class EngineExecutionAdapter:
             if prompt is None:
                 if self.prompt_builder is None:
                     raise RuntimeError("execution adapter prompt builder is not initialized")
-                prompt = self.prompt_builder.render(ctx)
+                prompt = self._resolve_effective_prompt(ctx)
             if options is None:
                 options = ctx.options
         if prompt is None:
@@ -383,7 +376,7 @@ class EngineExecutionAdapter:
             if prompt is None:
                 if self.prompt_builder is None:
                     raise RuntimeError("execution adapter prompt builder is not initialized")
-                prompt = self.prompt_builder.render(ctx)
+                prompt = self._resolve_effective_prompt(ctx)
             if options is None:
                 options = ctx.options
         if prompt is None:
@@ -581,15 +574,56 @@ class EngineExecutionAdapter:
             config_path,
         )
 
-    def _build_prompt(self, skill: SkillManifest, run_dir: Path, input_data: dict[str, Any]) -> str:
+    def _resolve_attempt_number(self, options: dict[str, Any] | None) -> int:
+        if not isinstance(options, dict):
+            return 1
+        attempt_number_obj = options.get("__attempt_number")
+        if isinstance(attempt_number_obj, int) and attempt_number_obj > 0:
+            return attempt_number_obj
+        return 1
+
+    def _prepend_global_first_attempt_prefix(
+        self,
+        *,
+        ctx: AdapterExecutionContext,
+        prompt: str,
+    ) -> str:
+        profile = getattr(self, "profile", None)
+        if profile is None:
+            return prompt
+        prefix = render_global_first_attempt_prefix(ctx=ctx, profile=profile)
+        if not prefix.strip():
+            return prompt
+        body = prompt.lstrip("\n")
+        prefix_text = prefix.rstrip()
+        if not body:
+            return prefix_text
+        return f"{prefix_text}\n\n{body}"
+
+    def _resolve_effective_prompt(self, ctx: AdapterExecutionContext) -> str:
         if self.prompt_builder is None:
             raise RuntimeError("execution adapter prompt builder is not initialized")
-        return self.prompt_builder.render(
+        prompt = self.prompt_builder.render(ctx)
+        prompt_override = ctx.options.get("__prompt_override")
+        if isinstance(prompt_override, str) and prompt_override.strip():
+            prompt = prompt_override
+        if self._resolve_attempt_number(ctx.options) != 1:
+            return prompt
+        return self._prepend_global_first_attempt_prefix(ctx=ctx, prompt=prompt)
+
+    def _build_prompt(
+        self,
+        skill: SkillManifest,
+        run_dir: Path,
+        input_data: dict[str, Any],
+        options: dict[str, Any] | None = None,
+    ) -> str:
+        return self._resolve_effective_prompt(
             AdapterExecutionContext(
                 skill=skill,
                 run_dir=run_dir,
                 input_data=input_data,
-                options={},
+                options=options or {},
             )
         )
 
@@ -613,7 +647,7 @@ class EngineExecutionAdapter:
     def bootstrap(self, ctx: AdapterExecutionContext) -> tuple[str, Path]:
         config_path = self._construct_config(ctx.skill, ctx.run_dir, ctx.options)
         workspace_dir = self._setup_environment(ctx.skill, ctx.run_dir, config_path, ctx.options)
-        prompt = self.prompt_builder.render(ctx) if self.prompt_builder is not None else ""
+        prompt = self._resolve_effective_prompt(ctx) if self.prompt_builder is not None else ""
         return prompt, workspace_dir
 
     async def _capture_process_output(

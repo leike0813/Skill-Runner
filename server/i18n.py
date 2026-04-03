@@ -20,6 +20,7 @@ NON_LOCALIZED_EXACT_KEYS: frozenset[str] = frozenset(
         "ui.engines.engine_gemini",
         "ui.engines.engine_iflow",
         "ui.engines.engine_opencode",
+        "ui.engines.engine_claude",
         "ui.engines.method_api_key",
         "ui.engines.method_auth_code",
         "ui.engines.method_callback",

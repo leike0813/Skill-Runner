@@ -486,6 +486,42 @@ class FakeBackendOpencode(FakeBackend):
         }
 
 
+class FakeBackendClaudeCustomProviders(FakeBackend):
+    async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
+        assert skill_id == "demo-skill"
+        return {
+            "id": "demo-skill",
+            "name": "Demo Skill",
+            "version": "1.0.0",
+            "engines": ["claude"],
+            "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
+        }
+
+    async def get_engine_detail(self, engine: str) -> dict[str, Any]:
+        if engine != "claude":
+            return {"engine": engine, "models": []}
+        return {
+            "engine": "claude",
+            "models": [
+                {
+                    "id": "claude-sonnet-4-5",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-5",
+                    "display_name": "Claude Sonnet 4.5",
+                    "source": "official",
+                },
+                {
+                    "id": "openrouter/qwen-3",
+                    "provider": "openrouter",
+                    "model": "qwen-3",
+                    "display_name": "openrouter/qwen-3",
+                    "source": "custom_provider",
+                },
+            ],
+        }
+
+
 class FakeBackendUnreachable(FakeBackend):
     async def get_run_state(
         self,
@@ -799,6 +835,22 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
         result = await _request(app, "GET", "/runs/req-temp-1/result")
         assert result.status_code == 404
 
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_run_form_shows_claude_official_and_custom_provider_models():
+    app = create_app()
+    fake_backend = FakeBackendClaudeCustomProviders()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(app, "GET", "/skills/demo-skill/run")
+        assert response.status_code == 200
+        assert "claude-sonnet-4-5" in response.text
+        assert "openrouter/qwen-3" in response.text
+        assert '"provider":"anthropic"' in response.text or '"provider": "anthropic"' in response.text
+        assert '"provider":"openrouter"' in response.text or '"provider": "openrouter"' in response.text
     finally:
         app.dependency_overrides.clear()
 

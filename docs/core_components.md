@@ -113,7 +113,7 @@
 | `server/services/engine_management/engine_policy.py` | Skill 引擎策略计算与校验 |
 | `server/services/engine_management/engine_status_cache_service.py` | 引擎状态缓存服务 |
 | `server/services/engine_management/runtime_profile.py` | 运行时环境画像与子进程环境组装 |
-| `server/services/engine_management/engine_command_profile.py` | 引擎命令 profile 合并 |
+| `server/runtime/adapter/common/profile_loader.py` | Adapter profile 加载与命令默认参数合同 |
 | `server/services/engine_management/engine_interaction_gate.py` | 交互会话门控 |
 
 ### 2.3 Platform — 平台能力

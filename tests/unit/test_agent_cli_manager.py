@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from server.config import config
+from server.engines.claude.adapter.sandbox_probe import load_claude_sandbox_probe
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.agent_cli_manager import CommandResult
 from server.services.engine_management.runtime_profile import RuntimeProfile
@@ -44,6 +46,9 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     codex_config = manager.profile.agent_home / ".codex" / "config.toml"
     gemini_settings = manager.profile.agent_home / ".gemini" / "settings.json"
     iflow_settings = manager.profile.agent_home / ".iflow" / "settings.json"
+    claude_bootstrap = manager.profile.agent_home / ".claude.json"
+    claude_settings = manager.profile.agent_home / ".claude" / "settings.json"
+    claude_probe = manager.profile.agent_home / ".claude" / "sandbox_probe.json"
     opencode_dir = manager.profile.agent_home / ".opencode"
     opencode_config = manager.profile.agent_home / ".config" / "opencode" / "opencode.json"
 
@@ -53,12 +58,115 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     iflow_payload = json.loads(iflow_settings.read_text(encoding="utf-8"))
     assert iflow_payload["selectedAuthType"] == "oauth-iflow"
     assert iflow_payload["baseUrl"] == "https://apis.iflow.cn/v1"
+    assert json.loads(claude_bootstrap.read_text(encoding="utf-8"))["hasCompletedOnboarding"] is True
+    assert json.loads(claude_settings.read_text(encoding="utf-8")) == {}
+    assert claude_probe.exists()
     assert opencode_dir.exists()
     assert opencode_config.exists()
     opencode_payload = json.loads(opencode_config.read_text(encoding="utf-8"))
     plugins = opencode_payload.get("plugin", [])
     assert isinstance(plugins, list)
     assert any(isinstance(item, str) and item.startswith("opencode-antigravity-auth") for item in plugins)
+
+
+def test_default_bootstrap_engines_come_from_global_config(tmp_path: Path) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    assert manager.default_bootstrap_engines() == ("opencode", "codex", "gemini", "claude")
+
+
+def test_default_bootstrap_engines_respect_config_override(tmp_path: Path) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    config.defrost()
+    config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("claude", "gemini", "claude", "missing")
+    config.freeze()
+    try:
+        assert manager.default_bootstrap_engines() == ("claude", "gemini")
+    finally:
+        config.defrost()
+        config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("opencode", "codex", "gemini", "claude")
+        config.freeze()
+
+
+def test_collect_claude_sandbox_status_reports_missing_dependencies(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: None)
+    manager.ensure_layout()
+
+    payload = manager.collect_sandbox_status("claude")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert payload["dependency_status"] == "warning"
+    assert payload["warning_code"] == "CLAUDE_SANDBOX_DEPENDENCY_MISSING"
+    assert payload["missing_dependencies"] == ["bubblewrap", "socat"]
+
+
+def test_collect_claude_sandbox_status_reports_available_when_smoke_probe_succeeds(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(returncode=0, stdout="sandbox-ok", stderr=""),
+    )
+    manager.ensure_layout()
+
+    payload = manager.collect_sandbox_status("claude")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is True
+    assert payload["status"] == "available"
+    assert payload["dependency_status"] == "ready"
+    assert payload["warning_code"] is None
+    assert payload["missing_dependencies"] == []
+
+
+def test_collect_claude_sandbox_status_reports_runtime_unavailable_when_probe_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
+        ),
+    )
+    manager.ensure_layout()
+
+    payload = manager.collect_sandbox_status("claude")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert payload["warning_code"] == "CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE"
+    assert "Failed RTM_NEWADDR" in payload["message"]
+
+
+def test_ensure_layout_persists_claude_sandbox_probe_sidecar(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(returncode=124, stdout="", stderr="timeout"),
+    )
+
+    manager.ensure_layout()
+
+    persisted = load_claude_sandbox_probe(manager.profile.agent_home)
+    assert persisted is not None
+    assert persisted.available is False
+    assert persisted.warning_code == "CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE"
+    assert persisted.probe_kind == "bubblewrap_smoke"
 
 
 def test_import_credentials_whitelist_only(tmp_path):
@@ -70,6 +178,7 @@ def test_import_credentials_whitelist_only(tmp_path):
     (src / "gemini").mkdir(parents=True)
     (src / "iflow").mkdir(parents=True)
     (src / "opencode").mkdir(parents=True)
+    (src / "claude").mkdir(parents=True)
 
     (src / "codex" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (src / "codex" / "config.toml").write_text("should_not_copy=true", encoding="utf-8")
@@ -83,14 +192,17 @@ def test_import_credentials_whitelist_only(tmp_path):
     (src / "iflow" / "settings.json").write_text('{"bad":"override"}', encoding="utf-8")
     (src / "opencode" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (src / "opencode" / "antigravity-accounts.json").write_text('{"accounts":[]}', encoding="utf-8")
+    (src / "claude" / ".credentials.json").write_text('{"claudeAiOauth":{"accessToken":"x"}}', encoding="utf-8")
 
     copied = manager.import_credentials(src)
     assert copied["codex"] == ["auth.json"]
+    assert copied["claude"] == [".credentials.json"]
     assert copied["gemini"] == ["google_accounts.json", "oauth_creds.json"]
     assert copied["iflow"] == ["iflow_accounts.json", "oauth_creds.json"]
     assert copied["opencode"] == ["auth.json", "antigravity-accounts.json"]
 
     codex_dst = manager.profile.agent_home / ".codex"
+    claude_dst = manager.profile.agent_home / ".claude"
     gemini_dst = manager.profile.agent_home / ".gemini"
     iflow_dst = manager.profile.agent_home / ".iflow"
     opencode_data_dst = manager.profile.agent_home / ".local" / "share" / "opencode"
@@ -101,6 +213,7 @@ def test_import_credentials_whitelist_only(tmp_path):
 
     gemini_settings = json.loads((gemini_dst / "settings.json").read_text(encoding="utf-8"))
     assert gemini_settings["security"]["auth"]["selectedType"] == "oauth-personal"
+    assert (claude_dst / ".credentials.json").exists()
 
     iflow_settings = json.loads((iflow_dst / "settings.json").read_text(encoding="utf-8"))
     assert iflow_settings["selectedAuthType"] == "oauth-iflow"
@@ -145,7 +258,7 @@ def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "install_package", _fake_install)
 
     results = manager.ensure_installed()
-    assert set(results.keys()) == {"codex", "gemini", "iflow", "opencode"}
+    assert set(results.keys()) == {"codex", "opencode", "gemini", "claude"}
     assert len(calls) == 4
 
 

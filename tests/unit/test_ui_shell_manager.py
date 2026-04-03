@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -99,6 +100,15 @@ def patch_fake_popen(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def patch_git_initializer(monkeypatch):
+    class _GitInitializerNoop:
+        def ensure_git_repo(self, run_dir: Path) -> bool:  # noqa: ARG002
+            return False
+
+    monkeypatch.setattr("server.services.ui.ui_shell_manager.run_folder_git_initializer", _GitInitializerNoop())
+
+
 def test_ui_shell_manager_rejects_unknown_engine(tmp_path: Path, patch_fake_popen):
     manager = _new_manager(tmp_path)
     with pytest.raises(UiShellValidationError):
@@ -149,10 +159,7 @@ def test_ui_shell_manager_registers_and_releases_process_lease(
 
     monkeypatch.setattr(
         "server.services.ui.ui_shell_manager.process_supervisor.register_popen_process",
-        lambda **kwargs: (
-            register_calls.append((str(kwargs.get("owner_kind")), str(kwargs.get("owner_id")))),
-            "lease-ui-1",
-        )[1],
+        lambda **kwargs: _record_process_lease(register_calls, kwargs),
     )
     monkeypatch.setattr(
         "server.services.ui.ui_shell_manager.process_supervisor.release",
@@ -165,6 +172,11 @@ def test_ui_shell_manager_registers_and_releases_process_lease(
     assert stopped["status"] == "terminated"
     assert register_calls == [("ui_shell", started["session_id"])]
     assert release_calls == [("lease-ui-1", "ui_shell_stopped")]
+
+
+def _record_process_lease(register_calls: list[tuple[str, str]], kwargs: dict[str, Any]) -> str:
+    register_calls.append((str(kwargs.get("owner_kind")), str(kwargs.get("owner_id"))))
+    return "lease-ui-1"
 
 
 def test_ui_shell_manager_landlock_disabled_is_non_blocking(
@@ -269,6 +281,93 @@ def test_ui_shell_manager_start_failure_rolls_back_trust(tmp_path: Path, monkeyp
     assert reg_path == rm_path
 
 
+def test_ui_shell_manager_claude_session_bootstraps_git_without_parent_trust(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+):
+    trust_spy = _TrustSpy()
+    bootstrap_calls: list[Path] = []
+
+    class _GitInitializerSpy:
+        def ensure_git_repo(self, run_dir: Path) -> bool:
+            bootstrap_calls.append(run_dir)
+            return True
+
+    monkeypatch.setattr("server.services.ui.ui_shell_manager.run_folder_git_initializer", _GitInitializerSpy())
+    manager = _new_manager(tmp_path, trust_manager=trust_spy)
+
+    started = manager.start_session("claude")
+    session_dir = Path(started["cwd"])
+
+    assert bootstrap_calls == [session_dir]
+    assert trust_spy.bootstrap_calls == []
+    assert trust_spy.register_calls == [("claude", session_dir)]
+    assert started["sandbox_status"] == "supported"
+    assert "settings-managed sandbox" in started["sandbox_message"]
+
+    popen_args, _ = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    assert command[command.index("--") + 1] == sys.executable
+    engine_args = command[command.index("--") + 2 :]
+    assert "-p" not in engine_args
+
+    settings_path = session_dir / ".claude" / "settings.json"
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["includeGitInstructions"] is False
+    assert payload["permissions"]["defaultMode"] == "dontAsk"
+    assert payload["permissions"]["allow"] == ["WebFetch", "WebSearch"]
+    assert "Bash" in payload["permissions"]["deny"]
+    assert "Write" in payload["permissions"]["deny"]
+    assert "Read" in payload["permissions"]["deny"]
+    assert payload["sandbox"]["enabled"] is True
+    assert payload["sandbox"]["allowUnsandboxedCommands"] is False
+
+    manager.stop_session()
+    assert trust_spy.remove_calls == [("claude", session_dir)]
+
+
+def test_ui_shell_manager_claude_custom_model_injects_provider_env(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+):
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_custom_provider_service.engine_custom_provider_service.resolve_model",
+        lambda engine, model_spec: SimpleNamespace(
+            provider_id="bailian",
+            model="qwen3.5-plus",
+            api_key="sk-provider",
+            base_url="https://bailian.example/v1",
+        )
+        if engine == "claude" and model_spec == "bailian/qwen3.5-plus"
+        else None,
+    )
+
+    started = manager.start_session("claude", custom_model="bailian/qwen3.5-plus")
+    session_dir = Path(started["session_dir"])
+    settings_path = session_dir / ".claude" / "settings.json"
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert started["custom_model"] == "bailian/qwen3.5-plus"
+    assert payload["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-provider"
+    assert payload["env"]["ANTHROPIC_BASE_URL"] == "https://bailian.example/v1"
+    assert payload["env"]["ANTHROPIC_MODEL"] == "qwen3.5-plus"
+
+
+def test_ui_shell_manager_rejects_invalid_custom_model_format(tmp_path: Path, patch_fake_popen):
+    manager = _new_manager(tmp_path)
+    with pytest.raises(UiShellValidationError, match="provider/model"):
+        manager.start_session("claude", custom_model="qwen3.5-plus")
+
+
+def test_ui_shell_manager_rejects_custom_model_for_non_claude_engine(tmp_path: Path, patch_fake_popen):
+    manager = _new_manager(tmp_path)
+    with pytest.raises(UiShellValidationError, match="not supported"):
+        manager.start_session("codex", custom_model="openrouter/qwen-3")
+
+
 def test_ui_shell_manager_gemini_session_enforces_sandbox_and_disables_shell(
     tmp_path: Path,
     monkeypatch,
@@ -314,7 +413,7 @@ def test_ui_shell_manager_iflow_session_disables_shell_and_reports_non_sandbox(
 
     settings_path = session_dir / ".iflow" / "settings.json"
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["sandbox"] is False
+    assert payload["sandbox"] == "false"
     assert payload["autoAccept"] is False
     assert payload["approvalMode"] == "default"
     assert "ShellTool" in payload["excludeTools"]

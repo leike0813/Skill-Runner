@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.config_registry import keys
 from server.engines.opencode.auth.provider_registry import opencode_auth_provider_registry
 from server.runtime.adapter.common.profile_loader import CredentialImportProfile, load_adapter_profile
 from server.services.engine_management.auth_import_validator_registry import (
@@ -41,7 +42,7 @@ class AuthImportService:
 
     def _load_profile(self, engine: str):
         normalized_engine = engine.strip().lower()
-        if normalized_engine not in {"codex", "gemini", "iflow", "opencode"}:
+        if normalized_engine not in keys.ENGINE_KEYS:
             raise AuthImportError(f"Unsupported engine: {engine}")
         return load_adapter_profile(normalized_engine, self._adapter_profile_path(normalized_engine))
 

@@ -41,6 +41,37 @@
     "models_root": "../models",
     "seed_path": null
   },
+  "command_defaults": {
+    "start": ["--skip-git-repo-check", "--json", "--full-auto", "-p", "skill-runner"],
+    "resume": ["--skip-git-repo-check", "--json", "--full-auto", "-p", "skill-runner"],
+    "ui_shell": [
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "features.unified_exec=false"
+    ]
+  },
+  "ui_shell": {
+    "command_id": "codex-tui",
+    "label": "Codex TUI",
+    "trust_bootstrap_parent": true,
+    "sandbox_arg": "--sandbox",
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "codex_landlock",
+    "sandbox_probe_message": null,
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "none",
+    "config_assets": {
+      "default_path": null,
+      "enforced_path": null,
+      "settings_schema_path": null,
+      "target_relpath": null
+    }
+  },
   "cli_management": {
     "package": "@openai/codex",
     "binary_candidates": ["codex", "codex.cmd", "codex.exe"],

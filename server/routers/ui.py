@@ -47,6 +47,7 @@ from ..services.engine_management.engine_status_cache_service import engine_stat
 from ..services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
 from ..services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from ..services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
+from ..services.engine_management.engine_custom_provider_service import engine_custom_provider_service
 from ..services.engine_management.model_registry import model_registry
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
@@ -416,8 +417,63 @@ def _with_engine_status_rows(rows: list[dict[str, object]]) -> list[dict[str, ob
         version = getattr(status, "version", None)
         item["managed_present"] = present
         item["status_level"] = _engine_status_level(present=present, version=version)
+        sandbox_status = agent_cli_manager.collect_sandbox_status(engine)
+        item["sandbox_warning_code"] = sandbox_status.get("warning_code")
+        item["sandbox_warning_message"] = sandbox_status.get("message")
+        item["sandbox_missing_dependencies"] = list(sandbox_status.get("missing_dependencies") or [])
         enriched.append(item)
     return enriched
+
+
+def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
+    t = getattr(request.state, "t", lambda key, default=None, **kwargs: default if default is not None else key)
+    label_defaults = {
+        "codex": "Codex",
+        "gemini": "Gemini",
+        "iflow": "iFlow",
+        "opencode": "OpenCode",
+        "claude": "Claude Code",
+    }
+    input_defaults: dict[str, dict[str, str]] = {
+        "gemini": {
+            "default_input_kind": "code",
+            "default_input_label": t(
+                "ui.engines.input_label_gemini",
+                default="Paste the authorization code below and submit.",
+            ),
+        },
+        "iflow": {
+            "default_input_kind": "text",
+            "default_input_label": t(
+                "ui.engines.input_label_iflow",
+                default="Paste the authorization code or callback URL below and submit.",
+            ),
+        },
+        "claude": {
+            "default_input_kind": "text",
+            "default_input_label": t(
+                "ui.engines.input_label_claude",
+                default="Paste the authorization code or callback URL below and submit.",
+            ),
+        },
+    }
+    payload: dict[str, dict[str, str]] = {}
+    for engine in keys.ENGINE_KEYS:
+        label = t(
+            f"ui.engines.engine_{engine}",
+            default=label_defaults.get(engine, engine),
+        )
+        item = {
+            "label": label,
+            "auth_entry_label": t(
+                "ui.engines.table.auth_engine",
+                default="Auth ({engine})",
+                engine=label,
+            ),
+        }
+        item.update(input_defaults.get(engine, {}))
+        payload[engine] = item
+    return payload
 
 
 def _render_engine_upgrade_status(
@@ -700,6 +756,31 @@ async def ui_run_logs_tail(request: Request, request_id: str):
 async def ui_engines(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
     rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
+    engine_ui_metadata = _build_engine_ui_metadata(request)
+    ui_shell_engines = {
+        str(item.get("engine") or "").strip().lower()
+        for item in ui_shell_manager.list_commands()
+    }
+    for row in rows:
+        engine = str(row.get("engine") or "").strip().lower()
+        metadata = engine_ui_metadata.get(engine, {})
+        row["auth_entry_label"] = metadata.get(
+            "auth_entry_label",
+            request.state.t(
+                "ui.engines.table.auth_engine",
+                default="Auth ({engine})",
+                engine=engine,
+            ),
+        )
+    custom_provider_engines = [
+        {
+            "engine": engine,
+            "label": engine_ui_metadata.get(engine, {}).get("label", engine),
+            "provider_tui_supported": engine in ui_shell_engines and engine == "claude",
+        }
+        for engine in keys.ENGINE_KEYS
+        if engine_custom_provider_service.supports(engine)
+    ]
     opencode_providers = [
         {
             "provider_id": item.provider_id,
@@ -721,6 +802,8 @@ async def ui_engines(request: Request):
             "auth_ui_high_risk_capabilities": (
                 engine_auth_strategy_service.list_ui_high_risk_capabilities()
             ),
+            "engine_ui_metadata": engine_ui_metadata,
+            "custom_provider_engines": custom_provider_engines,
             "ttyd_available": _is_ttyd_available(),
         },
     )
@@ -968,11 +1051,14 @@ async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequ
 
 
 @router.post("/engines/tui/session/start")
-async def ui_engine_tui_start(engine: str = Form(...)):
+async def ui_engine_tui_start(
+    engine: str = Form(...),
+    custom_model: str | None = Form(default=None),
+):
     if not _is_ttyd_available():
         raise HTTPException(status_code=503, detail="ttyd not found. Inline TUI is unavailable.")
     try:
-        data = ui_shell_manager.start_session(engine)
+        data = ui_shell_manager.start_session(engine, custom_model=custom_model)
         return JSONResponse(data)
     except UiShellBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -1011,6 +1097,18 @@ async def ui_engines_table(request: Request):
 async def ui_management_engines_table(request: Request):
     engines_payload = await _resolve_async(management_router.list_management_engines())
     rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
+    engine_ui_metadata = _build_engine_ui_metadata(request)
+    for row in rows:
+        engine = str(row.get("engine") or "").strip().lower()
+        metadata = engine_ui_metadata.get(engine, {})
+        row["auth_entry_label"] = metadata.get(
+            "auth_entry_label",
+            request.state.t(
+                "ui.engines.table.auth_engine",
+                default="Auth ({engine})",
+                engine=engine,
+            ),
+        )
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/engines_table.html",

@@ -70,6 +70,14 @@ class _DummyHarnessRuntime(HarnessRuntime):
                 for token in list(passthrough_args or [])
                 if isinstance(token, str) and token.startswith("-")
             ]
+            if self.engine == "claude":
+                return [
+                    f"/usr/bin/{self.engine}",
+                    "--resume",
+                    session_handle.handle_value,
+                    *flags,
+                    prompt,
+                ]
             return [
                 f"/usr/bin/{self.engine}",
                 "exec",
@@ -220,6 +228,48 @@ def test_harness_registers_and_cleans_trust_for_codex(tmp_path: Path, monkeypatc
     run_dir = Path(result["run_dir"])
     assert trust_spy.register_calls == [("codex", run_dir)]
     assert trust_spy.remove_calls == [("codex", run_dir)]
+
+
+def test_harness_registers_trust_for_claude_and_bootstraps_git(tmp_path: Path, monkeypatch) -> None:
+    class _TrustSpy:
+        def __init__(self) -> None:
+            self.register_calls: list[tuple[str, Path]] = []
+            self.remove_calls: list[tuple[str, Path]] = []
+
+        def register_run_folder(self, engine: str, run_dir: Path) -> None:
+            self.register_calls.append((engine, run_dir))
+
+        def remove_run_folder(self, engine: str, run_dir: Path) -> None:
+            self.remove_calls.append((engine, run_dir))
+
+    bootstrap_calls: list[Path] = []
+
+    class _GitInitializerSpy:
+        def ensure_git_repo(self, run_dir: Path) -> bool:
+            bootstrap_calls.append(run_dir)
+            return True
+
+    trust_spy = _TrustSpy()
+    monkeypatch.setattr("agent_harness.runtime.run_folder_trust_manager", trust_spy)
+    monkeypatch.setattr("agent_harness.runtime.run_folder_git_initializer", _GitInitializerSpy())
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n'
+
+    result = runtime.start(
+        HarnessLaunchRequest(
+            engine="claude",
+            passthrough_args=["-p", "trust"],
+            translate_level=1,
+        )
+    )
+    run_dir = Path(result["run_dir"])
+    assert bootstrap_calls == [run_dir]
+    assert trust_spy.register_calls == [("claude", run_dir)]
+    assert trust_spy.remove_calls == [("claude", run_dir)]
 
 
 def test_harness_does_not_register_trust_for_iflow(tmp_path: Path, monkeypatch) -> None:
@@ -474,6 +524,116 @@ def test_opencode_start_is_supported(tmp_path: Path) -> None:
     )
     assert result["status"] == "waiting_user"
     assert runtime.commands[0][:3] == ["/usr/bin/opencode", "run", "--format"]
+
+
+def test_claude_start_is_supported_without_codex_specific_injection(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-claude"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"hello from claude"}}\n'
+    )
+
+    result = runtime.start(
+        HarnessLaunchRequest(
+            engine="claude",
+            passthrough_args=["-p", "hello"],
+            translate_level=1,
+        )
+    )
+
+    assert result["status"] == "waiting_user"
+    assert runtime.commands[0] == ["/usr/bin/claude", "-p", "hello"]
+    injected = runtime.config_injection_calls[0]
+    assert injected["engine"] == "claude"
+    options = injected["options"]
+    assert isinstance(options, dict)
+    assert options == {"__harness_mode": True, "execution_mode": "interactive"}
+
+
+def test_claude_start_accepts_custom_model(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-claude-custom"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"hello from custom claude"}}\n'
+    )
+
+    result = runtime.start(
+        HarnessLaunchRequest(
+            engine="claude",
+            passthrough_args=["-p", "hello"],
+            translate_level=1,
+            custom_model="openrouter/qwen-3",
+        )
+    )
+
+    assert result["status"] == "waiting_user"
+    options = runtime.config_injection_calls[0]["options"]
+    assert isinstance(options, dict)
+    assert options["model"] == "openrouter/qwen-3"
+
+
+def test_custom_model_rejected_for_non_claude_engine(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+
+    with pytest.raises(HarnessError) as excinfo:
+        runtime.start(
+            HarnessLaunchRequest(
+                engine="codex",
+                passthrough_args=["exec", "--json", "-p", "hello"],
+                translate_level=1,
+                custom_model="openrouter/qwen-3",
+            )
+        )
+
+    assert excinfo.value.code == "CUSTOM_MODEL_UNSUPPORTED_ENGINE"
+
+
+def test_claude_resume_is_supported(tmp_path: Path) -> None:
+    config = HarnessConfig(
+        runtime_profile=_build_profile(tmp_path),
+        run_root=tmp_path / "harness_runs",
+    )
+    runtime = _DummyHarnessRuntime(config)
+    runtime.stdout = (
+        '{"type":"thread.started","thread_id":"session-claude-resume"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}\n'
+    )
+    start_result = runtime.start(
+        HarnessLaunchRequest(
+            engine="claude",
+            passthrough_args=["-p", "first"],
+            translate_level=1,
+        )
+    )
+    handle = start_result["handle"]
+    assert isinstance(handle, str)
+
+    runtime.stdout = (
+        '{"type":"item.completed","item":{"type":"agent_message","text":"second"}}\n'
+        "__SKILL_DONE__\n"
+    )
+    resumed = runtime.resume(HarnessResumeRequest(handle=handle, message="second turn"))
+
+    assert resumed["status"] == "succeeded"
+    assert runtime.commands[-1] == [
+        "/usr/bin/claude",
+        "--resume",
+        "session-claude-resume",
+        "-p",
+        "second turn",
+    ]
 
 
 def test_engine_config_injection_failure_is_structured_error(tmp_path: Path) -> None:

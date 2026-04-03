@@ -1,0 +1,15 @@
+{
+  "general": {
+    "enableAutoUpdate": false
+  },
+  "tools": {
+    "autoAccept": false,
+    "exclude": [
+      "run_shell_command",
+      "ShellTool"
+    ]
+  },
+  "security": {
+    "disableYoloMode": true
+  }
+}

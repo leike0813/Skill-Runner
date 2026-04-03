@@ -11,11 +11,15 @@ from threading import Lock
 from typing import Any, Dict, Optional, Protocol
 
 from server.services.engine_management.agent_cli_manager import AgentCliManager
+from server.services.engine_management.engine_custom_provider_service import (
+    engine_custom_provider_service,
+)
 from server.services.engine_management.engine_interaction_gate import (
     EngineInteractionBusyError,
     EngineInteractionGate,
     engine_interaction_gate,
 )
+from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
 from server.services.platform.process_supervisor import process_supervisor
 from server.services.platform.process_termination import terminate_popen_process_tree
@@ -275,6 +279,7 @@ class UiShellManager:
         session.process_lease_id = None
 
     def _inject_trust_for_session(self, capability: EngineShellCapability, session_dir: Path) -> None:
+        run_folder_git_initializer.ensure_git_repo(session_dir)
         if capability.trust_bootstrap_parent:
             # Keep the session parent trusted so CLI startup does not ask trust interactively.
             self.trust_manager.bootstrap_parent_trust(self._session_root())
@@ -287,11 +292,13 @@ class UiShellManager:
         env: Dict[str, str],
         *,
         sandbox_enabled: bool,
+        custom_model: str | None,
     ) -> None:
         capability.session_security_strategy.prepare(
             session_dir=session_dir,
             env=env,
             sandbox_enabled=sandbox_enabled,
+            custom_model=custom_model,
         )
 
     def _cleanup_trust_for_session(self, session: UiShellSession) -> None:
@@ -356,14 +363,27 @@ class UiShellManager:
                     self._active_session = None
         return data
 
-    def start_session(self, engine: str) -> Dict[str, Any]:
+    def start_session(self, engine: str, *, custom_model: str | None = None) -> Dict[str, Any]:
         normalized_engine = engine.strip().lower()
+        normalized_custom_model = (custom_model or "").strip() or None
         spec = self._command_specs.get(normalized_engine)
         capability = self._capabilities.get(normalized_engine)
         if spec is None:
             raise UiShellValidationError(f"Unsupported engine: {engine}")
         if capability is None:
             raise UiShellValidationError(f"Unsupported engine: {engine}")
+        if normalized_custom_model is not None:
+            provider, separator, model = normalized_custom_model.partition("/")
+            if not separator or not provider.strip() or not model.strip():
+                raise UiShellValidationError("custom_model must use strict provider/model format")
+            if normalized_engine != "claude":
+                raise UiShellValidationError(
+                    f"custom_model is not supported for engine: {normalized_engine}"
+                )
+            if engine_custom_provider_service.resolve_model("claude", normalized_custom_model) is None:
+                raise UiShellValidationError(
+                    f"Unknown custom provider model for claude: {normalized_custom_model}"
+                )
 
         with self._lock:
             self._cleanup_stale_session_locked()
@@ -420,6 +440,7 @@ class UiShellManager:
                     session_dir,
                     env,
                     sandbox_enabled=sandbox_enabled,
+                    custom_model=normalized_custom_model,
                 )
                 launch_args = list(spec.args)
                 if capability.sandbox_arg and not sandbox_enabled:
@@ -522,6 +543,8 @@ class UiShellManager:
             data["active"] = True
             data["session_dir"] = str(session_dir)
             data["agent_home"] = str(self.agent_manager.profile.agent_home)
+            if normalized_custom_model is not None:
+                data["custom_model"] = normalized_custom_model
             return data
 
     def stop_session(self) -> Dict[str, Any]:

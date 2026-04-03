@@ -11,13 +11,15 @@
     "attempt_workspace",
     "config_assets",
     "model_catalog",
+    "command_defaults",
+    "ui_shell",
     "cli_management",
     "parser_auth_patterns"
   ],
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "gemini", "iflow", "opencode"]
+      "enum": ["codex", "gemini", "iflow", "opencode", "claude"]
     },
     "prompt_builder": {
       "type": "object",
@@ -144,6 +146,82 @@
           "then": { "required": ["manifest_path"] }
         }
       ]
+    },
+    "command_defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "resume", "ui_shell"],
+      "properties": {
+        "start": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "resume": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "ui_shell": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "ui_shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_id",
+        "label",
+        "trust_bootstrap_parent",
+        "sandbox_arg",
+        "retry_without_sandbox_on_early_exit",
+        "sandbox_probe_strategy",
+        "sandbox_probe_message",
+        "auth_hint_strategy",
+        "runtime_override_strategy",
+        "config_assets"
+      ],
+      "properties": {
+        "command_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "trust_bootstrap_parent": { "type": "boolean" },
+        "sandbox_arg": { "type": ["string", "null"] },
+        "retry_without_sandbox_on_early_exit": { "type": "boolean" },
+        "sandbox_probe_strategy": {
+          "type": "string",
+          "enum": [
+            "static_supported",
+            "static_unsupported",
+            "codex_landlock",
+            "gemini_container"
+          ]
+        },
+        "sandbox_probe_message": { "type": ["string", "null"] },
+        "auth_hint_strategy": {
+          "type": "string",
+          "enum": ["none", "gemini_api_key_disables_sandbox"]
+        },
+        "runtime_override_strategy": {
+          "type": "string",
+          "enum": ["none", "gemini_ui_shell", "claude_ui_shell"]
+        },
+        "config_assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "default_path",
+            "enforced_path",
+            "settings_schema_path",
+            "target_relpath"
+          ],
+          "properties": {
+            "default_path": { "type": ["string", "null"] },
+            "enforced_path": { "type": ["string", "null"] },
+            "settings_schema_path": { "type": ["string", "null"] },
+            "target_relpath": { "type": ["string", "null"] }
+          }
+        }
+      }
     },
     "cli_management": {
       "type": "object",

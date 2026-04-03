@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any, Literal
 import logging
 
+from server.config_registry.keys import ENGINE_KEYS
 from server.models import EngineSessionHandle, EngineSessionHandleType
 from server.models import SkillManifest
 from server.services.engine_management.engine_adapter_registry import engine_adapter_registry
+from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_folder_trust_manager import (
     RunFolderTrustManager,
     run_folder_trust_manager,
@@ -40,8 +42,8 @@ from .storage import (
 )
 
 
-SUPPORTED_ENGINES = {"codex", "gemini", "iflow", "opencode"}
-TRUST_ENGINES = {"codex", "gemini"}
+SUPPORTED_ENGINES = set(ENGINE_KEYS)
+TRUST_ENGINES = {"codex", "gemini", "claude"}
 HARNESS_CODEX_PROFILE_NAME = "skill-runner-harness"
 HARNESS_CODEX_DEFAULT_MODEL = "gpt-5.1-codex-mini"
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ class HarnessLaunchRequest:
     translate_level: int
     run_selector: str | None = None
     execution_mode: Literal["auto", "interactive"] = "interactive"
+    custom_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,7 @@ class HarnessRuntime:
             return RunFolderTrustManager(
                 codex_config_path=profile.agent_home / ".codex" / "config.toml",
                 gemini_trusted_path=profile.agent_home / ".gemini" / "trustedFolders.json",
+                claude_config_path=profile.agent_home / ".claude.json",
                 runs_root=self.config.run_root,
             )
         return manager
@@ -128,6 +132,31 @@ class HarnessRuntime:
                 details={"engine": engine, "supported_engines": sorted(SUPPORTED_ENGINES)},
             )
         return adapter
+
+    def _normalize_custom_model(
+        self,
+        *,
+        engine: str,
+        custom_model: str | None,
+    ) -> str | None:
+        if custom_model is None:
+            return None
+        normalized = custom_model.strip()
+        if not normalized:
+            return None
+        if engine != "claude":
+            raise HarnessError(
+                "CUSTOM_MODEL_UNSUPPORTED_ENGINE",
+                "--custom-model is currently supported only for claude",
+                details={"engine": engine},
+            )
+        if "/" not in normalized:
+            raise HarnessError(
+                "INVALID_CUSTOM_MODEL",
+                "Claude custom model must use strict provider/model format",
+                details={"engine": engine, "custom_model": normalized},
+            )
+        return normalized
 
     def _ensure_executable_path(self, *, engine: str, command: list[str]) -> Path:
         if not command:
@@ -206,12 +235,15 @@ class HarnessRuntime:
         adapter: Any,
         run_dir: Path,
         execution_mode: Literal["auto", "interactive"],
+        custom_model: str | None = None,
     ) -> dict[str, Any]:
         skill = SkillManifest(id="harness-config-bootstrap", path=None)
         options: dict[str, Any] = {"__harness_mode": True, "execution_mode": execution_mode}
         if engine == "codex":
             options["__codex_profile_name"] = HARNESS_CODEX_PROFILE_NAME
             options["model"] = HARNESS_CODEX_DEFAULT_MODEL
+        elif custom_model:
+            options["model"] = custom_model
         try:
             config_path_obj = adapter._construct_config(skill, run_dir, options)
         except Exception as exc:
@@ -237,10 +269,18 @@ class HarnessRuntime:
         engine = self._ensure_engine_supported(request.engine)
         execution_mode = self._normalize_execution_mode(request.execution_mode)
         adapter = self._resolve_adapter(engine)
+        custom_model = self._normalize_custom_model(
+            engine=engine,
+            custom_model=request.custom_model,
+        )
         try:
             command = adapter.build_start_command(
                 prompt="",
-                options={"__harness_mode": True, "execution_mode": execution_mode},
+                options={
+                    "__harness_mode": True,
+                    "execution_mode": execution_mode,
+                    **({"model": custom_model} if custom_model else {}),
+                },
                 passthrough_args=list(request.passthrough_args),
                 use_profile_defaults=False,
             )
@@ -258,10 +298,12 @@ class HarnessRuntime:
                 "passthrough_args": list(request.passthrough_args),
                 "run_selector": request.run_selector,
                 "execution_mode": execution_mode,
+                **({"custom_model": custom_model} if custom_model else {}),
             },
             stdin_text="",
             session_handle_hint=None,
             execution_mode=execution_mode,
+            custom_model=custom_model,
         )
 
     def resume(self, request: HarnessResumeRequest) -> dict[str, Any]:
@@ -438,6 +480,7 @@ class HarnessRuntime:
         stdin_text: str,
         session_handle_hint: str | None,
         execution_mode: Literal["auto", "interactive"],
+        custom_model: str | None = None,
     ) -> dict[str, Any]:
         if translate_level not in {0, 1, 2, 3}:
             raise HarnessError(
@@ -452,6 +495,7 @@ class HarnessRuntime:
             adapter=adapter,
             run_dir=run_dir,
             execution_mode=execution_mode,
+            custom_model=custom_model,
         )
         project_root = self._resolve_project_root()
         skill_injection = inject_all_skill_packages(
@@ -485,6 +529,7 @@ class HarnessRuntime:
             before_snapshot = snapshot_filesystem(run_dir)
             trust_registered = False
             trust_manager = self._resolve_trust_manager()
+            run_folder_git_initializer.ensure_git_repo(run_dir)
             try:
                 if engine in TRUST_ENGINES:
                     trust_manager.register_run_folder(engine, run_dir)

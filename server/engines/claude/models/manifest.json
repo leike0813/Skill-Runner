@@ -1,0 +1,13 @@
+{
+  "engine": "claude",
+  "snapshots": [
+    {
+      "version": "0.0.0",
+      "file": "models_0.0.0.json"
+    },
+    {
+      "version": "2.1.91",
+      "file": "models_2.1.91.json"
+    }
+  ]
+}

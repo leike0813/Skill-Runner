@@ -11,7 +11,6 @@ from server.runtime.adapter.common.run_folder_validator_common import (
     ProfiledAttemptRunFolderValidator,
 )
 from server.services.engine_management.agent_cli_manager import AgentCliManager
-from server.services.engine_management.engine_command_profile import engine_command_profile
 from .command_builder import OpencodeCommandBuilder
 from .config_composer import OpencodeConfigComposer
 from .stream_parser import OpencodeStreamParser
@@ -39,7 +38,7 @@ class OpencodeExecutionAdapter(EngineExecutionAdapter):
     def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
         if not use_profile_defaults:
             return []
-        return engine_command_profile.resolve_args(engine="opencode", action=action)
+        return self.profile.resolve_command_defaults(action=action)
 
     def _resolve_opencode_command(self) -> Path:
         command = self.agent_manager.resolve_engine_command("opencode")

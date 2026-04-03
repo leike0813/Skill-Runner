@@ -1563,6 +1563,27 @@ Gemini OAuth 代理说明：
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`
 
+Claude bootstrap / runtime 配置说明：
+- Claude 的 bootstrap 默认值写入 `~/.claude.json`，而不是 `~/.claude/settings.json`。
+- bootstrap 目前会初始化：
+  - `hasCompletedOnboarding = true`
+- Claude 的每次运行仍会生成 run-local `run_dir/.claude/settings.json`，用于本次 run 的环境变量和模型注入。
+- 这两层文件职责不同：
+  - `~/.claude.json`：agent-home 全局状态
+  - `run_dir/.claude/settings.json`：单次运行配置
+- Claude headless run / harness 的运行姿态：
+  - `permissions.defaultMode = "bypassPermissions"`
+  - `sandbox.enabled = true`
+  - `sandbox.allowUnsandboxedCommands = false`
+  - sandbox 文件写权限动态约束到 `run_dir`
+  - Claude sandbox 依赖 `bubblewrap`（`bwrap`）和 `socat`
+  - 缺少依赖、sandbox 初始化失败或运行期命令被 sandbox 拦截时，会产生明确的 diagnostics / warnings
+  - 这些告警不会单独把 preflight 或 run 变成硬失败
+- Claude inline UI shell 与 headless run 分治：
+  - 使用独立的 session-local `.claude/settings.json`
+  - `permissions.defaultMode = "dontAsk"`
+  - 默认只保留轻量网络交互，文件编辑与 shell 类工具默认禁用
+
 iFlow OAuth 代理说明：
 - `oauth_proxy + iflow` 使用本地回调地址 `http://localhost:11451/oauth2callback`。
 - `callback` 模式会尝试拉起本地 listener（`127.0.0.1:11451`）；若不可用，会话仍可通过 `/input` 手工兜底完成。

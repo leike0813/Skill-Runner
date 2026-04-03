@@ -111,6 +111,46 @@ def test_build_import_pending_auth_embeds_upload_files_ask_user(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_create_custom_provider_pending_auth_persists_provider_config_challenge(tmp_path: Path):
+    run_dir = tmp_path / "run-custom-provider-auth"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    backend = SimpleNamespace(
+        clear_pending_auth=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
+        clear_pending_auth_method_selection=AsyncMock(),
+        set_pending_auth=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        update_run_status=AsyncMock(),
+    )
+    appended: list[dict[str, object]] = []
+
+    service = RunAuthOrchestrationService()
+    pending = await service.create_custom_provider_pending_auth(
+        run_id="run-1",
+        run_dir=run_dir,
+        request_id="req-1",
+        engine="claude",
+        requested_model="openrouter/qwen-3",
+        source_attempt=2,
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **kwargs: appended.append(kwargs),
+        update_status=lambda *_args, **_kwargs: None,
+    )
+
+    assert pending.auth_session_id == "provider-config::req-1"
+    assert pending.auth_method == AuthMethod.CUSTOM_PROVIDER
+    assert pending.ask_user is not None
+    assert pending.ask_user.ui_hints["widget"] == "provider_config"
+    assert pending.ask_user.ui_hints["scenario"] == "provider_missing"
+    backend.set_pending_auth.assert_awaited_once()
+    backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.WAITING_AUTH)
+    assert appended[0]["type_name"] == "auth.challenge.updated"
+    state_payload = _read_state_payload(run_dir)
+    assert state_payload["status"] == "waiting_auth"
+    assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
+
+
+@pytest.mark.asyncio
 async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-selection"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -566,6 +606,122 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     state_payload = _read_state_payload(run_dir)
     assert state_payload["status"] == "queued"
     assert state_payload["pending"]["owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_submit_custom_provider_input_updates_provider_store_and_retries(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-custom-provider-submit"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pending_auth = {
+        "auth_session_id": "provider-config::req-1",
+        "engine": "claude",
+        "provider_id": "openrouter",
+        "auth_method": "custom_provider",
+        "challenge_kind": "custom_provider",
+        "prompt": "Configure provider",
+        "accepts_chat_input": True,
+        "input_kind": "custom_provider",
+        "source_attempt": 1,
+        "phase": "challenge_active",
+    }
+
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+
+    provider_rows = [
+        SimpleNamespace(
+            provider_id="openrouter",
+            api_key="sk-old",
+            base_url="https://openrouter.example/v1",
+            models=("qwen-3",),
+        )
+    ]
+    upsert_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_custom_provider_service.list_providers",
+        lambda _engine: provider_rows,
+    )
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_custom_provider_service.upsert_provider",
+        lambda **kwargs: (
+            upsert_calls.append(kwargs),
+            SimpleNamespace(
+                provider_id=kwargs["provider_id"],
+                api_key=kwargs["api_key"],
+                base_url=kwargs["base_url"],
+                models=tuple(kwargs["models"]),
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.concurrency_manager.admit_or_reject",
+        AsyncMock(side_effect=AssertionError("provider config retry must not re-enter queue admission")),
+    )
+
+    backend = SimpleNamespace(
+        get_pending_auth=AsyncMock(return_value=pending_auth),
+        get_request=AsyncMock(
+            return_value={
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "skill_id": "demo-skill",
+                "engine": "claude",
+                "engine_options": {"model": "openrouter/qwen-3"},
+                "runtime_options": {"execution_mode": "interactive"},
+            }
+        ),
+        update_request_engine_options=AsyncMock(),
+        clear_pending_auth=AsyncMock(),
+        clear_pending_auth_method_selection=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-claude-1"}),
+        mark_resume_ticket_dispatched=AsyncMock(return_value=True),
+        update_run_status=AsyncMock(),
+    )
+    background_tasks = BackgroundTasks()
+    appended: list[dict[str, object]] = []
+    resume_run_job = AsyncMock()
+
+    service = RunAuthOrchestrationService()
+    response = await service.submit_auth_input(
+        request_id="req-1",
+        run_id="run-1",
+        request=AuthSubmission(
+            kind=AuthSubmissionKind.CUSTOM_PROVIDER,
+            value=json.dumps(
+                {
+                    "action": "configure_provider",
+                    "provider_id": "openrouter",
+                    "api_key": "sk-new",
+                    "base_url": "https://openrouter.example/v1",
+                    "model": "qwen-3-plus",
+                }
+            ),
+        ),
+        auth_session_id="provider-config::req-1",
+        background_tasks=background_tasks,
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **kwargs: appended.append(kwargs),
+        update_status=lambda *_args, **_kwargs: None,
+        resume_run_job=resume_run_job,
+    )
+
+    assert response.status == RunStatus.QUEUED
+    assert upsert_calls[0]["provider_id"] == "openrouter"
+    backend.update_request_engine_options.assert_awaited_once_with(
+        "req-1",
+        {"model": "openrouter/qwen-3-plus"},
+    )
+    backend.clear_pending_auth.assert_awaited_once_with("req-1")
+    backend.issue_resume_ticket.assert_awaited_once()
+    backend.mark_resume_ticket_dispatched.assert_awaited_once_with("req-1", "ticket-claude-1")
+    assert appended[0]["type_name"] == "auth.session.completed"
+    assert len(background_tasks.tasks) == 1
+    state_payload = _read_state_payload(run_dir)
+    assert state_payload["status"] == "queued"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
 )
@@ -405,168 +406,88 @@ class OpencodeStreamParser:
         return _OpencodeLiveSession(self)
 
 
-class _OpencodeLiveSession:
+class _OpencodeLiveSession(NdjsonLiveStreamParserSession):
     def __init__(self, parser: OpencodeStreamParser) -> None:
+        super().__init__(accepted_streams={"stdout", "pty"})
         self._parser = parser
-        self._buffers: dict[str, str] = {"stdout": "", "pty": ""}
-        self._buffer_byte_start: dict[str, int] = {"stdout": 0, "pty": 0}
         self._last_text: str | None = None
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
         self._run_handle_emitted = False
 
-    def feed(
+    def handle_live_row(
         self,
         *,
+        payload: dict[str, Any],
+        raw_ref: RuntimeStreamRawRef,
         stream: str,
-        text: str,
-        byte_from: int,
-        byte_to: int,
     ) -> list[LiveParserEmission]:
-        if stream not in {"stdout", "pty"}:
-            return []
-        previous_tail = self._buffers.get(stream, "")
-        previous_tail_start = self._buffer_byte_start.get(stream, int(byte_from))
-        if previous_tail:
-            combined = f"{previous_tail}{text}"
-            combined_start = previous_tail_start
-        else:
-            combined = text
-            combined_start = int(byte_from)
-        if "\n" not in combined:
-            self._buffers[stream] = combined
-            self._buffer_byte_start[stream] = combined_start
-            return []
-        lines = combined.splitlines(keepends=True)
-        complete = lines[:-1]
-        tail = lines[-1]
-        if tail.endswith("\n"):
-            complete.append(tail)
-            tail = ""
-        self._buffers[stream] = tail
-        cursor = combined_start
-        self._buffer_byte_start[stream] = cursor
         emissions: list[LiveParserEmission] = []
-        for line in complete:
-            clean = line.strip()
-            encoded = line.encode("utf-8", errors="replace")
-            row_from = cursor
-            row_to = cursor + len(encoded)
-            cursor = row_to
-            self._buffer_byte_start[stream] = cursor
-            if not clean:
-                continue
-            try:
-                payload = json.loads(clean)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            if self._parser._is_turn_start(payload) and not self._turn_start_emitted:  # noqa: SLF001
-                self._turn_start_emitted = True
-                emissions.append(
-                    {
-                        "kind": "turn_marker",
-                        "marker": "start",
-                        "raw_ref": {
-                            "stream": stream,
-                            "byte_from": row_from,
-                            "byte_to": row_to,
-                        },
-                    }
-                )
-            session_id = find_session_id(payload)
-            if (
-                self._parser._is_turn_start(payload)  # noqa: SLF001
-                and not self._run_handle_emitted
-                and isinstance(session_id, str)
-                and session_id.strip()
-            ):
-                self._run_handle_emitted = True
-                emissions.append(
-                    {
-                        "kind": "run_handle",
-                        "handle_id": session_id.strip(),
-                        "raw_ref": {
-                            "stream": stream,
-                            "byte_from": row_from,
-                            "byte_to": row_to,
-                        },
-                    }
-                )
-            if self._parser._is_turn_complete(payload) and not self._turn_complete_emitted:  # noqa: SLF001
-                self._turn_complete_emitted = True
-                turn_complete_data = self._parser._extract_turn_complete_data(payload)  # noqa: SLF001
-                marker_emission: LiveParserEmission = {
-                    "kind": "turn_marker",
-                    "marker": "complete",
-                    "raw_ref": {
-                        "stream": stream,
-                        "byte_from": row_from,
-                        "byte_to": row_to,
-                    },
+        if self._parser._is_turn_start(payload) and not self._turn_start_emitted:  # noqa: SLF001
+            self._turn_start_emitted = True
+            emissions.append({"kind": "turn_marker", "marker": "start", "raw_ref": raw_ref})
+        session_id = find_session_id(payload)
+        if (
+            self._parser._is_turn_start(payload)  # noqa: SLF001
+            and not self._run_handle_emitted
+            and isinstance(session_id, str)
+            and session_id.strip()
+        ):
+            self._run_handle_emitted = True
+            emissions.append(
+                {
+                    "kind": "run_handle",
+                    "handle_id": session_id.strip(),
+                    "raw_ref": raw_ref,
                 }
-                if isinstance(turn_complete_data, dict):
-                    marker_emission["turn_complete_data"] = turn_complete_data
-                emissions.append(marker_emission)
-                completion_emission: LiveParserEmission = {"kind": "turn_completed"}
-                if isinstance(turn_complete_data, dict):
-                    completion_emission["turn_complete_data"] = turn_complete_data
-                emissions.append(completion_emission)
-            row_for_process: dict[str, Any] = {
-                "stream": stream,
-                "byte_from": row_from,
-                "byte_to": row_to,
+            )
+        if self._parser._is_turn_complete(payload) and not self._turn_complete_emitted:  # noqa: SLF001
+            self._turn_complete_emitted = True
+            turn_complete_data = self._parser._extract_turn_complete_data(payload)  # noqa: SLF001
+            marker_emission: LiveParserEmission = {
+                "kind": "turn_marker",
+                "marker": "complete",
+                "raw_ref": raw_ref,
             }
-            process_event = self._parser._extract_process_event(payload=payload, row=row_for_process)  # noqa: SLF001
-            if process_event is not None:
-                process_emission: LiveParserEmission = {
-                    "kind": "process_event",
-                    "process_type": process_event["process_type"],
-                    "summary": process_event["summary"],
-                    "classification": process_event.get("classification", process_event["process_type"]),
-                    "details": process_event.get("details", {}),
-                    "raw_ref": {
-                        "stream": stream,
-                        "byte_from": row_from,
-                        "byte_to": row_to,
-                    },
-                }
-                message_id_obj = process_event.get("message_id")
-                if isinstance(message_id_obj, str) and message_id_obj.strip():
-                    process_emission["message_id"] = message_id_obj
-                text_obj = process_event.get("text")
-                if isinstance(text_obj, str) and text_obj.strip():
-                    process_emission["text"] = text_obj
-                emissions.append(process_emission)
-            extracted = self._parser._extract_text_event(payload)  # noqa: SLF001
-            if not isinstance(extracted, str) or not extracted.strip() or extracted == self._last_text:
-                continue
-            self._last_text = extracted
-            emission: LiveParserEmission = {
-                "kind": "assistant_message",
-                "text": extracted,
-                "raw_ref": {
-                    "stream": stream,
-                    "byte_from": row_from,
-                    "byte_to": row_to,
-                },
+            if isinstance(turn_complete_data, dict):
+                marker_emission["turn_complete_data"] = turn_complete_data
+            emissions.append(marker_emission)
+            completion_emission: LiveParserEmission = {"kind": "turn_completed"}
+            if isinstance(turn_complete_data, dict):
+                completion_emission["turn_complete_data"] = turn_complete_data
+            emissions.append(completion_emission)
+        row_for_process: dict[str, Any] = {
+            "stream": stream,
+            "byte_from": raw_ref["byte_from"],
+            "byte_to": raw_ref["byte_to"],
+        }
+        process_event = self._parser._extract_process_event(payload=payload, row=row_for_process)  # noqa: SLF001
+        if process_event is not None:
+            process_emission: LiveParserEmission = {
+                "kind": "process_event",
+                "process_type": process_event["process_type"],
+                "summary": process_event["summary"],
+                "classification": process_event.get("classification", process_event["process_type"]),
+                "details": process_event.get("details", {}),
+                "raw_ref": raw_ref,
             }
-            if session_id:
-                emission["session_id"] = session_id
-            emissions.append(emission)
-        if tail:
-            self._buffer_byte_start[stream] = cursor
-        else:
-            self._buffer_byte_start[stream] = int(byte_to)
+            message_id_obj = process_event.get("message_id")
+            if isinstance(message_id_obj, str) and message_id_obj.strip():
+                process_emission["message_id"] = message_id_obj
+            text_obj = process_event.get("text")
+            if isinstance(text_obj, str) and text_obj.strip():
+                process_emission["text"] = text_obj
+            emissions.append(process_emission)
+        extracted = self._parser._extract_text_event(payload)  # noqa: SLF001
+        if not isinstance(extracted, str) or not extracted.strip() or extracted == self._last_text:
+            return emissions
+        self._last_text = extracted
+        emission: LiveParserEmission = {
+            "kind": "assistant_message",
+            "text": extracted,
+            "raw_ref": raw_ref,
+        }
+        if session_id:
+            emission["session_id"] = session_id
+        emissions.append(emission)
         return emissions
-
-    def finish(
-        self,
-        *,
-        exit_code: int,
-        failure_reason: str | None,
-    ) -> list[LiveParserEmission]:
-        _ = exit_code
-        _ = failure_reason
-        return []

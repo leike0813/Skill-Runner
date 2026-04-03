@@ -40,6 +40,18 @@ def _stub_openai_callback_listener(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_git_initializer(monkeypatch):
+    class _GitInitializerNoop:
+        def ensure_git_repo(self, run_dir: Path) -> bool:  # noqa: ARG002
+            return False
+
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_flow_manager.run_folder_git_initializer",
+        _GitInitializerNoop(),
+    )
+
+
 def _set_engine_auth_log_persistence(enabled: bool) -> bool:
     previous = bool(config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED)
     config.defrost()
@@ -243,6 +255,50 @@ def test_engine_auth_flow_manager_opt_in_keeps_persistent_auth_logs(tmp_path: Pa
         started = manager.start_session("codex", "auth", auth_method="callback")
         assert started["log_root"] is not None
         assert (profile.data_dir / "engine_auth_sessions").exists()
+    finally:
+        _set_engine_auth_log_persistence(previous)
+
+
+def test_engine_auth_flow_manager_claude_callback_session_injects_run_scope_trust(
+    tmp_path: Path,
+    monkeypatch,
+):
+    previous = _set_engine_auth_log_persistence(False)
+    command_path = _write_script(tmp_path / "fake-claude", "exit 0")
+    profile = _FakeProfile(tmp_path)
+    trust_spy = _TrustSpy()
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=trust_spy,
+    )
+    bootstrap_calls: list[Path] = []
+
+    class _GitInitializerSpy:
+        def ensure_git_repo(self, run_dir: Path) -> bool:
+            bootstrap_calls.append(run_dir)
+            return True
+
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_auth_flow_manager.run_folder_git_initializer",
+        _GitInitializerSpy(),
+    )
+    monkeypatch.setattr(
+        manager,
+        "start_callback_listener",
+        lambda *, channel, callback_handler: (True, "http://127.0.0.1:51123/callback"),  # noqa: ARG005
+    )
+    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: None)  # noqa: ARG005
+
+    try:
+        started = manager.start_session("claude", "auth", auth_method="callback")
+        session_dir = trust_spy.register_calls[0][1]
+        assert bootstrap_calls == [session_dir]
+        assert trust_spy.bootstrap_calls == []
+        assert trust_spy.register_calls == [("claude", session_dir)]
+
+        manager.cancel_session(started["session_id"])
+        assert trust_spy.remove_calls == [("claude", session_dir)]
     finally:
         _set_engine_auth_log_persistence(previous)
 

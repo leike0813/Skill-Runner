@@ -151,6 +151,88 @@ def test_cli_direct_engine_syntax_forwards_passthrough(monkeypatch, tmp_path, ca
     assert "Start complete. exitCode=0" in captured.out
 
 
+def test_cli_direct_claude_syntax_forwards_passthrough(monkeypatch, tmp_path, capsys) -> None:
+    calls: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def __init__(self, config: HarnessConfig) -> None:
+            calls["config"] = config
+
+        def start(self, request):
+            calls["start"] = request
+            return {
+                "ok": True,
+                "run_id": "run-claude",
+                "run_dir": "/tmp/run-claude",
+                "handle": None,
+                "session_id": None,
+                "status": "waiting_user",
+                "translate_level": request.translate_level,
+                "completion": {"state": "awaiting_user_input", "reason_code": "WAITING_USER_INPUT"},
+                "exit_code": 0,
+                "audit": {"meta": "/tmp/run-claude/.audit/meta.1.json"},
+                "view": {"stdout": "", "stderr": ""},
+            }
+
+    monkeypatch.setattr(cli, "HarnessRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        cli,
+        "resolve_harness_config",
+        lambda: HarnessConfig(runtime_profile=_profile(tmp_path), run_root=tmp_path / "runs"),
+    )
+
+    exit_code = cli.main(["claude", "-p", "Hello from Claude."])
+    captured = capsys.readouterr()
+    request = calls["start"]
+
+    assert exit_code == 0
+    assert getattr(request, "engine") == "claude"
+    assert getattr(request, "execution_mode") == "interactive"
+    assert getattr(request, "passthrough_args") == ["-p", "Hello from Claude."]
+    assert "Run id: run-claude" in captured.out
+    assert "Start complete. exitCode=0" in captured.out
+
+
+def test_cli_claude_start_forwards_custom_model(monkeypatch, tmp_path, capsys) -> None:
+    calls: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def __init__(self, config: HarnessConfig) -> None:
+            calls["config"] = config
+
+        def start(self, request):
+            calls["start"] = request
+            return {
+                "ok": True,
+                "run_id": "run-claude-custom",
+                "run_dir": "/tmp/run-claude-custom",
+                "handle": None,
+                "session_id": None,
+                "status": "waiting_user",
+                "translate_level": request.translate_level,
+                "completion": {"state": "awaiting_user_input", "reason_code": "WAITING_USER_INPUT"},
+                "exit_code": 0,
+                "audit": {"meta": "/tmp/run-claude-custom/.audit/meta.1.json"},
+                "view": {"stdout": "", "stderr": ""},
+            }
+
+    monkeypatch.setattr(cli, "HarnessRuntime", _FakeRuntime)
+    monkeypatch.setattr(
+        cli,
+        "resolve_harness_config",
+        lambda: HarnessConfig(runtime_profile=_profile(tmp_path), run_root=tmp_path / "runs"),
+    )
+
+    exit_code = cli.main(["start", "--custom-model", "openrouter/qwen-3", "claude", "--", "-p", "Hello"])
+    captured = capsys.readouterr()
+    request = calls["start"]
+
+    assert exit_code == 0
+    assert getattr(request, "engine") == "claude"
+    assert getattr(request, "custom_model") == "openrouter/qwen-3"
+    assert "Run id: run-claude-custom" in captured.out
+
+
 def test_cli_direct_engine_without_passthrough_is_valid(monkeypatch, tmp_path, capsys) -> None:
     calls: dict[str, object] = {}
 
