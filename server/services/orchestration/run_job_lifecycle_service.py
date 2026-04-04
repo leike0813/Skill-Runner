@@ -45,6 +45,9 @@ from server.services.orchestration.run_result_file_fallback import (
 from server.services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
+from server.services.engine_management.provider_aware_auth import (
+    is_provider_aware_engine,
+)
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
@@ -58,44 +61,66 @@ logger = logging.getLogger(__name__)
 _TERMINAL_ERROR_SUMMARY_MAX_CHARS = 512
 
 
-def _normalize_opencode_provider(value: Any) -> str | None:
+def _normalize_provider_id(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
     return normalized or None
 
 
-def _provider_from_model(value: Any) -> str | None:
+def _provider_from_prefixed_model(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip()
     if "/" not in normalized:
         return None
     provider, _rest = normalized.split("/", 1)
-    return _normalize_opencode_provider(provider)
+    return _normalize_provider_id(provider)
 
 
-def _resolve_opencode_provider_from_model(
+def _iter_request_option_candidates(
+    *,
+    options: Dict[str, Any],
+    request_record: Dict[str, Any] | None,
+    key: str,
+) -> tuple[Any, ...]:
+    request_payload = request_record if isinstance(request_record, dict) else {}
+    engine_options = request_payload.get("engine_options")
+    effective_runtime_options = request_payload.get("effective_runtime_options")
+    runtime_options = request_payload.get("runtime_options")
+    return (
+        engine_options.get(key) if isinstance(engine_options, dict) else None,
+        options.get(key),
+        effective_runtime_options.get(key) if isinstance(effective_runtime_options, dict) else None,
+        runtime_options.get(key) if isinstance(runtime_options, dict) else None,
+    )
+
+
+def _resolve_provider_id(
     *,
     engine_name: str,
     options: Dict[str, Any],
     request_record: Dict[str, Any] | None,
 ) -> str | None:
-    if engine_name.strip().lower() != "opencode":
+    normalized_engine = engine_name.strip().lower()
+    if not is_provider_aware_engine(normalized_engine):
         return None
-    request_payload = request_record if isinstance(request_record, dict) else {}
-    engine_options = request_payload.get("engine_options")
-    effective_runtime_options = request_payload.get("effective_runtime_options")
-    runtime_options = request_payload.get("runtime_options")
-    for candidate in (
-        engine_options.get("model") if isinstance(engine_options, dict) else None,
-        options.get("model"),
-        effective_runtime_options.get("model")
-        if isinstance(effective_runtime_options, dict)
-        else None,
-        runtime_options.get("model") if isinstance(runtime_options, dict) else None,
+    for candidate in _iter_request_option_candidates(
+        options=options,
+        request_record=request_record,
+        key="provider_id",
     ):
-        provider_id = _provider_from_model(candidate)
+        provider_id = _normalize_provider_id(candidate)
+        if provider_id is not None:
+            return provider_id
+    if normalized_engine != "opencode":
+        return None
+    for candidate in _iter_request_option_candidates(
+        options=options,
+        request_record=request_record,
+        key="model",
+    ):
+        provider_id = _provider_from_prefixed_model(candidate)
         if provider_id is not None:
             return provider_id
     return None
@@ -106,15 +131,10 @@ def _resolve_requested_model(
     options: Dict[str, Any],
     request_record: Dict[str, Any] | None,
 ) -> str | None:
-    request_payload = request_record if isinstance(request_record, dict) else {}
-    engine_options = request_payload.get("engine_options")
-    effective_runtime_options = request_payload.get("effective_runtime_options")
-    runtime_options = request_payload.get("runtime_options")
-    for candidate in (
-        engine_options.get("model") if isinstance(engine_options, dict) else None,
-        options.get("model"),
-        effective_runtime_options.get("model") if isinstance(effective_runtime_options, dict) else None,
-        runtime_options.get("model") if isinstance(runtime_options, dict) else None,
+    for candidate in _iter_request_option_candidates(
+        options=options,
+        request_record=request_record,
+        key="model",
     ):
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
@@ -138,31 +158,39 @@ def _resolve_claude_custom_model(
     return model
 
 
-def _opencode_provider_unresolved_detail(
+def _provider_unresolved_detail(
     *,
+    engine_name: str,
     options: Dict[str, Any],
     request_record: Dict[str, Any] | None,
 ) -> str:
-    request_payload = request_record if isinstance(request_record, dict) else {}
-    engine_options = request_payload.get("engine_options")
-    effective_runtime_options = request_payload.get("effective_runtime_options")
-    runtime_options = request_payload.get("runtime_options")
+    normalized_engine = engine_name.strip().lower()
+    for candidate in _iter_request_option_candidates(
+        options=options,
+        request_record=request_record,
+        key="provider_id",
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return (
+                f"{normalized_engine} provider could not be resolved from "
+                f"engine_options.provider_id={candidate.strip()!r}"
+            )
     raw_model = None
-    for candidate in (
-        engine_options.get("model") if isinstance(engine_options, dict) else None,
-        options.get("model"),
-        effective_runtime_options.get("model")
-        if isinstance(effective_runtime_options, dict)
-        else None,
-        runtime_options.get("model") if isinstance(runtime_options, dict) else None,
+    for candidate in _iter_request_option_candidates(
+        options=options,
+        request_record=request_record,
+        key="model",
     ):
         if isinstance(candidate, str) and candidate.strip():
             raw_model = candidate.strip()
             break
     if raw_model is None:
-        return "opencode provider could not be resolved because engine_options.model is missing"
+        return (
+            f"{normalized_engine} provider could not be resolved because "
+            "engine_options.provider_id is missing"
+        )
     return (
-        "opencode provider could not be resolved from engine_options.model="
+        f"{normalized_engine} provider could not be resolved from engine_options.model="
         f"{raw_model!r}"
     )
 
@@ -1020,7 +1048,7 @@ class _RunJobLifecyclePipeline:
                             + ", ".join(resolution_result.missing_required_fields)
                         )
                 if auth_detection_high and session_capable and request_id:
-                    canonical_provider_id = _resolve_opencode_provider_from_model(
+                    canonical_provider_id = _resolve_provider_id(
                         engine_name=engine_name,
                         options=options,
                         request_record=request_record,
@@ -1058,11 +1086,12 @@ class _RunJobLifecyclePipeline:
                             pending_auth_method_selection = created_pending_payload
                         forced_failure_reason = None
                     else:
-                        if (
-                            engine_name.strip().lower() == "opencode"
-                            and canonical_provider_id is None
-                        ):
-                            warning_code = "OPENCODE_PROVIDER_UNRESOLVED_FROM_MODEL"
+                        if is_provider_aware_engine(engine_name) and canonical_provider_id is None:
+                            warning_code = (
+                                "OPENCODE_PROVIDER_UNRESOLVED_FROM_MODEL"
+                                if engine_name.strip().lower() == "opencode"
+                                else "PROVIDER_ID_UNRESOLVED"
+                            )
                             warnings.append(warning_code)
                             self._append_orchestrator_event(
                                 run_dir=run_dir,
@@ -1071,7 +1100,8 @@ class _RunJobLifecyclePipeline:
                                 type_name=OrchestratorEventType.DIAGNOSTIC_WARNING.value,
                                 data=make_diagnostic_warning_payload(
                                     code=warning_code,
-                                    detail=_opencode_provider_unresolved_detail(
+                                    detail=_provider_unresolved_detail(
+                                        engine_name=engine_name,
                                         options=options,
                                         request_record=request_record,
                                     ),

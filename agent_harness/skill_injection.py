@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, List, Literal
 
 from server.models import ManifestArtifact
-from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
+from server.services.orchestration.manifest_artifact_inference import (
+    infer_manifest_artifacts,
+)
 from server.services.skill.skill_patcher import skill_patcher
 
 
@@ -17,6 +19,8 @@ AGENT_SKILL_ROOTS: dict[str, Path] = {
     "gemini": Path(".gemini/skills"),
     "iflow": Path(".iflow/skills"),
     "opencode": Path(".opencode/skills"),
+    "claude": Path(".claude/skills"),
+    "qwen": Path(".qwen/skills"),
 }
 
 
@@ -51,7 +55,9 @@ def _load_manifest_artifacts(skill_dir: Path) -> List[ManifestArtifact]:
     try:
         payload = json.loads(runner_path.read_text(encoding="utf-8"))
     except Exception:
-        logger.warning("Failed to parse runner manifest for skill injection: %s", runner_path)
+        logger.warning(
+            "Failed to parse runner manifest for skill injection: %s", runner_path
+        )
         return []
     if not isinstance(payload, dict):
         return []

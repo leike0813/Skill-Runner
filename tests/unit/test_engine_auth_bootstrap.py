@@ -25,6 +25,7 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
     assert "gemini" in bundle.engine_auth_handlers
     assert "iflow" in bundle.engine_auth_handlers
     assert "opencode" in bundle.engine_auth_handlers
+    assert "qwen" in bundle.engine_auth_handlers
     assert bundle.driver_registry.supports(
         transport="oauth_proxy",
         engine="codex",
@@ -40,6 +41,12 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
         engine="opencode",
         auth_method="api_key",
         provider_id="deepseek",
+    )
+    assert bundle.driver_registry.supports(
+        transport="oauth_proxy",
+        engine="qwen",
+        auth_method="auth_code_or_url",
+        provider_id="qwen-oauth",
     )
     assert hasattr(manager, "_codex_oauth_proxy_flow")
     assert hasattr(manager, "_gemini_oauth_proxy_flow")
@@ -82,6 +89,12 @@ def test_engine_auth_bootstrap_disables_windows_cli_delegate_without_pywinpty(
         auth_method="callback",
         provider_id="openai",
     )
+    assert not bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="qwen",
+        auth_method="auth_code_or_url",
+        provider_id="qwen-oauth",
+    )
     assert bundle.driver_registry.supports(
         transport="cli_delegate",
         engine="codex",
@@ -119,4 +132,10 @@ def test_engine_auth_bootstrap_keeps_windows_cli_delegate_with_pywinpty(
         engine="opencode",
         auth_method="callback",
         provider_id="openai",
+    )
+    assert bundle.driver_registry.supports(
+        transport="cli_delegate",
+        engine="qwen",
+        auth_method="auth_code_or_url",
+        provider_id="qwen-oauth",
     )

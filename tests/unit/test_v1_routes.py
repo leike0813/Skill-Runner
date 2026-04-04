@@ -494,6 +494,63 @@ async def test_v1_engine_auth_session_start_route_opencode(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_v1_engine_auth_session_start_route_qwen_provider_aware(monkeypatch):
+    captured = {}
+
+    def _start(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ANN001
+        captured.update(
+            {
+                "engine": engine,
+                "method": method,
+                "auth_method": auth_method,
+                "provider_id": provider_id,
+                "transport": transport,
+            }
+        )
+        return {
+            "session_id": "auth-qwen-1",
+            "engine": engine,
+            "method": method,
+            "auth_method": auth_method,
+            "transport": transport,
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "input_kind": "api_key",
+            "created_at": "2026-02-26T00:00:00Z",
+            "updated_at": "2026-02-26T00:00:01Z",
+            "expires_at": "2026-02-26T00:15:00Z",
+            "credential_state": "missing",
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        }
+
+    monkeypatch.setattr("server.routers.engines.engine_auth_flow_manager.start_session", _start)
+    response = await _request(
+        "POST",
+        "/v1/engines/auth/sessions",
+        json={
+            "engine": "qwen",
+            "method": "auth",
+            "provider_id": "coding-plan-global",
+            "transport": "cli_delegate",
+            "auth_method": "api_key",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "auth-qwen-1"
+    assert body["provider_id"] == "coding-plan-global"
+    assert captured == {
+        "engine": "qwen",
+        "method": "auth",
+        "auth_method": "api_key",
+        "provider_id": "coding-plan-global",
+        "transport": "cli_delegate",
+    }
+
+
+@pytest.mark.asyncio
 async def test_v1_engine_auth_session_start_conflict(monkeypatch):
     def _raise(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ARG001
         raise EngineInteractionBusyError("busy")

@@ -82,6 +82,12 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
         auth_method="api_key",
         provider_id="deepseek",
     )
+    assert manager._driver_registry.supports(  # noqa: SLF001
+        transport="oauth_proxy",
+        engine="qwen",
+        auth_method="auth_code_or_url",
+        provider_id="qwen-oauth",
+    )
     assert not manager._driver_registry.supports(  # noqa: SLF001
         transport="oauth_proxy",
         engine="opencode",
@@ -102,4 +108,10 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
         transport="oauth_proxy",
         engine="codex",
         auth_method="callback",
+    ) == "auth"
+    assert manager.resolve_transport_start_method(
+        transport="oauth_proxy",
+        engine="qwen",
+        auth_method="auth_code_or_url",
+        provider_id="qwen-oauth",
     ) == "auth"

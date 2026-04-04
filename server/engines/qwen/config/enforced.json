@@ -1,0 +1,20 @@
+{
+  "$schema": "../schemas/qwen_config_schema.json",
+  "output": {
+    "format": "stream-json",
+    "includePartialMessages": false
+  },
+  "tools": {
+    "sandbox": false,
+    "approvalMode": "yolo"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "general": {
+    "enableAutoUpdate": false,
+    "checkpointing": {
+      "enabled": false
+    }
+  }
+}

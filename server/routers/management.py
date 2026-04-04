@@ -319,6 +319,7 @@ async def get_management_engine(engine: str):
             notes=entry.notes,
             supported_effort=entry.supported_effort,
             provider=entry.provider,
+            provider_id=getattr(entry, "provider_id", None),
             model=entry.model,
             source=getattr(entry, "source", None),
         )

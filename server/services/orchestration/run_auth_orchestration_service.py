@@ -44,6 +44,9 @@ from server.services.engine_management.auth_import_service import (
     auth_import_service,
 )
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
+from server.services.engine_management.provider_aware_auth import (
+    is_provider_aware_engine,
+)
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.workspace_manager import workspace_manager
@@ -55,7 +58,7 @@ logger = logging.getLogger(__name__)
 _CONVERSATION_METHOD_MAP: dict[str, AuthMethod] = {
     "callback": AuthMethod.CALLBACK,
     "device_auth": AuthMethod.DEVICE_AUTH,
-    "authorization_code": AuthMethod.AUTHORIZATION_CODE,
+    "auth_code_or_url": AuthMethod.AUTH_CODE_OR_URL,
     "import": AuthMethod.IMPORT,
     "api_key": AuthMethod.API_KEY,
     "custom_provider": AuthMethod.CUSTOM_PROVIDER,
@@ -1166,7 +1169,10 @@ class RunAuthOrchestrationService:
             method="auth",
             auth_method=self._map_auth_method_to_runtime(auth_method),
             provider_id=provider_id,
-            transport="oauth_proxy",
+            transport=engine_auth_strategy_service.resolve_conversation_transport(
+                engine=engine,
+                provider_id=provider_id,
+            ),
         )
         pending_auth = self._build_pending_auth_from_snapshot(
             snapshot=snapshot,
@@ -1489,7 +1495,7 @@ class RunAuthOrchestrationService:
         method_labels = {
             AuthMethod.CALLBACK: "Callback URL",
             AuthMethod.DEVICE_AUTH: "Device Authorization",
-            AuthMethod.AUTHORIZATION_CODE: "Authorization Code",
+            AuthMethod.AUTH_CODE_OR_URL: "Auth Code or URL",
             AuthMethod.API_KEY: "API Key",
             AuthMethod.IMPORT: "Import Credentials",
         }
@@ -1535,15 +1541,22 @@ class RunAuthOrchestrationService:
         source_attempt: int,
         last_error: str | None,
     ) -> PendingAuth:
+        engine = self._normalize_string(snapshot.get("engine")) or ""
+        provider_id = self._normalize_string(snapshot.get("provider_id"))
         challenge_kind, accepts_chat_input, input_kind, prompt = self._challenge_profile(
-            engine=self._normalize_string(snapshot.get("engine")) or "",
-            provider_id=self._normalize_string(snapshot.get("provider_id")),
+            engine=engine,
+            provider_id=provider_id,
             auth_method=auth_method,
+            transport=engine_auth_strategy_service.resolve_conversation_transport(
+                engine=engine,
+                provider_id=provider_id,
+            ),
+            runtime_input_kind=self._normalize_string(snapshot.get("input_kind")),
         )
         return PendingAuth(
             auth_session_id=self._normalize_string(snapshot.get("session_id")) or "",
-            engine=self._normalize_string(snapshot.get("engine")) or "",
-            provider_id=self._normalize_string(snapshot.get("provider_id")),
+            engine=engine,
+            provider_id=provider_id,
             auth_method=auth_method,
             challenge_kind=challenge_kind,
             prompt=prompt,
@@ -1553,6 +1566,7 @@ class RunAuthOrchestrationService:
                 challenge_kind=challenge_kind,
                 auth_url=self._normalize_string(snapshot.get("auth_url")),
                 user_code=self._normalize_string(snapshot.get("user_code")),
+                accepts_chat_input=accepts_chat_input,
                 last_error=last_error,
             ),
             accepts_chat_input=accepts_chat_input,
@@ -1929,8 +1943,19 @@ class RunAuthOrchestrationService:
         engine: str,
         provider_id: str | None,
         auth_method: AuthMethod,
+        transport: str | None = None,
+        runtime_input_kind: str | None = None,
     ) -> tuple[AuthChallengeKind, bool, AuthSubmissionKind | None, str]:
         is_high_risk = self._is_conversation_method_high_risk(engine, provider_id, auth_method)
+        resolved_transport = transport or engine_auth_strategy_service.resolve_conversation_transport(
+            engine=engine,
+            provider_id=provider_id,
+        )
+        session_behavior = engine_auth_strategy_service.runtime_session_behavior_for_transport(
+            engine=engine,
+            transport=resolved_transport,
+            provider_id=provider_id,
+        )
 
         def _append_risk(prompt: str) -> str:
             if not is_high_risk:
@@ -1951,12 +1976,20 @@ class RunAuthOrchestrationService:
                 None,
                 _append_risk("Open the authorization link and complete device authentication in the browser."),
             )
-        if auth_method == AuthMethod.AUTHORIZATION_CODE:
+        if auth_method == AuthMethod.AUTH_CODE_OR_URL:
+            accepts_chat_input = session_behavior.input_required
+            if runtime_input_kind is not None:
+                accepts_chat_input = bool(runtime_input_kind)
+            prompt = (
+                "Open the authorization link and paste the final callback URL or authorization code here."
+                if accepts_chat_input
+                else "Open the authorization link and complete authentication in the browser."
+            )
             return (
-                AuthChallengeKind.AUTHORIZATION_CODE,
-                True,
-                AuthSubmissionKind.AUTHORIZATION_CODE,
-                _append_risk("Open the authorization link and paste the authorization code here."),
+                AuthChallengeKind.AUTH_CODE_OR_URL,
+                accepts_chat_input,
+                AuthSubmissionKind.AUTH_CODE_OR_URL if accepts_chat_input else None,
+                _append_risk(prompt),
             )
         if auth_method == AuthMethod.IMPORT:
             return (
@@ -2009,6 +2042,7 @@ class RunAuthOrchestrationService:
         challenge_kind: AuthChallengeKind,
         auth_url: str | None,
         user_code: str | None,
+        accepts_chat_input: bool,
         last_error: str | None,
     ) -> str | None:
         parts: list[str] = []
@@ -2018,8 +2052,11 @@ class RunAuthOrchestrationService:
             parts.append(f"User code: {user_code}")
         if challenge_kind == AuthChallengeKind.CALLBACK_URL:
             parts.append("Paste the callback URL after the browser redirects.")
-        elif challenge_kind == AuthChallengeKind.AUTHORIZATION_CODE:
-            parts.append("Paste the authorization code from the browser.")
+        elif challenge_kind == AuthChallengeKind.AUTH_CODE_OR_URL:
+            if accepts_chat_input:
+                parts.append("Paste the callback URL or authorization code from the browser.")
+            else:
+                parts.append("Complete authentication in the browser. This session will continue polling automatically.")
         elif challenge_kind == AuthChallengeKind.API_KEY:
             parts.append("Paste the API key exactly as issued by the provider.")
         if last_error:
@@ -2029,7 +2066,7 @@ class RunAuthOrchestrationService:
     def _map_auth_method_to_runtime(self, auth_method: AuthMethod) -> str:
         if auth_method == AuthMethod.CALLBACK:
             return "callback"
-        if auth_method in {AuthMethod.DEVICE_AUTH, AuthMethod.AUTHORIZATION_CODE}:
+        if auth_method in {AuthMethod.DEVICE_AUTH, AuthMethod.AUTH_CODE_OR_URL}:
             return "auth_code_or_url"
         if auth_method == AuthMethod.IMPORT:
             return "import"
@@ -2046,7 +2083,7 @@ class RunAuthOrchestrationService:
             return runtime_input_kind
         if submission.kind == AuthSubmissionKind.CALLBACK_URL:
             return "text"
-        if submission.kind == AuthSubmissionKind.AUTHORIZATION_CODE:
+        if submission.kind == AuthSubmissionKind.AUTH_CODE_OR_URL:
             return "code"
         if submission.kind == AuthSubmissionKind.IMPORT_FILES:
             return "import"
@@ -2114,8 +2151,8 @@ class RunAuthOrchestrationService:
             return auth_method
         if submission_kind == AuthSubmissionKind.CALLBACK_URL:
             return AuthMethod.CALLBACK
-        if submission_kind == AuthSubmissionKind.AUTHORIZATION_CODE:
-            return AuthMethod.AUTHORIZATION_CODE
+        if submission_kind == AuthSubmissionKind.AUTH_CODE_OR_URL:
+            return AuthMethod.AUTH_CODE_OR_URL
         if submission_kind == AuthSubmissionKind.IMPORT_FILES:
             return AuthMethod.IMPORT
         if submission_kind == AuthSubmissionKind.CUSTOM_PROVIDER:
@@ -2146,8 +2183,11 @@ class RunAuthOrchestrationService:
         canonical_provider_id: str | None,
     ) -> str | None:
         normalized_engine = engine_name.strip().lower()
-        if normalized_engine == "opencode":
-            return self._normalize_provider_id(canonical_provider_id)
+        if is_provider_aware_engine(normalized_engine):
+            return (
+                self._normalize_provider_id(canonical_provider_id)
+                or self._normalize_provider_id(auth_detection.provider_id)
+            )
         return self._normalize_provider_id(auth_detection.provider_id)
 
     def _normalize_string(self, value: Any) -> str | None:

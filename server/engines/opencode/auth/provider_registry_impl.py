@@ -15,6 +15,7 @@ class OpencodeAuthProvider:
     display_name: str
     auth_mode: str
     menu_label: str
+    supports_import: bool
 
 
 class OpencodeAuthProviderRegistry:
@@ -41,6 +42,7 @@ class OpencodeAuthProviderRegistry:
                 display_name=str(row["display_name"]).strip(),
                 auth_mode=str(row["auth_mode"]).strip().lower(),
                 menu_label=str(row["menu_label"]).strip(),
+                supports_import=bool(row.get("supports_import", False)),
             )
             if provider.auth_mode not in {"oauth", "api_key"}:
                 raise ValueError(f"Unsupported auth mode for provider '{provider.provider_id}'")

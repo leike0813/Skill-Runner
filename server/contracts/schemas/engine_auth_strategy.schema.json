@@ -21,23 +21,27 @@
         "gemini",
         "iflow",
         "opencode",
-        "claude"
+        "claude",
+        "qwen"
       ],
       "properties": {
         "codex": {
-          "$ref": "#/$defs/non_opencode_engine"
+          "$ref": "#/$defs/engine_scoped_engine"
         },
         "gemini": {
-          "$ref": "#/$defs/non_opencode_engine"
+          "$ref": "#/$defs/engine_scoped_engine"
         },
         "iflow": {
-          "$ref": "#/$defs/non_opencode_engine"
+          "$ref": "#/$defs/engine_scoped_engine"
         },
         "opencode": {
-          "$ref": "#/$defs/opencode_engine"
+          "$ref": "#/$defs/provider_aware_engine"
         },
         "claude": {
-          "$ref": "#/$defs/non_opencode_engine"
+          "$ref": "#/$defs/engine_scoped_engine"
+        },
+        "qwen": {
+          "$ref": "#/$defs/provider_aware_engine"
         }
       }
     }
@@ -57,7 +61,7 @@
       "enum": [
         "callback",
         "device_auth",
-        "authorization_code",
+        "auth_code_or_url",
         "import",
         "api_key",
         "custom_provider"
@@ -89,6 +93,22 @@
         }
       }
     },
+    "session_behavior_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_required": {
+          "type": "boolean"
+        },
+        "polling_start": {
+          "type": "string",
+          "enum": [
+            "manual_submit",
+            "immediate"
+          ]
+        }
+      }
+    },
     "transport_policy": {
       "type": "object",
       "additionalProperties": false,
@@ -114,6 +134,9 @@
         },
         "driver": {
           "$ref": "#/$defs/driver_policy"
+        },
+        "session_behavior": {
+          "$ref": "#/$defs/session_behavior_policy"
         }
       }
     },
@@ -133,7 +156,7 @@
       },
       "minProperties": 1
     },
-    "non_opencode_engine": {
+    "engine_scoped_engine": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -167,7 +190,7 @@
         }
       }
     },
-    "opencode_provider_policy": {
+    "provider_policy": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -197,7 +220,7 @@
         }
       }
     },
-    "opencode_engine": {
+    "provider_aware_engine": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -221,7 +244,7 @@
           "type": "object",
           "minProperties": 1,
           "additionalProperties": {
-            "$ref": "#/$defs/opencode_provider_policy"
+            "$ref": "#/$defs/provider_policy"
           }
         }
       }

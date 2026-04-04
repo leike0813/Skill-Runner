@@ -1,0 +1,13 @@
+{
+  "engine": "qwen",
+  "snapshots": [
+    {
+      "version": "0.0.0",
+      "file": "models_0.0.0.json"
+    },
+    {
+      "version": "0.14.0",
+      "file": "models_0.14.0.json"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "providers": [
+    {
+      "provider_id": "qwen-oauth",
+      "display_name": "Qwen OAuth (Free)",
+      "auth_mode": "oauth",
+      "menu_label": "Qwen OAuth",
+      "supports_import": true
+    },
+    {
+      "provider_id": "coding-plan-china",
+      "display_name": "Alibaba Cloud Coding Plan (China)",
+      "auth_mode": "api_key",
+      "menu_label": "Coding Plan (China)",
+      "supports_import": false
+    },
+    {
+      "provider_id": "coding-plan-global",
+      "display_name": "Alibaba Cloud Coding Plan (Global)",
+      "auth_mode": "api_key",
+      "menu_label": "Coding Plan (Global)",
+      "supports_import": false
+    }
+  ]
+}

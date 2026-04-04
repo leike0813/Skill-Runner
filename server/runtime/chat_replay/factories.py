@@ -92,8 +92,8 @@ def _auth_submission_text(submission_kind: str) -> str:
         return "API key submitted"
     if normalized == "callback_url":
         return "Callback URL submitted"
-    if normalized == "authorization_code":
-        return "Authorization code submitted"
+    if normalized == "auth_code_or_url":
+        return "Auth code or URL submitted"
     return "Authentication input submitted"
 
 
@@ -159,7 +159,7 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
             )
         )
     elif type_name == "auth.input.accepted":
-        submission_kind = _safe_text(data.get("submission_kind")) or "authorization_code"
+        submission_kind = _safe_text(data.get("submission_kind")) or "auth_code_or_url"
         specs.append(
             (
                 ChatReplayRole.USER.value,

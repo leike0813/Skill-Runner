@@ -11,15 +11,21 @@ import yaml  # type: ignore[import-untyped]
 
 from server.config_registry import keys
 from server.config_registry.registry import config_registry
+from server.services.engine_management.provider_aware_auth import (
+    provider_aware_engines,
+)
 
 
 _VALID_TRANSPORTS = ("oauth_proxy", "cli_delegate", "provider_config")
-_NON_OPENCODE_ENGINES = tuple(engine for engine in keys.ENGINE_KEYS if engine != "opencode")
+_PROVIDER_AWARE_ENGINES = provider_aware_engines()
+_ENGINE_SCOPED_ENGINES = tuple(
+    engine for engine in keys.ENGINE_KEYS if engine not in _PROVIDER_AWARE_ENGINES
+)
 _ENGINE_KEYS = tuple(keys.ENGINE_KEYS)
 _CONVERSATION_TO_RUNTIME_METHOD_MAP: dict[str, str] = {
     "callback": "callback",
     "device_auth": "auth_code_or_url",
-    "authorization_code": "auth_code_or_url",
+    "auth_code_or_url": "auth_code_or_url",
     "api_key": "api_key",
     "custom_provider": "custom_provider",
 }
@@ -37,6 +43,12 @@ class DriverStrategyEntry:
     provider_id: str | None
     start_method: str
     execution_mode: str
+
+
+@dataclass(frozen=True)
+class SessionBehaviorPolicy:
+    input_required: bool = True
+    polling_start: str = "manual_submit"
 
 
 class EngineAuthStrategyService:
@@ -79,7 +91,9 @@ class EngineAuthStrategyService:
     def _load_strategy(self) -> dict[str, Any]:
         if self._strategy_path is not None:
             try:
-                payload = yaml.safe_load(self._strategy_path.read_text(encoding="utf-8"))
+                payload = yaml.safe_load(
+                    self._strategy_path.read_text(encoding="utf-8")
+                )
             except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
                 raise EngineAuthStrategyLoadError(
                     f"Failed to load engine auth strategy config: {self._strategy_path}"
@@ -103,7 +117,9 @@ class EngineAuthStrategyService:
                     f"Missing engine auth strategy file for `{engine}`: {strategy_path}"
                 )
             try:
-                engine_payload = yaml.safe_load(strategy_path.read_text(encoding="utf-8"))
+                engine_payload = yaml.safe_load(
+                    strategy_path.read_text(encoding="utf-8")
+                )
             except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
                 raise EngineAuthStrategyLoadError(
                     f"Failed to load engine auth strategy config: {strategy_path}"
@@ -158,14 +174,14 @@ class EngineAuthStrategyService:
         block = engines.get(normalized_engine)
         return block if isinstance(block, dict) else {}
 
-    def _opencode_provider_block(self, provider_id: str | None) -> dict[str, Any]:
+    def _provider_block(self, engine: str, provider_id: str | None) -> dict[str, Any]:
         if not provider_id:
             return {}
-        opencode = self._engine_block("opencode")
-        providers_obj = opencode.get("providers")
+        engine_block = self._engine_block(engine)
+        providers_obj = engine_block.get("providers")
         providers = providers_obj if isinstance(providers_obj, dict) else {}
-        block = providers.get(provider_id.strip().lower())
-        return block if isinstance(block, dict) else {}
+        provider_block = providers.get(provider_id.strip().lower())
+        return provider_block if isinstance(provider_block, dict) else {}
 
     def _transport_block(
         self,
@@ -174,42 +190,52 @@ class EngineAuthStrategyService:
         provider_id: str | None = None,
         transport: str,
     ) -> dict[str, Any]:
+        normalized_engine = engine.strip().lower()
         normalized_transport = transport.strip().lower()
-        if engine.strip().lower() == "opencode":
-            provider_block = self._opencode_provider_block(provider_id)
+        if normalized_engine in _PROVIDER_AWARE_ENGINES:
+            provider_block = self._provider_block(normalized_engine, provider_id)
             transports_obj = provider_block.get("transports")
         else:
-            engine_block = self._engine_block(engine)
+            engine_block = self._engine_block(normalized_engine)
             transports_obj = engine_block.get("transports")
         transports = transports_obj if isinstance(transports_obj, dict) else {}
         block = transports.get(normalized_transport)
         return block if isinstance(block, dict) else {}
 
-    def resolve_conversation_transport(self, engine: str, provider_id: str | None = None) -> str:
+    def resolve_conversation_transport(
+        self, engine: str, provider_id: str | None = None
+    ) -> str:
         normalized_engine = engine.strip().lower()
-        if normalized_engine == "opencode":
-            block = self._engine_block("opencode")
-        else:
-            block = self._engine_block(normalized_engine)
+        block = self._engine_block(normalized_engine)
         in_conversation_obj = block.get("in_conversation")
-        in_conversation = in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+        in_conversation = (
+            in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+        )
         transport_obj = in_conversation.get("transport")
-        transport = transport_obj.strip().lower() if isinstance(transport_obj, str) else ""
+        transport = (
+            transport_obj.strip().lower() if isinstance(transport_obj, str) else ""
+        )
         if transport in _VALID_TRANSPORTS:
             return transport
         # schema enforces a valid value, but keep a defensive fallback.
         return "oauth_proxy"
 
-    def methods_for_conversation(self, engine: str, provider_id: str | None = None) -> tuple[str, ...]:
+    def methods_for_conversation(
+        self, engine: str, provider_id: str | None = None
+    ) -> tuple[str, ...]:
         normalized_engine = engine.strip().lower()
-        if normalized_engine == "opencode":
-            provider_block = self._opencode_provider_block(provider_id)
+        if normalized_engine in _PROVIDER_AWARE_ENGINES:
+            provider_block = self._provider_block(normalized_engine, provider_id)
             in_conversation_obj = provider_block.get("in_conversation")
-            in_conversation = in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+            in_conversation = (
+                in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+            )
         else:
             engine_block = self._engine_block(normalized_engine)
             in_conversation_obj = engine_block.get("in_conversation")
-            in_conversation = in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+            in_conversation = (
+                in_conversation_obj if isinstance(in_conversation_obj, dict) else {}
+            )
         methods_obj = in_conversation.get("methods")
         methods = methods_obj if isinstance(methods_obj, list) else []
         normalized_methods: list[str] = []
@@ -264,6 +290,37 @@ class EngineAuthStrategyService:
                     normalized.append(value)
         return tuple(normalized)
 
+    def runtime_session_behavior_for_transport(
+        self,
+        *,
+        engine: str,
+        transport: str,
+        provider_id: str | None = None,
+    ) -> SessionBehaviorPolicy:
+        block = self._transport_block(
+            engine=engine,
+            provider_id=provider_id,
+            transport=transport,
+        )
+        behavior_obj = block.get("session_behavior")
+        behavior = behavior_obj if isinstance(behavior_obj, dict) else {}
+        input_required_obj = behavior.get("input_required")
+        input_required = (
+            input_required_obj if isinstance(input_required_obj, bool) else True
+        )
+        polling_start_obj = behavior.get("polling_start")
+        polling_start = (
+            polling_start_obj.strip().lower()
+            if isinstance(polling_start_obj, str)
+            else "manual_submit"
+        )
+        if polling_start not in {"manual_submit", "immediate"}:
+            polling_start = "manual_submit"
+        return SessionBehaviorPolicy(
+            input_required=input_required,
+            polling_start=polling_start,
+        )
+
     def is_runtime_method_high_risk(
         self,
         *,
@@ -289,7 +346,9 @@ class EngineAuthStrategyService:
         provider_id: str | None = None,
     ) -> bool:
         normalized_conversation_method = conversation_method.strip().lower()
-        runtime_method = _CONVERSATION_TO_RUNTIME_METHOD_MAP.get(normalized_conversation_method)
+        runtime_method = _CONVERSATION_TO_RUNTIME_METHOD_MAP.get(
+            normalized_conversation_method
+        )
         if runtime_method is None:
             return False
         transport = self.resolve_conversation_transport(engine, provider_id=provider_id)
@@ -302,101 +361,104 @@ class EngineAuthStrategyService:
 
     def list_ui_capabilities(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {
-            "oauth_proxy": {
-                "opencode": {},
-            },
-            "cli_delegate": {
-                "opencode": {},
-            },
-            "provider_config": {
-                "opencode": {},
-            },
+            transport: {
+                **{engine: {} for engine in _PROVIDER_AWARE_ENGINES},
+                **{engine: [] for engine in _ENGINE_SCOPED_ENGINES},
+            }
+            for transport in _VALID_TRANSPORTS
         }
         for transport in _VALID_TRANSPORTS:
-            for engine in _NON_OPENCODE_ENGINES:
+            for engine in _ENGINE_SCOPED_ENGINES:
                 payload[transport][engine] = []
-        for engine in _NON_OPENCODE_ENGINES:
+        for engine in _ENGINE_SCOPED_ENGINES:
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(
-                    self.runtime_methods_for_transport(engine=engine, transport=transport)
-                )
-
-        opencode_block = self._engine_block("opencode")
-        providers_obj = opencode_block.get("providers")
-        providers = providers_obj if isinstance(providers_obj, dict) else {}
-        for provider_id, provider_block in providers.items():
-            if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
-                continue
-            normalized_provider = provider_id.strip().lower()
-            if not normalized_provider:
-                continue
-            for transport in _VALID_TRANSPORTS:
-                methods = list(
                     self.runtime_methods_for_transport(
-                        engine="opencode",
-                        transport=transport,
-                        provider_id=normalized_provider,
+                        engine=engine, transport=transport
                     )
                 )
-                if methods:
-                    payload[transport]["opencode"][normalized_provider] = methods
+
+        for engine in _PROVIDER_AWARE_ENGINES:
+            engine_block = self._engine_block(engine)
+            providers_obj = engine_block.get("providers")
+            providers = providers_obj if isinstance(providers_obj, dict) else {}
+            for provider_id, provider_block in providers.items():
+                if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
+                    continue
+                normalized_provider = provider_id.strip().lower()
+                if not normalized_provider:
+                    continue
+                for transport in _VALID_TRANSPORTS:
+                    methods = list(
+                        self.runtime_methods_for_transport(
+                            engine=engine,
+                            transport=transport,
+                            provider_id=normalized_provider,
+                        )
+                    )
+                    if methods:
+                        payload[transport][engine][normalized_provider] = methods
+
         return payload
 
     def list_ui_high_risk_capabilities(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {
-            "oauth_proxy": {
-                "opencode": {},
-            },
-            "cli_delegate": {
-                "opencode": {},
-            },
-            "provider_config": {
-                "opencode": {},
-            },
+            transport: {
+                **{engine: {} for engine in _PROVIDER_AWARE_ENGINES},
+                **{engine: [] for engine in _ENGINE_SCOPED_ENGINES},
+            }
+            for transport in _VALID_TRANSPORTS
         }
         for transport in _VALID_TRANSPORTS:
-            for engine in _NON_OPENCODE_ENGINES:
+            for engine in _ENGINE_SCOPED_ENGINES:
                 payload[transport][engine] = []
-        for engine in _NON_OPENCODE_ENGINES:
+        for engine in _ENGINE_SCOPED_ENGINES:
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(
-                    self.runtime_high_risk_methods_for_transport(engine=engine, transport=transport)
-                )
-
-        opencode_block = self._engine_block("opencode")
-        providers_obj = opencode_block.get("providers")
-        providers = providers_obj if isinstance(providers_obj, dict) else {}
-        for provider_id, provider_block in providers.items():
-            if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
-                continue
-            normalized_provider = provider_id.strip().lower()
-            if not normalized_provider:
-                continue
-            for transport in _VALID_TRANSPORTS:
-                methods = list(
                     self.runtime_high_risk_methods_for_transport(
-                        engine="opencode",
-                        transport=transport,
-                        provider_id=normalized_provider,
+                        engine=engine, transport=transport
                     )
                 )
-                if methods:
-                    payload[transport]["opencode"][normalized_provider] = methods
+
+        for engine in _PROVIDER_AWARE_ENGINES:
+            engine_block = self._engine_block(engine)
+            providers_obj = engine_block.get("providers")
+            providers = providers_obj if isinstance(providers_obj, dict) else {}
+            for provider_id, provider_block in providers.items():
+                if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
+                    continue
+                normalized_provider = provider_id.strip().lower()
+                if not normalized_provider:
+                    continue
+                for transport in _VALID_TRANSPORTS:
+                    methods = list(
+                        self.runtime_high_risk_methods_for_transport(
+                            engine=engine,
+                            transport=transport,
+                            provider_id=normalized_provider,
+                        )
+                    )
+                    if methods:
+                        payload[transport][engine][normalized_provider] = methods
         return payload
 
     def iter_driver_entries(self) -> tuple[DriverStrategyEntry, ...]:
         entries: list[DriverStrategyEntry] = []
 
-        for engine in _NON_OPENCODE_ENGINES:
+        for engine in _ENGINE_SCOPED_ENGINES:
             for transport in _VALID_TRANSPORTS:
-                transport_block = self._transport_block(engine=engine, transport=transport)
+                transport_block = self._transport_block(
+                    engine=engine, transport=transport
+                )
                 driver_obj = transport_block.get("driver")
                 driver = driver_obj if isinstance(driver_obj, dict) else {}
                 start_method = str(driver.get("start_method") or "").strip().lower()
                 execution_mode = str(driver.get("execution_mode") or "").strip().lower()
                 if not start_method or not execution_mode:
                     continue
-                for method in self.runtime_methods_for_transport(engine=engine, transport=transport):
+                for method in self.runtime_methods_for_transport(
+                    engine=engine, transport=transport
+                ):
                     entries.append(
                         DriverStrategyEntry(
                             transport=transport,
@@ -408,42 +470,43 @@ class EngineAuthStrategyService:
                         )
                     )
 
-        opencode_block = self._engine_block("opencode")
-        providers_obj = opencode_block.get("providers")
-        providers = providers_obj if isinstance(providers_obj, dict) else {}
-        for provider_id, provider_block in providers.items():
-            if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
-                continue
-            normalized_provider = provider_id.strip().lower()
-            if not normalized_provider:
-                continue
-            for transport in _VALID_TRANSPORTS:
-                transport_block = self._transport_block(
-                    engine="opencode",
-                    provider_id=normalized_provider,
-                    transport=transport,
-                )
-                driver_obj = transport_block.get("driver")
-                driver = driver_obj if isinstance(driver_obj, dict) else {}
-                start_method = str(driver.get("start_method") or "").strip().lower()
-                execution_mode = str(driver.get("execution_mode") or "").strip().lower()
-                if not start_method or not execution_mode:
+        for engine in _PROVIDER_AWARE_ENGINES:
+            engine_block = self._engine_block(engine)
+            providers_obj = engine_block.get("providers")
+            providers = providers_obj if isinstance(providers_obj, dict) else {}
+            for provider_id, provider_block in providers.items():
+                if not isinstance(provider_id, str) or not isinstance(provider_block, dict):
                     continue
-                for method in self.runtime_methods_for_transport(
-                    engine="opencode",
-                    transport=transport,
-                    provider_id=normalized_provider,
-                ):
-                    entries.append(
-                        DriverStrategyEntry(
-                            transport=transport,
-                            engine="opencode",
-                            auth_method=method,
-                            provider_id=normalized_provider,
-                            start_method=start_method,
-                            execution_mode=execution_mode,
-                        )
+                normalized_provider = provider_id.strip().lower()
+                if not normalized_provider:
+                    continue
+                for transport in _VALID_TRANSPORTS:
+                    transport_block = self._transport_block(
+                        engine=engine,
+                        provider_id=normalized_provider,
+                        transport=transport,
                     )
+                    driver_obj = transport_block.get("driver")
+                    driver = driver_obj if isinstance(driver_obj, dict) else {}
+                    start_method = str(driver.get("start_method") or "").strip().lower()
+                    execution_mode = str(driver.get("execution_mode") or "").strip().lower()
+                    if not start_method or not execution_mode:
+                        continue
+                    for method in self.runtime_methods_for_transport(
+                        engine=engine,
+                        transport=transport,
+                        provider_id=normalized_provider,
+                    ):
+                        entries.append(
+                            DriverStrategyEntry(
+                                transport=transport,
+                                engine=engine,
+                                auth_method=method,
+                                provider_id=normalized_provider,
+                                start_method=start_method,
+                                execution_mode=execution_mode,
+                            )
+                        )
 
         entries.sort(
             key=lambda item: (

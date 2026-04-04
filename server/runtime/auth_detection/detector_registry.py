@@ -6,6 +6,7 @@ from server.engines.codex.auth.detection import CodexAuthDetector
 from server.engines.gemini.auth.detection import GeminiAuthDetector
 from server.engines.iflow.auth.detection import IFlowAuthDetector
 from server.engines.opencode.auth.detection import OpencodeAuthDetector
+from server.engines.qwen.auth.detection import QwenAuthDetector
 
 from .contracts import AuthDetector
 
@@ -31,6 +32,6 @@ def create_default_auth_detector_registry() -> AuthDetectorRegistry:
             "gemini": GeminiAuthDetector(),
             "iflow": IFlowAuthDetector(),
             "opencode": OpencodeAuthDetector(),
+            "qwen": QwenAuthDetector(),
         }
     )
-

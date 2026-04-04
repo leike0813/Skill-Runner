@@ -1,0 +1,132 @@
+{
+  "engine": "qwen",
+  "prompt_builder": {
+    "engine_key": "qwen",
+    "default_template_path": "../../../assets/templates/qwen_default.j2",
+    "fallback_inline": "{{ input_prompt }}",
+    "merge_input_if_no_parameter_schema": false,
+    "params_json_source": "none",
+    "main_prompt_source": "parameter.prompt",
+    "main_prompt_default_template": "Execute skill {skill_id}",
+    "include_input_file_name": false,
+    "include_skill_dir": false
+  },
+  "session_codec": {
+    "strategy": "json_lines_scan",
+    "error_message": "SESSION_RESUME_FAILED: missing session id",
+    "error_prefix": "SESSION_RESUME_FAILED: qwen",
+    "required_type": null,
+    "id_field": null,
+    "recursive_key": null,
+    "fallback_text_finder": null,
+    "json_lines_finder": "find_session_id",
+    "regex_pattern": null
+  },
+  "attempt_workspace": {
+    "workspace_subdir": ".qwen",
+    "skills_subdir": "skills",
+    "use_config_parent_as_workspace": false,
+    "unknown_fallback": false
+  },
+  "config_assets": {
+    "bootstrap_path": "../config/bootstrap.json",
+    "default_path": "../config/default.json",
+    "enforced_path": "../config/enforced.json",
+    "settings_schema_path": "../schemas/qwen_config_schema.json",
+    "skill_defaults_path": "assets/qwen_config.json"
+  },
+  "model_catalog": {
+    "mode": "manifest",
+    "manifest_path": "../models/manifest.json",
+    "models_root": "../models",
+    "seed_path": null
+  },
+  "command_defaults": {
+    "start": [
+      "--output-format", "stream-json",
+      "--yolo",
+      "-p"
+    ],
+    "resume": [
+      "--output-format", "stream-json",
+      "--yolo",
+      "--resume"
+    ],
+    "ui_shell": []
+  },
+  "ui_shell": {
+    "command_id": "qwen-tui",
+    "label": "Qwen TUI",
+    "trust_bootstrap_parent": false,
+    "sandbox_arg": null,
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "static_unsupported",
+    "sandbox_probe_message": "Qwen Code TUI runs without sandbox by default.",
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "none",
+    "config_assets": {
+      "default_path": null,
+      "enforced_path": null,
+      "settings_schema_path": null,
+      "target_relpath": null
+    }
+  },
+  "cli_management": {
+    "package": "@qwen-code/qwen-code",
+    "binary_candidates": ["qwen", "qwen.cmd", "qwen.exe"],
+    "credential_imports": [
+      {
+        "source": "oauth_creds.json",
+        "target_relpath": ".qwen/oauth_creds.json",
+        "import_validator": "qwen_oauth_creds_json"
+      }
+    ],
+    "credential_policy": {
+      "mode": "any_of_sources",
+      "sources": ["oauth_creds.json"],
+      "settings_validator": null
+    },
+    "resume_probe": {
+      "help_hints": ["--resume"],
+      "dynamic_args": []
+    },
+    "layout": {
+      "extra_dirs": [".qwen"],
+      "bootstrap_target_relpath": ".qwen/settings.json",
+      "bootstrap_format": "json",
+      "normalize_strategy": null
+    }
+  },
+  "parser_auth_patterns": {
+    "rules": [
+      {
+        "id": "qwen_oauth_token_expired",
+        "enabled": true,
+        "priority": 900,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "OAuth.*token.*expired|401.*Unauthorized"
+            }
+          ]
+        }
+      },
+      {
+        "id": "qwen_api_key_missing",
+        "enabled": true,
+        "priority": 890,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "API key is missing|Invalid API key"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

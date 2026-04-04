@@ -29,6 +29,7 @@ class EngineModelInfo(BaseModel):
     notes: Optional[str] = None
     supported_effort: Optional[List[str]] = None
     provider: Optional[str] = None
+    provider_id: Optional[str] = None
     model: Optional[str] = None
     source: Optional[str] = None
 
@@ -225,6 +226,7 @@ class EngineManifestModelInfo(BaseModel):
     notes: Optional[str] = None
     supported_effort: Optional[List[str]] = None
     provider: Optional[str] = None
+    provider_id: Optional[str] = None
     model: Optional[str] = None
     source: Optional[str] = None
 

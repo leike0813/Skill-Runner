@@ -42,6 +42,7 @@ ImportValidatorName = Literal[
     "iflow_oauth_creds_json",
     "opencode_auth_json",
     "opencode_antigravity_accounts_json",
+    "qwen_oauth_creds_json",
 ]
 
 

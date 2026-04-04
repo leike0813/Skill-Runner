@@ -143,3 +143,35 @@ def test_get_import_spec_claude_uses_credentials_json(tmp_path: Path) -> None:
     assert [item["name"] for item in ask_user["files"] if item["required"] is True] == [
         ".credentials.json",
     ]
+
+
+def test_get_import_spec_qwen_oauth_uses_oauth_creds_json(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+
+    spec = service.get_import_spec(engine="qwen", provider_id="qwen-oauth")
+
+    assert spec["engine"] == "qwen"
+    assert spec["provider_id"] == "qwen-oauth"
+    assert spec["supported"] is True
+    assert [item["name"] for item in spec["ask_user"]["files"]] == ["oauth_creds.json"]
+
+
+def test_get_import_spec_qwen_coding_plan_rejects_import(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+
+    with pytest.raises(AuthImportError, match="does not support import auth"):
+        service.get_import_spec(engine="qwen", provider_id="coding-plan-china")
+
+
+def test_import_auth_files_qwen_oauth_writes_oauth_creds(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+
+    result = service.import_auth_files(
+        engine="qwen",
+        provider_id="qwen-oauth",
+        files={"oauth_creds.json": b'{"refresh_token":"x"}'},
+    )
+
+    target = tmp_path / "agent-home" / ".qwen" / "oauth_creds.json"
+    assert target.exists()
+    assert result["provider_id"] == "qwen-oauth"

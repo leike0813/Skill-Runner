@@ -26,8 +26,14 @@ from server.models import (
     EngineInteractiveProfile,
     EngineResumeCapability,
 )
-from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
-from server.services.engine_management.runtime_profile import RuntimeProfile, get_runtime_profile
+from server.runtime.adapter.common.profile_loader import (
+    AdapterProfile,
+    load_adapter_profile,
+)
+from server.services.engine_management.runtime_profile import (
+    RuntimeProfile,
+    get_runtime_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +58,9 @@ _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
     },
     "claude": {
         "hasCompletedOnboarding": True,
+    },
+    "qwen": {
+        "general": {"enableAutoUpdate": False, "checkpointing": {"enabled": False}}
     },
 }
 _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS: dict[str, str] = {
@@ -88,7 +97,9 @@ def _supported_engines() -> tuple[str, ...]:
     return tuple(keys.ENGINE_KEYS)
 
 
-def _load_bootstrap_json(filename: str, fallback: Mapping[str, object]) -> Dict[str, Any]:
+def _load_bootstrap_json(
+    filename: str, fallback: Mapping[str, object]
+) -> Dict[str, Any]:
     path = Path(filename)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -170,9 +181,13 @@ class AgentCliManager:
 
     def default_bootstrap_engines(self) -> tuple[str, ...]:
         configured = self._configured_default_bootstrap_engines()
-        return tuple(engine for engine in configured if engine in self.supported_engines())
+        return tuple(
+            engine for engine in configured if engine in self.supported_engines()
+        )
 
-    def resolve_bootstrap_targets(self, engine_spec: str | None = None) -> dict[str, Any]:
+    def resolve_bootstrap_targets(
+        self, engine_spec: str | None = None
+    ) -> dict[str, Any]:
         raw_spec = engine_spec
         if raw_spec is None:
             raw_spec = os.environ.get("SKILL_RUNNER_BOOTSTRAP_ENGINES", "")
@@ -295,7 +310,9 @@ class AgentCliManager:
                 detail="cli_missing",
             )
 
-        dynamic_args = list(self._engine_profile(engine).cli_management.resume_probe.dynamic_args)
+        dynamic_args = list(
+            self._engine_profile(engine).cli_management.resume_probe.dynamic_args
+        )
         if not dynamic_args:
             return static
 
@@ -364,7 +381,9 @@ class AgentCliManager:
             return match.group(0)
         return text
 
-    def ensure_installed(self, engine_spec: str | None = None) -> Dict[str, CommandResult]:
+    def ensure_installed(
+        self, engine_spec: str | None = None
+    ) -> Dict[str, CommandResult]:
         results: Dict[str, CommandResult] = {}
         targets = self.resolve_bootstrap_targets(engine_spec)["requested_engines"]
         for engine in targets:
@@ -529,7 +548,9 @@ class AgentCliManager:
         profile = self._load_engine_profile_or_none(engine)
         if profile is None:
             return None
-        candidates = self._ordered_binary_candidates(profile.cli_management.binary_candidates)
+        candidates = self._ordered_binary_candidates(
+            profile.cli_management.binary_candidates
+        )
         for base in self.profile.managed_bin_dirs:
             for name in candidates:
                 path = base / name
@@ -541,7 +562,9 @@ class AgentCliManager:
         profile = self._load_engine_profile_or_none(engine)
         if profile is None:
             return None
-        candidates = self._ordered_binary_candidates(profile.cli_management.binary_candidates)
+        candidates = self._ordered_binary_candidates(
+            profile.cli_management.binary_candidates
+        )
         global_path = self._build_global_only_path(os.environ.get("PATH", ""))
         for name in candidates:
             resolved = shutil.which(name, path=global_path)
@@ -556,7 +579,9 @@ class AgentCliManager:
             if candidate.exists() and os.access(candidate, os.X_OK):
                 return candidate
             return None
-        managed_path = os.pathsep.join(str(path) for path in self.profile.managed_bin_dirs)
+        managed_path = os.pathsep.join(
+            str(path) for path in self.profile.managed_bin_dirs
+        )
         ttyd_candidates = self._ordered_binary_candidates(TTYD_BINARY_CANDIDATES)
         for name in ttyd_candidates:
             resolved = shutil.which(name, path=managed_path)
@@ -634,7 +659,9 @@ class AgentCliManager:
         profile = self._engine_profile(engine)
         result: Dict[str, bool] = {}
         for rule in profile.cli_management.credential_imports:
-            result[rule.source] = (self.profile.agent_home / rule.target_relpath).exists()
+            result[rule.source] = (
+                self.profile.agent_home / rule.target_relpath
+            ).exists()
         return result
 
     def _evaluate_credentials_present(
@@ -649,15 +676,21 @@ class AgentCliManager:
 
         policy = profile.cli_management.credential_policy
         if policy.mode == "all_of_sources":
-            matched = all(credential_files.get(source, False) for source in policy.sources)
+            matched = all(
+                credential_files.get(source, False) for source in policy.sources
+            )
         else:
-            matched = any(credential_files.get(source, False) for source in policy.sources)
+            matched = any(
+                credential_files.get(source, False) for source in policy.sources
+            )
         if not matched:
             return False
 
         validator = policy.settings_validator
         if validator == "iflow_oauth_settings":
-            return self._is_iflow_settings_valid(self._engine_bootstrap_target_path(profile.engine))
+            return self._is_iflow_settings_valid(
+                self._engine_bootstrap_target_path(profile.engine)
+            )
         return True
 
     def _engine_bootstrap_payload(self, engine: str) -> Mapping[str, object] | str:
@@ -667,7 +700,9 @@ class AgentCliManager:
         if bootstrap_format == "json":
             fallback = _DEFAULT_BOOTSTRAP_JSON_FALLBACKS.get(engine)
             if fallback is None:
-                raise RuntimeError(f"Missing JSON bootstrap fallback for engine: {engine}")
+                raise RuntimeError(
+                    f"Missing JSON bootstrap fallback for engine: {engine}"
+                )
             return _load_bootstrap_json(bootstrap_path, fallback)
         fallback_text = _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS.get(engine)
         if fallback_text is None:
@@ -676,7 +711,10 @@ class AgentCliManager:
 
     def _engine_bootstrap_target_path(self, engine: str) -> Path:
         profile = self._engine_profile(engine)
-        return self.profile.agent_home / profile.cli_management.layout.bootstrap_target_relpath
+        return (
+            self.profile.agent_home
+            / profile.cli_management.layout.bootstrap_target_relpath
+        )
 
     def _command_exists_any(self, names: Iterable[str]) -> bool:
         return self._resolve_command_any(names) is not None
@@ -726,10 +764,13 @@ class AgentCliManager:
             )
 
         dependency_checks = {
-            "bubblewrap": self._resolve_command_any(("bwrap", "bubblewrap")) is not None,
+            "bubblewrap": self._resolve_command_any(("bwrap", "bubblewrap"))
+            is not None,
             "socat": self._resolve_command_any(("socat",)) is not None,
         }
-        missing_dependencies = [name for name, present in dependency_checks.items() if not present]
+        missing_dependencies = [
+            name for name, present in dependency_checks.items() if not present
+        ]
         checked_at = _utc_now_iso()
         if missing_dependencies:
             return ClaudeSandboxProbeResult(
@@ -792,7 +833,9 @@ class AgentCliManager:
                 probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
             )
 
-        detail = ((result.stderr or "").strip() or (result.stdout or "").strip()).splitlines()
+        detail = (
+            (result.stderr or "").strip() or (result.stdout or "").strip()
+        ).splitlines()
         first_line = detail[0] if detail else f"exit={result.returncode}"
         return ClaudeSandboxProbeResult(
             declared_enabled=True,
@@ -828,7 +871,9 @@ class AgentCliManager:
     def _ensure_bootstrap_sidecars(self, engine: str) -> None:
         if engine != "claude":
             return
-        self._ensure_json_file(self.profile.agent_home / ".claude" / "settings.json", {})
+        self._ensure_json_file(
+            self.profile.agent_home / ".claude" / "settings.json", {}
+        )
         probe = self._probe_claude_sandbox_status()
         write_claude_sandbox_probe(agent_home=self.profile.agent_home, probe=probe)
 
@@ -843,7 +888,9 @@ class AgentCliManager:
             return
         if strategy == "iflow_settings_v1":
             if not isinstance(bootstrap_payload, Mapping):
-                raise RuntimeError("iflow_settings_v1 normalizer expects JSON bootstrap payload")
+                raise RuntimeError(
+                    "iflow_settings_v1 normalizer expects JSON bootstrap payload"
+                )
             self._normalize_iflow_settings(bootstrap_path, bootstrap_payload)
             return
         raise RuntimeError(f"Unknown normalize strategy: {strategy}")
@@ -854,7 +901,9 @@ class AgentCliManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(dict(payload), indent=2) + "\n", encoding="utf-8")
 
-    def _normalize_iflow_settings(self, path: Path, defaults: Mapping[str, object]) -> None:
+    def _normalize_iflow_settings(
+        self, path: Path, defaults: Mapping[str, object]
+    ) -> None:
         selected_auth_default = str(defaults.get("selectedAuthType") or "oauth-iflow")
         base_url_default = str(defaults.get("baseUrl") or "https://apis.iflow.cn/v1")
         try:
@@ -883,7 +932,9 @@ class AgentCliManager:
             changed = True
 
         base_url = current.get("baseUrl")
-        if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+        if not isinstance(base_url, str) or not base_url.startswith(
+            ("http://", "https://")
+        ):
             current["baseUrl"] = base_url_default
             changed = True
 
@@ -985,7 +1036,9 @@ class AgentCliManager:
         return rank, name.lower()
 
     @staticmethod
-    def _command_preview(argv: Iterable[str], *, max_parts: int = 5, max_len: int = 160) -> str:
+    def _command_preview(
+        argv: Iterable[str], *, max_parts: int = 5, max_len: int = 160
+    ) -> str:
         parts = [str(part) for part in argv]
         preview_parts = parts[:max_parts]
         preview = " ".join(preview_parts)
@@ -1037,7 +1090,9 @@ class AgentCliManager:
             if not engine:
                 continue
             if engine in {"all", "none"}:
-                raise ValueError("engine spec must not mix 'all' or 'none' with engine names")
+                raise ValueError(
+                    "engine spec must not mix 'all' or 'none' with engine names"
+                )
             if engine not in supported:
                 raise ValueError(
                     "Unsupported engine in bootstrap set: "
@@ -1047,18 +1102,24 @@ class AgentCliManager:
                 seen.add(engine)
                 requested.append(engine)
         if not requested:
-            raise ValueError("bootstrap engine set must not be empty unless using 'none'")
+            raise ValueError(
+                "bootstrap engine set must not be empty unless using 'none'"
+            )
         return requested
 
 
-def format_status_payload(status: Dict[str, EngineStatus]) -> Dict[str, Dict[str, object]]:
+def format_status_payload(
+    status: Dict[str, EngineStatus],
+) -> Dict[str, Dict[str, object]]:
     return {
         engine: {"present": item.present, "version": item.version}
         for engine, item in status.items()
     }
 
 
-def format_auth_status_payload(status: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def format_auth_status_payload(
+    status: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
     return {engine: dict(payload) for engine, payload in status.items()}
 
 

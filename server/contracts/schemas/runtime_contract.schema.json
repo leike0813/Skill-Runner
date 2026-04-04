@@ -226,7 +226,7 @@
           "enum": [
             "callback",
             "device_auth",
-            "authorization_code",
+            "auth_code_or_url",
             "import",
             "api_key",
             null
@@ -237,7 +237,7 @@
           "enum": [
             "oauth_link",
             "callback_url",
-            "authorization_code",
+            "auth_code_or_url",
             "api_key",
             "import_files",
             "browser_callback_only"
@@ -275,7 +275,7 @@
           ],
           "enum": [
             "callback_url",
-            "authorization_code",
+            "auth_code_or_url",
             "import_files",
             "api_key",
             null
@@ -360,7 +360,7 @@
             "enum": [
               "callback",
               "device_auth",
-              "authorization_code",
+              "auth_code_or_url",
               "import",
               "api_key"
             ]
@@ -1442,7 +1442,7 @@
                     "type": "string",
                     "enum": [
                       "callback_url",
-                      "authorization_code",
+                      "auth_code_or_url",
                       "import_files",
                       "api_key"
                     ]
@@ -2850,7 +2850,7 @@
                     "type": "string",
                     "enum": [
                       "callback_url",
-                      "authorization_code",
+                      "auth_code_or_url",
                       "import_files",
                       "api_key"
                     ]

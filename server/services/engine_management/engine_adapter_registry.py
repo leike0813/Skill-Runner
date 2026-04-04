@@ -8,6 +8,7 @@ from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.profile_loader import validate_adapter_profiles
 
@@ -41,6 +42,11 @@ class EngineAdapterRegistry:
                 / "claude"
                 / "adapter"
                 / "adapter_profile.json",
+                "qwen": Path(__file__).resolve().parents[2]
+                / "engines"
+                / "qwen"
+                / "adapter"
+                / "adapter_profile.json",
             }
         )
         self._adapters: Dict[str, EngineExecutionAdapter] = {
@@ -49,6 +55,7 @@ class EngineAdapterRegistry:
             "iflow": IFlowExecutionAdapter(),
             "opencode": OpencodeExecutionAdapter(),
             "claude": ClaudeExecutionAdapter(),
+            "qwen": QwenExecutionAdapter(),
         }
 
     def get(self, engine: str) -> EngineExecutionAdapter | None:

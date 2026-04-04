@@ -94,7 +94,7 @@ class AuthChallengeKind(str, Enum):
 
     OAUTH_LINK = "oauth_link"
     CALLBACK_URL = "callback_url"
-    AUTHORIZATION_CODE = "authorization_code"
+    AUTH_CODE_OR_URL = "auth_code_or_url"
     API_KEY = "api_key"
     BROWSER_CALLBACK_ONLY = "browser_callback_only"
     IMPORT_FILES = "import_files"
@@ -106,7 +106,7 @@ class AuthMethod(str, Enum):
 
     CALLBACK = "callback"
     DEVICE_AUTH = "device_auth"
-    AUTHORIZATION_CODE = "authorization_code"
+    AUTH_CODE_OR_URL = "auth_code_or_url"
     API_KEY = "api_key"
     IMPORT = "import"
     CUSTOM_PROVIDER = "custom_provider"
@@ -123,7 +123,7 @@ class AuthSubmissionKind(str, Enum):
     """Chat-submitted auth payload kinds."""
 
     CALLBACK_URL = "callback_url"
-    AUTHORIZATION_CODE = "authorization_code"
+    AUTH_CODE_OR_URL = "auth_code_or_url"
     API_KEY = "api_key"
     IMPORT_FILES = "import_files"
     CUSTOM_PROVIDER = "custom_provider"

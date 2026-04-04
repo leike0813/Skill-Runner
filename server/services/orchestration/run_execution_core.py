@@ -40,6 +40,7 @@ def validate_runtime_and_model_options(
     *,
     engine: str,
     model: str | None,
+    provider_id: str | None = None,
     runtime_options: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     runtime_opts = options_policy.validate_runtime_options(runtime_options)
@@ -49,6 +50,8 @@ def validate_runtime_and_model_options(
         engine_opts["model"] = validated["model"]
         if "model_reasoning_effort" in validated:
             engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
+    if isinstance(provider_id, str) and provider_id.strip():
+        engine_opts["provider_id"] = provider_id.strip().lower()
     return runtime_opts, engine_opts
 
 

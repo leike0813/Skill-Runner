@@ -43,19 +43,36 @@ from ..services.engine_management.engine_upgrade_manager import (
     EngineUpgradeValidationError,
     engine_upgrade_manager,
 )
-from ..services.engine_management.engine_status_cache_service import engine_status_cache_service
-from ..services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
-from ..services.engine_management.engine_interaction_gate import EngineInteractionBusyError
-from ..services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
-from ..services.engine_management.engine_custom_provider_service import engine_custom_provider_service
+from ..services.engine_management.engine_status_cache_service import (
+    engine_status_cache_service,
+)
+from ..services.engine_management.engine_auth_flow_manager import (
+    engine_auth_flow_manager,
+)
+from ..services.engine_management.engine_interaction_gate import (
+    EngineInteractionBusyError,
+)
+from ..services.engine_management.engine_auth_strategy_service import (
+    engine_auth_strategy_service,
+)
+from ..services.engine_management.engine_custom_provider_service import (
+    engine_custom_provider_service,
+)
 from ..services.engine_management.model_registry import model_registry
-from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
-from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
-from ..engines.opencode.auth.provider_registry import opencode_auth_provider_registry
+from ..services.orchestration.runtime_observability_ports import (
+    install_runtime_observability_ports,
+)
+from ..services.orchestration.runtime_protocol_ports import (
+    install_runtime_protocol_ports,
+)
 from ..services.engine_management.engine_model_catalog_lifecycle import (
     engine_model_catalog_lifecycle,
 )
 from ..services.engine_management.agent_cli_manager import AgentCliManager
+from ..services.engine_management.provider_aware_auth import (
+    list_engine_auth_providers,
+    provider_aware_engines,
+)
 from ..services.skill.skill_browser import (
     build_preview_payload,
     list_skill_entries,
@@ -117,15 +134,21 @@ logger = logging.getLogger(__name__)
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
 
-LEGACY_UI_DATA_API_MODE = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_MODE", "warn").strip().lower()
-LEGACY_UI_DATA_API_SUNSET = os.environ.get("SKILL_RUNNER_UI_LEGACY_API_SUNSET", "2026-06-30")
+LEGACY_UI_DATA_API_MODE = (
+    os.environ.get("SKILL_RUNNER_UI_LEGACY_API_MODE", "warn").strip().lower()
+)
+LEGACY_UI_DATA_API_SUNSET = os.environ.get(
+    "SKILL_RUNNER_UI_LEGACY_API_SUNSET", "2026-06-30"
+)
 LEGACY_UI_DATA_API_REPLACEMENT_DOC = os.environ.get(
     "SKILL_RUNNER_UI_LEGACY_API_REPLACEMENT_DOC",
     "/docs/api_reference.md#management-api-recommended",
 )
 
 
-def _get_engine_models_context(engine: str, *, error: str | None = None, message: str | None = None) -> dict[str, object]:
+def _get_engine_models_context(
+    engine: str, *, error: str | None = None, message: str | None = None
+) -> dict[str, object]:
     view = model_registry.get_manifest_view(engine)
     snapshots_supported = model_registry.supports_model_snapshots(engine)
     return {
@@ -164,7 +187,9 @@ def _raise_ui_internal_server_error(*, action: str, exc: Exception) -> NoReturn:
     raise HTTPException(status_code=500, detail=str(exc))
 
 
-def _request_opencode_catalog_refresh_if_needed(snapshot: object, *, reason: str) -> None:
+def _request_opencode_catalog_refresh_if_needed(
+    snapshot: object, *, reason: str
+) -> None:
     if not isinstance(snapshot, Mapping):
         return
     engine = str(snapshot.get("engine") or "").strip().lower()
@@ -343,9 +368,9 @@ def _normalize_ui_skills_rows(rows: list[object]) -> list[dict[str, object]]:
         if not skill_id:
             continue
         display_name = _coerce_non_empty_str(payload.get("name"), skill_id)
-        engines = _normalize_string_list(payload.get("effective_engines")) or _normalize_string_list(
-            payload.get("engines")
-        )
+        engines = _normalize_string_list(
+            payload.get("effective_engines")
+        ) or _normalize_string_list(payload.get("engines"))
         health = _normalize_health_indicator(payload.get("health"))
         normalized.append(
             {
@@ -354,7 +379,9 @@ def _normalize_ui_skills_rows(rows: list[object]) -> list[dict[str, object]]:
                 "raw_name": skill_id,
                 "version": _coerce_non_empty_str(payload.get("version"), "-"),
                 "engines": engines,
-                "execution_modes": _normalize_execution_modes(payload.get("execution_modes")),
+                "execution_modes": _normalize_execution_modes(
+                    payload.get("execution_modes")
+                ),
                 "is_builtin": _coerce_bool(payload.get("is_builtin")),
                 "health_level": health["level"],
                 "health_fallback": health["fallback"],
@@ -420,19 +447,26 @@ def _with_engine_status_rows(rows: list[dict[str, object]]) -> list[dict[str, ob
         sandbox_status = agent_cli_manager.collect_sandbox_status(engine)
         item["sandbox_warning_code"] = sandbox_status.get("warning_code")
         item["sandbox_warning_message"] = sandbox_status.get("message")
-        item["sandbox_missing_dependencies"] = list(sandbox_status.get("missing_dependencies") or [])
+        item["sandbox_missing_dependencies"] = list(
+            sandbox_status.get("missing_dependencies") or []
+        )
         enriched.append(item)
     return enriched
 
 
 def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
-    t = getattr(request.state, "t", lambda key, default=None, **kwargs: default if default is not None else key)
+    t = getattr(
+        request.state,
+        "t",
+        lambda key, default=None, **kwargs: default if default is not None else key,
+    )
     label_defaults = {
         "codex": "Codex",
         "gemini": "Gemini",
         "iflow": "iFlow",
         "opencode": "OpenCode",
         "claude": "Claude Code",
+        "qwen": "Qwen",
     }
     input_defaults: dict[str, dict[str, str]] = {
         "gemini": {
@@ -456,6 +490,13 @@ def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
                 default="Paste the authorization code or callback URL below and submit.",
             ),
         },
+        "qwen": {
+            "default_input_kind": "text",
+            "default_input_label": t(
+                "ui.engines.input_label_qwen",
+                default="请在浏览器完成授权后输入 'done' 或直接提交",
+            ),
+        },
     }
     payload: dict[str, dict[str, str]] = {}
     for engine in keys.ENGINE_KEYS:
@@ -466,8 +507,12 @@ def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
         item = {
             "label": label,
             "auth_entry_label": t(
-                "ui.engines.table.auth_engine",
-                default="Auth ({engine})",
+                f"ui.engines.table.auth_{engine}",
+                default=t(
+                    "ui.engines.table.auth_engine",
+                    default="Auth ({engine})",
+                    engine=label,
+                ),
                 engine=label,
             ),
         }
@@ -526,7 +571,9 @@ async def ui_settings(request: Request):
 
 
 @router.get("/management/skills/table", response_class=HTMLResponse)
-async def ui_management_skills_table(request: Request, highlight_skill_id: str | None = None):
+async def ui_management_skills_table(
+    request: Request, highlight_skill_id: str | None = None
+):
     skills_payload = await _resolve_async(management_router.list_management_skills())
     return _render_skills_table(
         request=request,
@@ -537,7 +584,9 @@ async def ui_management_skills_table(request: Request, highlight_skill_id: str |
 
 @router.get("/skills/table", response_class=HTMLResponse)
 async def ui_skills_table(request: Request, highlight_skill_id: str | None = None):
-    replacement = f"/ui/management/skills/table?highlight_skill_id={highlight_skill_id or ''}"
+    replacement = (
+        f"/ui/management/skills/table?highlight_skill_id={highlight_skill_id or ''}"
+    )
     _handle_legacy_data_endpoint("/ui/skills/table", replacement)
     response = await ui_management_skills_table(request, highlight_skill_id)
     response.headers.update(_legacy_data_headers("/ui/management/skills/table"))
@@ -705,7 +754,9 @@ async def ui_run_detail(
 
 @router.get("/management/runs/{request_id}/view", response_class=HTMLResponse)
 async def ui_management_run_view_file(request: Request, request_id: str, path: str):
-    payload = await _resolve_async(management_router.get_management_run_file(request_id, path))
+    payload = await _resolve_async(
+        management_router.get_management_run_file(request_id, path)
+    )
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/file_preview.html",
@@ -781,14 +832,18 @@ async def ui_engines(request: Request):
         for engine in keys.ENGINE_KEYS
         if engine_custom_provider_service.supports(engine)
     ]
-    opencode_providers = [
-        {
-            "provider_id": item.provider_id,
-            "display_name": item.display_name,
-            "auth_mode": item.auth_mode,
-        }
-        for item in opencode_auth_provider_registry.list()
-    ]
+    engine_auth_providers = {
+        engine: [
+            {
+                "provider_id": item.provider_id,
+                "display_name": item.display_name,
+                "auth_mode": item.auth_mode,
+                "supports_import": item.supports_import,
+            }
+            for item in list_engine_auth_providers(engine)
+        ]
+        for engine in provider_aware_engines()
+    }
     return templates.TemplateResponse(
         request=request,
         name="ui/engines.html",
@@ -797,7 +852,7 @@ async def ui_engines(request: Request):
             "rows": rows,
             "session": ui_shell_manager.get_session_snapshot(),
             "auth_session": engine_auth_flow_manager.get_active_session_snapshot(),
-            "opencode_auth_providers": opencode_providers,
+            "engine_auth_providers": engine_auth_providers,
             "auth_ui_capabilities": engine_auth_strategy_service.list_ui_capabilities(),
             "auth_ui_high_risk_capabilities": (
                 engine_auth_strategy_service.list_ui_high_risk_capabilities()
@@ -815,7 +870,9 @@ async def ui_engine_tui_session_status():
 
 
 @router.post("/engines/auth/oauth-proxy/sessions")
-async def ui_engine_auth_oauth_proxy_start(request: Request, body: AuthSessionStartRequestV2):
+async def ui_engine_auth_oauth_proxy_start(
+    request: Request, body: AuthSessionStartRequestV2
+):
     if body.transport.strip().lower() != "oauth_proxy":
         raise HTTPException(status_code=422, detail="transport must be oauth_proxy")
     try:
@@ -832,7 +889,9 @@ async def ui_engine_auth_oauth_proxy_start(request: Request, body: AuthSessionSt
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_start", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_oauth_proxy_start", exc=exc
+        )
 
 
 @router.get("/engines/auth/oauth-proxy/sessions/{session_id}")
@@ -847,7 +906,9 @@ async def ui_engine_auth_oauth_proxy_status(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_status", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_oauth_proxy_status", exc=exc
+        )
 
 
 @router.post("/engines/auth/oauth-proxy/sessions/{session_id}/cancel")
@@ -863,13 +924,19 @@ async def ui_engine_auth_oauth_proxy_cancel(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_cancel", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_oauth_proxy_cancel", exc=exc
+        )
 
 
 @router.post("/engines/auth/oauth-proxy/sessions/{session_id}/input")
-async def ui_engine_auth_oauth_proxy_input(session_id: str, body: AuthSessionInputRequestV2):
+async def ui_engine_auth_oauth_proxy_input(
+    session_id: str, body: AuthSessionInputRequestV2
+):
     try:
-        payload = oauth_proxy_orchestrator.input_session(session_id, body.kind, body.value)
+        payload = oauth_proxy_orchestrator.input_session(
+            session_id, body.kind, body.value
+        )
         _request_opencode_catalog_refresh_if_needed(
             payload,
             reason="auth_success_input_submit",
@@ -886,11 +953,15 @@ async def ui_engine_auth_oauth_proxy_input(session_id: str, body: AuthSessionInp
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_oauth_proxy_input", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_oauth_proxy_input", exc=exc
+        )
 
 
 @router.post("/engines/auth/cli-delegate/sessions")
-async def ui_engine_auth_cli_delegate_start(request: Request, body: AuthSessionStartRequestV2):
+async def ui_engine_auth_cli_delegate_start(
+    request: Request, body: AuthSessionStartRequestV2
+):
     if body.transport.strip().lower() != "cli_delegate":
         raise HTTPException(status_code=422, detail="transport must be cli_delegate")
     try:
@@ -907,7 +978,9 @@ async def ui_engine_auth_cli_delegate_start(request: Request, body: AuthSessionS
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_start", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_cli_delegate_start", exc=exc
+        )
 
 
 @router.get("/engines/auth/cli-delegate/sessions/{session_id}")
@@ -922,7 +995,9 @@ async def ui_engine_auth_cli_delegate_status(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_status", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_cli_delegate_status", exc=exc
+        )
 
 
 @router.post("/engines/auth/cli-delegate/sessions/{session_id}/cancel")
@@ -938,13 +1013,19 @@ async def ui_engine_auth_cli_delegate_cancel(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Auth session not found")
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_cancel", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_cli_delegate_cancel", exc=exc
+        )
 
 
 @router.post("/engines/auth/cli-delegate/sessions/{session_id}/input")
-async def ui_engine_auth_cli_delegate_input(session_id: str, body: AuthSessionInputRequestV2):
+async def ui_engine_auth_cli_delegate_input(
+    session_id: str, body: AuthSessionInputRequestV2
+):
     try:
-        payload = cli_delegate_orchestrator.input_session(session_id, body.kind, body.value)
+        payload = cli_delegate_orchestrator.input_session(
+            session_id, body.kind, body.value
+        )
         _request_opencode_catalog_refresh_if_needed(
             payload,
             reason="auth_success_input_submit",
@@ -961,20 +1042,22 @@ async def ui_engine_auth_cli_delegate_input(session_id: str, body: AuthSessionIn
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except (RuntimeError, OSError, TypeError, LookupError, ValueError) as exc:
-        _raise_ui_internal_server_error(action="ui_engine_auth_cli_delegate_input", exc=exc)
+        _raise_ui_internal_server_error(
+            action="ui_engine_auth_cli_delegate_input", exc=exc
+        )
 
 
 @router.post("/engines/auth/sessions")
 async def ui_engine_auth_start(request: Request, body: EngineAuthSessionStartRequest):
     try:
         payload = engine_auth_flow_manager.start_session(
-                engine=body.engine,
-                method=body.method,
-                auth_method=body.auth_method,
-                provider_id=body.provider_id,
-                transport=body.transport,
-                callback_base_url=str(request.base_url).rstrip("/"),
-            )
+            engine=body.engine,
+            method=body.method,
+            auth_method=body.auth_method,
+            provider_id=body.provider_id,
+            transport=body.transport,
+            callback_base_url=str(request.base_url).rstrip("/"),
+        )
         payload["deprecated"] = True
         return JSONResponse(payload)
     except EngineInteractionBusyError as exc:
@@ -1029,7 +1112,9 @@ async def ui_engine_auth_cancel(session_id: str):
 @router.post("/engines/auth/sessions/{session_id}/input")
 async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequest):
     try:
-        payload = engine_auth_flow_manager.input_session(session_id, body.kind, body.value)
+        payload = engine_auth_flow_manager.input_session(
+            session_id, body.kind, body.value
+        )
         _request_opencode_catalog_refresh_if_needed(
             payload,
             reason="auth_success_input_submit",
@@ -1056,7 +1141,9 @@ async def ui_engine_tui_start(
     custom_model: str | None = Form(default=None),
 ):
     if not _is_ttyd_available():
-        raise HTTPException(status_code=503, detail="ttyd not found. Inline TUI is unavailable.")
+        raise HTTPException(
+            status_code=503, detail="ttyd not found. Inline TUI is unavailable."
+        )
     try:
         data = ui_shell_manager.start_session(engine, custom_model=custom_model)
         return JSONResponse(data)
@@ -1072,12 +1159,16 @@ async def ui_engine_tui_start(
 
 @router.post("/engines/tui/session/input")
 async def ui_engine_tui_input(text: str = Form(...)):
-    raise HTTPException(status_code=410, detail="Direct input endpoint is removed; use ttyd gateway")
+    raise HTTPException(
+        status_code=410, detail="Direct input endpoint is removed; use ttyd gateway"
+    )
 
 
 @router.post("/engines/tui/session/resize")
 async def ui_engine_tui_resize(cols: int = Form(...), rows: int = Form(...)):
-    raise HTTPException(status_code=410, detail="Resize endpoint is removed; use ttyd gateway")
+    raise HTTPException(
+        status_code=410, detail="Resize endpoint is removed; use ttyd gateway"
+    )
 
 
 @router.post("/engines/tui/session/stop")
@@ -1171,7 +1262,10 @@ async def ui_engine_upgrade_status(request: Request, request_id: str):
     status = str(record.get("status", EngineUpgradeTaskStatus.FAILED.value))
     results_obj = record.get("results")
     results = results_obj if isinstance(results_obj, dict) else {}
-    poll = status in {EngineUpgradeTaskStatus.QUEUED.value, EngineUpgradeTaskStatus.RUNNING.value}
+    poll = status in {
+        EngineUpgradeTaskStatus.QUEUED.value,
+        EngineUpgradeTaskStatus.RUNNING.value,
+    }
     return _render_engine_upgrade_status(
         request=request,
         request_id=request_id,
@@ -1183,7 +1277,9 @@ async def ui_engine_upgrade_status(request: Request, request_id: str):
 
 
 @router.get("/engines/{engine}/models", response_class=HTMLResponse)
-async def ui_engine_models(request: Request, engine: str, error: str | None = None, message: str | None = None):
+async def ui_engine_models(
+    request: Request, engine: str, error: str | None = None, message: str | None = None
+):
     try:
         context = _get_engine_models_context(engine, error=error, message=message)
     except ValueError as exc:
@@ -1247,9 +1343,17 @@ async def ui_engine_models_add_snapshot(
             continue
         model_value = model[index].strip() if index < len(model) else ""
         notes_value = notes[index].strip() if index < len(notes) else ""
-        deprecated_raw = deprecated[index].strip().lower() if index < len(deprecated) else "false"
-        effort_raw = supported_effort[index].strip() if index < len(supported_effort) else ""
-        efforts = [item.strip() for item in effort_raw.split(",") if item.strip()] if effort_raw else None
+        deprecated_raw = (
+            deprecated[index].strip().lower() if index < len(deprecated) else "false"
+        )
+        effort_raw = (
+            supported_effort[index].strip() if index < len(supported_effort) else ""
+        )
+        efforts = (
+            [item.strip() for item in effort_raw.split(",") if item.strip()]
+            if effort_raw
+            else None
+        )
         models.append(
             {
                 "id": model_id_clean,

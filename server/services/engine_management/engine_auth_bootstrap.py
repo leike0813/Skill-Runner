@@ -7,17 +7,25 @@ from pathlib import Path
 from typing import Any
 
 from server.engines.claude.auth import ClaudeAuthCliFlow, ClaudeOAuthProxyFlow
-from server.engines.claude.auth.callbacks.local_callback_server import claude_local_callback_server
+from server.engines.claude.auth.callbacks.local_callback_server import (
+    claude_local_callback_server,
+)
 from server.engines.claude.auth.runtime_handler import ClaudeAuthRuntimeHandler
 from server.engines.codex.auth import CodexOAuthProxyFlow
 from server.engines.codex.auth.runtime_handler import CodexAuthRuntimeHandler
-from server.engines.common.callbacks.openai_local_callback_server import openai_local_callback_server
+from server.engines.common.callbacks.openai_local_callback_server import (
+    openai_local_callback_server,
+)
 from server.engines.common.openai_auth import OpenAIDeviceProxyFlow
 from server.engines.gemini.auth import GeminiAuthCliFlow, GeminiOAuthProxyFlow
-from server.engines.gemini.auth.callbacks.local_callback_server import gemini_local_callback_server
+from server.engines.gemini.auth.callbacks.local_callback_server import (
+    gemini_local_callback_server,
+)
 from server.engines.gemini.auth.runtime_handler import GeminiAuthRuntimeHandler
 from server.engines.iflow.auth import IFlowAuthCliFlow, IFlowOAuthProxyFlow
-from server.engines.iflow.auth.callbacks.local_callback_server import iflow_local_callback_server
+from server.engines.iflow.auth.callbacks.local_callback_server import (
+    iflow_local_callback_server,
+)
 from server.engines.iflow.auth.runtime_handler import IFlowAuthRuntimeHandler
 from server.engines.opencode.auth import (
     OpencodeAuthCliFlow,
@@ -28,13 +36,21 @@ from server.engines.opencode.auth.callbacks.antigravity_local_callback_server im
     antigravity_local_callback_server,
 )
 from server.engines.opencode.auth.runtime_handler import OpencodeAuthRuntimeHandler
+from server.engines.qwen.auth import (
+    QwenAuthCliFlow,
+    CodingPlanAuthFlow,
+    QwenOAuthProxyFlow,
+)
+from server.engines.qwen.auth.runtime_handler import QwenAuthRuntimeHandler
 from server.runtime.auth.callbacks import CallbackListenerRegistry
 from server.runtime.auth.cli_pty_runtime import detect_pywinpty_support
 from server.runtime.auth.driver_registry import AuthDriverRegistry
-from server.services.engine_management.engine_auth_strategy_service import engine_auth_strategy_service
+from server.services.engine_management.engine_auth_strategy_service import (
+    engine_auth_strategy_service,
+)
 
 logger = logging.getLogger(__name__)
-_WINDOWS_PYWINPTY_ENGINES = frozenset({"gemini", "iflow", "opencode"})
+_WINDOWS_PYWINPTY_ENGINES = frozenset({"gemini", "iflow", "opencode", "qwen"})
 
 
 @dataclass(frozen=True)
@@ -66,7 +82,9 @@ def _register_auth_driver(
     )
 
 
-def _build_driver_registry(*, disabled_cli_delegate_engines: set[str] | None = None) -> AuthDriverRegistry:
+def _build_driver_registry(
+    *, disabled_cli_delegate_engines: set[str] | None = None
+) -> AuthDriverRegistry:
     disabled = disabled_cli_delegate_engines or set()
     registry = AuthDriverRegistry()
     for entry in engine_auth_strategy_service.iter_driver_entries():
@@ -110,7 +128,9 @@ def _build_callback_listener_registry() -> CallbackListenerRegistry:
     return registry
 
 
-def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootstrapBundle:
+def build_engine_auth_bootstrap(
+    manager: Any, *, agent_home: Path
+) -> AuthBootstrapBundle:
     agent_home.mkdir(parents=True, exist_ok=True)
     disabled_cli_delegate_engines = _resolve_disabled_cli_delegate_engines()
     # Flows are attached on manager because runtime handlers access them via manager attributes.
@@ -124,9 +144,14 @@ def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootst
     manager._codex_oauth_proxy_flow = CodexOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._claude_oauth_proxy_flow = ClaudeOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._opencode_openai_oauth_proxy_flow = OpencodeOpenAIOAuthProxyFlow(agent_home)  # noqa: SLF001
-    manager._opencode_google_antigravity_oauth_proxy_flow = OpencodeGoogleAntigravityOAuthProxyFlow(  # noqa: SLF001
-        agent_home
+    manager._opencode_google_antigravity_oauth_proxy_flow = (
+        OpencodeGoogleAntigravityOAuthProxyFlow(  # noqa: SLF001
+            agent_home
+        )
     )
+    manager._qwen_oauth_proxy_flow = QwenOAuthProxyFlow(agent_home)  # noqa: SLF001
+    manager._qwen_coding_plan_flow = CodingPlanAuthFlow(agent_home)  # noqa: SLF001
+    manager._qwen_flow = QwenAuthCliFlow(agent_home)  # noqa: SLF001
 
     handlers = {
         "codex": CodexAuthRuntimeHandler(manager),
@@ -134,9 +159,12 @@ def build_engine_auth_bootstrap(manager: Any, *, agent_home: Path) -> AuthBootst
         "iflow": IFlowAuthRuntimeHandler(manager),
         "opencode": OpencodeAuthRuntimeHandler(manager),
         "claude": ClaudeAuthRuntimeHandler(manager),
+        "qwen": QwenAuthRuntimeHandler(manager),
     }
     return AuthBootstrapBundle(
-        driver_registry=_build_driver_registry(disabled_cli_delegate_engines=disabled_cli_delegate_engines),
+        driver_registry=_build_driver_registry(
+            disabled_cli_delegate_engines=disabled_cli_delegate_engines
+        ),
         callback_listener_registry=_build_callback_listener_registry(),
         engine_auth_handlers=handlers,
     )

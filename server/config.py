@@ -233,6 +233,7 @@ _C.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = (
     "codex",
     "gemini",
     "claude",
+    "qwen"
 )
 
 

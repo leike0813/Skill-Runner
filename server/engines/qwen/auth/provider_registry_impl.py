@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from threading import Lock
+from typing import Dict, List
+
+
+@dataclass(frozen=True)
+class QwenAuthProvider:
+    provider_id: str
+    display_name: str
+    auth_mode: str
+    menu_label: str
+    supports_import: bool
+
+
+class QwenAuthProviderRegistry:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._providers: Dict[str, QwenAuthProvider] = {}
+        self._ordered_ids: List[str] = []
+        self._loaded = False
+
+    def _config_path(self) -> Path:
+        # Use __file__ to compute path: server/engines/qwen/auth/provider_registry_impl.py -> server/engines/qwen/config/auth_providers.json
+        return Path(__file__).resolve().parent.parent / "config" / "auth_providers.json"
+
+    def _load_locked(self) -> None:
+        if self._loaded:
+            return
+        path = self._config_path()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        providers = payload.get("providers", [])
+        mapped: Dict[str, QwenAuthProvider] = {}
+        ordered: List[str] = []
+        for row in providers:
+            provider = QwenAuthProvider(
+                provider_id=str(row["provider_id"]).strip(),
+                display_name=str(row["display_name"]).strip(),
+                auth_mode=str(row["auth_mode"]).strip().lower(),
+                menu_label=str(row["menu_label"]).strip(),
+                supports_import=bool(row.get("supports_import", False)),
+            )
+            if provider.auth_mode not in {"oauth", "api_key"}:
+                raise ValueError(
+                    f"Unsupported auth mode for provider '{provider.provider_id}'"
+                )
+            mapped[provider.provider_id] = provider
+            ordered.append(provider.provider_id)
+        self._providers = mapped
+        self._ordered_ids = ordered
+        self._loaded = True
+
+    def list(self) -> List[QwenAuthProvider]:
+        with self._lock:
+            self._load_locked()
+            return [self._providers[key] for key in self._ordered_ids]
+
+    def get(self, provider_id: str) -> QwenAuthProvider:
+        key = provider_id.strip().lower()
+        with self._lock:
+            self._load_locked()
+            provider = self._providers.get(key)
+            if provider is None:
+                raise ValueError(f"Unsupported qwen provider: {provider_id}")
+            return provider
+
+
+qwen_auth_provider_registry = QwenAuthProviderRegistry()

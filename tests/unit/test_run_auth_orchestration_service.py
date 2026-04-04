@@ -9,7 +9,14 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from server.models import AuthMethod, AuthSessionPhase, AuthSubmission, AuthSubmissionKind, RunStatus
+from server.models import (
+    AuthChallengeKind,
+    AuthMethod,
+    AuthSessionPhase,
+    AuthSubmission,
+    AuthSubmissionKind,
+    RunStatus,
+)
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_audit_service import RunAuditService
@@ -70,6 +77,18 @@ def test_challenge_profile_appends_high_risk_notice_for_opencode_google() -> Non
     )
 
     assert "High risk!" in prompt
+
+
+def test_resolve_effective_provider_id_prefers_canonical_for_provider_aware_engine() -> None:
+    service = RunAuthOrchestrationService()
+
+    resolved = service._resolve_effective_provider_id(  # noqa: SLF001
+        engine_name="qwen",
+        auth_detection=_build_detection(engine="qwen", provider_id="coding-plan-global"),
+        canonical_provider_id="qwen-oauth",
+    )
+
+    assert resolved == "qwen-oauth"
 
 
 def test_build_import_pending_auth_embeds_upload_files_ask_user(monkeypatch) -> None:
@@ -263,6 +282,61 @@ async def test_create_pending_auth_single_method_starts_session(monkeypatch, tmp
     state_payload = _read_state_payload(run_dir)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
+
+
+@pytest.mark.asyncio
+async def test_create_pending_auth_qwen_oauth_proxy_auto_poll_hides_chat_input(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-qwen-auto-poll"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
+        lambda **_kwargs: {
+            "session_id": "auth-qwen-1",
+            "engine": "qwen",
+            "provider_id": "qwen-oauth",
+            "status": "waiting_user",
+            "input_kind": None,
+            "auth_url": "https://chat.qwen.ai/device?user_code=TEST123",
+            "user_code": "TEST123",
+            "created_at": "2099-03-03T00:00:00Z",
+            "expires_at": "2099-03-03T00:15:00Z",
+            "error": None,
+        },
+    )
+
+    backend = SimpleNamespace(
+        clear_pending_auth_method_selection=AsyncMock(),
+        set_pending_auth=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        update_run_status=AsyncMock(),
+    )
+
+    service = RunAuthOrchestrationService()
+    pending_auth = await service.create_pending_auth(
+        run_id="run-1",
+        run_dir=run_dir,
+        request_id="req-1",
+        skill_id="demo-skill",
+        engine_name="qwen",
+        options={"execution_mode": "interactive"},
+        attempt_number=1,
+        auth_detection=_build_detection(engine="qwen", provider_id="qwen-oauth", subcategory="oauth_reauth"),
+        canonical_provider_id="qwen-oauth",
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **_kwargs: None,
+        update_status=lambda *_args, **_kwargs: None,
+    )
+
+    assert pending_auth is not None
+    assert pending_auth.auth_method == AuthMethod.AUTH_CODE_OR_URL
+    assert pending_auth.challenge_kind == AuthChallengeKind.AUTH_CODE_OR_URL
+    assert pending_auth.accepts_chat_input is False
+    assert pending_auth.input_kind is None
+    assert pending_auth.auth_url == "https://chat.qwen.ai/device?user_code=TEST123"
+    assert pending_auth.user_code == "TEST123"
+    assert pending_auth.instructions is not None
+    assert "polling automatically" in pending_auth.instructions
 
 
 @pytest.mark.asyncio
@@ -512,14 +586,14 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
         "auth_session_id": "auth-1",
         "engine": "iflow",
         "provider_id": None,
-        "auth_method": "authorization_code",
-        "challenge_kind": "authorization_code",
-        "prompt": "Paste authorization code",
+        "auth_method": "auth_code_or_url",
+        "challenge_kind": "auth_code_or_url",
+        "prompt": "Paste callback URL or authorization code",
         "auth_url": "https://auth.example.dev",
         "user_code": None,
-        "instructions": "Paste the code from browser.",
+        "instructions": "Paste the callback URL or authorization code from browser.",
         "accepts_chat_input": True,
-        "input_kind": "authorization_code",
+        "input_kind": "auth_code_or_url",
         "last_error": None,
         "source_attempt": 1,
         "phase": "challenge_active",
@@ -577,7 +651,7 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     response = await service.submit_auth_input(
         request_id="req-1",
         run_id="run-1",
-        request=AuthSubmission(kind=AuthSubmissionKind.AUTHORIZATION_CODE, value="AUTH-CODE"),
+        request=AuthSubmission(kind=AuthSubmissionKind.AUTH_CODE_OR_URL, value="AUTH-CODE"),
         auth_session_id="auth-1",
         background_tasks=background_tasks,
         run_store_backend=backend,
@@ -816,10 +890,10 @@ async def test_get_auth_session_status_returns_backend_truth(monkeypatch):
                 "waiting_auth": True,
                 "phase": "challenge_active",
                 "timed_out": False,
-                "available_methods": ["callback", "authorization_code"],
-                    "selected_method": "authorization_code",
+                "available_methods": ["callback", "auth_code_or_url"],
+                    "selected_method": "auth_code_or_url",
                     "auth_session_id": "auth-1",
-                    "challenge_kind": "authorization_code",
+                    "challenge_kind": "auth_code_or_url",
                     "timeout_sec": 900,
                     "created_at": "2099-03-03T00:00:00Z",
                     "expires_at": "2099-03-03T00:15:00Z",
@@ -834,8 +908,8 @@ async def test_get_auth_session_status_returns_backend_truth(monkeypatch):
 
     assert status.waiting_auth is True
     assert status.phase == AuthSessionPhase.CHALLENGE_ACTIVE
-    assert status.selected_method == AuthMethod.AUTHORIZATION_CODE
-    assert status.available_methods == [AuthMethod.CALLBACK, AuthMethod.AUTHORIZATION_CODE]
+    assert status.selected_method == AuthMethod.AUTH_CODE_OR_URL
+    assert status.available_methods == [AuthMethod.CALLBACK, AuthMethod.AUTH_CODE_OR_URL]
 
 
 @pytest.mark.asyncio

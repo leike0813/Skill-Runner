@@ -16,5 +16,5 @@ in_conversation:
   transport: oauth_proxy
   methods:
     - callback
-    - authorization_code
+    - auth_code_or_url
     - import

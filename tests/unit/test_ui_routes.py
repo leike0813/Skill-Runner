@@ -2,14 +2,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
+from fastapi import Request
 
 from server.main import app
+from server.routers.ui import _build_engine_ui_metadata
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
 
@@ -45,6 +48,26 @@ def _read_run_detail_template() -> str:
 
 def _read_ui_template(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+
+def test_build_engine_ui_metadata_prefers_engine_specific_auth_label() -> None:
+    translations = {
+        "ui.engines.engine_qwen": "Qwen",
+        "ui.engines.table.auth_qwen": "鉴权(Qwen)",
+    }
+
+    def _translate(key, default=None, **kwargs):  # noqa: ANN001
+        value = translations.get(key, default if default is not None else key)
+        if isinstance(value, str) and kwargs:
+            return value.format(**kwargs)
+        return value
+
+    request = cast(Request, SimpleNamespace(state=SimpleNamespace(t=_translate)))
+
+    payload = _build_engine_ui_metadata(request)
+
+    assert payload["qwen"]["label"] == "Qwen"
+    assert payload["qwen"]["auth_entry_label"] == "鉴权(Qwen)"
 
 
 @pytest.mark.asyncio
@@ -135,11 +158,12 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
     assert 'id="engine-status-indicator"' in response.text
     assert 'data-engine-status-refresh="static"' in response.text
-    assert 'data-engine-count="5"' in response.text
-    assert "style=\"--engine-count: 5;\"" in response.text
+    assert 'data-engine-count="6"' in response.text
+    assert "style=\"--engine-count: 6;\"" in response.text
     assert 'data-engine="codex" data-status-level="healthy"' in response.text
     assert 'data-engine="gemini" data-status-level="warning"' in response.text
     assert 'data-engine="iflow" data-status-level="error"' in response.text
+    assert 'data-engine="qwen" data-status-level="error"' in response.text
 
 
 @pytest.mark.asyncio
@@ -1131,6 +1155,63 @@ async def test_ui_engine_auth_start_passes_auth_method(monkeypatch):
     assert response.status_code == 200
     assert captured["auth_method"] == "auth_code_or_url"
     assert captured["provider_id"] == "openai"
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_auth_start_route_qwen_provider_aware(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    captured = {}
+
+    def _start(engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None):  # noqa: ANN001
+        captured.update(
+            {
+                "engine": engine,
+                "method": method,
+                "auth_method": auth_method,
+                "provider_id": provider_id,
+                "transport": transport,
+            }
+        )
+        return {
+            "session_id": "auth-qwen-ui-1",
+            "engine": engine,
+            "method": method,
+            "auth_method": auth_method,
+            "transport": transport,
+            "provider_id": provider_id,
+            "status": "waiting_user",
+            "input_kind": "api_key",
+            "created_at": "2026-02-25T00:00:00Z",
+            "updated_at": "2026-02-25T00:00:01Z",
+            "expires_at": "2026-02-25T00:15:00Z",
+            "credential_state": "missing",
+            "error": None,
+            "exit_code": None,
+            "terminal": False,
+        }
+
+    monkeypatch.setattr("server.routers.ui.engine_auth_flow_manager.start_session", _start)
+    response = await _request(
+        "POST",
+        "/ui/engines/auth/sessions",
+        json={
+            "engine": "qwen",
+            "method": "auth",
+            "provider_id": "coding-plan-global",
+            "transport": "cli_delegate",
+            "auth_method": "api_key",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["provider_id"] == "coding-plan-global"
+    assert captured == {
+        "engine": "qwen",
+        "method": "auth",
+        "auth_method": "api_key",
+        "provider_id": "coding-plan-global",
+        "transport": "cli_delegate",
+    }
 
 
 @pytest.mark.asyncio

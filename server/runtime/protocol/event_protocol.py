@@ -797,12 +797,12 @@ def translate_orchestrator_event_to_fcmp_specs(
             return specs
         push(
             FcmpEventType.AUTH_INPUT_ACCEPTED.value,
-            make_fcmp_auth_input_accepted(
-                auth_session_id=auth_session_id,
-                submission_kind=str(data.get("submission_kind") or "authorization_code"),
-                accepted_at=(
-                    data.get("accepted_at")
-                    if isinstance(data.get("accepted_at"), str)
+                make_fcmp_auth_input_accepted(
+                    auth_session_id=auth_session_id,
+                    submission_kind=str(data.get("submission_kind") or "auth_code_or_url"),
+                    accepted_at=(
+                        data.get("accepted_at")
+                        if isinstance(data.get("accepted_at"), str)
                     else updated_at
                 ),
             ),
@@ -1500,7 +1500,7 @@ def build_fcmp_events(
                 FcmpEventType.AUTH_INPUT_ACCEPTED.value,
                 make_fcmp_auth_input_accepted(
                     auth_session_id=auth_session_id,
-                    submission_kind=str(row_data.get("submission_kind") or "authorization_code"),
+                    submission_kind=str(row_data.get("submission_kind") or "auth_code_or_url"),
                     accepted_at=(
                         row_data.get("accepted_at")
                         if isinstance(row_data.get("accepted_at"), str)

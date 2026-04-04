@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from server.config_registry import keys
-from server.engines.opencode.auth.provider_registry import opencode_auth_provider_registry
 from server.runtime.adapter.common.profile_loader import CredentialImportProfile, load_adapter_profile
+from server.services.engine_management.provider_aware_auth import (
+    get_engine_auth_provider,
+    is_provider_aware_engine,
+)
 from server.services.engine_management.auth_import_validator_registry import (
     AuthImportValidationError,
     auth_import_validator_registry,
@@ -61,7 +64,7 @@ class AuthImportService:
         profile = self._load_profile(engine)
         imports = {rule.source: rule for rule in profile.cli_management.credential_imports}
         normalized_engine = profile.engine
-        if normalized_engine != "opencode":
+        if not is_provider_aware_engine(normalized_engine):
             required_sources = profile.cli_management.credential_policy.sources
             required_rules: list[CredentialImportProfile] = []
             for source in required_sources:
@@ -83,23 +86,43 @@ class AuthImportService:
 
         normalized_provider = self._normalize_provider(provider_id)
         if normalized_provider is None:
-            raise AuthImportError("provider_id is required for opencode auth import")
-        provider = opencode_auth_provider_registry.get(normalized_provider)
-        if provider.auth_mode != "oauth":
             raise AuthImportError(
-                f"opencode provider `{normalized_provider}` does not support import auth"
+                f"provider_id is required for {normalized_engine} auth import"
+            )
+        provider = get_engine_auth_provider(normalized_engine, normalized_provider)
+        if not provider.supports_import:
+            raise AuthImportError(
+                f"{normalized_engine} provider `{normalized_provider}` does not support import auth"
             )
 
-        auth_rule = imports.get("auth.json")
-        if auth_rule is None:
-            raise AuthImportError("opencode adapter profile missing auth.json import rule")
-        if normalized_provider == "google":
-            google_optional_rules: list[CredentialImportProfile] = []
-            antigravity_rule = imports.get("antigravity-accounts.json")
-            if antigravity_rule is not None:
-                google_optional_rules.append(antigravity_rule)
-            return _RuleSelection(required=(auth_rule,), optional=tuple(google_optional_rules))
-        return _RuleSelection(required=(auth_rule,), optional=tuple())
+        if normalized_engine == "opencode":
+            auth_rule = imports.get("auth.json")
+            if auth_rule is None:
+                raise AuthImportError("opencode adapter profile missing auth.json import rule")
+            if normalized_provider == "google":
+                google_optional_rules: list[CredentialImportProfile] = []
+                antigravity_rule = imports.get("antigravity-accounts.json")
+                if antigravity_rule is not None:
+                    google_optional_rules.append(antigravity_rule)
+                return _RuleSelection(required=(auth_rule,), optional=tuple(google_optional_rules))
+            return _RuleSelection(required=(auth_rule,), optional=tuple())
+
+        required_sources = profile.cli_management.credential_policy.sources
+        required_rules = []
+        for source in required_sources:
+            rule = imports.get(source)
+            if rule is None:
+                raise AuthImportError(
+                    f"Engine `{normalized_engine}` missing import rule for required file: {source}"
+                )
+            required_rules.append(rule)
+        optional_rules = [
+            rule for source, rule in imports.items() if source not in set(required_sources)
+        ]
+        return _RuleSelection(
+            required=tuple(required_rules),
+            optional=tuple(optional_rules),
+        )
 
     def _resolve_target_path(self, target_relpath: str) -> Path:
         candidate = (self._runtime_profile.agent_home / target_relpath).resolve()
@@ -234,12 +257,12 @@ class AuthImportService:
             )
 
         supported = True
-        if profile.engine == "opencode":
+        if is_provider_aware_engine(profile.engine):
             if normalized_provider is None:
                 supported = False
             else:
-                provider = opencode_auth_provider_registry.get(normalized_provider)
-                supported = provider.auth_mode == "oauth"
+                provider = get_engine_auth_provider(profile.engine, normalized_provider)
+                supported = provider.supports_import
 
         ui_hints: dict[str, Any] = {}
         if profile.engine == "opencode" and normalized_provider == "google":

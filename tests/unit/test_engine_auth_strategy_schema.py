@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import jsonschema  # type: ignore[import-untyped]
 import pytest
@@ -41,3 +42,26 @@ def test_engine_auth_strategy_schema_rejects_missing_required_fields() -> None:
 
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=strategy, schema=schema)
+
+
+def test_engine_auth_strategy_schema_accepts_session_behavior_extension() -> None:
+    schema = _load_schema()
+    strategy = _load_strategy()
+    engines = cast(dict[str, object], strategy["engines"])
+    qwen = engines["qwen"]
+    assert isinstance(qwen, dict)
+    providers = qwen["providers"]
+    assert isinstance(providers, dict)
+    qwen_oauth = providers["qwen-oauth"]
+    assert isinstance(qwen_oauth, dict)
+    transports = qwen_oauth["transports"]
+    assert isinstance(transports, dict)
+    oauth_proxy = transports["oauth_proxy"]
+    assert isinstance(oauth_proxy, dict)
+
+    oauth_proxy["session_behavior"] = {
+        "input_required": False,
+        "polling_start": "immediate",
+    }
+
+    jsonschema.validate(instance=strategy, schema=schema)

@@ -7,6 +7,7 @@ from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 
 
 def _platform_cmd(path: str) -> str:
@@ -280,6 +281,57 @@ def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monk
         "--custom-flag",
         "--model",
         "google/gemini-3.1-pro-preview",
+        "next turn",
+    ]
+
+
+def test_qwen_start_command_uses_headless_stream_json_flags(monkeypatch) -> None:
+    adapter = QwenExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/qwen"))
+
+    command = adapter.build_start_command(
+        prompt="hello",
+        options={"model": "coder-model"},
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/qwen"),
+        "--output-format",
+        "stream-json",
+        "--approval-mode",
+        "yolo",
+        "-p",
+        "hello",
+    ]
+
+
+def test_qwen_resume_command_uses_resume_flag_and_prompt(monkeypatch) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = QwenExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/qwen"))
+
+    command = adapter.build_resume_command(
+        prompt="next turn",
+        options={},
+        session_handle=EngineSessionHandle(
+            engine="qwen",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="sess-qwen",
+            created_at_turn=1,
+        ),
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/qwen"),
+        "--output-format",
+        "stream-json",
+        "--approval-mode",
+        "yolo",
+        "--resume",
+        "sess-qwen",
+        "-p",
         "next turn",
     ]
 

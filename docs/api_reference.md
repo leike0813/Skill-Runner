@@ -46,8 +46,8 @@
 
 ### Engine 管理
 - `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/models_count`，版本来自后台缓存）
-- `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`）
-- `GET /v1/management/engines/{engine}/auth/import/spec`：返回该引擎（及 OpenCode provider）导入鉴权文件要求
+- `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`；模型项在适用时可带 `provider/provider_id/model/source`）
+- `GET /v1/management/engines/{engine}/auth/import/spec`：返回该引擎（及 provider-aware provider）导入鉴权文件要求
 - `POST /v1/management/engines/{engine}/auth/import`：提交并导入鉴权文件（multipart）
 
 ### Run 管理（对话窗口）
@@ -583,14 +583,15 @@
 ```json
 {
   "skill_id": "demo-prime-number",
-  "engine": "gemini",          // 可选: "gemini" / "codex" / "iflow" / "opencode" (默认: codex)
+  "engine": "qwen",            // 可选: "gemini" / "codex" / "iflow" / "opencode" / "claude" / "qwen" (默认: codex)
+  "provider_id": "qwen-oauth",
   "input": {
     "query": "some inline input payload"
   },
   "parameter": {
     "divisor": 1                 // 仅包含配置参数
   },
-  "model": "gemini-2.5-pro",
+  "model": "coder-model",
   "runtime_options": {}
 }
 ```
@@ -602,9 +603,11 @@
   - 对 `x-input-source=file`（或未声明，默认 file）的字段，值也在请求体 `input` 中显式提交，但值必须是 `uploads/` 根下相对路径（例如 `papers/a.pdf`）。
 - **参数分离**: API 请求体中的 `parameter` 字段仅用于传递 `parameter.schema.json` 中定义的数值或配置。
 - **模型字段**:
+  - provider-aware engine（当前为 `opencode`、`qwen`）推荐显式提交 `provider_id + model`。
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
   - **Codex** 使用 `model_name@reasoning_effort` 格式（例如 `gpt-5.2-codex@high`）。
-  - **OpenCode** 使用 `provider/model` 格式（例如 `openai/gpt-5`），不支持 `@effort` 后缀。
+  - **OpenCode** 旧客户端仍可使用 `provider/model` 格式（例如 `openai/gpt-5`）；新客户端推荐显式传 `provider_id=openai` 且 `model=gpt-5`。
+  - **Qwen** 的 Coding Plan provider 可能暴露同名模型；新客户端应以 `provider_id + model` 作为规范选择方式。
   - **iFlow 运行时默认配置（托管环境）**：若未提供 `~/.iflow/settings.json`，服务会写入最小可用默认值：
     - `selectedAuthType = "oauth-iflow"`
     - `baseUrl = "https://apis.iflow.cn/v1"`
@@ -699,6 +702,10 @@
 - `model` 为本次 run 记录的模型标识（若请求未显式指定则可能为空）。
 - `pending_auth_session_id` 非空时，表示 run 正在等待引擎鉴权，客户端应查询 `auth/session`。
 - `pending_payload` 包含待决事项的额外结构化载荷（如鉴权 URL 等），可用于前端直接渲染。
+- 当 run 处于 `waiting_auth` 时，前端通常应同时读取 `GET /v1/jobs/{request_id}/interaction/pending` 与 `GET /v1/jobs/{request_id}/auth/session`：
+  - `interaction/pending` 提供聊天侧 challenge 语义，如 `accepts_chat_input`、`input_kind`、`auth_url`、`user_code`
+  - `auth/session` 提供底层引擎鉴权会话状态真相
+- 若 `pending_auth.accepts_chat_input=false` 且 `pending_auth.input_kind=null`，前端应隐藏输入框并继续轮询状态；这类 challenge 仍可能返回 `auth_url` / `user_code` 供用户在浏览器中完成授权。
 - `interaction_count` 为当前 request 已记录的交互轮次计数。
 - `recovery_state` 取值：`none | recovered_waiting | failed_reconciled`。
 - `failed_reconciled` 常见错误码：`SESSION_RESUME_FAILED`、`ORCHESTRATOR_RESTART_INTERRUPTED`。
@@ -785,7 +792,7 @@
 
 **Request**:
 - `Content-Type`: `multipart/form-data`
-- `provider_id`（可选；OpenCode 建议传入，其他引擎可省略）
+- `provider_id`（可选；对 provider-aware engine 建议显式传入）
 - `files`（可重复）：鉴权文件
 
 **Response** (`InteractionReplyResponse`):
@@ -988,13 +995,13 @@
 用于 UI 渲染“导入鉴权文件”对话框。规则来自 engine adapter profile（声明式）。
 
 **Query 参数**:
-- `provider_id`（可选）：OpenCode 必填（如 `openai` / `google`），其他引擎忽略。
+- `provider_id`（可选）：对 provider-aware engine（当前为 `opencode` / `qwen`）用于选择 provider-specific 导入规则。
 
 **Response** (`ManagementEngineAuthImportSpecResponse`):
 ```json
 {
-  "engine": "gemini",
-  "provider_id": null,
+  "engine": "qwen",
+  "provider_id": "qwen-oauth",
   "supported": true,
   "ask_user": {
     "kind": "upload_files",
@@ -1002,15 +1009,9 @@
     "hint": "Select required files and submit to continue.",
     "files": [
       {
-        "name": "google_accounts.json",
-        "required": true,
-        "hint": "$HOME/.gemini/google_accounts.json",
-        "accept": ".json"
-      },
-      {
         "name": "oauth_creds.json",
         "required": true,
-        "hint": "$HOME/.gemini/oauth_creds.json",
+        "hint": "$HOME/.qwen/oauth_creds.json",
         "accept": ".json"
       }
     ],
@@ -1024,24 +1025,28 @@
 **错误码**:
 - `422`: 引擎/provider 不支持导入或导入规则非法。
 
+**补充说明**:
+- `qwen-oauth` 支持导入 `oauth_creds.json`。
+- `qwen` 的 `coding-plan-china` / `coding-plan-global` 在当前版本不暴露导入式鉴权入口。
+
 ### 提交引擎鉴权文件导入（管理 API）
 `POST /v1/management/engines/{engine}/auth/import`
 
 **Request**:
 - `Content-Type`: `multipart/form-data`
-- `provider_id`（可选，OpenCode 必填）
+- `provider_id`（可选；对 provider-aware engine 用于选择导入规则）
 - `files`（可重复）：鉴权文件
 
 **Response** (`ManagementEngineAuthImportSubmitResponse`):
 ```json
 {
-  "engine": "opencode",
-  "provider_id": "openai",
+  "engine": "qwen",
+  "provider_id": "qwen-oauth",
   "imported_files": [
     {
-      "source": "auth.json",
-      "target_relpath": ".local/share/opencode/auth.json",
-      "target_path": "/home/user/.local/share/opencode/auth.json"
+      "source": "oauth_creds.json",
+      "target_relpath": ".qwen/oauth_creds.json",
+      "target_path": "/home/user/.qwen/oauth_creds.json"
     }
   ],
   "risk_notice_required": false
@@ -1100,6 +1105,13 @@
 ```
 
 无关联鉴权会话时 `auth_session` 为 `null`。
+
+说明：
+- 该接口返回的是底层引擎鉴权会话状态，不等同于聊天侧 `pending_auth` 读模型。
+- 会话型客户端在 `waiting_auth` 阶段通常需要同时读取：
+  - `GET /v1/jobs/{request_id}/auth/session`
+  - `GET /v1/jobs/{request_id}/interaction/pending`
+- 某些 challenge 会自动推进而不接收聊天输入；这时 `pending_auth` 会表现为 `accepts_chat_input=false`、`input_kind=null`，前端应隐藏输入框并继续轮询。
 
 ### 取消运行 (Cancel Run)
 `POST /v1/jobs/{request_id}/cancel`
@@ -1478,7 +1490,9 @@ Query 参数：
     {"engine": "codex", "cli_version_detected": "0.89.0"},
     {"engine": "gemini", "cli_version_detected": "0.25.2"},
     {"engine": "iflow", "cli_version_detected": "0.5.2"},
-    {"engine": "opencode", "cli_version_detected": "0.1.0"}
+    {"engine": "opencode", "cli_version_detected": "0.1.0"},
+    {"engine": "claude", "cli_version_detected": "0.1.0"},
+    {"engine": "qwen", "cli_version_detected": "0.1.0"}
   ]
 }
 ```
@@ -1510,11 +1524,22 @@ V2 `start` 请求体示例：
 }
 ```
 
+provider-aware 示例：
+```json
+{
+  "engine": "qwen",
+  "provider_id": "qwen-oauth",
+  "auth_method": "auth_code_or_url",
+  "transport": "oauth_proxy"
+}
+```
+
 说明：
 - `transport` 支持 `oauth_proxy` 与 `cli_delegate`。
 - V2 下 `auth_method` 为必填，仅支持 `callback` / `auth_code_or_url` / `api_key`（取决于引擎与 provider）。
 - 旧值 `browser-oauth/device-auth/screen-reader-google-oauth/iflow-cli-oauth/opencode-provider-auth` 已废弃并返回 `422`。
 - V2 下不再使用 `method` 历史字段；兼容层仍可接收 `method`。
+- provider-aware engine（当前为 `opencode`、`qwen`）应显式提交 `provider_id`；这也是新的推荐写法。
 - `codex` 支持 2x2 组合：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
 - `gemini` 支持：
   - `oauth_proxy + callback`（自动回调优先，零 CLI，支持 `/input` 兜底）
@@ -1529,11 +1554,18 @@ V2 `start` 请求体示例：
   - `oauth_proxy + callback`（自动回调）
   - `oauth_proxy + auth_code_or_url`（手工回填）
   - `cli_delegate + auth_code_or_url`（现有 CLI 编排）
+- `qwen(provider_id=qwen-oauth)` 支持：
+  - `oauth_proxy + auth_code_or_url`（设备码语义，返回 `auth_url + user_code`；当前实现会自动轮询完成状态，不要求额外 `/input`）
+  - `cli_delegate + auth_code_or_url`（CLI 自行轮询完成状态，不要求额外 `/input`）
+- `qwen(provider_id=coding-plan-china|coding-plan-global)` 支持：
+  - `oauth_proxy + api_key`
+  - `cli_delegate + api_key`
 - `cli_delegate + codex` 映射：
   - `callback` -> `codex login`
   - `auth_code_or_url` -> `codex login --device-auth`
-- `opencode` 在 V2 通过 `provider_id + auth_method` 指定流程。
-- 用户输入统一通过 `/input` 回填，`kind` 支持 `code` / `api_key` / `text`。
+- provider-aware engine 在 V2 通过 `provider_id + auth_method` 指定流程。
+- 仅在会话确实需要用户输入时，才通过 `/input` 回填；`kind` 支持 `code` / `api_key` / `text`。
+- `auth_code_or_url` 表示统一的“人工 OAuth 返回内容”语义，不等于一定会显示输入框；是否需要输入以会话返回的 `input_kind` / `accepts_chat_input` 为准。
 - 会话快照包含 `transport_state_machine`、`orchestrator`、`log_root` 用于状态解释与日志定位。
 - 语义约束：
   - `oauth_proxy` 不应出现 `waiting_orchestrator`
@@ -1558,6 +1590,12 @@ Gemini OAuth 代理说明：
 - `callback` 模式要求本地 listener 可用，并支持 `/input` 兜底。
 - `auth_code_or_url` 模式使用手工码流，通过 `/input(kind=text|code)` 完成鉴权。
 - 鉴权成功后会写入 `~/.gemini/oauth_creds.json`（以及可选 `google_accounts.json`），并确保 `~/.gemini/settings.json` 中 `security.auth.selectedType="oauth-personal"`。
+
+Qwen OAuth / Coding Plan 说明：
+- `oauth_proxy + qwen(provider_id=qwen-oauth)` 走设备码语义，返回 `auth_url + user_code`；当前实现会在后端自动轮询完成状态，不要求用户额外调用 `/input`。
+- `qwen-oauth` 鉴权成功后写入 `.qwen/oauth_creds.json`。
+- `coding-plan-china` / `coding-plan-global` 通过 API Key 完成，会写入 `.qwen/settings.json`。
+- `qwen` 当前没有公开的 browser callback 端点；`qwen-oauth` 的 `oauth_proxy` 不是本地回调模式。
 - 不读写 `mcp-oauth-tokens-v2.json`。
 - 需通过环境变量提供 Google OAuth 凭据：
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
@@ -1618,6 +1656,10 @@ iFlow OAuth 代理说明：
 }
 ```
 
+说明：
+- 同一模型项结构也用于 `GET /v1/management/engines/{engine}` 的 `models[]`。
+- 新客户端应优先读取 `provider_id + model`；`id` 保留兼容语义。
+
 OpenCode 返回示例（动态探测缓存）：
 ```json
 {
@@ -1630,10 +1672,34 @@ OpenCode 返回示例（动态探测缓存）：
     {
       "id": "openai/gpt-5",
       "provider": "openai",
+      "provider_id": "openai",
       "model": "gpt-5",
       "display_name": "OpenAI GPT-5",
       "deprecated": false,
       "notes": "runtime_probe_cache",
+      "supported_effort": null
+    }
+  ]
+}
+```
+
+Qwen 返回示例（静态 snapshot）：
+```json
+{
+  "engine": "qwen",
+  "cli_version_detected": "0.1.0",
+  "snapshot_version_used": "0.0.0",
+  "source": "pinned_snapshot",
+  "fallback_reason": null,
+  "models": [
+    {
+      "id": "qwen3-coder-plus",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3-coder-plus",
+      "display_name": "Qwen3-Coder Plus",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
       "supported_effort": null
     }
   ]

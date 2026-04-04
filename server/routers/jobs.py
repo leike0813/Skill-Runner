@@ -52,6 +52,10 @@ from ..services.orchestration.runtime_protocol_ports import install_runtime_prot
 from ..services.platform.schema_validator import schema_validator
 from ..services.skill.skill_asset_resolver import resolve_schema_asset
 from ..services.engine_management.model_registry import model_registry
+from ..services.engine_management.provider_aware_auth import (
+    get_engine_auth_provider,
+    is_provider_aware_engine,
+)
 from ..services.platform.cache_key_builder import (
     build_input_manifest,
     compute_bytes_hash,
@@ -159,8 +163,14 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         runtime_opts, engine_opts = validate_runtime_and_model_options(
             engine=request.engine,
             model=request.model,
+            provider_id=request.provider_id,
             runtime_options=request.runtime_options,
         )
+        if request.provider_id:
+            normalized_provider = request.provider_id.strip().lower()
+            if is_provider_aware_engine(request.engine):
+                get_engine_auth_provider(request.engine, normalized_provider)
+            engine_opts["provider_id"] = normalized_provider
         _, runtime_opts_for_policy, runtime_default_option_warnings = (
             resolve_runtime_options_with_skill_defaults(
                 skill=skill,

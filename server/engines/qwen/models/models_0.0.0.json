@@ -1,0 +1,275 @@
+{
+  "engine": "qwen",
+  "version": "0.0.0",
+  "models": [
+    {
+      "id": "coder-model",
+      "display_name": "Qwen 3.6 Plus",
+      "deprecated": false,
+      "notes": "Qwen OAuth built-in model",
+      "provider": "qwen-oauth",
+      "provider_id": "qwen-oauth",
+      "model": "coder-model"
+    },
+    {
+      "id": "qwen3.5-plus",
+      "display_name": "Qwen 3.5 Plus",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "qwen3.5-plus",
+      "settings_name": "[ModelStudio Coding Plan] qwen3.5-plus",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 1000000
+      }
+    },
+    {
+      "id": "glm-5",
+      "display_name": "GLM 5",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "glm-5",
+      "settings_name": "[ModelStudio Coding Plan] glm-5",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 202752
+      }
+    },
+    {
+      "id": "kimi-k2.5",
+      "display_name": "Kimi K2.5",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "kimi-k2.5",
+      "settings_name": "[ModelStudio Coding Plan] kimi-k2.5",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 262144
+      }
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "display_name": "MiniMax M2.5",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "MiniMax-M2.5",
+      "settings_name": "[ModelStudio Coding Plan] MiniMax-M2.5",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 196608
+      }
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "display_name": "Qwen3-Coder Plus",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "qwen3-coder-plus",
+      "settings_name": "[ModelStudio Coding Plan] qwen3-coder-plus",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "contextWindowSize": 1000000
+      }
+    },
+    {
+      "id": "qwen3-coder-next",
+      "display_name": "Qwen3-Coder Next",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "qwen3-coder-next",
+      "settings_name": "[ModelStudio Coding Plan] qwen3-coder-next",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "contextWindowSize": 262144
+      }
+    },
+    {
+      "id": "qwen3-max-2026-01-23",
+      "display_name": "Qwen3 Max 2026-01-23",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "qwen3-max-2026-01-23",
+      "settings_name": "[ModelStudio Coding Plan] qwen3-max-2026-01-23",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 262144
+      }
+    },
+    {
+      "id": "glm-4.7",
+      "display_name": "GLM 4.7",
+      "deprecated": false,
+      "notes": "Bailian Coding Plan (China)",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "glm-4.7",
+      "settings_name": "[ModelStudio Coding Plan] glm-4.7",
+      "settings_base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 202752
+      }
+    },
+    {
+      "id": "qwen3.5-plus",
+      "display_name": "Qwen 3.5 Plus",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3.5-plus",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] qwen3.5-plus",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 1000000
+      }
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "display_name": "Qwen3-Coder Plus",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3-coder-plus",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] qwen3-coder-plus",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "contextWindowSize": 1000000
+      }
+    },
+    {
+      "id": "qwen3-coder-next",
+      "display_name": "Qwen3-Coder Next",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3-coder-next",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] qwen3-coder-next",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "contextWindowSize": 262144
+      }
+    },
+    {
+      "id": "qwen3-max-2026-01-23",
+      "display_name": "Qwen3 Max 2026-01-23",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3-max-2026-01-23",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] qwen3-max-2026-01-23",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 262144
+      }
+    },
+    {
+      "id": "glm-4.7",
+      "display_name": "GLM 4.7",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "glm-4.7",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] glm-4.7",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 202752
+      }
+    },
+    {
+      "id": "glm-5",
+      "display_name": "GLM 5",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "glm-5",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] glm-5",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 202752
+      }
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "display_name": "MiniMax M2.5",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "MiniMax-M2.5",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] MiniMax-M2.5",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 196608
+      }
+    },
+    {
+      "id": "kimi-k2.5",
+      "display_name": "Kimi K2.5",
+      "deprecated": false,
+      "notes": "Alibaba Cloud Coding Plan (Global)",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "kimi-k2.5",
+      "settings_name": "[ModelStudio Coding Plan for Global/Intl] kimi-k2.5",
+      "settings_base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "generation_config": {
+        "extra_body": {
+          "enable_thinking": true
+        },
+        "contextWindowSize": 262144
+      }
+    }
+  ]
+}

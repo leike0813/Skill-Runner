@@ -256,6 +256,23 @@ def test_get_manifest_view(monkeypatch, tmp_path: Path):
     assert view["models"][0]["id"] == "model-a"
 
 
+def test_get_manifest_view_qwen_uses_snapshot_contract(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+
+    view = registry.get_manifest_view("qwen")
+
+    assert view["engine"] == "qwen"
+    assert view["manifest"]["engine"] == "qwen"
+    assert view["resolved_snapshot_file"] == "models_0.14.0.json"
+    assert any(item["provider_id"] == "qwen-oauth" for item in view["models"])
+    assert any(item["provider_id"] == "coding-plan-china" for item in view["models"])
+    assert any(item["provider_id"] == "coding-plan-global" for item in view["models"])
+
+
 def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
     engine_root = _build_models_fixture(tmp_path, "gemini")

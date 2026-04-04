@@ -13,6 +13,8 @@ from server.engines.opencode.auth import (
     OpencodeAuthCliSession,
     OpencodeGoogleAntigravityOAuthProxySession,
 )
+from server.engines.qwen.auth.drivers.cli_delegate_flow import QwenAuthCliSession
+from server.engines.qwen.auth.protocol.qwen_oauth_proxy_flow import QwenOAuthSession
 from server.runtime.auth.session_lifecycle import AuthStartPlan
 from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
@@ -475,6 +477,121 @@ def test_engine_auth_flow_manager_opencode_openai_cli_delegate_callback_shows_in
     assert started["provider_id"] == "openai"
     assert started["status"] == "waiting_user"
     assert started["input_kind"] == "text"
+
+
+def test_engine_auth_flow_manager_qwen_oauth_proxy_starts_and_completes(
+    tmp_path: Path,
+):
+    command_path = _write_script(tmp_path / "fake-qwen", "exit 0")
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+    )
+    now = datetime.now(timezone.utc)
+    runtime = QwenOAuthSession(
+        session_id="auth-qwen-1",
+        device_code="device-1",
+        user_code="TEST123",
+        verification_uri_complete="https://chat.qwen.ai/device?user_code=TEST123",
+        code_verifier="verifier-1",
+        expires_in=300,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    manager._qwen_oauth_proxy_flow.start_session = lambda **_kwargs: runtime  # type: ignore[method-assign]  # noqa: SLF001
+
+    def _start_polling(_runtime, now=None, poll_now=False):  # noqa: ANN001
+        current = now or datetime.now(timezone.utc)
+        _runtime.polling_started = True
+        _runtime.next_poll_at = current if poll_now else (_runtime.next_poll_at or current + timedelta(seconds=2))
+
+    def _poll_once(_runtime, now=None):  # noqa: ANN001
+        current = now or datetime.now(timezone.utc)
+        next_poll_at = _runtime.next_poll_at
+        if next_poll_at is not None and current < next_poll_at:
+            return False
+        return True
+
+    manager._qwen_oauth_proxy_flow.start_polling = _start_polling  # type: ignore[method-assign]  # noqa: SLF001
+    manager._qwen_oauth_proxy_flow.submit_input = lambda _runtime, _value, now=None: setattr(  # type: ignore[method-assign]  # noqa: SLF001
+        _runtime, "polling_started", True
+    )
+    manager._qwen_oauth_proxy_flow.poll_once = _poll_once  # type: ignore[method-assign]  # noqa: SLF001
+
+    started = manager.start_session(
+        "qwen",
+        "auth",
+        transport="oauth_proxy",
+        provider_id="qwen-oauth",
+        auth_method="auth_code_or_url",
+    )
+    assert started["engine"] == "qwen"
+    assert started["status"] == "waiting_user"
+    assert started["user_code"] == "TEST123"
+    assert started["auth_url"] == "https://chat.qwen.ai/device?user_code=TEST123"
+    assert started["input_kind"] is None
+
+    runtime.next_poll_at = datetime.now(timezone.utc)
+    final = manager.get_session(started["session_id"])
+    assert final["status"] == "succeeded"
+    assert final["terminal"] is True
+
+
+def test_engine_auth_flow_manager_qwen_cli_delegate_waits_for_api_key_prompt(
+    tmp_path: Path,
+    monkeypatch,
+):
+    command_path = _write_script(tmp_path / "fake-qwen", "exit 0")
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+    )
+
+    class _FakeProc:
+        pid = 9876
+
+        def poll(self):  # noqa: ANN201
+            return None
+
+    now = datetime.now(timezone.utc)
+    runtime = QwenAuthCliSession(
+        session_id="auth-qwen-2",
+        provider_id="coding-plan-global",
+        process=_FakeProc(),
+        master_fd=0,
+        output_path=tmp_path / "auth.log",
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(minutes=5),
+        status="waiting_user",
+        api_key_prompt_visible=True,
+    )
+    manager._qwen_flow.start_session = lambda **_kwargs: runtime  # type: ignore[method-assign]  # noqa: SLF001
+    manager._qwen_flow.refresh = lambda _runtime: None  # type: ignore[method-assign]  # noqa: SLF001
+    captured: list[str] = []
+    manager._qwen_flow.submit_api_key = lambda _runtime, value: captured.append(value)  # type: ignore[method-assign]  # noqa: SLF001
+
+    started = manager.start_session(
+        "qwen",
+        "auth",
+        transport="cli_delegate",
+        provider_id="coding-plan-global",
+        auth_method="api_key",
+    )
+    assert started["engine"] == "qwen"
+    assert started["transport"] == "cli_delegate"
+    assert started["input_kind"] == "api_key"
+    assert started["status"] == "waiting_user"
+
+    monkeypatch.setattr(manager._qwen_flow, "refresh", lambda _runtime: setattr(_runtime, "status", "code_submitted_waiting_result"))  # noqa: SLF001
+    input_snapshot = manager.input_session(started["session_id"], "api_key", "sk-sp-123")
+    assert captured == ["sk-sp-123"]
+    assert input_snapshot["status"] == "code_submitted_waiting_result"
 
 
 def test_engine_auth_flow_manager_cancel_releases_lock_on_terminate_error(tmp_path: Path, monkeypatch):

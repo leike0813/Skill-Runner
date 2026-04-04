@@ -31,6 +31,7 @@ class ModelEntry:
     notes: Optional[str]
     supported_effort: Optional[List[str]]
     provider: Optional[str] = None
+    provider_id: Optional[str] = None
     model: Optional[str] = None
     source: str = "official"
 
@@ -135,6 +136,7 @@ class ModelRegistry:
                     "notes": entry.notes,
                     "supported_effort": entry.supported_effort,
                     "provider": entry.provider,
+                    "provider_id": entry.provider_id,
                     "model": entry.model,
                     "source": entry.source,
                 }
@@ -198,11 +200,12 @@ class ModelRegistry:
                 display_name=model_name,
                 deprecated=False,
                 notes=None,
-                supported_effort=None,
-                provider=self._provider_from_model_spec(model_name),
-                model=self._model_name_from_model_spec(model_name),
-                source="custom_provider",
-            )
+                    supported_effort=None,
+                    provider=self._provider_from_model_spec(model_name),
+                    provider_id=self._provider_from_model_spec(model_name),
+                    model=self._model_name_from_model_spec(model_name),
+                    source="custom_provider",
+                )
         if not model_entry:
             raise ValueError(f"Model '{model_name}' not allowed for engine '{engine}'")
         if effort:
@@ -297,6 +300,7 @@ class ModelRegistry:
                     notes=entry.get("notes"),
                     supported_effort=entry.get("supported_effort"),
                     provider=entry.get("provider"),
+                    provider_id=entry.get("provider_id"),
                     model=entry.get("model"),
                     source=str(entry.get("source") or "official"),
                 )
@@ -313,6 +317,7 @@ class ModelRegistry:
                     notes=item.notes,
                     supported_effort=item.supported_effort,
                     provider=item.provider,
+                    provider_id=item.provider_id,
                     model=item.model,
                     source="official",
                 )
@@ -328,6 +333,7 @@ class ModelRegistry:
                     notes=item.notes,
                     supported_effort=item.supported_effort,
                     provider=item.provider or "anthropic",
+                    provider_id=item.provider_id,
                     model=item.model or item.id,
                     source="official",
                 )
@@ -351,6 +357,7 @@ class ModelRegistry:
                     notes=None,
                     supported_effort=None,
                     provider=item.provider,
+                    provider_id=item.provider,
                     model=item.model,
                     source=item.source,
                 )
@@ -381,6 +388,7 @@ class ModelRegistry:
                         notes=row.get("notes"),
                         supported_effort=row.get("supported_effort"),
                         provider=row.get("provider"),
+                        provider_id=row.get("provider_id"),
                         model=row.get("model"),
                         source=str(row.get("source") or "official"),
                     )
@@ -442,6 +450,7 @@ class ModelRegistry:
                     "notes": entry.notes,
                     "supported_effort": entry.supported_effort,
                     "provider": entry.provider,
+                    "provider_id": entry.provider_id,
                     "model": entry.model,
                     "source": entry.source,
                 }
@@ -495,6 +504,21 @@ class ModelRegistry:
             }
             if supported_effort is not None:
                 normalized_entry["supported_effort"] = supported_effort
+            provider = entry.get("provider")
+            if provider is not None:
+                if not isinstance(provider, str) or not provider.strip():
+                    raise ValueError("model.provider must be a non-empty string or null")
+                normalized_entry["provider"] = provider.strip()
+            provider_id = entry.get("provider_id")
+            if provider_id is not None:
+                if not isinstance(provider_id, str) or not provider_id.strip():
+                    raise ValueError("model.provider_id must be a non-empty string or null")
+                normalized_entry["provider_id"] = provider_id.strip()
+            model_name = entry.get("model")
+            if model_name is not None:
+                if not isinstance(model_name, str) or not model_name.strip():
+                    raise ValueError("model.model must be a non-empty string or null")
+                normalized_entry["model"] = model_name.strip()
             normalized.append(normalized_entry)
         return normalized
 

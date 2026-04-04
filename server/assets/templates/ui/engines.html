@@ -467,7 +467,7 @@
     const ttydAvailable = {{ "true" if ttyd_available else "false" }};
     const initialSession = {{ session | tojson }};
     const initialAuthSession = {{ auth_session | tojson }};
-    const opencodeAuthProviders = {{ opencode_auth_providers | tojson }};
+    const engineAuthProviders = {{ engine_auth_providers | tojson }};
     const authUiCapabilities = {{ auth_ui_capabilities | tojson }};
     const authUiHighRiskCapabilities = {{ auth_ui_high_risk_capabilities | tojson }};
     const engineUiMetadata = {{ engine_ui_metadata | tojson }};
@@ -717,7 +717,7 @@
         const scoped = authUiCapabilities[transportKey] || {};
         const engineCaps = scoped[engineKey];
         if (!engineCaps) return [];
-        if (engineKey !== "opencode") {
+        if (!engineSupportsProviderAuth(engineKey)) {
             return Array.isArray(engineCaps) ? engineCaps : [];
         }
         const providerCaps = (engineCaps && typeof engineCaps === "object") ? engineCaps : {};
@@ -732,7 +732,7 @@
         const scoped = authUiHighRiskCapabilities[transportKey] || {};
         const engineCaps = scoped[engineKey];
         if (!engineCaps) return [];
-        if (engineKey !== "opencode") {
+        if (!engineSupportsProviderAuth(engineKey)) {
             return Array.isArray(engineCaps) ? engineCaps : [];
         }
         const providerCaps = (engineCaps && typeof engineCaps === "object") ? engineCaps : {};
@@ -1047,10 +1047,21 @@
         }
     }
 
-    function availableOpencodeProviders(transport) {
-        return opencodeAuthProviders.filter((provider) => {
+    function providersForEngine(engine) {
+        const engineKey = String(engine || "").trim().toLowerCase();
+        const providers = engineAuthProviders[engineKey];
+        return Array.isArray(providers) ? providers : [];
+    }
+
+    function engineSupportsProviderAuth(engine) {
+        return providersForEngine(engine).length > 0;
+    }
+
+    function availableProviders(engine, transport) {
+        const engineKey = String(engine || "").trim().toLowerCase();
+        return providersForEngine(engineKey).filter((provider) => {
             const providerId = String(provider.provider_id || "").trim().toLowerCase();
-            return methodsForEngine(transport, "opencode", providerId).length > 0;
+            return methodsForEngine(transport, engineKey, providerId).length > 0;
         });
     }
 
@@ -1285,68 +1296,67 @@
         const normalizedEngine = String(engine || "").trim().toLowerCase();
         if (!normalizedEngine) return;
         const transport = selectedTransport();
-        if (normalizedEngine !== "opencode") {
-            const methods = methodsForEngine(transport, normalizedEngine, "");
-            if (methods.length === 0) {
-                showAuthError(I18N.errorNoMethodForEngine);
+        if (engineSupportsProviderAuth(normalizedEngine)) {
+            const providers = availableProviders(normalizedEngine, transport);
+            if (providers.length === 0) {
+                showAuthError(I18N.errorNoProvider);
                 return;
             }
-            const items = [
-                ...methods.map((method) => ({
-                    label: renderAuthMethodLabel(method, transport, normalizedEngine, ""),
-                    onClick: () => {
-                        hideAuthMenu();
-                        startAuth(normalizedEngine, transport, method, "");
-                    },
+            renderAuthMenuItems(
+                providers.map((provider) => ({
+                    label: provider.display_name,
+                    onClick: () => openProviderMethodMenu(anchor, normalizedEngine, transport, provider),
                 })),
-                { separator: true },
-                {
-                    label: I18N.importMenuEntry,
-                    onClick: () => openAuthImportDialog(anchor, normalizedEngine),
-                },
-            ];
-            renderAuthMenuItems(items, `${resolveEngineLabel(normalizedEngine)} · ${I18N.chooseMethod}`);
-            authMenuState = { level: "method", engine: normalizedEngine, anchor };
+                `${resolveEngineLabel(normalizedEngine)} · ${I18N.chooseProvider}`
+            );
+            authMenuState = { level: "provider", engine: normalizedEngine, anchor };
             positionAuthMenu(anchor);
             return;
         }
-
-        const providers = availableOpencodeProviders(transport);
-        if (providers.length === 0) {
-            showAuthError(I18N.errorNoProvider);
+        const methods = methodsForEngine(transport, normalizedEngine, "");
+        if (methods.length === 0) {
+            showAuthError(I18N.errorNoMethodForEngine);
             return;
         }
-        renderAuthMenuItems(
-            providers.map((provider) => ({
-                label: provider.display_name,
-                onClick: () => openOpencodeMethodMenu(anchor, transport, provider),
+        const items = [
+            ...methods.map((method) => ({
+                label: renderAuthMethodLabel(method, transport, normalizedEngine, ""),
+                onClick: () => {
+                    hideAuthMenu();
+                    startAuth(normalizedEngine, transport, method, "");
+                },
             })),
-            `OpenCode · ${I18N.chooseProvider}`
-        );
-        authMenuState = { level: "provider", engine: "opencode", anchor };
+            { separator: true },
+            {
+                label: I18N.importMenuEntry,
+                onClick: () => openAuthImportDialog(anchor, normalizedEngine),
+            },
+        ];
+        renderAuthMenuItems(items, `${resolveEngineLabel(normalizedEngine)} · ${I18N.chooseMethod}`);
+        authMenuState = { level: "method", engine: normalizedEngine, anchor };
         positionAuthMenu(anchor);
     }
 
-    function openOpencodeMethodMenu(anchor, transport, provider) {
+    function openProviderMethodMenu(anchor, engine, transport, provider) {
+        const normalizedEngine = String(engine || "").trim().toLowerCase();
         const providerId = String(provider.provider_id || "").trim().toLowerCase();
-        const methods = methodsForEngine(transport, "opencode", providerId);
+        const methods = methodsForEngine(transport, normalizedEngine, providerId);
         if (methods.length === 0) {
             showAuthError(`${I18N.errorProviderNoMethod} provider=${providerId}, transport=${transport}`);
             return;
         }
-        const providerAuthMode = String(provider.auth_mode || "").trim().toLowerCase();
-        const supportsImport = providerAuthMode === "oauth";
+        const supportsImport = provider && provider.supports_import === true;
         const items = [
             {
                 label: I18N.backProviderList,
                 secondary: true,
-                onClick: () => openEngineAuthMenu(anchor, "opencode"),
+                onClick: () => openEngineAuthMenu(anchor, normalizedEngine),
             },
             ...methods.map((method) => ({
-                label: renderAuthMethodLabel(method, transport, "opencode", providerId),
+                label: renderAuthMethodLabel(method, transport, normalizedEngine, providerId),
                 onClick: () => {
                     hideAuthMenu();
-                    startAuth("opencode", transport, method, providerId);
+                    startAuth(normalizedEngine, transport, method, providerId);
                 },
             })),
         ];
@@ -1354,11 +1364,14 @@
             items.push({ separator: true });
             items.push({
                 label: I18N.importMenuEntry,
-                onClick: () => openAuthImportDialog(anchor, "opencode", providerId),
+                onClick: () => openAuthImportDialog(anchor, normalizedEngine, providerId),
             });
         }
-        renderAuthMenuItems(items, `OpenCode / ${provider.display_name} · ${I18N.chooseMethodSuffix}`);
-        authMenuState = { level: "method", engine: "opencode", providerId, anchor };
+        renderAuthMenuItems(
+            items,
+            `${resolveEngineLabel(normalizedEngine)} / ${provider.display_name} · ${I18N.chooseMethodSuffix}`
+        );
+        authMenuState = { level: "method", engine: normalizedEngine, providerId, anchor };
         positionAuthMenu(anchor);
     }
 
@@ -1368,7 +1381,11 @@
         const authMethod = String(session.auth_method || "").trim().toLowerCase();
         if (!session.user_code) return false;
         if (authMethod !== "auth_code_or_url") return false;
-        return engine === "codex" || (engine === "opencode" && providerId === "openai");
+        return (
+            engine === "codex"
+            || (engine === "opencode" && providerId === "openai")
+            || (engine === "qwen" && providerId === "qwen-oauth")
+        );
     }
 
     async function copyText(text) {
@@ -1602,7 +1619,7 @@
             transport: normalizedTransport,
             auth_method: normalizedAuthMethod,
         };
-        if (engine === "opencode") {
+        if (engineSupportsProviderAuth(engine)) {
             requestBody.provider_id = String(authProvider || "").trim().toLowerCase();
             if (!requestBody.provider_id) {
                 showAuthError(I18N.errorProviderRequired);

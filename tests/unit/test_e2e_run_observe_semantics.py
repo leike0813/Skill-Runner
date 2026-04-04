@@ -91,6 +91,7 @@ def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
     assert "askUser.kind).trim() === \"upload_files\"" in content
     assert "askUser.files" in content
     assert "resolveAuthImportSpec" not in content
+    assert 'kind: authInputKind || "auth_code_or_url"' in content
 
 
 def test_run_observe_template_supports_custom_provider_auth_panel():

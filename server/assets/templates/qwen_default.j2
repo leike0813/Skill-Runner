@@ -1,0 +1,13 @@
+Please call the skill named "{{ skill.id }}".
+
+# Inputs
+{% for key, val in input.items() %}
+- {{ key }}: {{ val }}
+{% endfor %}
+
+# Parameters
+{% for key, val in parameter.items() %}
+- {{ key }}: {{ val }}
+{% endfor %}
+
+Task: Execute the skill using the above inputs and parameters.

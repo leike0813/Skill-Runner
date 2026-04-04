@@ -1,0 +1,14 @@
+{
+  "$schema": "../schemas/qwen_config_schema.json",
+  "security": {
+    "auth": {
+      "selectedType": "qwen-oauth"
+    }
+  },
+  "general": {
+    "enableAutoUpdate": false,
+    "checkpointing": {
+      "enabled": false
+    }
+  }
+}

@@ -100,6 +100,21 @@ def _validate_opencode_antigravity_accounts(name: str, content: bytes) -> None:
         )
 
 
+def _validate_qwen_oauth_creds(name: str, content: bytes) -> None:
+    payload = _require_json_object(name, content)
+    access_token = payload.get("access_token")
+    refresh_token = payload.get("refresh_token")
+    if not (
+        isinstance(access_token, str)
+        and access_token.strip()
+        or isinstance(refresh_token, str)
+        and refresh_token.strip()
+    ):
+        raise AuthImportValidationError(
+            f"{name} must contain access_token or refresh_token"
+        )
+
+
 ValidatorFn = Callable[[str, bytes], None]
 
 
@@ -126,5 +141,6 @@ auth_import_validator_registry = AuthImportValidatorRegistry(
         "iflow_oauth_creds_json": _validate_iflow_oauth_creds,
         "opencode_auth_json": _validate_opencode_auth,
         "opencode_antigravity_accounts_json": _validate_opencode_antigravity_accounts,
+        "qwen_oauth_creds_json": _validate_qwen_oauth_creds,
     }
 )

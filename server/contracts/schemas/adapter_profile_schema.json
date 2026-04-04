@@ -19,7 +19,7 @@
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "gemini", "iflow", "opencode", "claude"]
+      "enum": ["codex", "gemini", "iflow", "opencode", "claude", "qwen"]
     },
     "prompt_builder": {
       "type": "object",
@@ -261,7 +261,8 @@
                   "iflow_accounts_json",
                   "iflow_oauth_creds_json",
                   "opencode_auth_json",
-                  "opencode_antigravity_accounts_json"
+                  "opencode_antigravity_accounts_json",
+                  "qwen_oauth_creds_json"
                 ]
               },
               "aliases": {
