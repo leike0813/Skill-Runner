@@ -24,6 +24,7 @@ from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.adapter.types import RuntimeStreamRawRow
+from server.runtime.adapter.common.live_stream_parser_common import NdjsonLineBuffer
 
 from .contracts import LiveRuntimeEmitter, LiveStreamParserSession
 from .factories import make_fcmp_event, make_rasp_event
@@ -664,8 +665,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             self._parser_session = start_live_session()
         else:
             self._parser_session = _BufferedLiveParserSession(stream_parser=stream_parser)
-        self._line_buffers: dict[str, str] = {"stdout": "", "stderr": "", "pty": ""}
-        self._line_buffer_start: dict[str, int | None] = {"stdout": None, "stderr": None, "pty": None}
+        self._raw_line_buffer = NdjsonLineBuffer(accepted_streams={"stdout", "stderr", "pty"})
         self._pending_raw_rows: dict[str, list[RuntimeStreamRawRow]] = {"stdout": [], "stderr": [], "pty": []}
         self._suppressed_raw_ranges: dict[str, list[tuple[int, int]]] = {
             "stdout": [],
@@ -730,32 +730,19 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         byte_to: int,
         event_ts: datetime | None = None,
     ) -> None:
-        buffer = self._line_buffers.get(stream, "")
-        buffer_start = self._line_buffer_start.get(stream)
-        combined_start = buffer_start if buffer and isinstance(buffer_start, int) else byte_from
-        combined = f"{buffer}{text}"
-        if "\n" not in combined:
-            self._line_buffers[stream] = combined
-            self._line_buffer_start[stream] = combined_start
-            return
-        pieces = combined.splitlines(keepends=True)
-        emit_lines = pieces[:-1]
-        tail = pieces[-1]
-        if tail.endswith("\n"):
-            emit_lines.append(tail)
-            tail = ""
-        self._line_buffers[stream] = tail
-        self._line_buffer_start[stream] = combined_start + len("".join(emit_lines).encode("utf-8", errors="replace")) if tail else None
-        if not emit_lines:
-            return
-        line_start = combined_start
         buffered_rows = self._pending_raw_rows.setdefault(stream, [])
-        for line in emit_lines:
-            encoded = line.encode("utf-8", errors="replace")
-            line_end = line_start + len(encoded)
-            clean_line = line.rstrip("\n")
+        for line in self._raw_line_buffer.feed(
+            stream=stream,
+            text=text,
+            byte_from=byte_from,
+            byte_to=byte_to,
+        ):
+            line_start = line.byte_from
+            line_end = line.byte_to
+            if line.repair_failed:
+                continue
+            clean_line = line.text
             if self._is_raw_span_suppressed(stream=stream, byte_from=line_start, byte_to=line_end):
-                line_start = line_end
                 continue
             buffered_rows.append(
                 {
@@ -766,33 +753,28 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     "ts": event_ts.isoformat() if isinstance(event_ts, datetime) else None,
                 }
             )
-            line_start = line_end
         if self._semantic_emissions_terminal_only:
             return
         self._drain_pending_raw_rows(stream=stream, flush_all=False, event_ts=event_ts)
 
     def _flush_partial_lines(self, *, event_ts: datetime | None = None) -> None:
-        for stream, text in list(self._line_buffers.items()):
-            if not text:
+        for stream in ("stdout", "stderr", "pty"):
+            prepared = self._raw_line_buffer.flush(stream=stream)
+            if prepared is None or prepared.repair_failed:
                 continue
-            start = self._line_buffer_start.get(stream)
-            byte_from = start if isinstance(start, int) else 0
-            byte_to = byte_from + len(text.encode("utf-8", errors="replace"))
+            byte_from = prepared.byte_from
+            byte_to = prepared.byte_to
             if self._is_raw_span_suppressed(stream=stream, byte_from=byte_from, byte_to=byte_to):
-                self._line_buffers[stream] = ""
-                self._line_buffer_start[stream] = None
                 continue
             self._pending_raw_rows.setdefault(stream, []).append(
                 {
                     "stream": stream,
-                    "line": text,
+                    "line": prepared.text,
                     "byte_from": byte_from,
                     "byte_to": byte_to,
                     "ts": event_ts.isoformat() if isinstance(event_ts, datetime) else None,
                 }
             )
-            self._line_buffers[stream] = ""
-            self._line_buffer_start[stream] = None
 
     def _flush_pending_raw_rows(self, *, event_ts: datetime | None = None) -> None:
         for stream in ("stdout", "stderr", "pty"):
@@ -1091,13 +1073,17 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 code = emission.get("code")
                 if not isinstance(code, str) or not code:
                     continue
+                data: dict[str, Any] = {"code": code}
+                diagnostic_details_obj = emission.get("details")
+                if isinstance(diagnostic_details_obj, dict):
+                    data.update(diagnostic_details_obj)
                 rasp = make_rasp_event(
                     run_id=self._run_id,
                     seq=1,
                     source=RuntimeEventSource(engine=self._engine, parser="live_semantic", confidence=0.6),
                     category=RuntimeEventCategory.DIAGNOSTIC,
                     type_name="diagnostic.warning",
-                    data={"code": code},
+                    data=data,
                     attempt_number=self._attempt_number,
                     raw_ref=raw_ref,
                     correlation=correlation,
@@ -1108,7 +1094,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     seq=1,
                     engine=self._engine,
                     type_name=FcmpEventType.DIAGNOSTIC_WARNING.value,
-                    data={"code": code},
+                    data=data,
                     attempt_number=self._attempt_number,
                     raw_ref=raw_ref,
                     ts=event_ts or datetime.utcnow(),

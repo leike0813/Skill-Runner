@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,11 @@ from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapt
 from server.engines.codex.adapter.stream_parser import CodexStreamParser
 from server.engines.opencode.adapter.stream_parser import OpencodeStreamParser
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
-from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
+from server.runtime.adapter.common.live_stream_parser_common import (
+    LIVE_STREAM_LINE_OVERFLOW_REPAIRED,
+    NdjsonLiveStreamParserSession,
+    repair_truncated_json_line,
+)
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.protocol.live_publish import (
@@ -200,6 +205,49 @@ def test_ndjson_live_session_ignores_invalid_json_and_routes_multiple_streams() 
     assert stderr_emissions == []
     assert [item["code"] for item in pty_emissions] == ["pty:row-2"]
     assert [item[0] for item in session.rows] == ["stdout", "pty"]
+
+
+def test_repair_truncated_json_line_closes_string_and_containers() -> None:
+    prefix = '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"'
+    repaired = repair_truncated_json_line(prefix + ("A" * 5000))
+
+    assert isinstance(repaired, str)
+    payload = json.loads(repaired)
+    assert payload["type"] == "user"
+    assert payload["message"]["content"][0]["type"] == "tool_result"
+    assert payload["message"]["content"][0]["tool_use_id"] == "toolu_1"
+    assert "[truncated by live overflow guard]" in payload["message"]["content"][0]["content"]
+
+
+def test_ndjson_live_session_repairs_overflowed_line_and_resyncs() -> None:
+    session = _RecordingNdjsonSession()
+    oversized = (
+        '{"id":"row-1","content":"'
+        + ("A" * 5000)
+        + '"}\n{"id":"row-2"}\n'
+    )
+    payload_bytes = oversized.encode("utf-8")
+    split = 2700
+    first = payload_bytes[:split].decode("utf-8", errors="replace")
+    second = payload_bytes[split:].decode("utf-8", errors="replace")
+
+    emissions_first = session.feed(stream="stdout", text=first, byte_from=0, byte_to=split)
+    emissions_second = session.feed(
+        stream="stdout",
+        text=second,
+        byte_from=split,
+        byte_to=len(payload_bytes),
+    )
+
+    assert emissions_first == []
+    assert emissions_second[0]["kind"] == "diagnostic"
+    assert emissions_second[0]["code"] == LIVE_STREAM_LINE_OVERFLOW_REPAIRED
+    assert [item["code"] for item in emissions_second[1:]] == ["stdout:row-1", "stdout:row-2"]
+    first_row_payload = session.rows[0][1]
+    assert first_row_payload["id"] == "row-1"
+    assert "[truncated by live overflow guard]" in first_row_payload["content"]
+    assert session.rows[0][2]["byte_to"] > 4096
+    assert session.rows[1][1]["id"] == "row-2"
 
 
 def test_codex_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> None:
@@ -506,3 +554,70 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     final_rasp = rasp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
     assert not any(row.get("event", {}).get("type") == "raw.stdout" for row in final_rasp["events"])
     assert any(row.get("event", {}).get("type") == "lifecycle.run_handle" for row in final_rasp["events"])
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_repairs_overflowed_claude_tool_result_and_resyncs(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-claude-overflow-repaired"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-overflow-repaired")
+    rasp_live_journal.clear("run-live-claude-overflow-repaired")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-overflow-repaired",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    init_payload = '{"type":"system","subtype":"init","session_id":"session-claude-overflow"}\n'
+    tool_use_payload = (
+        '{"type":"assistant","message":{"content":[{"name":"Read","input":{"file_path":"/tmp/source.md"},'
+        '"id":"toolu_read","type":"tool_use"}]}}\n'
+    )
+    tool_result_payload = (
+        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_read","content":"'
+        + ("B" * 7000)
+        + '","is_error":false}]}}\n'
+    )
+    result_payload = (
+        '{"type":"result","subtype":"success","session_id":"session-claude-overflow","result":"done"}\n'
+    )
+    combined = f"{init_payload}{tool_use_payload}{tool_result_payload}{result_payload}"
+
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=combined,
+        byte_from=0,
+        byte_to=len(combined.encode("utf-8")),
+    )
+    await emitter.on_process_exit(exit_code=0, failure_reason=None)
+
+    rasp_payload = rasp_live_journal.replay(run_id="run-live-claude-overflow-repaired", after_seq=0)
+    rasp_types = [row.get("event", {}).get("type") for row in rasp_payload["events"]]
+    assert "diagnostic.warning" in rasp_types
+    assert "agent.tool_call" in rasp_types
+    assert "agent.turn_complete" in rasp_types
+    overflow_warning = next(
+        row for row in rasp_payload["events"]
+        if row.get("event", {}).get("type") == "diagnostic.warning"
+        and row.get("data", {}).get("code") == LIVE_STREAM_LINE_OVERFLOW_REPAIRED
+    )
+    assert overflow_warning["data"]["stream_line_limit_bytes"] == 4096
+    repaired_tool_result = next(
+        row for row in rasp_payload["events"]
+        if row.get("event", {}).get("type") == "agent.tool_call"
+        and row.get("data", {}).get("details", {}).get("item_type") == "tool_result"
+    )
+    assert repaired_tool_result["data"]["classification"] == "tool_call"
+    assert "[truncated by live overflow guard]" in str(repaired_tool_result["data"].get("text", ""))
+
+    fcmp_payload = fcmp_live_journal.replay(run_id="run-live-claude-overflow-repaired", after_seq=0)
+    fcmp_types = [row.get("type") for row in fcmp_payload["events"]]
+    assert "diagnostic.warning" in fcmp_types
+    assert "assistant.tool_call" in fcmp_types
+    assert "assistant.message.final" in fcmp_types
