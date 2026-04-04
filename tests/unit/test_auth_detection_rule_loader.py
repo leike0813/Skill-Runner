@@ -53,6 +53,28 @@ def _write_profile(
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False,
                 },
+                "command_defaults": {
+                    "start": ["--json"],
+                    "resume": ["resume", "--json"],
+                    "ui_shell": ["ui", "--json"],
+                },
+                "ui_shell": {
+                    "command_id": f"{engine}_ui_shell",
+                    "label": f"{engine} ui shell",
+                    "trust_bootstrap_parent": False,
+                    "sandbox_arg": None,
+                    "retry_without_sandbox_on_early_exit": False,
+                    "sandbox_probe_strategy": "static_unsupported",
+                    "sandbox_probe_message": None,
+                    "auth_hint_strategy": "none",
+                    "runtime_override_strategy": "none",
+                    "config_assets": {
+                        "default_path": None,
+                        "enforced_path": None,
+                        "settings_schema_path": None,
+                        "target_relpath": None,
+                    },
+                },
                 "config_assets": {
                     "bootstrap_path": str(root / "bootstrap.json"),
                     "default_path": str(root / "default.json"),

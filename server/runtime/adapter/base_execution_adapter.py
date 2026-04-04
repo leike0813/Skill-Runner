@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import deque
+import contextlib
+from dataclasses import dataclass, field
+from io import StringIO
 import json
 import logging
 import os
@@ -9,7 +13,6 @@ import re
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any, cast
@@ -27,8 +30,11 @@ from ...models import (
 from ..protocol.contracts import LiveRuntimeEmitter
 from ...services.platform.process_supervisor import process_supervisor
 from ...services.platform.process_termination import terminate_asyncio_process_tree
+from ..common.async_audit_writer import BufferedAsyncTextFileWriter
 from ..auth_detection.signal import extract_auth_signal, is_high_confidence_auth_signal
+from .common.live_stream_parser_common import NdjsonIngressSanitizer
 from .common.prompt_builder_common import render_global_first_attempt_prefix
+from .common.stream_text_decoder import IncrementalUtf8TextDecoder
 from .contracts import (
     AdapterExecutionArtifacts,
     AdapterExecutionContext,
@@ -39,7 +45,13 @@ from .contracts import (
     SessionHandleCodec,
     StreamParser,
 )
-from .types import EngineRunResult, ProcessExecutionResult, RuntimeAuthSignal, RuntimeStreamParseResult
+from .types import (
+    EngineRunResult,
+    LiveParserEmission,
+    ProcessExecutionResult,
+    RuntimeAuthSignal,
+    RuntimeStreamParseResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +60,45 @@ _RUNTIME_DEPENDENCY_WARNING_MAX_CHARS = 512
 
 
 AUTH_DETECTION_MONITOR_INTERVAL_SECONDS = 0.1
-AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 0.25
+AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 1.5
+AUTH_DETECTION_STDOUT_WINDOW_BYTES = 64 * 1024
+AUTH_DETECTION_STDERR_WINDOW_BYTES = 16 * 1024
+RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS = 0.2
+NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode"}
+
+
+@dataclass
+class _RecentTextWindow:
+    max_bytes: int
+    _chunks: deque[str] = field(init=False, repr=False)
+    _bytes: int = 0
+
+    def __post_init__(self) -> None:
+        self.max_bytes = max(1, int(self.max_bytes))
+        self._chunks = deque()
+
+    def append(self, text: str) -> None:
+        if not text:
+            return
+        text_bytes = len(text.encode("utf-8", errors="replace"))
+        if text_bytes >= self.max_bytes:
+            self._chunks.clear()
+            self._bytes = 0
+            encoded = text.encode("utf-8", errors="replace")
+            trimmed = encoded[-self.max_bytes :].decode("utf-8", errors="ignore")
+            trimmed_bytes = len(trimmed.encode("utf-8", errors="replace"))
+            if trimmed:
+                self._chunks.append(trimmed)
+                self._bytes = trimmed_bytes
+            return
+        self._chunks.append(text)
+        self._bytes += text_bytes
+        while self._chunks and self._bytes > self.max_bytes:
+            dropped = self._chunks.popleft()
+            self._bytes -= len(dropped.encode("utf-8", errors="replace"))
+
+    def render(self) -> str:
+        return "".join(self._chunks)
 
 
 @dataclass
@@ -658,13 +708,19 @@ class EngineExecutionAdapter:
         prefix: str,
         live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
-        stdout_chunks: list[str] = []
-        stderr_chunks: list[str] = []
+        stdout_buffer = StringIO()
+        stderr_buffer = StringIO()
+        stdout_recent = _RecentTextWindow(max_bytes=AUTH_DETECTION_STDOUT_WINDOW_BYTES)
+        stderr_recent = _RecentTextWindow(max_bytes=AUTH_DETECTION_STDERR_WINDOW_BYTES)
         auth_engine = self._resolve_auth_detection_engine(options=options)
         auth_idle_grace_sec = self._resolve_auth_detection_idle_grace_seconds()
+        engine_obj = options.get("__engine_name")
+        engine_name = engine_obj if isinstance(engine_obj, str) and engine_obj else None
+        use_ndjson_ingress_sanitizer = engine_name in NDJSON_INGRESS_SANITIZED_ENGINES
         auth_signal: RuntimeAuthSignal | None = None
         auth_detection_armed = False
         auth_early_exit = False
+        auth_probe_dirty = False
         last_output_monotonic = time.monotonic()
         last_probe_monotonic = 0.0
         detection_lock = asyncio.Lock()
@@ -675,30 +731,34 @@ class EngineExecutionAdapter:
         stdout_log_path = audit_dir / f"stdout.{attempt_number}.log"
         stderr_log_path = audit_dir / f"stderr.{attempt_number}.log"
         io_chunks_path = audit_dir / f"io_chunks.{attempt_number}.jsonl"
-        stdout_log = stdout_log_path.open("w", encoding="utf-8")
-        stderr_log = stderr_log_path.open("w", encoding="utf-8")
-        io_chunks_log = io_chunks_path.open("w", encoding="utf-8")
-        io_chunks_lock = asyncio.Lock()
+        run_id_obj = options.get("__run_id")
+        run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
+        stdout_writer = BufferedAsyncTextFileWriter(path=stdout_log_path)
+        stderr_writer = BufferedAsyncTextFileWriter(path=stderr_log_path)
+        io_chunks_writer = BufferedAsyncTextFileWriter(path=io_chunks_path)
         io_chunk_seq = 0
         io_chunks_write_failed = False
 
         async def _probe_auth_detection(force: bool = False) -> None:
-            nonlocal auth_signal, auth_detection_armed, last_probe_monotonic
+            nonlocal auth_signal, auth_detection_armed, last_probe_monotonic, auth_probe_dirty
             if auth_engine is None:
                 return
             now = time.monotonic()
             if not force and (now - last_probe_monotonic) < AUTH_DETECTION_PROBE_THROTTLE_SECONDS:
                 return
+            if not force and not auth_probe_dirty:
+                return
             last_probe_monotonic = now
             if detection_lock.locked():
                 return
             async with detection_lock:
-                current_stdout = "".join(stdout_chunks)
-                current_stderr = "".join(stderr_chunks)
+                current_stdout = stdout_recent.render()
+                current_stderr = stderr_recent.render()
                 runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
                     raw_stdout=current_stdout,
                     raw_stderr=current_stderr,
                 )
+                auth_probe_dirty = False
                 signal = extract_auth_signal(runtime_parse_result)
                 if isinstance(signal, dict):
                     auth_signal = signal
@@ -719,77 +779,153 @@ class EngineExecutionAdapter:
 
         async def read_stream(
             stream: asyncio.StreamReader | None,
-            chunks: list[str],
+            full_buffer: StringIO,
+            recent_window: _RecentTextWindow,
             tag: str,
             should_print: bool,
-            log_file: Any,
+            log_writer: BufferedAsyncTextFileWriter,
             stream_name: str,
         ) -> None:
-            nonlocal last_output_monotonic, io_chunk_seq, io_chunks_write_failed
+            nonlocal last_output_monotonic, io_chunk_seq, io_chunks_write_failed, auth_probe_dirty
             if stream is None:
                 return
             offset = 0
+            text_decoder = IncrementalUtf8TextDecoder()
+            ingress_sanitizer = (
+                NdjsonIngressSanitizer(accepted_streams={"stdout"})
+                if use_ndjson_ingress_sanitizer and stream_name == "stdout"
+                else None
+            )
+
+            async def _publish_text(
+                *,
+                published_text: str,
+                published_byte_from: int,
+                published_byte_to: int,
+                payload_bytes: bytes | None = None,
+                diagnostics: list[LiveParserEmission] | None = None,
+            ) -> None:
+                nonlocal io_chunk_seq, io_chunks_write_failed, auth_probe_dirty
+                if not published_text:
+                    return
+                io_payload = payload_bytes or published_text.encode("utf-8", errors="replace")
+                full_buffer.write(published_text)
+                recent_window.append(published_text)
+                if stream_name in {"stdout", "stderr"}:
+                    auth_probe_dirty = True
+                log_writer.enqueue(published_text)
+                if not io_chunks_write_failed:
+                    try:
+                        io_chunk_seq += 1
+                        io_chunks_row = json.dumps(
+                            {
+                                "seq": io_chunk_seq,
+                                "ts": datetime.utcnow().isoformat(),
+                                "stream": stream_name,
+                                "byte_from": published_byte_from,
+                                "byte_to": published_byte_to,
+                                "payload_b64": base64.b64encode(io_payload).decode("ascii"),
+                                "encoding": "base64",
+                            },
+                            ensure_ascii=False,
+                        )
+                        if not io_chunks_writer.enqueue(f"{io_chunks_row}\n"):
+                            io_chunks_write_failed = True
+                            logger.warning("[%s] io_chunks writer overflowed; dropping subsequent journal rows", prefix)
+                    except OSError:
+                        io_chunks_write_failed = True
+                        logger.exception("[%s] failed to append io_chunks journal", prefix)
+                if live_runtime_emitter is not None:
+                    await live_runtime_emitter.on_stream_chunk(
+                        stream=stream_name,
+                        text=published_text,
+                        byte_from=published_byte_from,
+                        byte_to=published_byte_to,
+                    )
+                    diagnostics_publisher = getattr(live_runtime_emitter, "publish_runtime_diagnostics", None)
+                    if callable(diagnostics_publisher) and diagnostics:
+                        publish_result = diagnostics_publisher(emissions=diagnostics)
+                        if asyncio.iscoroutine(publish_result):
+                            await publish_result
+                if should_print:
+                    logger.info("[%s]%s", tag, published_text.rstrip())
+
             while True:
                 chunk = await stream.read(1024)
                 if not chunk:
                     break
-                decoded_chunk = chunk.decode("utf-8", errors="replace")
-                chunks.append(decoded_chunk)
-                log_file.write(decoded_chunk)
-                log_file.flush()
-                if not io_chunks_write_failed:
-                    try:
-                        async with io_chunks_lock:
-                            io_chunk_seq += 1
-                            io_chunks_log.write(
-                                json.dumps(
-                                    {
-                                        "seq": io_chunk_seq,
-                                        "ts": datetime.utcnow().isoformat(),
-                                        "stream": stream_name,
-                                        "byte_from": offset,
-                                        "byte_to": offset + len(chunk),
-                                        "payload_b64": base64.b64encode(chunk).decode("ascii"),
-                                        "encoding": "base64",
-                                    },
-                                    ensure_ascii=False,
-                                )
-                            )
-                            io_chunks_log.write("\n")
-                            io_chunks_log.flush()
-                    except OSError:
-                        io_chunks_write_failed = True
-                        logger.exception("[%s] failed to append io_chunks journal", prefix)
+                decoded_chunk = text_decoder.feed(chunk)
                 last_output_monotonic = time.monotonic()
-                if live_runtime_emitter is not None:
-                    await live_runtime_emitter.on_stream_chunk(
-                        stream=stream_name,
-                        text=decoded_chunk,
-                        byte_from=offset,
-                        byte_to=offset + len(chunk),
+                if ingress_sanitizer is None:
+                    await _publish_text(
+                        published_text=decoded_chunk,
+                        published_byte_from=offset,
+                        published_byte_to=offset + len(chunk),
+                        payload_bytes=chunk,
                     )
-                offset += len(chunk)
-                if should_print:
-                    logger.info("[%s]%s", tag, decoded_chunk.rstrip())
+                    offset += len(chunk)
+                    await _probe_auth_detection()
+                    continue
+                published_any = False
+                for sanitized_chunk in ingress_sanitizer.feed(stream=stream_name, text=decoded_chunk):
+                    await _publish_text(
+                        published_text=sanitized_chunk.text,
+                        published_byte_from=sanitized_chunk.byte_from,
+                        published_byte_to=sanitized_chunk.byte_to,
+                        diagnostics=sanitized_chunk.diagnostics,
+                    )
+                    published_any = True
+                if published_any:
+                    offset = sanitized_chunk.byte_to
+                    await _probe_auth_detection()
+            tail_text, pending_len = text_decoder.finish()
+            if ingress_sanitizer is None:
+                if tail_text:
+                    await _publish_text(
+                        published_text=tail_text,
+                        published_byte_from=max(0, offset - pending_len),
+                        published_byte_to=offset,
+                        payload_bytes=tail_text.encode("utf-8", errors="replace"),
+                    )
+                    last_output_monotonic = time.monotonic()
+                    await _probe_auth_detection()
+                return
+            if tail_text:
+                for sanitized_chunk in ingress_sanitizer.feed(stream=stream_name, text=tail_text):
+                    await _publish_text(
+                        published_text=sanitized_chunk.text,
+                        published_byte_from=sanitized_chunk.byte_from,
+                        published_byte_to=sanitized_chunk.byte_to,
+                        diagnostics=sanitized_chunk.diagnostics,
+                    )
+                    offset = sanitized_chunk.byte_to
+                    last_output_monotonic = time.monotonic()
+                    await _probe_auth_detection()
+            flushed_chunk = ingress_sanitizer.flush(stream=stream_name)
+            if flushed_chunk is not None:
+                await _publish_text(
+                    published_text=flushed_chunk.text,
+                    published_byte_from=flushed_chunk.byte_from,
+                    published_byte_to=flushed_chunk.byte_to,
+                    diagnostics=flushed_chunk.diagnostics,
+                )
+                offset = flushed_chunk.byte_to
+                last_output_monotonic = time.monotonic()
                 await _probe_auth_detection()
 
         stdout_task = asyncio.create_task(
-            read_stream(proc.stdout, stdout_chunks, f"{prefix} OUT ", False, stdout_log, "stdout")
+            read_stream(proc.stdout, stdout_buffer, stdout_recent, f"{prefix} OUT ", False, stdout_writer, "stdout")
         )
         stderr_task = asyncio.create_task(
-            read_stream(proc.stderr, stderr_chunks, f"{prefix} ERR ", False, stderr_log, "stderr")
+            read_stream(proc.stderr, stderr_buffer, stderr_recent, f"{prefix} ERR ", False, stderr_writer, "stderr")
         )
 
-        run_id_obj = options.get("__run_id")
-        run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else None
         lease_id: str | None = None
         if run_id:
             request_id_obj = options.get("__request_id")
             request_id = request_id_obj if isinstance(request_id_obj, str) and request_id_obj else None
             attempt_obj = options.get("__attempt_number")
             attempt_number_value = attempt_obj if isinstance(attempt_obj, int) and attempt_obj > 0 else None
-            engine_obj = options.get("__engine_name")
-            engine_name = engine_obj if isinstance(engine_obj, str) and engine_obj else None
             lease_id = process_supervisor.register_asyncio_process(
                 owner_kind="run_attempt",
                 owner_id=f"{run_id}:{attempt_number}",
@@ -850,15 +986,23 @@ class EngineExecutionAdapter:
                 stdout_task.cancel()
                 stderr_task.cancel()
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            stdout_log.close()
-            stderr_log.close()
-            io_chunks_log.close()
             if run_id:
                 self._active_processes().pop(run_id, None)
             process_supervisor.release(lease_id, reason="run_attempt_finalized")
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(
+                        asyncio.gather(
+                            stdout_writer.close_and_wait(timeout_sec=None),
+                            stderr_writer.close_and_wait(timeout_sec=None),
+                            io_chunks_writer.close_and_wait(timeout_sec=None),
+                        )
+                    ),
+                    timeout=RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS,
+                )
 
-        raw_stdout = "".join(stdout_chunks)
-        raw_stderr = "".join(stderr_chunks)
+        raw_stdout = stdout_buffer.getvalue()
+        raw_stderr = stderr_buffer.getvalue()
         returncode = proc.returncode if proc.returncode is not None else 1
         failure_reason: str | None = None
         if auth_early_exit:

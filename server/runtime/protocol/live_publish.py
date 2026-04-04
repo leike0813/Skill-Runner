@@ -8,7 +8,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Set, cast
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, cast
 
 from server.models import (
     ConversationEventEnvelope,
@@ -20,6 +20,7 @@ from server.models import (
     RuntimeEventSource,
 )
 from server.runtime.chat_replay.publisher import chat_replay_publisher
+from server.runtime.common.async_audit_writer import BufferedAsyncTextFileWriter, audit_writer_registry
 from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
@@ -86,108 +87,76 @@ def _append_jsonl_sync(path: Path, row: dict[str, Any]) -> None:
 
 class FcmpAuditMirrorWriter:
     def __init__(self) -> None:
-        self._pending_tasks_by_run: dict[str, Set[asyncio.Task[Any]]] = defaultdict(set)
-        self._path_locks: dict[str, asyncio.Lock] = {}
+        self._writers_by_path: dict[str, BufferedAsyncTextFileWriter] = {}
+        self._writers_by_run: dict[str, set[BufferedAsyncTextFileWriter]] = defaultdict(set)
 
-    def _lock_for_path(self, path: Path) -> asyncio.Lock:
-        key = str(path.resolve(strict=False))
-        lock = self._path_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._path_locks[key] = lock
-        return lock
-
-    async def append_row(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+    def _writer_for(self, *, run_dir: Path, attempt_number: int, run_id: str) -> BufferedAsyncTextFileWriter:
         path = run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl"
-        lock = self._lock_for_path(path)
-        async with lock:
-            _append_jsonl_sync(path, row)
+        key = str(path.resolve(strict=False))
+        writer = self._writers_by_path.get(key)
+        if writer is None:
+            writer = BufferedAsyncTextFileWriter(path=path)
+            self._writers_by_path[key] = writer
+            self._writers_by_run[run_id].add(writer)
+            audit_writer_registry.register(run_id=run_id, writer=writer)
+        return writer
 
     def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             _append_jsonl_sync(run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl", row)
             return
-        task = loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
-        pending = self._pending_tasks_by_run[run_id]
-        pending.add(task)
-
-        def _on_done(done_task: asyncio.Task[Any]) -> None:
-            task_set = self._pending_tasks_by_run.get(run_id)
-            if task_set is None:
-                return
-            task_set.discard(done_task)
-            if not task_set:
-                self._pending_tasks_by_run.pop(run_id, None)
-
-        task.add_done_callback(_on_done)
+        writer = self._writer_for(run_dir=run_dir, attempt_number=attempt_number, run_id=run_id)
+        writer.enqueue(f"{json.dumps(row, ensure_ascii=False)}\n")
 
     async def drain(self, *, run_id: Optional[str] = None) -> None:
-        tasks: list[asyncio.Task[Any]] = []
         if run_id is None:
-            for task_set in self._pending_tasks_by_run.values():
-                tasks.extend(task_set)
+            writers = list(self._writers_by_path.values())
         else:
-            tasks.extend(self._pending_tasks_by_run.get(run_id, set()))
-        if not tasks:
+            writers = list(self._writers_by_run.get(run_id, set()))
+        if not writers:
             return
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*(writer.wait_for_idle() for writer in writers), return_exceptions=True)
 
 
 class RaspAuditMirrorWriter:
     def __init__(self) -> None:
-        self._pending_tasks_by_run: dict[str, Set[asyncio.Task[Any]]] = defaultdict(set)
-        self._path_locks: dict[str, asyncio.Lock] = {}
+        self._writers_by_path: dict[str, BufferedAsyncTextFileWriter] = {}
+        self._writers_by_run: dict[str, set[BufferedAsyncTextFileWriter]] = defaultdict(set)
 
-    def _lock_for_path(self, path: Path) -> asyncio.Lock:
-        key = str(path.resolve(strict=False))
-        lock = self._path_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._path_locks[key] = lock
-        return lock
-
-    async def append_row(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+    def _writer_for(self, *, run_dir: Path, attempt_number: int, run_id: str) -> BufferedAsyncTextFileWriter:
         path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
-        lock = self._lock_for_path(path)
-        async with lock:
-            _append_jsonl_sync(path, row)
+        key = str(path.resolve(strict=False))
+        writer = self._writers_by_path.get(key)
+        if writer is None:
+            writer = BufferedAsyncTextFileWriter(path=path)
+            self._writers_by_path[key] = writer
+            self._writers_by_run[run_id].add(writer)
+            audit_writer_registry.register(run_id=run_id, writer=writer)
+        return writer
 
     def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             _append_jsonl_sync(run_dir / ".audit" / f"events.{attempt_number}.jsonl", row)
             return
-        task = loop.create_task(self.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row))
-        pending = self._pending_tasks_by_run[run_id]
-        pending.add(task)
-
-        def _on_done(done_task: asyncio.Task[Any]) -> None:
-            task_set = self._pending_tasks_by_run.get(run_id)
-            if task_set is None:
-                return
-            task_set.discard(done_task)
-            if not task_set:
-                self._pending_tasks_by_run.pop(run_id, None)
-
-        task.add_done_callback(_on_done)
+        writer = self._writer_for(run_dir=run_dir, attempt_number=attempt_number, run_id=run_id)
+        writer.enqueue(f"{json.dumps(row, ensure_ascii=False)}\n")
 
     async def drain(self, *, run_id: Optional[str] = None) -> None:
-        tasks: list[asyncio.Task[Any]] = []
         if run_id is None:
-            for task_set in self._pending_tasks_by_run.values():
-                tasks.extend(task_set)
+            writers = list(self._writers_by_path.values())
         else:
-            tasks.extend(self._pending_tasks_by_run.get(run_id, set()))
-        if not tasks:
+            writers = list(self._writers_by_run.get(run_id, set()))
+        if not writers:
             return
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*(writer.wait_for_idle() for writer in writers), return_exceptions=True)
 
 
 class FcmpEventPublisher:
@@ -721,6 +690,14 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         if exit_code == 0 and failure_reason not in {"AUTH_REQUIRED", "TIMEOUT"}:
             self._emit_promoted_and_final(status="succeeded", event_ts=event_ts)
 
+    async def publish_runtime_diagnostics(
+        self,
+        *,
+        emissions: list[LiveParserEmission],
+        event_ts: datetime | None = None,
+    ) -> None:
+        await self._publish_emissions(emissions, event_ts=event_ts)
+
     def _publish_raw_lines(
         self,
         *,
@@ -1235,8 +1212,23 @@ fcmp_event_publisher = FcmpEventPublisher()
 rasp_event_publisher = RaspEventPublisher()
 
 
-async def flush_live_audit_mirrors(*, run_id: Optional[str] = None) -> None:
-    await asyncio.gather(
-        fcmp_event_publisher.drain_mirror(run_id=run_id),
-        rasp_event_publisher.drain_mirror(run_id=run_id),
+async def flush_live_audit_mirrors(
+    *,
+    run_id: Optional[str] = None,
+    timeout_sec: float | None = None,
+) -> bool:
+    waiter = asyncio.shield(
+        asyncio.gather(
+            fcmp_event_publisher.drain_mirror(run_id=run_id),
+            rasp_event_publisher.drain_mirror(run_id=run_id),
+            chat_replay_publisher.drain_mirror(run_id=run_id),
+        )
     )
+    if timeout_sec is None:
+        await waiter
+        return True
+    try:
+        await asyncio.wait_for(waiter, timeout=timeout_sec)
+        return True
+    except asyncio.TimeoutError:
+        return False

@@ -33,6 +33,7 @@ from server.runtime.protocol.schema_registry import (
 )
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
+from server.runtime.adapter.common.stream_text_decoder import IncrementalUtf8TextDecoder
 from server.runtime.protocol.live_publish import (
     FcmpEventPublisher,
     LiveRuntimeEmitterImpl,
@@ -866,14 +867,65 @@ class RunObservabilityService:
             run_dir=run_dir,
             requested_attempt=attempt,
         )
+        if self._is_running_current_attempt_protocol_request(
+            run_dir=run_dir,
+            stream=normalized_stream,
+            status=status,
+            status_payload=status_payload,
+            selected_attempt=selected_attempt,
+        ):
+            fast_live_payload = self._get_live_protocol_payload(
+                run_dir=run_dir,
+                stream=normalized_stream,
+                attempt_number=selected_attempt,
+                from_seq=from_seq,
+                to_seq=to_seq,
+                from_ts=from_ts,
+                to_ts=to_ts,
+            )
+            return self._build_live_protocol_history_response(
+                run_dir=run_dir,
+                selected_attempt=selected_attempt,
+                live_payload=fast_live_payload,
+                limit=limit,
+                from_seq=from_seq,
+                to_seq=to_seq,
+            )
         live_payload: Dict[str, Any]
         live_rows: List[Dict[str, Any]]
         live_floor = 0
         live_ceiling = 0
+        terminal_mirror_drained = not (terminal_status and normalized_stream in {"fcmp", "rasp"})
         if terminal_status and normalized_stream in {"fcmp", "rasp"}:
-            await flush_live_audit_mirrors(run_id=run_dir.name)
-            live_payload = {"events": [], "cursor_floor": 0, "cursor_ceiling": 0}
-            live_rows = []
+            terminal_mirror_drained = await flush_live_audit_mirrors(
+                run_id=run_dir.name,
+                timeout_sec=0.2,
+            )
+            if terminal_mirror_drained:
+                live_payload = {"events": [], "cursor_floor": 0, "cursor_ceiling": 0}
+                live_rows = []
+            else:
+                live_payload = self._get_live_protocol_payload(
+                    run_dir=run_dir,
+                    stream=normalized_stream,
+                    attempt_number=selected_attempt,
+                    from_seq=from_seq,
+                    to_seq=to_seq,
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                )
+                live_rows_obj = live_payload.get("events")
+                live_rows = live_rows_obj if isinstance(live_rows_obj, list) else []
+                live_floor_obj = live_payload.get("cursor_floor")
+                live_ceiling_obj = live_payload.get("cursor_ceiling")
+                try:
+                    live_floor = int(live_floor_obj or 0)
+                except (TypeError, ValueError):
+                    live_floor = 0
+                try:
+                    live_ceiling = int(live_ceiling_obj or 0)
+                except (TypeError, ValueError):
+                    live_ceiling = 0
         else:
             live_payload = self._get_live_protocol_payload(
                 run_dir=run_dir,
@@ -901,7 +953,7 @@ class RunObservabilityService:
         needs_audit = normalized_stream == "orchestrator"
         if normalized_stream in {"fcmp", "rasp"}:
             if terminal_status:
-                needs_audit = True
+                needs_audit = terminal_mirror_drained
             elif requested_from is None:
                 needs_audit = True
             elif live_floor > 0 and requested_from < live_floor:
@@ -909,23 +961,27 @@ class RunObservabilityService:
             elif not live_rows:
                 needs_audit = True
         context = f"history:{normalized_stream}:{request_id or run_dir.name}"
-        if normalized_stream == "fcmp":
-            self.reindex_fcmp_global_seq(run_dir)
-            rows = self._filter_valid_fcmp_rows(
-                rows=read_jsonl(paths["fcmp"]),
-                context=context,
-            )
-        elif normalized_stream == "rasp":
-            rows = self._filter_valid_rasp_rows(
-                rows=read_jsonl(paths["events"]),
-                context=context,
-            )
-        else:
+        rows: list[dict[str, Any]]
+        if normalized_stream == "orchestrator":
             orchestrator_rows = self._backfill_orchestrator_seq(read_jsonl(paths["orchestrator"]))
             rows = self._filter_valid_orchestrator_rows(
                 rows=orchestrator_rows,
                 context=context,
             )
+        elif needs_audit:
+            if normalized_stream == "fcmp":
+                self.reindex_fcmp_global_seq(run_dir)
+                rows = self._filter_valid_fcmp_rows(
+                    rows=read_jsonl(paths["fcmp"]),
+                    context=context,
+                )
+            else:
+                rows = self._filter_valid_rasp_rows(
+                    rows=read_jsonl(paths["events"]),
+                    context=context,
+                )
+        else:
+            rows = []
 
         filtered = self._filter_events(
             rows=rows,
@@ -934,7 +990,7 @@ class RunObservabilityService:
             from_ts=from_ts,
             to_ts=to_ts,
         )
-        if normalized_stream in {"fcmp", "rasp"} and not terminal_status:
+        if normalized_stream in {"fcmp", "rasp"} and (not terminal_status or not terminal_mirror_drained):
             filtered = self._merge_protocol_rows(
                 stream=normalized_stream,
                 audit_rows=filtered,
@@ -951,13 +1007,9 @@ class RunObservabilityService:
             "available_attempts": self._list_available_attempts(run_dir),
             "events": filtered,
             "source": (
-                "audit"
-                if terminal_status and normalized_stream in {"fcmp", "rasp"}
-                else (
-                    "mixed"
-                    if filtered and live_rows and needs_audit
-                    else ("live" if live_rows and not needs_audit else "audit")
-                )
+                "mixed"
+                if needs_audit and live_rows and filtered
+                else ("live" if live_rows and not needs_audit else "audit")
             ),
             "cursor_floor": live_floor,
             "cursor_ceiling": live_ceiling,
@@ -1429,6 +1481,60 @@ class RunObservabilityService:
             "cursor_ceiling": payload.get("cursor_ceiling", 0),
         }
 
+    def _is_running_current_attempt_protocol_request(
+        self,
+        *,
+        run_dir: Path,
+        stream: str,
+        status: str,
+        status_payload: Dict[str, Any],
+        selected_attempt: int,
+    ) -> bool:
+        if status not in RUNNING_STATUSES or stream not in {"fcmp", "rasp"}:
+            return False
+        current_attempt = self._read_expected_attempt_number(status_payload)
+        if current_attempt is None or current_attempt <= 0:
+            latest_attempt = self._latest_attempt_number(run_dir)
+            current_attempt = latest_attempt if latest_attempt > 0 else selected_attempt
+        return selected_attempt == current_attempt
+
+    def _build_live_protocol_history_response(
+        self,
+        *,
+        run_dir: Path,
+        selected_attempt: int,
+        live_payload: Dict[str, Any],
+        limit: Optional[int],
+        from_seq: Optional[int],
+        to_seq: Optional[int],
+    ) -> Dict[str, Any]:
+        live_rows_obj = live_payload.get("events")
+        live_rows = live_rows_obj if isinstance(live_rows_obj, list) else []
+        filtered = self._apply_protocol_limit(
+            rows=live_rows,
+            limit=limit,
+            from_seq=from_seq,
+            to_seq=to_seq,
+        )
+        live_floor_obj = live_payload.get("cursor_floor")
+        live_ceiling_obj = live_payload.get("cursor_ceiling")
+        try:
+            live_floor = int(live_floor_obj or 0)
+        except (TypeError, ValueError):
+            live_floor = 0
+        try:
+            live_ceiling = int(live_ceiling_obj or 0)
+        except (TypeError, ValueError):
+            live_ceiling = 0
+        return {
+            "attempt": selected_attempt,
+            "available_attempts": self._list_available_attempts(run_dir),
+            "events": filtered,
+            "source": "live",
+            "cursor_floor": live_floor,
+            "cursor_ceiling": live_ceiling,
+        }
+
     def _protocol_row_stable_key(self, *, stream: str, row: Dict[str, Any]) -> str:
         if stream == "rasp":
             attempt_obj = row.get("attempt_number")
@@ -1702,6 +1808,11 @@ class RunObservabilityService:
         )
         diagnostics: list[str] = []
         replay_rows: list[dict[str, Any]] = []
+        decoders = {
+            "stdout": IncrementalUtf8TextDecoder(),
+            "stderr": IncrementalUtf8TextDecoder(),
+        }
+        last_row_index_by_stream: dict[str, int] = {}
         for row in ordered:
             seq_obj = row.get("seq")
             seq = seq_obj if isinstance(seq_obj, int) and seq_obj > 0 else None
@@ -1729,6 +1840,7 @@ class RunObservabilityService:
                 byte_to = expected_to
             ts_obj = row.get("ts")
             ts = ts_obj if isinstance(ts_obj, str) and ts_obj else None
+            decoded_text = decoders[stream].feed(payload)
             replay_rows.append(
                 {
                     "seq": seq,
@@ -1736,9 +1848,19 @@ class RunObservabilityService:
                     "stream": stream,
                     "byte_from": byte_from,
                     "byte_to": byte_to,
-                    "text": payload.decode("utf-8", errors="replace"),
+                    "text": decoded_text,
                 }
             )
+            last_row_index_by_stream[stream] = len(replay_rows) - 1
+        for stream_name, decoder in decoders.items():
+            tail_text, _pending_len = decoder.finish()
+            if not tail_text:
+                continue
+            row_index = last_row_index_by_stream.get(stream_name)
+            if row_index is None:
+                continue
+            existing_text = replay_rows[row_index].get("text")
+            replay_rows[row_index]["text"] = f"{existing_text or ''}{tail_text}"
         if not replay_rows:
             return {"used": False, "reason": "decode_failed", "rows": [], "diagnostics": diagnostics}
         return {

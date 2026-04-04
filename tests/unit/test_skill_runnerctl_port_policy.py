@@ -16,6 +16,15 @@ def _load_skill_runnerctl_module():
     return module
 
 
+def _profile(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        mode="local",
+        data_dir=tmp_path / "data",
+        agent_cache_root=tmp_path / "cache",
+        agent_home=tmp_path / "agent-home",
+    )
+
+
 def test_parser_defaults_use_service_port_9813(monkeypatch) -> None:
     monkeypatch.delenv("SKILL_RUNNER_LOCAL_PORT", raising=False)
     monkeypatch.delenv("SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN", raising=False)
@@ -48,7 +57,7 @@ def test_parser_defaults_use_plugin_port_and_fallback_from_env(monkeypatch) -> N
 def test_collect_local_status_uses_lightweight_probe(monkeypatch, tmp_path: Path) -> None:
     module = _load_skill_runnerctl_module()
 
-    profile = SimpleNamespace(mode="local", data_dir=tmp_path / "data", agent_cache_root=tmp_path / "cache")
+    profile = _profile(tmp_path)
     monkeypatch.setattr(module, "_runtime_env", lambda: (profile, {"SKILL_RUNNER_LOCAL_BIND_HOST": "127.0.0.1"}))
     monkeypatch.setattr(module, "_state_file", lambda _profile: tmp_path / "state.json")
     monkeypatch.setattr(module, "_load_state", lambda _path: {"host": "127.0.0.1", "port": 9813, "pid": 4321})
@@ -75,7 +84,7 @@ def test_cmd_up_local_uses_fallback_port_when_requested_port_unavailable(
 ) -> None:
     module = _load_skill_runnerctl_module()
 
-    profile = SimpleNamespace(mode="local", data_dir=tmp_path / "data", agent_cache_root=tmp_path / "cache")
+    profile = _profile(tmp_path)
     monkeypatch.setattr(module, "_runtime_env", lambda: (profile, {"SKILL_RUNNER_LOCAL_BIND_HOST": "127.0.0.1"}))
     monkeypatch.setattr(module, "_command_exists", lambda _: True)
     monkeypatch.setattr(module, "_collect_local_status", lambda _args: {"service_healthy": False})
@@ -112,7 +121,7 @@ def test_cmd_up_local_uses_fallback_port_when_requested_port_unavailable(
 def test_cmd_up_local_fails_when_no_port_available(monkeypatch, capsys, tmp_path: Path) -> None:
     module = _load_skill_runnerctl_module()
 
-    profile = SimpleNamespace(mode="local", data_dir=tmp_path / "data", agent_cache_root=tmp_path / "cache")
+    profile = _profile(tmp_path)
     monkeypatch.setattr(module, "_runtime_env", lambda: (profile, {"SKILL_RUNNER_LOCAL_BIND_HOST": "127.0.0.1"}))
     monkeypatch.setattr(module, "_command_exists", lambda _: True)
     monkeypatch.setattr(module, "_collect_local_status", lambda _args: {"service_healthy": False})

@@ -231,7 +231,8 @@ async def test_rasp_audit_mirror_writer_persists_jsonl_rows(tmp_path: Path) -> N
     ]
 
     for row in rows:
-        await writer.append_row(run_dir=run_dir, attempt_number=attempt_number, row=row)
+        writer.enqueue(run_dir=run_dir, attempt_number=attempt_number, row=row)
+    await writer.drain(run_id=run_dir.name)
 
     path = run_dir / ".audit" / "events.1.jsonl"
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

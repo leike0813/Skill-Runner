@@ -12,8 +12,10 @@ from server.runtime.adapter.base_execution_adapter import (
     RUNTIME_DEPENDENCIES_INJECTION_FAILED,
     EngineExecutionAdapter,
 )
+from server.runtime.adapter.common.stream_text_decoder import IncrementalUtf8TextDecoder
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.types import ProcessExecutionResult
+from server.runtime.common import async_audit_writer as async_audit_writer_module
 
 
 class _NoopComposer:
@@ -256,6 +258,164 @@ async def test_capture_process_output_stream_writes_logs_during_run(tmp_path: Pa
     assert "tick" in partial
     result = await task
     assert "done" in result.raw_stdout
+
+
+def test_incremental_utf8_text_decoder_matches_one_shot_decode_for_split_multibyte_and_invalid_bytes():
+    decoder = IncrementalUtf8TextDecoder()
+    chunks = [b"prefix-", b"\xe7", b"\x9a\x84-middle-", b"\xff", b"-suffix"]
+
+    decoded_parts = [decoder.feed(chunk) for chunk in chunks]
+    tail_text, pending_len = decoder.finish()
+
+    assert pending_len == 0
+    assert "".join(decoded_parts) + tail_text == b"".join(chunks).decode("utf-8", errors="replace")
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_uses_incremental_utf8_decoding_for_logs_and_live_stream(tmp_path: Path):
+    class _LiveEmitter:
+        def __init__(self) -> None:
+            self.by_stream: dict[str, list[str]] = {"stdout": [], "stderr": []}
+
+        async def on_process_started(self) -> None:
+            return None
+
+        async def on_stream_chunk(
+            self,
+            *,
+            stream: str,
+            text: str,
+            byte_from: int,
+            byte_to: int,
+            event_ts=None,
+        ) -> None:
+            _ = byte_from, byte_to, event_ts
+            self.by_stream.setdefault(stream, []).append(text)
+
+        async def on_process_exit(
+            self,
+            *,
+            exit_code: int,
+            timed_out: bool = False,
+            failure_reason: str | None = None,
+        ) -> None:
+            _ = exit_code, timed_out, failure_reason
+            return None
+
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    live_emitter = _LiveEmitter()
+    stdout_bytes = (b"a" * 1023) + b"\xe7" + b"\x9a\x84" + b"Z\n"
+    stderr_bytes = (b"b" * 1023) + b"\xe7" + b"\x9a\x84" + b"Y\n"
+    proc = await asyncio.create_subprocess_exec(
+        "python",
+        "-c",
+        (
+            "import sys,time;"
+            "sys.stdout.buffer.write(b'a'*1023 + b'\\xe7'); sys.stdout.flush();"
+            "sys.stderr.buffer.write(b'b'*1023 + b'\\xe7'); sys.stderr.flush();"
+            "time.sleep(0.2);"
+            "sys.stdout.buffer.write(b'\\x9a\\x84Z\\n'); sys.stdout.flush();"
+            "sys.stderr.buffer.write(b'\\x9a\\x84Y\\n'); sys.stderr.flush()"
+        ),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(run_dir),
+    )
+
+    result = await adapter._capture_process_output(
+        proc,
+        run_dir,
+        {"hard_timeout_seconds": 10},
+        "Test",
+        live_runtime_emitter=live_emitter,
+    )
+
+    expected_stdout = stdout_bytes.decode("utf-8", errors="replace")
+    expected_stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+    assert (run_dir / ".audit" / "stdout.1.log").read_text(encoding="utf-8") == expected_stdout
+    assert (run_dir / ".audit" / "stderr.1.log").read_text(encoding="utf-8") == expected_stderr
+    assert result.raw_stdout == expected_stdout
+    assert result.raw_stderr == expected_stderr
+    assert "".join(live_emitter.by_stream["stdout"]) == expected_stdout
+    assert "".join(live_emitter.by_stream["stderr"]) == expected_stderr
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_auth_probe_uses_recent_window_and_low_frequency(tmp_path: Path):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    probe_lengths: list[tuple[int, int]] = []
+
+    def _record_parse_runtime_stream_for_auth_detection(*, raw_stdout: str, raw_stderr: str) -> None:
+        probe_lengths.append((len(raw_stdout.encode("utf-8")), len(raw_stderr.encode("utf-8"))))
+        return None
+
+    adapter._parse_runtime_stream_for_auth_detection = _record_parse_runtime_stream_for_auth_detection  # type: ignore[method-assign]
+
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        SkillManifest(id="x"),
+        {
+            "__engine_name": "iflow",
+            "command": [
+                "python",
+                "-c",
+                (
+                    "import sys,time;"
+                    "sys.stdout.write('A'*80000); sys.stdout.flush();"
+                    "time.sleep(0.2);"
+                    "sys.stdout.write('tail\\n'); sys.stdout.flush()"
+                ),
+            ],
+            "hard_timeout_seconds": 10,
+        },
+    )
+
+    assert result.exit_code == 0
+    assert len(result.raw_stdout.encode("utf-8")) > 65536
+    assert result.raw_stdout.endswith("tail\n")
+    assert 1 <= len(probe_lengths) <= 2
+    assert max(stdout_len for stdout_len, _ in probe_lengths) <= 65536
+    assert max(stderr_len for _, stderr_len in probe_lengths) <= 16384
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_bounded_audit_drain_does_not_block_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    original_append = async_audit_writer_module._append_text_sync
+
+    def _slow_append(path: Path, text: str) -> None:
+        time.sleep(0.5)
+        original_append(path, text)
+
+    monkeypatch.setattr(async_audit_writer_module, "_append_text_sync", _slow_append)
+
+    start = time.monotonic()
+    result = await adapter._execute_process(
+        "noop",
+        run_dir,
+        SkillManifest(id="x"),
+        {
+            "command": ["python", "-c", "print('done', flush=True)"],
+            "hard_timeout_seconds": 10,
+        },
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.exit_code == 0
+    assert "done" in result.raw_stdout
+    assert elapsed < 0.45
+    await asyncio.sleep(0.6)
 
 
 @pytest.mark.asyncio

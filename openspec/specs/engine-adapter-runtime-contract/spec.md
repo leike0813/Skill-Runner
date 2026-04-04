@@ -237,12 +237,29 @@ The system MUST require runtime adapters to expose stdout/stderr chunks while th
 - **THEN** it MUST forward that chunk to the live runtime emitter before process completion
 
 ### Requirement: Stream parsers MUST support incremental live parsing
+
 The system MUST provide a live parser session contract so engine-specific parsers can emit semantic events incrementally during execution.
 
-#### Scenario: parser session emits semantic output before audit mirror
-- **WHEN** a parser can identify a complete semantic runtime event from incoming chunks
-- **THEN** it MUST be able to emit that event through the live parser session
-- **AND** the resulting FCMP / RASP publication MUST NOT wait for audit materialization
+#### Scenario: overflowed NDJSON line is repaired before semantic parsing
+
+- **WHEN** a live NDJSON parser session observes a single logical line whose buffered size exceeds `4096` bytes before the terminating newline
+- **THEN** it MUST stop retaining the full raw body in live memory
+- **AND** it MUST attempt to repair the retained prefix into a valid JSON object when that line terminates or the process exits
+- **AND** if repair succeeds, it MUST continue semantic parsing from the repaired object instead of dropping the line
+
+#### Scenario: repaired overflow line preserves semantic event type
+
+- **WHEN** an overflowed line is successfully repaired into a valid JSON object
+- **THEN** the engine-specific live parser MUST continue using its normal row handler on that repaired object
+- **AND** the resulting `LiveParserEmission` values MUST preserve the semantic event type implied by the original payload shape
+- **AND** associated `raw_ref.byte_from/byte_to` MUST still reference the true original byte span of the long line
+
+#### Scenario: unrecoverable overflow line does not block later live events
+
+- **WHEN** an overflowed line cannot be repaired into a valid JSON object
+- **THEN** the live path MUST emit a diagnostic warning for that line
+- **AND** it MUST discard only that line's semantic publication
+- **AND** it MUST resume normal parsing at the next newline boundary without stalling later rows
 
 ### Requirement: Batch parse MUST remain secondary and backfill-only
 The system MAY retain batch parse utilities for backfill, cold replay, and parity testing, but MUST NOT use batch materialization as the live-authoritative source for SSE.
@@ -253,12 +270,14 @@ The system MAY retain batch parse utilities for backfill, cold replay, and parit
 - **AND** MUST NOT invoke batch FCMP/RASP materialization as a prerequisite
 
 ### Requirement: Live parser emission order MUST define canonical RASP order
+
 系统 MUST 将 live parser session 的 emission 顺序定义为 canonical RASP 顺序；audit mirror、batch backfill 和 replay 路径 MUST NOT 改写该顺序。
 
-#### Scenario: parser emission order becomes rasp_seq order
-- **WHEN** `LiveStreamParserSession.feed()` 或 `finish()` 产出多条 emission
-- **THEN** 这些 emission 派生的 RASP MUST 按产出顺序获得 `rasp_seq`
-- **AND** 后续 mirror/replay MUST 保持这一顺序
+#### Scenario: repaired overflow warnings precede repaired semantic events
+
+- **WHEN** a long NDJSON line is repaired and yields both a diagnostic warning and one or more semantic emissions
+- **THEN** the warning emission MUST be published before the repaired semantic emissions for that same line
+- **AND** subsequent rows MUST retain their original live order after that repaired line
 
 ### Requirement: Parser-originated FCMP MUST be produced as candidates before publication
 系统 MUST 先把 parser-originated FCMP 构造成 candidate，再交给顺序 gate 决定是否发布。
@@ -328,3 +347,162 @@ Runtime adapter profile loader MUST read supported engines from a unified engine
 - **WHEN** 统一 engine catalog 增减 engine
 - **THEN** profile loader 使用更新后的列表
 - **AND** 无需同步修改本地硬编码引擎常量
+
+### Requirement: Protocol history queries MUST preserve live responsiveness for active runs
+
+The system MUST avoid routing running protocol history requests through heavyweight audit reindex and full-file reads when a live journal already exists for the current attempt.
+
+#### Scenario: running current-attempt FCMP history uses live-first hot path
+
+- **WHEN** a `protocol/history` query requests `stream=fcmp` for a run whose status is `queued` or `running`
+- **AND** the resolved attempt equals the current attempt
+- **THEN** the service MUST return the FCMP history from the live journal hot path
+- **AND** it MUST NOT require audit JSONL reads before returning
+- **AND** it MUST NOT trigger FCMP global reindex on that hot path
+
+#### Scenario: running current-attempt RASP history uses live-first hot path
+
+- **WHEN** a `protocol/history` query requests `stream=rasp` for a run whose status is `queued` or `running`
+- **AND** the resolved attempt equals the current attempt
+- **THEN** the service MUST return the RASP history from the live journal hot path
+- **AND** it MUST NOT require audit JSONL reads before returning
+
+#### Scenario: non-current or terminal history keeps audit semantics
+
+- **WHEN** a `protocol/history` query targets a terminal run or a non-current attempt
+- **THEN** the service MAY continue using the existing audit-backed history path
+- **AND** it MUST preserve the existing `protocol/history` response shape
+
+### Requirement: Protocol history changes MUST NOT alter UI-facing stream contracts
+
+The system MUST preserve existing UI and protocol contracts while optimizing the running hot path.
+
+#### Scenario: running live-first history preserves response shape
+
+- **WHEN** a running current-attempt FCMP or RASP history request is served from the live-first hot path
+- **THEN** the response MUST still include `attempt`, `available_attempts`, `events`, `cursor_floor`, and `cursor_ceiling`
+- **AND** it MUST remain compatible with the existing run detail UI polling logic without frontend changes
+
+### Requirement: Runtime stream text views MUST preserve UTF-8 decoding integrity across chunk boundaries
+
+The system MUST preserve the textual meaning of raw runtime bytes when converting `stdout` / `stderr` chunks into log text and live parser input.
+
+#### Scenario: execution stream decoding preserves split multibyte UTF-8 characters
+
+- **WHEN** the runtime reads `stdout` or `stderr` in multiple raw byte chunks
+- **AND** a valid UTF-8 multibyte character is split across chunk boundaries
+- **THEN** `stdout/stderr.log` MUST decode that character correctly
+- **AND** the live parser input text MUST match the same once-decoded UTF-8 replacement text
+- **AND** the system MUST NOT inject extra replacement characters solely because of chunk boundaries
+
+#### Scenario: execution stream decoding still replaces genuinely invalid bytes
+
+- **WHEN** the runtime reads raw bytes that are not valid UTF-8
+- **THEN** the text view MAY include replacement characters
+- **AND** those replacements MUST correspond only to genuinely invalid byte sequences
+
+### Requirement: Strict replay MUST reconstruct the same UTF-8 text truth as live execution
+
+The system MUST decode `io_chunks` for strict replay using the same incremental UTF-8 semantics as the live execution path.
+
+#### Scenario: strict replay preserves split multibyte UTF-8 characters
+
+- **WHEN** strict replay rebuilds text from `io_chunks`
+- **AND** a valid UTF-8 multibyte character is split across multiple stored chunks
+- **THEN** the replay rows' `text` MUST match the once-decoded UTF-8 replacement text of the original byte stream
+- **AND** replay MUST NOT reintroduce chunk-boundary replacement drift
+
+#### Scenario: byte references remain anchored to raw bytes
+
+- **WHEN** the runtime exposes `raw_ref.byte_from` and `raw_ref.byte_to`
+- **THEN** those byte ranges MUST remain anchored to the original raw byte stream
+- **AND** this change MUST NOT alter the `io_chunks` byte SSOT or its file format
+
+### Requirement: Runtime raw stream ingestion MUST preserve canonical protocol progress
+
+系统 MUST 保证 runtime 对 subprocess stdout/stderr 的采集不会因为超长 NDJSON 单行而破坏后续协议推进。
+
+#### Scenario: oversized NDJSON stdout line is sanitized before audit persistence
+
+- **WHEN** an NDJSON engine emits a single stdout logical line whose size exceeds `4096` bytes before the terminating newline
+- **THEN** runtime ingress MUST stop retaining that line's full original body for downstream audit persistence
+- **AND** it MUST sanitize the retained prefix into either a repaired JSON line or a runtime diagnostic JSON line before writing to runtime audit surfaces
+- **AND** the original oversized body MUST NOT be written to `io_chunks` or `stdout.log`
+
+#### Scenario: sanitized runtime raw becomes downstream single source of truth
+
+- **WHEN** runtime ingress sanitizes an oversized NDJSON stdout line
+- **THEN** the sanitized line MUST become the input seen by live parser, raw publisher, strict replay, and `raw_stdout`
+- **AND** downstream components MUST NOT observe the dropped original oversized body through normal runtime audit reads
+
+### Requirement: Sanitized overflow handling MUST preserve business semantics when possible
+
+系统 MUST 优先保住超长 NDJSON 行的业务语义，而不是保留完整中间正文。
+
+#### Scenario: oversized tool_result line is repaired into valid JSON
+
+- **WHEN** an oversized NDJSON line can be repaired into a valid JSON object from its retained prefix
+- **THEN** runtime MUST emit that repaired JSON line as the sanitized raw row
+- **AND** downstream engine-specific parsers MUST continue normal semantic extraction from that repaired object
+- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED`
+
+#### Scenario: unrecoverable oversized line is substituted with runtime diagnostic JSON
+
+- **WHEN** an oversized NDJSON line cannot be repaired into a valid JSON object
+- **THEN** runtime MUST substitute a runtime diagnostic JSON line in place of the original row
+- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED`
+- **AND** later logical lines in the same stream MUST continue normal runtime parsing and publication
+
+### Requirement: Runtime audit writing MUST NOT block the single-worker execution hot path
+
+The system MUST ensure that runtime audit persistence does not synchronously block the main chunk-processing path of active runs.
+
+#### Scenario: active run output is mirrored through background audit writers
+
+- **WHEN** the runtime reads `stdout` / `stderr` chunks from an active subprocess
+- **THEN** `stdout.log` / `stderr.log` / `io_chunks` MUST be persisted through background serial writers
+- **AND** FCMP / RASP / chat replay audit mirrors MUST NOT perform per-event synchronous file writes on the main event loop hot path
+
+#### Scenario: audit backpressure does not block live protocol publication
+
+- **WHEN** an audit writer queue reaches its bounded capacity
+- **THEN** the runtime MAY drop audit writes for that writer
+- **AND** the system MUST continue prioritizing live journal publication and core protocol progression
+
+### Requirement: Runtime auth detection MUST use low-frequency bounded windows
+
+The system MUST avoid re-parsing the full accumulated runtime output on a high-frequency cadence while a run is active.
+
+#### Scenario: active auth detection probes only recent output windows
+
+- **WHEN** auth detection is enabled for an active run
+- **THEN** the runtime MUST probe only recent bounded `stdout` / `stderr` windows
+- **AND** it MUST NOT rebuild auth detection input by repeatedly joining the full historical output
+
+#### Scenario: auth detection cadence is throttled
+
+- **WHEN** a run is actively streaming output
+- **THEN** auth detection probes MUST be throttled to a lower-frequency cadence than the previous `0.25s` path
+- **AND** the runtime MUST still perform one final forced probe before process completion handling finishes
+
+### Requirement: Slot release MUST remain decoupled from audit drain completion
+
+The system MUST preserve current concurrency capacity semantics when introducing asynchronous audit writing.
+
+#### Scenario: slot release does not wait for full audit drain
+
+- **WHEN** the subprocess for a run attempt has exited and stream readers have completed
+- **THEN** run slot release MUST NOT wait for full audit writer drain
+- **AND** any terminal audit flush performed on the main lifecycle path MUST be bounded by a short best-effort budget
+
+### Requirement: Terminal protocol history MUST avoid blocking on incomplete mirror drain
+
+The system MUST keep terminal protocol/history reads responsive even if background audit mirrors are still draining.
+
+#### Scenario: terminal protocol history falls back to live-first when bounded flush times out
+
+- **WHEN** a terminal FCMP or RASP history request is served
+- **AND** the bounded mirror flush does not finish within its budget
+- **THEN** the system MUST return the currently available live protocol rows without synchronously waiting for audit completion
+- **AND** the response shape and event schema MUST remain unchanged
+

@@ -40,7 +40,12 @@ def _write_integrity_manifest(module, project_root: Path, file_entries: list[tup
 
 
 def _prepare_preflight_runtime(monkeypatch, module, tmp_path: Path) -> tuple[SimpleNamespace, Path, dict[str, Path]]:
-    profile = SimpleNamespace(mode="local", data_dir=tmp_path / "data", agent_cache_root=tmp_path / "cache")
+    profile = SimpleNamespace(
+        mode="local",
+        data_dir=tmp_path / "data",
+        agent_cache_root=tmp_path / "cache",
+        agent_home=tmp_path / "agent-home",
+    )
     profile.data_dir.mkdir(parents=True, exist_ok=True)
     profile.agent_cache_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(module, "_runtime_env", lambda: (profile, {"SKILL_RUNNER_LOCAL_BIND_HOST": "127.0.0.1"}))

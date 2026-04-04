@@ -12,6 +12,10 @@ LIVE_STREAM_LINE_LIMIT_BYTES = 4096
 LIVE_STREAM_LINE_TRUNCATION_MARKER = " ... [truncated by live overflow guard]"
 LIVE_STREAM_LINE_OVERFLOW_REPAIRED = "RUNTIME_STREAM_LINE_OVERFLOW_REPAIRED"
 LIVE_STREAM_LINE_OVERFLOW_UNREPAIRABLE = "RUNTIME_STREAM_LINE_OVERFLOW_UNREPAIRABLE"
+RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED = "RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED"
+RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED = (
+    "RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED"
+)
 
 
 @dataclass
@@ -37,6 +41,14 @@ class PreparedNdjsonLine:
     repaired: bool = False
     repair_failed: bool = False
     diagnostic_details: dict[str, Any] | None = None
+
+
+@dataclass
+class SanitizedIngressChunk:
+    text: str
+    byte_from: int
+    byte_to: int
+    diagnostics: list[LiveParserEmission]
 
 
 def _truncate_text_to_byte_limit(text: str, limit_bytes: int) -> str:
@@ -213,6 +225,163 @@ def repair_truncated_json_line(prefix: str) -> str | None:
         if isinstance(payload, dict):
             return synthesized
     return None
+
+
+def repair_truncated_json_line_with_limit(prefix: str, *, output_limit_bytes: int) -> str | None:
+    if output_limit_bytes <= 0:
+        return None
+    candidate_limit = min(len(prefix.encode("utf-8", errors="replace")), output_limit_bytes)
+    while candidate_limit > 0:
+        candidate = _truncate_text_to_byte_limit(prefix, candidate_limit)
+        repaired = repair_truncated_json_line(candidate)
+        if repaired is not None and len(repaired.encode("utf-8", errors="replace")) <= output_limit_bytes:
+            return repaired
+        candidate_limit -= 128
+    return None
+
+
+def build_runtime_overflow_diagnostic_row(
+    *,
+    stream: str,
+    limit_bytes: int,
+    line_start_byte: int,
+) -> str:
+    return json.dumps(
+        {
+            "type": "runtime_diagnostic",
+            "subtype": "ndjson_line_overflow_substituted",
+            "stream": stream,
+            "code": RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
+            "threshold_bytes": limit_bytes,
+            "line_start_byte": line_start_byte,
+            "sanitized": True,
+            "original_line_dropped": True,
+        },
+        ensure_ascii=False,
+    )
+
+
+class NdjsonIngressSanitizer:
+    def __init__(
+        self,
+        *,
+        accepted_streams: set[str],
+        limit_bytes: int = LIVE_STREAM_LINE_LIMIT_BYTES,
+    ) -> None:
+        self._accepted_streams = set(accepted_streams)
+        self._limit_bytes = max(1, int(limit_bytes))
+        self._states: dict[str, _LineState] = {
+            stream: _LineState() for stream in self._accepted_streams
+        }
+        self._output_offsets: dict[str, int] = {stream: 0 for stream in self._accepted_streams}
+
+    def feed(self, *, stream: str, text: str) -> list[SanitizedIngressChunk]:
+        if stream not in self._accepted_streams or not text:
+            return []
+        state = self._states.setdefault(stream, _LineState())
+        results: list[SanitizedIngressChunk] = []
+        index = 0
+        text_len = len(text)
+        while index < text_len:
+            newline_index = text.find("\n", index)
+            if newline_index == -1:
+                segment = text[index:]
+                has_newline = False
+                index = text_len
+            else:
+                segment = text[index : newline_index + 1]
+                has_newline = True
+                index = newline_index + 1
+            self._append_segment(state=state, segment=segment)
+            if has_newline:
+                finalized = self._finalize_line(stream=stream, include_newline=True)
+                if finalized is not None:
+                    results.append(finalized)
+                state = self._states.setdefault(stream, _LineState())
+        return results
+
+    def flush(self, *, stream: str) -> SanitizedIngressChunk | None:
+        if stream not in self._accepted_streams:
+            return None
+        state = self._states.get(stream)
+        if state is None or state.start_byte is None or state.total_bytes <= 0:
+            return None
+        return self._finalize_line(stream=stream, include_newline=False)
+
+    def _append_segment(self, *, state: _LineState, segment: str) -> None:
+        segment_bytes = len(segment.encode("utf-8", errors="replace"))
+        if state.start_byte is None:
+            state.start_byte = state.total_bytes
+        state.total_bytes += segment_bytes
+        if state.overflowed or not segment:
+            return
+        remaining = self._limit_bytes - state.prefix_bytes
+        if remaining > 0:
+            kept = _truncate_text_to_byte_limit(segment, remaining)
+            if kept:
+                state.prefix_text = f"{state.prefix_text}{kept}"
+                state.prefix_bytes += len(kept.encode("utf-8", errors="replace"))
+        if state.prefix_bytes >= self._limit_bytes:
+            state.overflowed = True
+
+    def _finalize_line(self, *, stream: str, include_newline: bool) -> SanitizedIngressChunk | None:
+        state = self._states.get(stream)
+        if state is None or state.total_bytes <= 0:
+            return None
+        line_start = self._output_offsets.get(stream, 0)
+        diagnostics: list[LiveParserEmission] = []
+        if not state.overflowed:
+            body = state.prefix_text.rstrip("\n")
+        else:
+            detail_payload = {
+                "stream": stream,
+                "threshold_bytes": self._limit_bytes,
+                "line_start_byte": line_start,
+                "sanitized": True,
+                "original_line_dropped": True,
+            }
+            output_limit = self._limit_bytes - (1 if include_newline else 0)
+            repaired = repair_truncated_json_line_with_limit(
+                state.prefix_text.rstrip("\n"),
+                output_limit_bytes=output_limit,
+            )
+            if repaired is None:
+                body = build_runtime_overflow_diagnostic_row(
+                    stream=stream,
+                    limit_bytes=self._limit_bytes,
+                    line_start_byte=line_start,
+                )
+                diagnostics.append(
+                    {
+                        "kind": "diagnostic",
+                        "code": RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
+                        "details": dict(detail_payload),
+                    }
+                )
+            else:
+                body = repaired
+                diagnostics.append(
+                    {
+                        "kind": "diagnostic",
+                        "code": RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
+                        "details": dict(detail_payload),
+                    }
+                )
+        text = f"{body}\n" if include_newline else body
+        byte_length = len(text.encode("utf-8", errors="replace"))
+        byte_from = line_start
+        byte_to = line_start + byte_length
+        raw_ref: RuntimeStreamRawRef = {"stream": stream, "byte_from": byte_from, "byte_to": byte_to}
+        for diagnostic in diagnostics:
+            diagnostic["raw_ref"] = raw_ref
+        self._states[stream] = _LineState()
+        self._output_offsets[stream] = byte_to
+        return SanitizedIngressChunk(
+            text=text,
+            byte_from=byte_from,
+            byte_to=byte_to,
+            diagnostics=diagnostics,
+        )
 
 
 class NdjsonLineBuffer:

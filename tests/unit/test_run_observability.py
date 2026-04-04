@@ -1,7 +1,7 @@
 import json
 import base64
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -42,6 +42,13 @@ def _write_state_file(run_dir: Path, status: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _set_current_attempt(run_dir: Path, current_attempt: int) -> None:
+    state_path = run_dir / ".state" / "state.json"
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    payload["current_attempt"] = current_attempt
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -582,7 +589,7 @@ async def test_list_protocol_history_rasp_terminal_uses_audit_only(monkeypatch, 
         "_resolve_attempt_number",
         AsyncMock(side_effect=[1, 1]),
     )
-    flush_mock = AsyncMock(return_value=None)
+    flush_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.flush_live_audit_mirrors",
         flush_mock,
@@ -603,7 +610,73 @@ async def test_list_protocol_history_rasp_terminal_uses_audit_only(monkeypatch, 
     assert payload["source"] == "audit"
     assert len(payload["events"]) == 1
     assert payload["events"][0]["data"]["line"] == "audit-block"
-    flush_mock.assert_awaited_once_with(run_id=run_dir.name)
+    flush_mock.assert_awaited_once_with(run_id=run_dir.name, timeout_sec=0.2)
+
+
+@pytest.mark.asyncio
+async def test_list_protocol_history_terminal_fcmp_falls_back_to_live_when_mirror_drain_times_out(
+    monkeypatch,
+    tmp_path: Path,
+):
+    run_dir = tmp_path / "run-terminal-live-fcmp"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "succeeded")
+    _set_current_attempt(run_dir, 1)
+    write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(service, "_resolve_attempt_number", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        service,
+        "_get_live_protocol_payload",
+        lambda **_kwargs: {
+            "events": [
+                make_fcmp_event(
+                    run_id=run_dir.name,
+                    seq=12,
+                    engine="claude",
+                    type_name="assistant.message.final",
+                    data={"message_id": "m-live", "text": "live terminal"},
+                    attempt_number=1,
+                ).model_dump(mode="json")
+            ],
+            "cursor_floor": 12,
+            "cursor_ceiling": 12,
+        },
+    )
+    flush_mock = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.flush_live_audit_mirrors",
+        flush_mock,
+    )
+    read_jsonl_mock = Mock(side_effect=AssertionError("terminal live fallback must not read audit JSONL"))
+    monkeypatch.setattr("server.runtime.observability.run_observability.read_jsonl", read_jsonl_mock)
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id="req-terminal-live",
+        stream="fcmp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=None,
+        limit=200,
+    )
+
+    assert payload["source"] == "live"
+    assert payload["cursor_floor"] == 12
+    assert payload["cursor_ceiling"] == 12
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["type"] == "assistant.message.final"
+    flush_mock.assert_awaited_once_with(run_id=run_dir.name, timeout_sec=0.2)
+    read_jsonl_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -612,6 +685,7 @@ async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypat
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     _write_state_file(run_dir, "running")
+    _set_current_attempt(run_dir, 2)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -639,7 +713,7 @@ async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypat
     monkeypatch.setattr(
         service,
         "_resolve_attempt_number",
-        AsyncMock(side_effect=[1, 1]),
+        AsyncMock(return_value=1),
     )
     monkeypatch.setattr(service, "_materialize_protocol_stream", materialize_mock)
 
@@ -651,12 +725,201 @@ async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypat
         to_seq=None,
         from_ts=None,
         to_ts=None,
-        attempt=None,
+        attempt=1,
         limit=200,
     )
 
     assert payload["events"]
     materialize_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_protocol_history_fcmp_running_current_attempt_uses_live_only(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-live-fcmp"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    _set_current_attempt(run_dir, 2)
+    write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
+    write_jsonl(audit_dir / "fcmp_events.2.jsonl", [])
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "events.2.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.2.jsonl", [])
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(service, "_list_available_attempts", lambda _run_dir: [1, 2])
+    monkeypatch.setattr(service, "_resolve_attempt_number", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        service,
+        "_get_live_protocol_payload",
+        lambda **_kwargs: {
+            "events": [
+                make_fcmp_event(
+                    run_id=run_dir.name,
+                    seq=9,
+                    engine="claude",
+                    type_name="assistant.message.final",
+                    data={"message_id": "m-live", "text": "live path"},
+                    attempt_number=2,
+                ).model_dump(mode="json")
+            ],
+            "cursor_floor": 7,
+            "cursor_ceiling": 9,
+        },
+    )
+    reindex_mock = Mock(side_effect=AssertionError("running fast path must not reindex FCMP audit"))
+    monkeypatch.setattr(service, "reindex_fcmp_global_seq", reindex_mock)
+    read_jsonl_mock = Mock(side_effect=AssertionError("running fast path must not read audit JSONL"))
+    monkeypatch.setattr("server.runtime.observability.run_observability.read_jsonl", read_jsonl_mock)
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id="req-live-fcmp",
+        stream="fcmp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=None,
+        limit=200,
+    )
+
+    assert payload["source"] == "live"
+    assert payload["attempt"] == 2
+    assert payload["available_attempts"] == [1, 2]
+    assert payload["cursor_floor"] == 7
+    assert payload["cursor_ceiling"] == 9
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["type"] == "assistant.message.final"
+    reindex_mock.assert_not_called()
+    read_jsonl_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_protocol_history_rasp_running_current_attempt_uses_live_only(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-live-rasp"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    _set_current_attempt(run_dir, 2)
+    write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
+    write_jsonl(audit_dir / "fcmp_events.2.jsonl", [])
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "events.2.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.2.jsonl", [])
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(service, "_list_available_attempts", lambda _run_dir: [1, 2])
+    monkeypatch.setattr(service, "_resolve_attempt_number", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        service,
+        "_get_live_protocol_payload",
+        lambda **_kwargs: {
+            "events": [
+                make_rasp_event(
+                        run_id=run_dir.name,
+                        seq=11,
+                        source=RuntimeEventSource(engine="claude", parser="claude_json", confidence=1.0),
+                        category=RuntimeEventCategory.TOOL,
+                        type_name="agent.tool_call",
+                        data={"tool_name": "Read"},
+                        attempt_number=2,
+                    raw_ref=RuntimeEventRef(
+                        attempt_number=2,
+                        stream="stdout",
+                        byte_from=100,
+                        byte_to=180,
+                        encoding="utf-8",
+                    ),
+                ).model_dump(mode="json")
+            ],
+            "cursor_floor": 11,
+            "cursor_ceiling": 11,
+        },
+    )
+    read_jsonl_mock = Mock(side_effect=AssertionError("running fast path must not read audit JSONL"))
+    monkeypatch.setattr("server.runtime.observability.run_observability.read_jsonl", read_jsonl_mock)
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id="req-live-rasp",
+        stream="rasp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=None,
+        limit=200,
+    )
+
+    assert payload["source"] == "live"
+    assert payload["attempt"] == 2
+    assert payload["available_attempts"] == [1, 2]
+    assert payload["cursor_floor"] == 11
+    assert payload["cursor_ceiling"] == 11
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["event"]["type"] == "agent.tool_call"
+    read_jsonl_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_protocol_history_running_old_attempt_still_uses_audit(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-old-attempt"
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_state_file(run_dir, "running")
+    _set_current_attempt(run_dir, 2)
+    write_jsonl(
+        audit_dir / "fcmp_events.1.jsonl",
+        [
+            make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine="claude",
+                type_name="conversation.state.changed",
+                data=make_fcmp_state_changed(
+                    source_state="queued",
+                    target_state="running",
+                    trigger="turn.started",
+                    updated_at="2026-03-10T00:00:00Z",
+                    pending_interaction_id=None,
+                ),
+                attempt_number=1,
+            ).model_dump(mode="json")
+        ],
+    )
+    write_jsonl(audit_dir / "fcmp_events.2.jsonl", [])
+    write_jsonl(audit_dir / "events.1.jsonl", [])
+    write_jsonl(audit_dir / "events.2.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
+    write_jsonl(audit_dir / "orchestrator_events.2.jsonl", [])
+
+    service = RunObservabilityService()
+    monkeypatch.setattr(service, "_list_available_attempts", lambda _run_dir: [1, 2])
+    monkeypatch.setattr(service, "_resolve_attempt_number", AsyncMock(return_value=1))
+    monkeypatch.setattr(service, "_get_live_protocol_payload", lambda **_kwargs: {"events": [], "cursor_floor": 0, "cursor_ceiling": 0})
+    reindex_mock = Mock(wraps=service.reindex_fcmp_global_seq)
+    monkeypatch.setattr(service, "reindex_fcmp_global_seq", reindex_mock)
+
+    payload = await service.list_protocol_history(
+        run_dir=run_dir,
+        request_id="req-old-attempt",
+        stream="fcmp",
+        from_seq=None,
+        to_seq=None,
+        from_ts=None,
+        to_ts=None,
+        attempt=1,
+        limit=200,
+    )
+
+    assert payload["attempt"] == 1
+    assert payload["source"] == "audit"
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["type"] == "conversation.state.changed"
+    reindex_mock.assert_called_once_with(run_dir)
 
 
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
@@ -1447,6 +1710,40 @@ async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(mon
     backup_dir = Path(payload["backup_dir"]) / "attempt-1"
     assert (backup_dir / "events.1.jsonl").exists()
     assert (backup_dir / "fcmp_events.1.jsonl").exists()
+
+
+def test_load_io_chunks_for_strict_replay_uses_incremental_utf8_decoding(tmp_path: Path) -> None:
+    io_chunks_path = tmp_path / "io_chunks.1.jsonl"
+    payload_parts = [b"prefix-\xff-", b"\xe7", b"\x9a\x84-suffix\n"]
+    rows = []
+    offset = 0
+    for seq, payload in enumerate(payload_parts, start=1):
+        rows.append(
+            {
+                "seq": seq,
+                "ts": "2026-03-10T00:00:00Z",
+                "stream": "stdout",
+                "byte_from": offset,
+                "byte_to": offset + len(payload),
+                "payload_b64": base64.b64encode(payload).decode("ascii"),
+                "encoding": "base64",
+            }
+        )
+        offset += len(payload)
+    io_chunks_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    service = RunObservabilityService()
+    payload = service._load_io_chunks_for_strict_replay(io_chunks_path=io_chunks_path)
+
+    assert payload["used"] is True
+    replay_rows = payload["rows"]
+    actual = "".join(str(row["text"]) for row in replay_rows)
+    expected = b"".join(payload_parts).decode("utf-8", errors="replace")
+    assert actual == expected
+    assert actual.count("\ufffd") == expected.count("\ufffd")
 
 
 @pytest.mark.asyncio

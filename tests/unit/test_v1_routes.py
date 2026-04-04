@@ -744,6 +744,7 @@ async def test_v1_engine_models_route_available(monkeypatch):
                             "supported_effort": ["low", "high"],
                             "provider": None,
                             "model": None,
+                            "source": "pinned_snapshot",
                         },
                     )()
                 ],
@@ -783,6 +784,7 @@ async def test_v1_engine_models_route_opencode_runtime_probe_cache(monkeypatch):
                             "supported_effort": None,
                             "provider": "openai",
                             "model": "gpt-5",
+                            "source": "runtime_probe_cache",
                         },
                     )()
                 ],

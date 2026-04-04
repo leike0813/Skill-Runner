@@ -10,6 +10,9 @@ from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.live_stream_parser_common import (
     LIVE_STREAM_LINE_OVERFLOW_REPAIRED,
     NdjsonLiveStreamParserSession,
+    NdjsonIngressSanitizer,
+    RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
+    RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
     repair_truncated_json_line,
 )
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
@@ -248,6 +251,46 @@ def test_ndjson_live_session_repairs_overflowed_line_and_resyncs() -> None:
     assert "[truncated by live overflow guard]" in first_row_payload["content"]
     assert session.rows[0][2]["byte_to"] > 4096
     assert session.rows[1][1]["id"] == "row-2"
+
+
+def test_ndjson_ingress_sanitizer_repairs_oversized_line_and_resyncs() -> None:
+    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"})
+    oversized = (
+        '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"'
+        + ("A" * 5000)
+        + '"}]}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"after"}]}}\n'
+    )
+    split = 2500
+    first = oversized[:split]
+    second = oversized[split:]
+
+    sanitized_first = sanitizer.feed(stream="stdout", text=first)
+    sanitized_second = sanitizer.feed(stream="stdout", text=second)
+
+    assert sanitized_first == []
+    assert len(sanitized_second) == 2
+    first_chunk = sanitized_second[0]
+    second_chunk = sanitized_second[1]
+    assert first_chunk.diagnostics[0]["code"] == RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED
+    assert len(first_chunk.text.encode("utf-8")) <= 4096
+    repaired_payload = json.loads(first_chunk.text)
+    assert repaired_payload["type"] == "user"
+    assert "[truncated by live overflow guard]" in repaired_payload["message"]["content"][0]["content"]
+    assert json.loads(second_chunk.text)["message"]["content"][0]["text"] == "after"
+
+
+def test_ndjson_ingress_sanitizer_substitutes_unrepairable_line_with_runtime_diagnostic() -> None:
+    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"})
+    payload = ("X" * 5000) + "\n"
+
+    sanitized = sanitizer.feed(stream="stdout", text=payload)
+
+    assert len(sanitized) == 1
+    chunk = sanitized[0]
+    assert chunk.diagnostics[0]["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+    diagnostic_payload = json.loads(chunk.text)
+    assert diagnostic_payload["type"] == "runtime_diagnostic"
+    assert diagnostic_payload["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
 
 
 def test_codex_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> None:

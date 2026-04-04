@@ -79,5 +79,10 @@ class ChatReplayPublisher:
             published.append(self.publish(run_dir=run_dir, event=chat_row))
         return published
 
+    async def drain_mirror(self, *, run_id: str | None = None) -> None:
+        drain = getattr(self._mirror_writer, "drain", None)
+        if callable(drain):
+            await drain(run_id=run_id)
+
 
 chat_replay_publisher = ChatReplayPublisher()
