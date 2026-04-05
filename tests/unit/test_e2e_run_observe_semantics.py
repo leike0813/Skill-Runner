@@ -150,17 +150,25 @@ def test_run_observe_template_appends_final_artifact_summary():
     assert "clearFinalSummaryCard()" in content
 
 
-def test_run_observe_template_renders_all_assistant_messages_as_bubbles():
+def test_run_observe_template_defaults_to_plain_mode_for_assistant_messages():
     content = _read_template()
+    assert 'id="chat-mode-plain"' in content
+    assert 'id="chat-mode-bubble"' in content
+    assert "setChatDisplayMode(\"plain\")" in content
+    assert "chatModel.setDisplayMode(chatDisplayMode);" in content
+    assert "function createCompatibleThinkingChatModel(initialMode)" in content
     assert "handleChatEvent(event)" in content
     assert "appendChatBubble(" in content
+    assert 'chatEl.classList.toggle("plain-mode", mode === "plain")' in content
+    assert 'chatEl.classList.toggle("bubble-mode", mode === "bubble")' in content
+    assert 'item.className = `chat-plain-entry ${role}`' in content
     assert "isStructuredDoneMessage" not in content
 
 
 def test_run_observe_template_supports_assistant_process_thinking_bubble() -> None:
     content = _read_template()
-    assert "/static/js/chat_thinking_core.js" in content
-    assert "createThinkingChatModel()" in content
+    assert "/static/js/chat_thinking_core.js?v=20260405a" in content
+    assert "createCompatibleThinkingChatModel(chatDisplayMode)" in content
     assert "chatModel.consume(event)" in content
     assert "entry.type === \"thinking\"" in content
     assert "processTypeLabel(" in content
@@ -170,6 +178,10 @@ def test_run_observe_template_supports_assistant_process_thinking_bubble() -> No
     assert "function isNearBottom(targetEl, thresholdPx = 24)" in content
     assert "if (entry.collapsed) {" in content
     assert "thinking-item" in content
+    assert 'item.className = "chat-plain-process"' in content
+    assert 'meta.className = "chat-plain-process-item-meta"' in content
+    assert 'textEl.className = "chat-plain-process-item-body"' in content
+    assert 'bubble.className = "chat-bubble agent thinking-bubble"' in content
 
 
 def test_run_observe_template_keeps_stream_open_until_terminal_chat_event():
@@ -191,6 +203,14 @@ def test_run_observe_template_catches_up_history_for_waiting_and_terminal_states
     assert "catchUpHistory()\n                .catch(() => {})" in content
     assert "function shouldShowBackendUnreachable(evt)" in content
     assert "if (shouldShowBackendUnreachable(evt)) {" in content
+
+
+def test_run_observe_template_reports_client_init_failures_separately_from_backend_errors():
+    content = _read_template()
+    assert "clientInitFailedPrefix" in content
+    assert "showClientInitError(error);" in content
+    assert "showReplyError(I18N.submitFailedNetwork);" in content
+    assert "console.error(\"run observe initialization failed\", error);" in content
 
 
 def test_run_observe_template_restarts_stream_after_waiting_exit_even_if_existing_stream_is_open() -> None:

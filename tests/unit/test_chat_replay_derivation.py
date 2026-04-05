@@ -109,6 +109,7 @@ def test_assistant_final_derivation_keeps_raw_ref_in_correlation() -> None:
             "type": "assistant.message.final",
             "data": {
                 "message_id": "m-11",
+                "replaces_message_id": "m-10",
                 "text": "最终答复",
             },
             "raw_ref": {
@@ -124,6 +125,7 @@ def test_assistant_final_derivation_keeps_raw_ref_in_correlation() -> None:
     assert len(rows) == 1
     assert rows[0]["correlation"]["raw_ref"]["stream"] == "stdout"
     assert rows[0]["correlation"]["raw_ref"]["byte_from"] == 10
+    assert rows[0]["correlation"]["replaces_message_id"] == "m-10"
 
 
 def test_assistant_process_derivation_maps_reasoning_tool_and_command() -> None:
@@ -183,6 +185,30 @@ def test_assistant_process_derivation_maps_reasoning_tool_and_command() -> None:
     assert command_rows[0]["kind"] == "assistant_process"
     assert command_rows[0]["correlation"]["process_type"] == "command_execution"
     assert command_rows[0]["text"] == "python -m pytest -q tests/unit/test_chat_replay_derivation.py"
+
+
+def test_assistant_intermediate_derivation_maps_to_assistant_message() -> None:
+    rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 14,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:05:00Z",
+            "type": "assistant.message.intermediate",
+            "data": {
+                "message_id": "m-14",
+                "summary": "Draft answer",
+                "classification": "intermediate",
+                "details": {"source": "live_semantic"},
+                "text": "Draft answer body",
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+
+    assert rows[0]["role"] == "assistant"
+    assert rows[0]["kind"] == "assistant_message"
+    assert rows[0]["text"] == "Draft answer body"
+    assert rows[0]["correlation"]["message_id"] == "m-14"
 
 
 def test_assistant_message_promoted_derivation_emits_no_chat_row() -> None:

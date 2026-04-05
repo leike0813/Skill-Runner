@@ -13,6 +13,7 @@ event_kinds:
   - assistant.reasoning
   - assistant.tool_call
   - assistant.command_execution
+  - assistant.message.intermediate
   - assistant.message.promoted
   - lifecycle.run_handle
   - agent.turn_start

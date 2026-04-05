@@ -233,14 +233,14 @@ def test_process_events_promote_to_final_on_turn_completed(tmp_path: Path) -> No
     )
 
     types = [event.event.type for event in rasp_events]
-    assert "agent.reasoning" in types
+    assert "agent.message.intermediate" in types
     assert "agent.message.promoted" in types
     assert "agent.message.final" in types
     assert types.index("agent.message.promoted") < types.index("agent.message.final")
 
     fcmp_events = build_fcmp_events(rasp_events, status="running")
     fcmp_types = [event.type for event in fcmp_events]
-    assert "assistant.reasoning" in fcmp_types
+    assert "assistant.message.intermediate" in fcmp_types
     assert "assistant.message.promoted" in fcmp_types
     assert "assistant.message.final" in fcmp_types
 
@@ -314,7 +314,7 @@ def test_no_fallback_final_on_failed_without_turn_completed(tmp_path: Path) -> N
         stderr_path=logs_dir / "stderr.txt",
     )
     types = [event.event.type for event in rasp_events]
-    assert "agent.reasoning" in types
+    assert "agent.message.intermediate" in types
     assert "agent.message.final" not in types
 
 
@@ -391,6 +391,10 @@ def test_build_rasp_events_delegates_parsing_to_adapter(monkeypatch, tmp_path: P
 
     assert events
     assert all(event.source.parser == "fake_adapter_parser" for event in events)
+    intermediate_event = next(event for event in events if event.event.type == "agent.message.intermediate")
+    final_event = next(event for event in events if event.event.type == "agent.message.final")
+    assert intermediate_event.data["message_id"] == final_event.data["message_id"]
+    assert final_event.data["replaces_message_id"] == intermediate_event.data["message_id"]
     assert any(
         event.event.type == "agent.message.final" and event.data.get("text") == "delegated message"
         for event in events

@@ -451,7 +451,7 @@ def test_opencode_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> N
 
 
 @pytest.mark.asyncio
-async def test_live_runtime_emitter_publishes_reasoning_then_final_on_exit(tmp_path: Path) -> None:
+async def test_live_runtime_emitter_publishes_intermediate_then_final_on_exit(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-live"
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear("run-live")
@@ -476,7 +476,7 @@ async def test_live_runtime_emitter_publishes_reasoning_then_final_on_exit(tmp_p
 
     payload = fcmp_live_journal.replay(run_id="run-live", after_seq=0)
 
-    assert any(row.get("type") == "assistant.reasoning" for row in payload["events"])
+    assert any(row.get("type") == "assistant.message.intermediate" for row in payload["events"])
     assert not any(row.get("type") == "assistant.message.final" for row in payload["events"])
 
     await emitter.on_process_exit(exit_code=0, failure_reason=None)
@@ -648,10 +648,12 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     assert "lifecycle.run_handle" in running_types
     assert "agent.turn_start" in running_types
     assert "agent.reasoning" in running_types
+    assert "agent.message.intermediate" in running_types
     assert "agent.command_execution" in running_types
     assert running_types.index("lifecycle.run_handle") < running_types.index("agent.turn_start")
     assert running_types.index("agent.turn_start") < running_types.index("agent.reasoning")
-    assert running_types.index("agent.reasoning") < running_types.index("agent.command_execution")
+    assert running_types.index("agent.reasoning") < running_types.index("agent.message.intermediate")
+    assert running_types.index("agent.message.intermediate") < running_types.index("agent.command_execution")
     reasoning_events = [
         row for row in running_rasp["events"]
         if row.get("event", {}).get("type") == "agent.reasoning"
@@ -671,6 +673,7 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     running_fcmp = fcmp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
     running_fcmp_types = [row.get("type") for row in running_fcmp["events"]]
     assert "assistant.command_execution" in running_fcmp_types
+    assert "assistant.message.intermediate" in running_fcmp_types
     assert "assistant.message.final" in running_fcmp_types
     reasoning_fcmp = [
         row for row in running_fcmp["events"]
@@ -794,12 +797,12 @@ async def test_live_runtime_emitter_preserves_oversized_claude_assistant_message
         if row.get("event", {}).get("type") == "diagnostic.warning"
     ]
     assert LIVE_STREAM_LINE_OVERFLOW_REPAIRED not in warning_codes
-    reasoning_event = next(
+    intermediate_event = next(
         row for row in rasp_payload["events"]
-        if row.get("event", {}).get("type") == "agent.reasoning"
+        if row.get("event", {}).get("type") == "agent.message.intermediate"
         and row.get("data", {}).get("text") == long_text
     )
-    assert reasoning_event["data"]["text"] == long_text
+    assert intermediate_event["data"]["text"] == long_text
 
 
 @pytest.mark.asyncio
@@ -845,6 +848,7 @@ async def test_live_runtime_emitter_emits_qwen_process_events_and_single_final(t
     assert "agent.reasoning" in rasp_types
     assert "agent.tool_call" in rasp_types
     assert "agent.command_execution" in rasp_types
+    assert "agent.message.intermediate" in rasp_types
     assert "agent.message.final" in rasp_types
 
     fcmp_payload = fcmp_live_journal.replay(run_id="run-live-qwen-semantic", after_seq=0)
@@ -852,6 +856,7 @@ async def test_live_runtime_emitter_emits_qwen_process_events_and_single_final(t
     assert "assistant.reasoning" in fcmp_types
     assert "assistant.tool_call" in fcmp_types
     assert "assistant.command_execution" in fcmp_types
+    assert "assistant.message.intermediate" in fcmp_types
     assert fcmp_types.count("assistant.message.final") == 1
     final_payloads = [
         row.get("data", {}).get("text")

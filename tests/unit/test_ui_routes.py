@@ -1557,10 +1557,20 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/timeline/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "SkillRunnerFileExplorer" in detail_res.text
-    assert "chat_thinking_core.js" in detail_res.text
-    assert "createThinkingChatModel()" in detail_res.text
+    assert "chat_thinking_core.js?v=20260405a" in detail_res.text
+    assert "createCompatibleThinkingChatModel(initialMode)" in detail_res.text
+    assert "createCompatibleThinkingChatModel(chatDisplayMode)" in detail_res.text
     assert "chatModel.consume(event)" in detail_res.text
+    assert 'id="chat-mode-plain-btn"' in detail_res.text
+    assert 'id="chat-mode-bubble-btn"' in detail_res.text
+    assert "setChatDisplayMode(\"plain\")" in detail_res.text
+    assert 'stdoutEl.classList.toggle("plain-mode", mode === "plain")' in detail_res.text
+    assert 'stdoutEl.classList.toggle("bubble-mode", mode === "bubble")' in detail_res.text
+    assert 'item.className = `chat-plain-entry${role === "system" ? " system" : role === "user" ? " user" : ""}`' in detail_res.text
     assert "entry.type === \"thinking\"" in detail_res.text
+    assert 'item.className = "chat-plain-process"' in detail_res.text
+    assert 'meta.className = "chat-plain-process-item-meta"' in detail_res.text
+    assert 'body.className = "chat-plain-process-item-body"' in detail_res.text
     assert "chat-thinking-arrow" in detail_res.text
     assert "chat-thinking-meta" in detail_res.text
     assert "thinkingItem.rawRef" in detail_res.text

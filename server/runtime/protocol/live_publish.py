@@ -35,6 +35,7 @@ from .factories import make_fcmp_event, make_rasp_event
 from .final_promotion_coordinator import (
     FinalPromotionCoordinator,
     build_process_payload,
+    resolve_message_id,
 )
 from .ordering_gate import OrderingPrerequisite, RuntimeEventCandidate, RuntimeEventOrderingGate
 from .rasp_canonicalizer import coalesce_rasp_raw_rows
@@ -848,12 +849,13 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     continue
                 self._message_count += 1
                 message_id_obj = emission.get("message_id")
-                message_id = (
-                    message_id_obj
-                    if isinstance(message_id_obj, str) and message_id_obj.strip()
-                    else f"m_{self._attempt_number}_{self._message_count}"
+                message_id = resolve_message_id(
+                    message_id=message_id_obj if isinstance(message_id_obj, str) else None,
+                    text=text,
+                    attempt_number=self._attempt_number,
+                    raw_ref=raw_ref_obj if isinstance(raw_ref_obj, dict) else None,
                 )
-                candidate = self._promotion.register_reasoning_candidate(
+                candidate = self._promotion.register_message_candidate(
                     message_id=message_id,
                     text=text,
                     raw_ref=raw_ref_obj if isinstance(raw_ref_obj, dict) else None,
@@ -864,11 +866,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     seq=1,
                     source=RuntimeEventSource(engine=self._engine, parser="live_semantic", confidence=0.95),
                     category=RuntimeEventCategory.AGENT,
-                    type_name="agent.reasoning",
+                    type_name="agent.message.intermediate",
                     data=build_process_payload(
                         message_id=candidate.message_id,
                         summary=candidate.summary,
-                        classification="reasoning",
+                        classification="intermediate",
                         details=candidate.details,
                         text=candidate.text,
                     ),
@@ -881,11 +883,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     run_id=self._run_id,
                     seq=1,
                     engine=self._engine,
-                    type_name=FcmpEventType.ASSISTANT_REASONING.value,
+                    type_name=FcmpEventType.ASSISTANT_MESSAGE_INTERMEDIATE.value,
                     data=build_process_payload(
                         message_id=candidate.message_id,
                         summary=candidate.summary,
-                        classification="reasoning",
+                        classification="intermediate",
                         details=candidate.details,
                         text=candidate.text,
                     ),

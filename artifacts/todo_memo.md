@@ -34,7 +34,7 @@
 - [x] **增加 Claude Code 引擎**
 - [x] **增加 Qwen Code 引擎**
 - [x] 所有消息类型统一 4kb 截断阈值不合理，有时会截断agent的正常返回。对 agent message 以及归类为 reasoning 的消息添加豁免规则
-- [ ] **重新设计 agent message 的分类规则**，不再把非终态 agent message 先按 reasoning 暴露再 promote，而是赋予其一个新的独立语义。增加一种新的前端展示模式并设为默认（更类似终端内的 plain 风格，有效显示区域更大），在这种展示模式下，所有的 agent message 都将作为对话内容展示（其余的仍然当做推理过程对待）。用户可以通过一个开关切换新模式和传统的气泡模式（传统气泡模式仍然将非终态 agent message 作为 reasoning 一起折叠，从而保证显示区域干净）
+- [x] **重新设计 agent message 的分类规则**，不再把非终态 agent message 先按 reasoning 暴露再 promote，而是赋予其一个新的独立语义。增加一种新的前端展示模式并设为默认（更类似终端内的 plain 风格，有效显示区域更大），在这种展示模式下，所有的 agent message 都将作为对话内容展示（其余的仍然当做推理过程对待）。用户可以通过一个开关切换新模式和传统的气泡模式（传统气泡模式仍然将非终态 agent message 作为 reasoning 一起折叠，从而保证显示区域干净）
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
 - [ ] 进一步拆分 god object，重构 run store
 - [ ] 对单元测试进行全面审查、规范化、去重

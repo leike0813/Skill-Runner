@@ -67,6 +67,24 @@ def test_validate_chat_replay_event_accepts_assistant_process() -> None:
     assert validate_chat_replay_event(payload) == payload
 
 
+def test_validate_chat_replay_event_accepts_assistant_message() -> None:
+    payload = {
+        "protocol_version": "chat-replay/1.0",
+        "seq": 10,
+        "run_id": "run-chat-message",
+        "attempt": 1,
+        "role": "assistant",
+        "kind": "assistant_message",
+        "text": "Draft answer",
+        "created_at": "2026-03-04T10:00:00Z",
+        "correlation": {
+            "message_id": "m-10",
+            "fcmp_seq": 22,
+        },
+    }
+    assert validate_chat_replay_event(payload) == payload
+
+
 def test_validate_chat_replay_event_rejects_invalid_role() -> None:
     with pytest.raises(ProtocolSchemaViolation):
         validate_chat_replay_event(

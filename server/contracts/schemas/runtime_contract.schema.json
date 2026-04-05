@@ -1746,6 +1746,7 @@
                 "agent.reasoning",
                 "agent.tool_call",
                 "agent.command_execution",
+                "agent.message.intermediate",
                 "agent.turn_start",
                 "agent.turn_complete",
                 "agent.message.promoted",
@@ -2018,6 +2019,7 @@
                       "agent.reasoning",
                       "agent.tool_call",
                       "agent.command_execution",
+                      "agent.message.intermediate",
                       "agent.message.promoted"
                     ]
                   }
@@ -2045,6 +2047,7 @@
                       "reasoning",
                       "tool_call",
                       "command_execution",
+                      "intermediate",
                       "promoted",
                       "final"
                     ]
@@ -2054,6 +2057,10 @@
                   },
                   "text": {
                     "type": "string"
+                  },
+                  "replaces_message_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -2103,6 +2110,10 @@
                     "type": "object"
                   },
                   "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replaces_message_id": {
                     "type": "string",
                     "minLength": 1
                   }
@@ -2349,6 +2360,7 @@
             "interaction_reply",
             "auth_submission",
             "assistant_process",
+            "assistant_message",
             "assistant_final",
             "orchestration_notice"
           ]
@@ -2437,6 +2449,7 @@
             "assistant.reasoning",
             "assistant.tool_call",
             "assistant.command_execution",
+            "assistant.message.intermediate",
             "assistant.message.promoted",
             "assistant.message.final",
             "user.input.required",
@@ -2667,6 +2680,7 @@
                   "assistant.reasoning",
                   "assistant.tool_call",
                   "assistant.command_execution",
+                  "assistant.message.intermediate",
                   "assistant.message.promoted"
                 ]
               }
@@ -2692,6 +2706,7 @@
                       "reasoning",
                       "tool_call",
                       "command_execution",
+                      "intermediate",
                       "promoted",
                       "final"
                     ]
@@ -2701,6 +2716,10 @@
                   },
                   "text": {
                     "type": "string"
+                  },
+                  "replaces_message_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -2746,6 +2765,10 @@
                     "type": "object"
                   },
                   "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replaces_message_id": {
                     "type": "string",
                     "minLength": 1
                   }

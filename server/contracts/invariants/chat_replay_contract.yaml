@@ -7,6 +7,7 @@ kinds:
   - interaction_reply
   - auth_submission
   - assistant_process
+  - assistant_message
   - assistant_final
   - orchestration_notice
 order_source:
@@ -23,6 +24,9 @@ derivation_rules:
   - source: assistant.message.final
     role: assistant
     kind: assistant_final
+  - source: assistant.message.intermediate
+    role: assistant
+    kind: assistant_message
   - source: assistant.reasoning
     role: assistant
     kind: assistant_process

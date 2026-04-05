@@ -181,7 +181,27 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
                     ChatReplayRole.ASSISTANT.value,
                     ChatReplayKind.ASSISTANT_FINAL.value,
                     text,
-                    {"message_id": data.get("message_id"), "fcmp_seq": seq},
+                    {
+                        "message_id": data.get("message_id"),
+                        "replaces_message_id": data.get("replaces_message_id"),
+                        "fcmp_seq": seq,
+                    },
+                )
+            )
+    elif type_name == "assistant.message.intermediate":
+        text = normalize_interaction_text(data.get("text"))
+        if text:
+            specs.append(
+                (
+                    ChatReplayRole.ASSISTANT.value,
+                    ChatReplayKind.ASSISTANT_MESSAGE.value,
+                    text,
+                    {
+                        "message_id": data.get("message_id"),
+                        "fcmp_seq": seq,
+                        "summary": _safe_text(data.get("summary")) or None,
+                        "classification": data.get("classification"),
+                    },
                 )
             )
     elif type_name in {"assistant.reasoning", "assistant.tool_call", "assistant.command_execution"}:

@@ -30,7 +30,11 @@ from .factories import (
     make_fcmp_terminal_payload,
     make_rasp_event,
 )
-from .final_promotion_coordinator import FinalPromotionCoordinator, build_process_payload
+from .final_promotion_coordinator import (
+    FinalPromotionCoordinator,
+    build_process_payload,
+    resolve_message_id,
+)
 from .schema_registry import validate_fcmp_event, validate_rasp_event
 from .parse_utils import stream_lines_with_offsets, strip_runtime_script_envelope
 from .rasp_canonicalizer import coalesce_rasp_raw_rows
@@ -345,25 +349,26 @@ def build_rasp_events(
             continue
         latest_assistant_prompt = text.strip()
         message_id_obj = msg.get("message_id") if isinstance(msg, dict) else None
-        message_id = (
-            message_id_obj
-            if isinstance(message_id_obj, str) and message_id_obj.strip()
-            else f"m_{attempt_number}_{index}"
+        raw_ref_row = msg.get("raw_ref") if isinstance(msg, dict) else None
+        message_id = resolve_message_id(
+            message_id=message_id_obj if isinstance(message_id_obj, str) else None,
+            text=text,
+            attempt_number=attempt_number,
+            raw_ref=raw_ref_row if isinstance(raw_ref_row, dict) else None,
         )
-        candidate = promotion.register_reasoning_candidate(
+        candidate = promotion.register_message_candidate(
             message_id=message_id,
             text=text,
-            raw_ref=(msg.get("raw_ref") if isinstance(msg, dict) else None),
+            raw_ref=raw_ref_row if isinstance(raw_ref_row, dict) else None,
             details={"source": "build_rasp_events"},
         )
-        raw_ref_row = msg.get("raw_ref") if isinstance(msg, dict) else None
         push(
             RuntimeEventCategory.AGENT,
-            "agent.reasoning",
+            "agent.message.intermediate",
             data=build_process_payload(
                 message_id=candidate.message_id,
                 summary=candidate.summary,
-                classification="reasoning",
+                classification="intermediate",
                 details=candidate.details,
                 text=candidate.text,
             ),
@@ -1030,6 +1035,7 @@ def build_fcmp_events(
     assistant_reasoning_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
     assistant_tool_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
     assistant_command_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
+    assistant_intermediate_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
     assistant_promoted_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
     assistant_final_payloads: List[Tuple[dict[str, Any], Optional[RuntimeEventRef]]] = []
     for event in rasp_events:
@@ -1038,6 +1044,7 @@ def build_fcmp_events(
             "agent.reasoning",
             "agent.tool_call",
             "agent.command_execution",
+            "agent.message.intermediate",
             "agent.message.promoted",
             "agent.message.final",
         }:
@@ -1046,7 +1053,7 @@ def build_fcmp_events(
         message_id = (
             message_id_obj
             if isinstance(message_id_obj, str) and message_id_obj.strip()
-            else f"m_{attempt_number}_{len(assistant_final_payloads) + len(assistant_reasoning_payloads) + 1}"
+            else f"m_{attempt_number}_{len(assistant_final_payloads) + len(assistant_reasoning_payloads) + len(assistant_intermediate_payloads) + 1}"
         )
         summary_obj = event.data.get("summary")
         summary = summary_obj if isinstance(summary_obj, str) and summary_obj.strip() else None
@@ -1080,6 +1087,10 @@ def build_fcmp_events(
             assistant_tool_payloads.append((payload, event.raw_ref))
         elif event_type == "agent.command_execution":
             assistant_command_payloads.append((payload, event.raw_ref))
+        elif event_type == "agent.message.intermediate":
+            if isinstance(text, str):
+                assistant_messages.append(text)
+            assistant_intermediate_payloads.append((payload, event.raw_ref))
         elif event_type == "agent.message.promoted":
             assistant_promoted_payloads.append((payload, event.raw_ref))
         elif event_type == "agent.message.final":
@@ -1669,6 +1680,8 @@ def build_fcmp_events(
         push(FcmpEventType.ASSISTANT_TOOL_CALL.value, payload, raw_ref=raw_ref)
     for payload, raw_ref in assistant_command_payloads:
         push(FcmpEventType.ASSISTANT_COMMAND_EXECUTION.value, payload, raw_ref=raw_ref)
+    for payload, raw_ref in assistant_intermediate_payloads:
+        push(FcmpEventType.ASSISTANT_MESSAGE_INTERMEDIATE.value, payload, raw_ref=raw_ref)
     for payload, raw_ref in assistant_promoted_payloads:
         push(FcmpEventType.ASSISTANT_MESSAGE_PROMOTED.value, payload, raw_ref=raw_ref)
     for payload, raw_ref in assistant_final_payloads:

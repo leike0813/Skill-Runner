@@ -15,7 +15,14 @@
 </section>
 
 <section class="card" style="margin-top: 16px;">
-    <h3 style="margin-top: 0;">{{ t("client.observe_conversation", default="Conversation") }}</h3>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <h3 style="margin-top: 0; margin-bottom: 0;">{{ t("client.observe_conversation", default="Conversation") }}</h3>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="muted">{{ t("client.observe_chat_mode", default="View") }}</span>
+            <button id="chat-mode-plain" class="btn btn-secondary" type="button">{{ t("client.observe_chat_mode_plain", default="Plain") }}</button>
+            <button id="chat-mode-bubble" class="btn btn-secondary" type="button">{{ t("client.observe_chat_mode_bubble", default="Bubble") }}</button>
+        </div>
+    </div>
     <div id="chat-panel" class="chat-panel"></div>
 
     <div id="thinking-card" class="thinking-card hidden" role="status" aria-live="polite">
@@ -153,6 +160,13 @@
         padding: 14px;
         background: linear-gradient(180deg, #f9fbfa 0%, #f4f8f6 100%);
     }
+    .chat-panel.plain-mode {
+        padding: 16px 18px;
+        background: #fbfcfb;
+    }
+    .chat-panel.bubble-mode {
+        background: linear-gradient(180deg, #f9fbfa 0%, #f4f8f6 100%);
+    }
     .chat-row {
         display: flex;
         margin-bottom: 10px;
@@ -170,12 +184,16 @@
         max-width: min(78%, 760px);
         border-radius: 14px;
         padding: 10px 12px;
-        white-space: pre-wrap;
         overflow-wrap: anywhere;
         word-break: break-word;
-        line-height: 1.5;
+        line-height: 1.4;
         border: 1px solid var(--neutral-200);
         box-shadow: 0 4px 14px rgba(20, 100, 59, 0.08);
+    }
+
+    /* Remove extra margin from last element in chat bubble to avoid trailing space */
+    .chat-bubble > :last-child {
+        margin-bottom: 0;
     }
     .chat-bubble.agent {
         background: #ffffff;
@@ -226,7 +244,8 @@
         margin-top: 6px;
         font-size: 12px;
         color: #2b4c3d;
-        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     .thinking-list {
         margin-top: 8px;
@@ -245,11 +264,101 @@
         margin-bottom: 4px;
     }
     .thinking-item-text {
-        font-size: 12px;
-        color: #1f2937;
-        white-space: pre-wrap;
         overflow-wrap: anywhere;
         word-break: break-word;
+    }
+
+    .thinking-item-text > :last-child {
+        margin-bottom: 0;
+    }
+    .chat-plain-entry {
+        margin: 0 0 14px;
+        padding: 0 0 12px;
+        border-bottom: 1px solid var(--neutral-200);
+    }
+    .chat-plain-entry:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+    }
+    .chat-plain-entry.system {
+        color: #4b5563;
+    }
+    .chat-plain-entry.user {
+        color: #0e3b25;
+    }
+    .chat-plain-role {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #6b7280;
+    }
+    .chat-plain-body {
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        color: var(--neutral-900);
+    }
+
+    /* Remove extra margin from last element in plain body to avoid trailing space */
+    .chat-plain-body > :last-child {
+        margin-bottom: 0;
+    }
+    .chat-plain-process {
+        margin: 0 0 14px;
+        padding-left: 12px;
+        border-left: 3px solid #c9d8d0;
+    }
+    .chat-plain-process-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+    }
+    .chat-plain-process-title {
+        font-size: 12px;
+        color: #355846;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .chat-plain-process-latest {
+        margin-top: 6px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        color: #1f2937;
+        line-height: 1.6;
+        font-size: 12px;
+    }
+    .chat-plain-process-list {
+        margin-top: 8px;
+        display: grid;
+        gap: 0;
+    }
+    .chat-plain-process-item {
+        padding: 8px 0 9px 0;
+        border-bottom: 1px solid #dde7e1;
+    }
+    .chat-plain-process-item:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+    }
+    .chat-plain-process-item-meta {
+        font-size: 10px;
+        color: #6b7280;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 700;
+    }
+    .chat-plain-process-item-body {
+        font-size: 12px;
+        line-height: 1.5;
+        color: #1f2937;
     }
     .prompt-card {
         margin-top: 12px;
@@ -510,17 +619,457 @@
         color: var(--neutral-500);
         font-size: 13px;
     }
-    @media (max-width: 960px) {
-        .file-tree-layout {
-            grid-template-columns: 1fr;
-        }
+    .chat-bubble .markdown-body h1,
+    .chat-bubble .markdown-body h2,
+    .chat-bubble .markdown-body h3,
+    .chat-bubble .markdown-body h4,
+    .chat-bubble .markdown-body h5,
+    .chat-bubble .markdown-body h6,
+    .chat-bubble h1,
+    .chat-bubble h2,
+    .chat-bubble h3,
+    .chat-bubble h4,
+    .chat-bubble h5,
+    .chat-bubble h6 {
+        margin: 16px 0 8px;
+        font-weight: 600;
+        line-height: 1.25;
+    }
+
+    .chat-bubble h1 { font-size: 1.5em; }
+    .chat-bubble h2 { font-size: 1.25em; }
+    .chat-bubble h3 { font-size: 1.1em; }
+    .chat-bubble h4,
+    .chat-bubble h5,
+    .chat-bubble h6 { font-size: 1em; }
+
+    .chat-bubble p {
+        margin: 4px 0;
+        line-height: 1.5;
+    }
+
+    .chat-bubble code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 0.9em;
+        background: #f6f8fa;
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #24292f;
+    }
+
+    .chat-bubble pre {
+        background: #f6f8fa;
+        padding: 12px;
+        border-radius: 6px;
+        overflow: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 13px;
+        margin: 6px 0;
+    }
+
+    .chat-bubble pre code {
+        background: transparent;
+        padding: 0;
+        color: inherit;
+    }
+
+    .chat-bubble table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+
+    .chat-bubble th,
+    .chat-bubble td {
+        border: 1px solid #d0d7de;
+        padding: 8px 12px;
+        text-align: left;
+    }
+
+    .chat-bubble th {
+        background: #f6f8fa;
+        font-weight: 600;
+    }
+
+    .chat-bubble tr:nth-child(even) {
+        background: #f6f8fa;
+    }
+
+    .chat-bubble ul,
+    .chat-bubble ol {
+        padding-left: 24px;
+        margin: 8px 0;
+    }
+
+    .chat-bubble li {
+        margin: 4px 0;
+        line-height: 1.5;
+    }
+
+    .chat-bubble blockquote {
+        border-left: 4px solid #d0d7de;
+        padding-left: 16px;
+        margin: 12px 0;
+        color: #656d76;
+    }
+
+    .chat-bubble a {
+        color: #0969da;
+        text-decoration: none;
+    }
+
+    .chat-bubble a:hover {
+        text-decoration: underline;
+    }
+
+    .chat-bubble hr {
+        border: 0;
+        border-top: 1px solid #d0d7de;
+        margin: 16px 0;
+    }
+
+    .chat-bubble strong {
+        font-weight: 600;
+        color: #24292f;
+    }
+
+    .chat-bubble em {
+        font-style: italic;
+    }
+
+    /* Plain mode Markdown styles */
+    .chat-plain-body h1,
+    .chat-plain-body h2,
+    .chat-plain-body h3,
+    .chat-plain-body h4,
+    .chat-plain-body h5,
+    .chat-plain-body h6 {
+        margin: 16px 0 8px;
+        font-weight: 600;
+        line-height: 1.25;
+    }
+
+    .chat-plain-body h1 { font-size: 1.5em; }
+    .chat-plain-body h2 { font-size: 1.25em; }
+    .chat-plain-body h3 { font-size: 1.1em; }
+    .chat-plain-body h4,
+    .chat-plain-body h5,
+    .chat-plain-body h6 { font-size: 1em; }
+
+    .chat-plain-body p {
+        margin: 4px 0;
+        line-height: 1.5;
+    }
+
+    .chat-plain-body code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 0.9em;
+        background: #f6f8fa;
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #24292f;
+    }
+
+    .chat-plain-body pre {
+        background: #f6f8fa;
+        padding: 12px;
+        border-radius: 6px;
+        overflow: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 13px;
+        margin: 6px 0;
+    }
+
+    .chat-plain-body pre code {
+        background: transparent;
+        padding: 0;
+        color: inherit;
+    }
+
+    .chat-plain-body table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 12px 0;
+        font-size: 13px;
+    }
+
+    .chat-plain-body th,
+    .chat-plain-body td {
+        border: 1px solid #d0d7de;
+        padding: 8px 12px;
+        text-align: left;
+    }
+
+    .chat-plain-body th {
+        background: #f6f8fa;
+        font-weight: 600;
+    }
+
+    .chat-plain-body tr:nth-child(even) {
+        background: #f6f8fa;
+    }
+
+    .chat-plain-body ul,
+    .chat-plain-body ol {
+        padding-left: 24px;
+        margin: 8px 0;
+    }
+
+    .chat-plain-body li {
+        margin: 4px 0;
+        line-height: 1.5;
+    }
+
+    .chat-plain-body blockquote {
+        border-left: 4px solid #d0d7de;
+        padding-left: 16px;
+        margin: 12px 0;
+        color: #656d76;
+    }
+
+    .chat-plain-body a {
+        color: #0969da;
+        text-decoration: none;
+    }
+
+    .chat-plain-body a:hover {
+        text-decoration: underline;
+    }
+
+    .chat-plain-body hr {
+        border: 0;
+        border-top: 1px solid #d0d7de;
+        margin: 16px 0;
+    }
+
+    .chat-plain-body strong {
+        font-weight: 600;
+        color: #24292f;
+    }
+
+    .chat-plain-body em {
+        font-style: italic;
+    }
+
+    /* Thinking card Markdown styles */
+    .thinking-item-text h1,
+    .thinking-item-text h2,
+    .thinking-item-text h3,
+    .thinking-item-text h4,
+    .thinking-item-text h5,
+    .thinking-item-text h6 {
+        margin: 12px 0 6px;
+        font-weight: 600;
+        line-height: 1.25;
+        font-size: 1em;
+    }
+
+    .thinking-item-text p {
+        margin: 6px 0;
+        line-height: 1.5;
+    }
+
+    .thinking-item-text code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 0.85em;
+        background: #f6f8fa;
+        padding: 2px 4px;
+        border-radius: 3px;
+    }
+
+    .thinking-item-text pre {
+        background: #f6f8fa;
+        padding: 8px;
+        border-radius: 4px;
+        overflow: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 12px;
+        margin: 6px 0;
+    }
+
+    .thinking-item-text pre code {
+        background: transparent;
+        padding: 0;
+    }
+
+    .thinking-item-text table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        font-size: 12px;
+    }
+
+    .thinking-item-text th,
+    .thinking-item-text td {
+        border: 1px solid #d0d7de;
+        padding: 6px 8px;
+        text-align: left;
+    }
+
+    .thinking-item-text th {
+        background: #f6f8fa;
+        font-weight: 600;
+    }
+
+    .thinking-item-text tr:nth-child(even) {
+        background: #f6f8fa;
+    }
+
+    .thinking-item-text ul,
+    .thinking-item-text ol {
+        padding-left: 20px;
+        margin: 6px 0;
+    }
+
+    .thinking-item-text li {
+        margin: 3px 0;
+    }
+
+    .thinking-item-text blockquote {
+        border-left: 3px solid #d0d7de;
+        padding-left: 12px;
+        margin: 8px 0;
+        color: #656d76;
+        font-size: 12px;
+    }
+
+    .thinking-item-text a {
+        color: #0969da;
+        text-decoration: none;
+    }
+
+    .thinking-item-text a:hover {
+        text-decoration: underline;
+    }
+
+    /* Final summary Markdown styles */
+    #final-summary-text h1,
+    #final-summary-text h2,
+    #final-summary-text h3,
+    #final-summary-text h4,
+    #final-summary-text h5,
+    #final-summary-text h6 {
+        margin: 12px 0 6px;
+        font-weight: 600;
+        line-height: 1.25;
+        font-size: 1em;
+    }
+
+    #final-summary-text p {
+        margin: 6px 0;
+        line-height: 1.5;
+    }
+
+    #final-summary-text code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 0.9em;
+        background: #f6f8fa;
+        padding: 2px 4px;
+        border-radius: 3px;
+    }
+
+    #final-summary-text pre {
+        background: #f6f8fa;
+        padding: 8px;
+        border-radius: 4px;
+        overflow: auto;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 12px;
+        margin: 6px 0;
+    }
+
+    #final-summary-text pre code {
+        background: transparent;
+        padding: 0;
+    }
+
+    #final-summary-text table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        font-size: 12px;
+    }
+
+    #final-summary-text th,
+    #final-summary-text td {
+        border: 1px solid #d0d7de;
+        padding: 6px 8px;
+        text-align: left;
+    }
+
+    #final-summary-text th {
+        background: #f6f8fa;
+        font-weight: 600;
+    }
+
+    #final-summary-text tr:nth-child(even) {
+        background: #f6f8fa;
+    }
+
+    #final-summary-text ul,
+    #final-summary-text ol {
+        padding-left: 20px;
+        margin: 6px 0;
+    }
+
+    #final-summary-text li {
+        margin: 3px 0;
+    }
+
+    #final-summary-text blockquote {
+        border-left: 3px solid #d0d7de;
+        padding-left: 12px;
+        margin: 8px 0;
+        color: #656d76;
+        font-size: 12px;
+    }
+
+    #final-summary-text a {
+        color: #0969da;
+        text-decoration: none;
+    }
+
+    #final-summary-text a:hover {
+        text-decoration: underline;
+    }
+
+    #final-summary-text hr {
+        border: 0;
+        border-top: 1px solid #d0d7de;
+        margin: 12px 0;
+    }
+
+    #final-summary-text strong {
+        font-weight: 600;
+    }
+
+    #final-summary-text em {
+        font-style: italic;
     }
 </style>
 
 <script src="/static/js/file_explorer.js"></script>
-<script src="/static/js/chat_thinking_core.js"></script>
+<script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
+<!-- KaTeX for LaTeX formula rendering (local vendor assets) -->
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/markdown-it/markdown-it.min.js"></script>
+<script src="/static/vendor/markdown-it-texmath/texmath.min.js"></script>
 <script>
 (() => {
+    function createCompatibleThinkingChatModel(initialMode) {
+        const core = window.SkillRunnerThinkingChatCore;
+        if (!core || typeof core.createThinkingChatModel !== "function") {
+            return null;
+        }
+        const model = core.createThinkingChatModel(initialMode);
+        if (model && typeof model.setDisplayMode === "function") {
+            model.setDisplayMode(initialMode);
+        }
+        return model && typeof model.getEntries === "function" ? model : null;
+    }
+
     const I18N = {
         defaultInteractionPrompt: {{ t("client.observe_default_prompt", default="Please reply to continue.") | tojson }},
         replyPlaceholder: {{ t("client.observe_reply_placeholder", default="Reply to agent...") | tojson }},
@@ -533,10 +1082,12 @@
         thinkingExpand: {{ t("client.observe_thinking_expand", default="Expand") | tojson }},
         thinkingCollapse: {{ t("client.observe_thinking_collapse", default="Collapse") | tojson }},
         processReasoning: {{ t("client.observe_process_reasoning", default="Reasoning") | tojson }},
+        processMessage: {{ t("client.observe_process_message", default="Message") | tojson }},
         processToolCall: {{ t("client.observe_process_tool_call", default="Tool call") | tojson }},
         processCommandExecution: {{ t("client.observe_process_command_execution", default="Command execution") | tojson }},
         submitFailedHttpPrefix: {{ t("client.observe_submit_failed_http", default="Submit failed: HTTP") | tojson }},
         submitFailedNetwork: {{ t("client.observe_submit_failed_network", default="Backend unreachable.") | tojson }},
+        clientInitFailedPrefix: {{ t("client.observe_init_failed", default="Frontend initialization failed:") | tojson }},
         authRequiredPrompt: {{ t("client.observe_auth_required_prompt", default="Authentication is required to continue.") | tojson }},
         authPasteApiKey: {{ t("client.observe_auth_paste_api_key", default="Paste API key here...") | tojson }},
         authPasteCode: {{ t("client.observe_auth_paste_code", default="Paste authorization code here...") | tojson }},
@@ -601,6 +1152,8 @@
     const pendingIdEl = document.getElementById("pending-id");
     const cursorEl = document.getElementById("run-cursor");
     const chatEl = document.getElementById("chat-panel");
+    const chatModePlainEl = document.getElementById("chat-mode-plain");
+    const chatModeBubbleEl = document.getElementById("chat-mode-bubble");
     const replyForm = document.getElementById("reply-form");
     const replyComposerEl = document.getElementById("reply-composer");
     const interactionIdEl = document.getElementById("interaction-id");
@@ -664,9 +1217,8 @@
     let fileTreeLoaded = false;
     let fileTreeExpanded = false;
     const renderedChatKeys = new Set();
-    let chatModel = window.SkillRunnerThinkingChatCore
-        ? window.SkillRunnerThinkingChatCore.createThinkingChatModel()
-        : null;
+    let chatDisplayMode = "plain";
+    let chatModel = createCompatibleThinkingChatModel(chatDisplayMode);
     const renderedPromptKeys = new Set();
     let lastPromptRenderSignature = "";
     let lastAuthRenderSignature = "";
@@ -694,6 +1246,48 @@
         return typeof value === "string" ? value : "";
     }
 
+    // Markdown renderer initialization
+    let mdParser = null;
+    if (window.markdownit) {
+        mdParser = window.markdownit({
+            html: false,        // Disable HTML for XSS protection
+            xhtmlOut: false,
+            breaks: true,       // Enable line breaks within paragraphs
+            langPrefix: 'language-',
+            linkify: false,     // Do not auto-convert URLs to links
+            typographer: false,
+            quotes: '""\'\'',
+            highlight: null     // No syntax highlighting for now
+        });
+        // Enable LaTeX formula support with katex and texmath
+        if (window.texmath && window.katex) {
+            mdParser.use(window.texmath, {
+                engine: window.katex,
+                delimiters: 'dollars',  // Support $inline$ and $$display$$
+                katexOptions: {
+                    throwOnError: false,
+                    output: 'htmlAndMath',
+                    displayMode: false
+                }
+            });
+        }
+    } else {
+        console.warn('markdown-it not loaded, falling back to plain text rendering');
+    }
+
+    function renderMarkdown(text) {
+        if (!mdParser || typeof text !== 'string') {
+            return safeText(text);
+        }
+        try {
+            // markdown-it adds trailing newline, remove it
+            return mdParser.render(text).trimEnd();
+        } catch (e) {
+            console.warn('Markdown render error, falling back to plain text:', e);
+            return safeText(text);
+        }
+    }
+
     function isNearBottom(targetEl, thresholdPx = 24) {
         if (!targetEl) return true;
         return targetEl.scrollTop + targetEl.clientHeight >= targetEl.scrollHeight - thresholdPx;
@@ -701,11 +1295,7 @@
 
     function resetConversationRenderState() {
         renderedChatKeys.clear();
-        if (window.SkillRunnerThinkingChatCore) {
-            chatModel = window.SkillRunnerThinkingChatCore.createThinkingChatModel();
-        } else {
-            chatModel = null;
-        }
+        chatModel = createCompatibleThinkingChatModel(chatDisplayMode);
         if (chatEl) {
             chatEl.textContent = "";
         }
@@ -1323,6 +1913,12 @@
         replyErrorEl.classList.remove("hidden");
     }
 
+    function showClientInitError(error) {
+        const message = error instanceof Error ? safeText(error.message).trim() : safeText(String(error)).trim();
+        const suffix = message || "unknown client error";
+        showReplyError(`${I18N.clientInitFailedPrefix} ${suffix}`);
+    }
+
     function setReplyEnabled(enabled, options = {}) {
         const textEnabled = enabled && options.textEnabled !== false;
         replyTextEl.disabled = !textEnabled;
@@ -1350,9 +1946,32 @@
 
     function processTypeLabel(processType) {
         const normalized = safeText(processType).trim().toLowerCase();
+        if (normalized === "assistant_message") return I18N.processMessage;
         if (normalized === "tool_call") return I18N.processToolCall;
         if (normalized === "command_execution") return I18N.processCommandExecution;
         return I18N.processReasoning;
+    }
+
+    function syncChatModeButtons() {
+        if (chatModePlainEl) {
+            chatModePlainEl.classList.toggle("btn-primary", chatDisplayMode === "plain");
+            chatModePlainEl.classList.toggle("btn-secondary", chatDisplayMode !== "plain");
+        }
+        if (chatModeBubbleEl) {
+            chatModeBubbleEl.classList.toggle("btn-primary", chatDisplayMode === "bubble");
+            chatModeBubbleEl.classList.toggle("btn-secondary", chatDisplayMode !== "bubble");
+        }
+    }
+
+    function setChatDisplayMode(mode, options = {}) {
+        chatDisplayMode = safeText(mode).trim().toLowerCase() === "bubble" ? "bubble" : "plain";
+        if (chatModel && typeof chatModel.setDisplayMode === "function") {
+            chatModel.setDisplayMode(chatDisplayMode);
+        }
+        syncChatModeButtons();
+        if (options.render !== false) {
+            renderChatModel({ preserveScroll: true });
+        }
     }
 
     function renderChatModel(options = {}) {
@@ -1360,6 +1979,11 @@
         const shouldStickToBottom = options.forceScroll === true || (options.preserveScroll !== true && isNearBottom(chatEl));
         const previousScrollTop = chatEl.scrollTop;
         const previousScrollHeight = chatEl.scrollHeight;
+        const mode = typeof chatModel.getDisplayMode === "function"
+            ? chatModel.getDisplayMode()
+            : chatDisplayMode;
+        chatEl.classList.toggle("plain-mode", mode === "plain");
+        chatEl.classList.toggle("bubble-mode", mode === "bubble");
         chatEl.textContent = "";
         const entries = chatModel.getEntries();
         for (const entry of entries) {
@@ -1369,6 +1993,20 @@
                 const role = safeText(event.role).trim() || "assistant";
                 const normalizedText = safeText(event.text).trim();
                 if (!normalizedText) continue;
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = `chat-plain-entry ${role}`;
+                    const roleEl = document.createElement("span");
+                    roleEl.className = "chat-plain-role";
+                    roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
+                    item.appendChild(roleEl);
+                    const body = document.createElement("div");
+                    body.className = "chat-plain-body";
+                    body.innerHTML = renderMarkdown(normalizedText);
+                    item.appendChild(body);
+                    chatEl.appendChild(item);
+                    continue;
+                }
                 const row = document.createElement("div");
                 row.className = `chat-row ${role}`;
                 const bubble = document.createElement("div");
@@ -1378,7 +2016,7 @@
                 roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
                 bubble.appendChild(roleEl);
                 const content = document.createElement("div");
-                content.textContent = normalizedText;
+                content.innerHTML = renderMarkdown(normalizedText);
                 bubble.appendChild(content);
                 row.appendChild(bubble);
                 chatEl.appendChild(row);
@@ -1388,6 +2026,58 @@
                 const items = Array.isArray(entry.items) ? entry.items : [];
                 if (!items.length) continue;
                 const latest = items[items.length - 1];
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = "chat-plain-process";
+                    const header = document.createElement("div");
+                    header.className = "chat-plain-process-header";
+                    header.setAttribute("role", "button");
+                    header.setAttribute("tabindex", "0");
+                    const title = document.createElement("span");
+                    title.className = "chat-plain-process-title";
+                    title.textContent = processTypeLabel(latest.processType);
+                    const arrow = document.createElement("span");
+                    arrow.textContent = entry.collapsed ? "◀" : "▼";
+                    header.appendChild(title);
+                    header.appendChild(arrow);
+                    item.appendChild(header);
+                    const toggleThinking = () => {
+                        chatModel.toggleThinking(entry.id);
+                        renderChatModel({ preserveScroll: true });
+                    };
+                    header.addEventListener("click", toggleThinking);
+                    header.addEventListener("keydown", (evt) => {
+                        if (evt.key === "Enter" || evt.key === " ") {
+                            evt.preventDefault();
+                            toggleThinking();
+                        }
+                    });
+                    if (entry.collapsed) {
+                        const latestLine = document.createElement("div");
+                        latestLine.className = "chat-plain-process-latest";
+                        latestLine.innerHTML = renderMarkdown(`${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`);
+                        item.appendChild(latestLine);
+                    } else {
+                        const list = document.createElement("div");
+                        list.className = "chat-plain-process-list";
+                        for (const itemEntry of items) {
+                            const child = document.createElement("div");
+                            child.className = "chat-plain-process-item";
+                            const meta = document.createElement("div");
+                            meta.className = "chat-plain-process-item-meta";
+                            meta.textContent = processTypeLabel(itemEntry.processType);
+                            child.appendChild(meta);
+                            const textEl = document.createElement("div");
+                            textEl.className = "chat-plain-process-item-body";
+                            textEl.innerHTML = renderMarkdown(safeText(itemEntry.text || itemEntry.summary));
+                            child.appendChild(textEl);
+                            list.appendChild(child);
+                        }
+                        item.appendChild(list);
+                    }
+                    chatEl.appendChild(item);
+                    continue;
+                }
                 const row = document.createElement("div");
                 row.className = "chat-row agent";
                 const bubble = document.createElement("div");
@@ -1423,7 +2113,7 @@
                 if (entry.collapsed) {
                     const latestLine = document.createElement("div");
                     latestLine.className = "thinking-latest";
-                    latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                    latestLine.innerHTML = renderMarkdown(`${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`);
                     bubble.appendChild(latestLine);
                 } else {
                     const list = document.createElement("div");
@@ -1437,7 +2127,7 @@
                         itemEl.appendChild(meta);
                         const textEl = document.createElement("div");
                         textEl.className = "thinking-item-text";
-                        textEl.textContent = safeText(item.text || item.summary);
+                        textEl.innerHTML = renderMarkdown(safeText(item.text || item.summary));
                         itemEl.appendChild(textEl);
                         list.appendChild(itemEl);
                     }
@@ -1453,6 +2143,17 @@
             const delta = chatEl.scrollHeight - previousScrollHeight;
             chatEl.scrollTop = Math.max(0, previousScrollTop + delta);
         }
+
+        // Render KaTeX formulas after chat content is updated
+        if (window.katex) {
+            renderKaTeXInElement(chatEl);
+        }
+    }
+
+    function renderKaTeXInElement(element) {
+        if (!window.katex || !element) return;
+        // KaTeX auto-renders elements with .katex class via markdown-it-katex plugin
+        // No additional processing needed for dynamically added content
     }
 
     function appendChatBubble(role, text, key, event = null) {
@@ -1474,7 +2175,7 @@
         roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
         bubble.appendChild(roleEl);
         const content = document.createElement("div");
-        content.textContent = normalizedText;
+        content.innerHTML = renderMarkdown(normalizedText);
         bubble.appendChild(content);
         row.appendChild(bubble);
         chatEl.appendChild(row);
@@ -1986,12 +2687,12 @@
             const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
             const preview = safeText(payload.result_preview).trim();
             if (finalSummaryCardEl && finalSummaryTextEl) {
-                finalSummaryTextEl.textContent = buildFinalSummaryText(
+                finalSummaryTextEl.innerHTML = renderMarkdown(buildFinalSummaryText(
                     payload,
                     resultStatus,
                     preview,
                     artifacts,
-                );
+                ));
                 finalSummaryCardEl.classList.remove("hidden");
             }
             finalSummaryLoaded = true;
@@ -2401,6 +3102,13 @@
             await maybeLoadFileTreeOnTerminal();
         }
     });
+    if (chatModePlainEl) {
+        chatModePlainEl.addEventListener("click", () => setChatDisplayMode("plain"));
+    }
+    if (chatModeBubbleEl) {
+        chatModeBubbleEl.addEventListener("click", () => setChatDisplayMode("bubble"));
+    }
+    syncChatModeButtons();
 
     (async () => {
         try {
@@ -2408,8 +3116,9 @@
             await loadHistory();
             await startStream();
             await refreshState();
-        } catch (_err) {
-            showReplyError(I18N.submitFailedNetwork);
+        } catch (error) {
+            console.error("run observe initialization failed", error);
+            showClientInitError(error);
         }
     })();
 

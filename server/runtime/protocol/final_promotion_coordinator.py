@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -23,6 +24,37 @@ def build_summary(text: str, *, max_chars: int = 220) -> str:
     return f"{compact[: max_chars - 3]}..."
 
 
+def resolve_message_id(
+    *,
+    message_id: str | None,
+    text: str,
+    attempt_number: int,
+    raw_ref: RuntimeStreamRawRef | None = None,
+) -> str:
+    normalized = message_id.strip() if isinstance(message_id, str) else ""
+    if normalized:
+        return normalized
+
+    stream = ""
+    byte_from = -1
+    byte_to = -1
+    if isinstance(raw_ref, dict):
+        stream = str(raw_ref.get("stream") or "").strip().lower()
+        byte_from = int(raw_ref.get("byte_from") or -1)
+        byte_to = int(raw_ref.get("byte_to") or -1)
+    fingerprint = "\n".join(
+        [
+            str(max(1, int(attempt_number))),
+            stream,
+            str(byte_from),
+            str(byte_to),
+            text.strip(),
+        ]
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    return f"m_{attempt_number}_{digest}"
+
+
 def build_process_payload(
     *,
     message_id: str,
@@ -30,6 +62,7 @@ def build_process_payload(
     classification: str,
     details: Dict[str, Any] | None = None,
     text: str | None = None,
+    replaces_message_id: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "message_id": message_id,
@@ -39,6 +72,8 @@ def build_process_payload(
     }
     if isinstance(text, str) and text.strip():
         payload["text"] = text
+    if isinstance(replaces_message_id, str) and replaces_message_id.strip():
+        payload["replaces_message_id"] = replaces_message_id.strip()
     return payload
 
 
@@ -49,7 +84,7 @@ class FinalPromotionCoordinator:
         self._latest_candidate: PromotableMessage | None = None
         self._promoted_ids: set[str] = set()
 
-    def register_reasoning_candidate(
+    def register_message_candidate(
         self,
         *,
         message_id: str,
@@ -62,11 +97,26 @@ class FinalPromotionCoordinator:
             text=text,
             summary=build_summary(text),
             details=dict(details or {}),
-            classification="reasoning",
+            classification="intermediate",
             raw_ref=raw_ref,
         )
         self._latest_candidate = candidate
         return candidate
+
+    def register_reasoning_candidate(
+        self,
+        *,
+        message_id: str,
+        text: str,
+        raw_ref: RuntimeStreamRawRef | None = None,
+        details: Dict[str, Any] | None = None,
+    ) -> PromotableMessage:
+        return self.register_message_candidate(
+            message_id=message_id,
+            text=text,
+            raw_ref=raw_ref,
+            details=details,
+        )
 
     def promote_on_turn_end(self) -> PromotableMessage | None:
         return self._promote_latest()
@@ -94,8 +144,9 @@ class FinalPromotionCoordinator:
             message_id=candidate.message_id,
             summary=candidate.summary,
             classification="promoted",
-            details={"from": "reasoning", "to": "final"},
+            details={"from": candidate.classification, "to": "final"},
             text=candidate.text,
+            replaces_message_id=candidate.message_id,
         )
 
     @staticmethod
@@ -106,4 +157,5 @@ class FinalPromotionCoordinator:
             classification="final",
             details=candidate.details,
             text=candidate.text,
+            replaces_message_id=candidate.message_id,
         )

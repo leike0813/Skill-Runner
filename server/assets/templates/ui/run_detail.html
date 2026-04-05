@@ -62,10 +62,110 @@
         }
         .preview-markdown td.code { padding-left: 10px; color: #0f172a; }
         .conversation-window { height: 380px; min-height: 380px; max-height: 380px; overflow: auto; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .conversation-window.plain-mode {
+            background: #fbfcfb;
+            padding: 12px 14px;
+        }
+        .conversation-window.bubble-mode {
+            background: #f9fafb;
+        }
         .chat-item { margin: 0 0 10px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; overflow-wrap: anywhere; word-break: break-word; }
         .chat-item.system { background: #f3f4f6; }
         .chat-item.user { background: #e8f5ec; }
         .chat-item.thinking { border-style: dashed; border-color: #bfdbfe; background: #eff6ff; cursor: pointer; }
+        .chat-plain-entry {
+            margin: 0 0 12px;
+            padding: 0 0 10px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .chat-plain-entry:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+        .chat-plain-entry.system {
+            color: #4b5563;
+        }
+        .chat-plain-entry.user {
+            color: #0f5132;
+        }
+        .chat-plain-role {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        .chat-plain-body {
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            line-height: 1.65;
+            color: #111827;
+            font-size: 14px;
+        }
+        .chat-plain-meta {
+            margin-top: 6px;
+            color: #6b7280;
+            font-size: 11px;
+        }
+        .chat-plain-process {
+            margin: 0 0 12px;
+            border-left: 3px solid #cbd5e1;
+            padding: 0 0 0 12px;
+        }
+        .chat-plain-process-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .chat-plain-process-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #334155;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .chat-plain-process-latest {
+            margin-top: 6px;
+            color: #0f172a;
+            white-space: pre-wrap;
+            line-height: 1.6;
+            font-size: 12px;
+        }
+        .chat-plain-process-list {
+            margin-top: 8px;
+            display: grid;
+            gap: 0;
+        }
+        .chat-plain-process-item {
+            padding: 8px 0 9px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .chat-plain-process-item:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+        .chat-plain-process-item-meta {
+            font-size: 10px;
+            color: #64748b;
+            margin-bottom: 4px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .chat-plain-process-item-body {
+            font-size: 12px;
+            line-height: 1.55;
+            color: #0f172a;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
         .chat-thinking-header {
             display: flex;
             align-items: center;
@@ -501,7 +601,14 @@
 
     <div class="row">
         <div class="card">
-            <h3 style="margin:0 0 8px;">{{ t("ui.run_detail.chat_title", default="对话区（Canonical Chat）") }}</h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 8px;">
+                <h3 style="margin:0;">{{ t("ui.run_detail.chat_title", default="对话区（Canonical Chat）") }}</h3>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span class="meta" style="margin-top:0;">{{ t("ui.run_detail.chat_mode", default="View") }}</span>
+                    <button id="chat-mode-plain-btn" type="button">{{ t("ui.run_detail.chat_mode_plain", default="Plain") }}</button>
+                    <button id="chat-mode-bubble-btn" type="button">{{ t("ui.run_detail.chat_mode_bubble", default="Bubble") }}</button>
+                </div>
+            </div>
             <div id="stdout-log" class="conversation-window"></div>
         </div>
         <div class="card">
@@ -596,9 +703,21 @@
 
 {% block extra_scripts %}
 <script src="/static/js/file_explorer.js"></script>
-<script src="/static/js/chat_thinking_core.js"></script>
+<script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
 <script>
 (function () {
+    function createCompatibleThinkingChatModel(initialMode) {
+        const core = window.SkillRunnerThinkingChatCore;
+        if (!core || typeof core.createThinkingChatModel !== "function") {
+            return null;
+        }
+        const model = core.createThinkingChatModel(initialMode);
+        if (model && typeof model.setDisplayMode === "function") {
+            model.setDisplayMode(initialMode);
+        }
+        return model && typeof model.getEntries === "function" ? model : null;
+    }
+
     const I18N = {
         terminalSucceeded: {{ t("ui.run_detail.terminal_succeeded", default="任务已成功。") | tojson }},
         terminalCanceled: {{ t("ui.run_detail.terminal_canceled", default="任务已取消。") | tojson }},
@@ -617,6 +736,7 @@
         thinkingExpand: {{ t("ui.run_detail.thinking_expand", default="Expand") | tojson }},
         thinkingCollapse: {{ t("ui.run_detail.thinking_collapse", default="Collapse") | tojson }},
         processReasoning: {{ t("ui.run_detail.process_reasoning", default="Reasoning") | tojson }},
+        processMessage: {{ t("ui.run_detail.process_message", default="Message") | tojson }},
         processToolCall: {{ t("ui.run_detail.process_tool_call", default="Tool call") | tojson }},
         processCommandExecution: {{ t("ui.run_detail.process_command_execution", default="Command execution") | tojson }},
         metaAttemptPrefix: {{ t("ui.run_detail.meta_attempt_prefix", default="attempt") | tojson }},
@@ -671,6 +791,8 @@
     const pendingIdEl = document.getElementById("run-pending-id");
     const interactionCountEl = document.getElementById("run-interaction-count");
     const stdoutEl = document.getElementById("stdout-log");
+    const chatModePlainBtn = document.getElementById("chat-mode-plain-btn");
+    const chatModeBubbleBtn = document.getElementById("chat-mode-bubble-btn");
     const stderrEl = document.getElementById("stderr-log");
     const stderrPanelEl = document.getElementById("stderr-panel");
     const stderrToggleBtn = document.getElementById("stderr-toggle-btn");
@@ -703,9 +825,8 @@
 
     const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
     const renderedChatSeq = new Set();
-    let chatModel = window.SkillRunnerThinkingChatCore
-        ? window.SkillRunnerThinkingChatCore.createThinkingChatModel()
-        : null;
+    let chatDisplayMode = "plain";
+    let chatModel = createCompatibleThinkingChatModel(chatDisplayMode);
     const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
     const protocolRows = { fcmp: [], rasp: [], orchestrator: [] };
     const protocolRawMode = { fcmp: false, rasp: false, orchestrator: false };
@@ -812,11 +933,7 @@
 
     function resetConversationRenderState() {
         renderedChatSeq.clear();
-        if (window.SkillRunnerThinkingChatCore) {
-            chatModel = window.SkillRunnerThinkingChatCore.createThinkingChatModel();
-        } else {
-            chatModel = null;
-        }
+        chatModel = createCompatibleThinkingChatModel(chatDisplayMode);
         if (stdoutEl) {
             stdoutEl.textContent = "";
         }
@@ -1540,9 +1657,32 @@
 
     function processTypeLabel(processType) {
         const normalized = safeText(processType).trim().toLowerCase();
+        if (normalized === "assistant_message") return I18N.processMessage;
         if (normalized === "tool_call") return I18N.processToolCall;
         if (normalized === "command_execution") return I18N.processCommandExecution;
         return I18N.processReasoning;
+    }
+
+    function syncChatModeButtons() {
+        if (chatModePlainBtn) {
+            chatModePlainBtn.style.opacity = chatDisplayMode === "plain" ? "1" : "0.8";
+            chatModePlainBtn.style.fontWeight = chatDisplayMode === "plain" ? "700" : "500";
+        }
+        if (chatModeBubbleBtn) {
+            chatModeBubbleBtn.style.opacity = chatDisplayMode === "bubble" ? "1" : "0.8";
+            chatModeBubbleBtn.style.fontWeight = chatDisplayMode === "bubble" ? "700" : "500";
+        }
+    }
+
+    function setChatDisplayMode(mode, options = {}) {
+        chatDisplayMode = safeText(mode).trim().toLowerCase() === "bubble" ? "bubble" : "plain";
+        if (chatModel && typeof chatModel.setDisplayMode === "function") {
+            chatModel.setDisplayMode(chatDisplayMode);
+        }
+        syncChatModeButtons();
+        if (options.render !== false) {
+            renderChatModel({ preserveScroll: true });
+        }
     }
 
     function renderChatModel(options = {}) {
@@ -1550,6 +1690,11 @@
         const shouldStickToBottom = options.forceScroll === true || (options.preserveScroll !== true && isNearBottom(stdoutEl));
         const previousScrollTop = stdoutEl.scrollTop;
         const previousScrollHeight = stdoutEl.scrollHeight;
+        const mode = typeof chatModel.getDisplayMode === "function"
+            ? chatModel.getDisplayMode()
+            : chatDisplayMode;
+        stdoutEl.classList.toggle("plain-mode", mode === "plain");
+        stdoutEl.classList.toggle("bubble-mode", mode === "bubble");
         stdoutEl.textContent = "";
         const entries = chatModel.getEntries();
         for (const entry of entries) {
@@ -1558,6 +1703,41 @@
                 const event = entry.event && typeof entry.event === "object" ? entry.event : {};
                 const role = safeText(event.role).trim() || "assistant";
                 const text = safeText(event.text);
+                const seq = Number(event && event.seq);
+                const localSeqObj = event && event.meta && event.meta.local_seq;
+                const localSeq = Number(localSeqObj || 0);
+                const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : (Number.isFinite(seq) ? Math.floor(seq) : 0);
+                const attempt = eventAttempt(event);
+                const rawRef = extractRawRef(event);
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = `chat-plain-entry${role === "system" ? " system" : role === "user" ? " user" : ""}`;
+                    const title = document.createElement("span");
+                    title.className = "chat-plain-role";
+                    title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
+                    item.appendChild(title);
+                    const body = document.createElement("div");
+                    body.className = "chat-plain-body";
+                    body.textContent = text || "";
+                    item.appendChild(body);
+                    const meta = document.createElement("div");
+                    meta.className = "chat-plain-meta";
+                    meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
+                    item.appendChild(meta);
+                    if (rawRef) {
+                        const refMeta = document.createElement("div");
+                        refMeta.className = "chat-plain-meta";
+                        const btn = document.createElement("button");
+                        btn.className = "link-btn";
+                        btn.type = "button";
+                        btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+                        btn.addEventListener("click", () => previewRawRef(rawRef));
+                        refMeta.appendChild(btn);
+                        item.appendChild(refMeta);
+                    }
+                    stdoutEl.appendChild(item);
+                    continue;
+                }
                 const item = document.createElement("div");
                 item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
                 const header = document.createElement("div");
@@ -1568,16 +1748,10 @@
                 const pre = document.createElement("pre");
                 pre.textContent = text || "";
                 item.appendChild(pre);
-                const seq = Number(event && event.seq);
-                const localSeqObj = event && event.meta && event.meta.local_seq;
-                const localSeq = Number(localSeqObj || 0);
-                const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : (Number.isFinite(seq) ? Math.floor(seq) : 0);
-                const attempt = eventAttempt(event);
                 const meta = document.createElement("div");
                 meta.className = "meta";
                 meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
                 item.appendChild(meta);
-                const rawRef = extractRawRef(event);
                 if (rawRef) {
                     const refMeta = document.createElement("div");
                     refMeta.className = "meta";
@@ -1596,6 +1770,58 @@
                 const items = Array.isArray(entry.items) ? entry.items : [];
                 if (!items.length) continue;
                 const latest = items[items.length - 1];
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = "chat-plain-process";
+                    const header = document.createElement("div");
+                    header.className = "chat-plain-process-header";
+                    header.setAttribute("role", "button");
+                    header.setAttribute("tabindex", "0");
+                    const title = document.createElement("span");
+                    title.className = "chat-plain-process-title";
+                    title.textContent = processTypeLabel(latest.processType);
+                    const arrow = document.createElement("span");
+                    arrow.textContent = entry.collapsed ? "◀" : "▼";
+                    header.appendChild(title);
+                    header.appendChild(arrow);
+                    item.appendChild(header);
+                    const toggleThinking = () => {
+                        chatModel.toggleThinking(entry.id);
+                        renderChatModel({ preserveScroll: true });
+                    };
+                    header.addEventListener("click", toggleThinking);
+                    header.addEventListener("keydown", (evt) => {
+                        if (evt.key === "Enter" || evt.key === " ") {
+                            evt.preventDefault();
+                            toggleThinking();
+                        }
+                    });
+                    if (entry.collapsed) {
+                        const latestLine = document.createElement("div");
+                        latestLine.className = "chat-plain-process-latest";
+                        latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                        item.appendChild(latestLine);
+                    } else {
+                        const list = document.createElement("div");
+                        list.className = "chat-plain-process-list";
+                        for (const thinkingItem of items) {
+                            const child = document.createElement("div");
+                            child.className = "chat-plain-process-item";
+                            const meta = document.createElement("div");
+                            meta.className = "chat-plain-process-item-meta";
+                            meta.textContent = processTypeLabel(thinkingItem.processType);
+                            child.appendChild(meta);
+                            const body = document.createElement("div");
+                            body.className = "chat-plain-process-item-body";
+                            body.textContent = safeText(thinkingItem.text || thinkingItem.summary);
+                            child.appendChild(body);
+                            list.appendChild(child);
+                        }
+                        item.appendChild(list);
+                    }
+                    stdoutEl.appendChild(item);
+                    continue;
+                }
                 const item = document.createElement("div");
                 item.className = "chat-item thinking";
                 item.setAttribute("role", "button");
@@ -2363,6 +2589,13 @@
             setStderrCollapsed(!stderrCollapsed);
         });
     }
+    if (chatModePlainBtn) {
+        chatModePlainBtn.addEventListener("click", () => setChatDisplayMode("plain"));
+    }
+    if (chatModeBubbleBtn) {
+        chatModeBubbleBtn.addEventListener("click", () => setChatDisplayMode("bubble"));
+    }
+    syncChatModeButtons();
     setStderrCollapsed(true);
     setTimelineCollapsed(true);
 
