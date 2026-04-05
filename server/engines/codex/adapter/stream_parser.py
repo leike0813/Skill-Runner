@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
+from server.runtime.adapter.common.live_stream_parser_common import (
+    NdjsonLiveStreamParserSession,
+    parse_repaired_ndjson_dict,
+    SemanticOverflowExemptionKind,
+)
 from server.runtime.adapter.types import (
     LiveParserEmission,
     RuntimeAssistantMessage,
@@ -35,6 +39,39 @@ def _summarize(value: str, *, limit: int = 220) -> str:
 class CodexStreamParser:
     def __init__(self, adapter: "CodexExecutionAdapter") -> None:
         self._adapter = adapter
+
+    def classify_ndjson_overflow_exemption(
+        self,
+        stream: str,
+        line_text: str,
+    ) -> SemanticOverflowExemptionKind | None:
+        if stream not in {"stdout", "pty"}:
+            return None
+        payload = parse_repaired_ndjson_dict(line_text)
+        if not isinstance(payload, dict):
+            return None
+        if str(payload.get("type") or "") != "item.completed":
+            return None
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            return None
+        item_type = str(item.get("type") or "")
+        if item_type == "agent_message":
+            text_obj = item.get("text")
+            if isinstance(text_obj, str) and text_obj.strip():
+                return "assistant_message"
+            return None
+        _, _, process_mapping_by_item = self._process_extract_profile()
+        mapping = process_mapping_by_item.get(item_type)
+        if mapping is None:
+            return None
+        classification = (mapping.classification or mapping.process_type).strip()
+        if classification != "reasoning":
+            return None
+        text_obj = item.get(mapping.text_field) if mapping.text_field else None
+        if isinstance(text_obj, str) and text_obj.strip():
+            return "reasoning"
+        return None
 
     def _slice_latest_turn_rows(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
         if not rows:
@@ -369,7 +406,10 @@ class CodexStreamParser:
 
 class _CodexLiveSession(NdjsonLiveStreamParserSession):
     def __init__(self, parser: CodexStreamParser) -> None:
-        super().__init__(accepted_streams={"stdout", "pty"})
+        super().__init__(
+            accepted_streams={"stdout", "pty"},
+            overflow_exemption_probe=parser.classify_ndjson_overflow_exemption,
+        )
         self._parser = parser
         (
             self._turn_start_types,

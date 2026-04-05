@@ -240,26 +240,20 @@ The system MUST require runtime adapters to expose stdout/stderr chunks while th
 
 The system MUST provide a live parser session contract so engine-specific parsers can emit semantic events incrementally during execution.
 
-#### Scenario: overflowed NDJSON line is repaired before semantic parsing
+#### Scenario: overflowed non-message NDJSON line is repaired before semantic parsing
 
 - **WHEN** a live NDJSON parser session observes a single logical line whose buffered size exceeds `4096` bytes before the terminating newline
+- **AND** that logical line is not semantically classified as `agent.reasoning` or `agent.message`
 - **THEN** it MUST stop retaining the full raw body in live memory
 - **AND** it MUST attempt to repair the retained prefix into a valid JSON object when that line terminates or the process exits
 - **AND** if repair succeeds, it MUST continue semantic parsing from the repaired object instead of dropping the line
 
-#### Scenario: repaired overflow line preserves semantic event type
+#### Scenario: agent reasoning or message NDJSON line bypasses live truncation guard
 
-- **WHEN** an overflowed line is successfully repaired into a valid JSON object
-- **THEN** the engine-specific live parser MUST continue using its normal row handler on that repaired object
-- **AND** the resulting `LiveParserEmission` values MUST preserve the semantic event type implied by the original payload shape
-- **AND** associated `raw_ref.byte_from/byte_to` MUST still reference the true original byte span of the long line
-
-#### Scenario: unrecoverable overflow line does not block later live events
-
-- **WHEN** an overflowed line cannot be repaired into a valid JSON object
-- **THEN** the live path MUST emit a diagnostic warning for that line
-- **AND** it MUST discard only that line's semantic publication
-- **AND** it MUST resume normal parsing at the next newline boundary without stalling later rows
+- **WHEN** a live NDJSON parser session observes a logical line that is semantically classified as `agent.reasoning` or `agent.message`
+- **AND** that line exceeds `4096` bytes before the terminating newline
+- **THEN** the shared live buffer MUST NOT truncate or substitute that logical line solely because of the `4096` byte limit
+- **AND** the engine-specific live parser MUST continue its normal semantic extraction from the full logical line
 
 ### Requirement: Batch parse MUST remain secondary and backfill-only
 The system MAY retain batch parse utilities for backfill, cold replay, and parity testing, but MUST NOT use batch materialization as the live-authoritative source for SSE.
@@ -422,36 +416,36 @@ The system MUST decode `io_chunks` for strict replay using the same incremental 
 
 系统 MUST 保证 runtime 对 subprocess stdout/stderr 的采集不会因为超长 NDJSON 单行而破坏后续协议推进。
 
-#### Scenario: oversized NDJSON stdout line is sanitized before audit persistence
+#### Scenario: oversized non-message NDJSON stdout line is sanitized before audit persistence
 
 - **WHEN** an NDJSON engine emits a single stdout logical line whose size exceeds `4096` bytes before the terminating newline
+- **AND** that logical line is not semantically classified as `agent.reasoning` or `agent.message`
 - **THEN** runtime ingress MUST stop retaining that line's full original body for downstream audit persistence
 - **AND** it MUST sanitize the retained prefix into either a repaired JSON line or a runtime diagnostic JSON line before writing to runtime audit surfaces
 - **AND** the original oversized body MUST NOT be written to `io_chunks` or `stdout.log`
 
-#### Scenario: sanitized runtime raw becomes downstream single source of truth
+#### Scenario: oversized agent reasoning or message line remains canonical raw truth
 
-- **WHEN** runtime ingress sanitizes an oversized NDJSON stdout line
-- **THEN** the sanitized line MUST become the input seen by live parser, raw publisher, strict replay, and `raw_stdout`
-- **AND** downstream components MUST NOT observe the dropped original oversized body through normal runtime audit reads
+- **WHEN** runtime ingress receives an NDJSON logical line that is semantically classified as `agent.reasoning` or `agent.message`
+- **AND** that logical line exceeds `4096` bytes before the terminating newline
+- **THEN** runtime ingress MUST preserve that full logical line as the canonical raw truth for live parser, raw publisher, strict replay, and `raw_stdout`
+- **AND** downstream runtime audit surfaces MUST NOT observe a truncated or substituted version of that line solely because of the `4096` byte limit
 
 ### Requirement: Sanitized overflow handling MUST preserve business semantics when possible
 
 系统 MUST 优先保住超长 NDJSON 行的业务语义，而不是保留完整中间正文。
 
-#### Scenario: oversized tool_result line is repaired into valid JSON
+#### Scenario: agent reasoning or message classification is shared across live and audit paths
 
-- **WHEN** an oversized NDJSON line can be repaired into a valid JSON object from its retained prefix
-- **THEN** runtime MUST emit that repaired JSON line as the sanitized raw row
-- **AND** downstream engine-specific parsers MUST continue normal semantic extraction from that repaired object
-- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED`
+- **WHEN** runtime decides whether an oversized NDJSON logical line should be exempted from the `4096` byte overflow guard
+- **THEN** live semantic parsing and runtime ingress sanitization MUST use the same semantic exemption decision
+- **AND** the system MUST NOT allow live parsing to preserve the full line while audit/raw ingestion truncates the same line, or vice versa
 
-#### Scenario: unrecoverable oversized line is substituted with runtime diagnostic JSON
+#### Scenario: non-message oversized line continues using sanitized overflow path
 
-- **WHEN** an oversized NDJSON line cannot be repaired into a valid JSON object
-- **THEN** runtime MUST substitute a runtime diagnostic JSON line in place of the original row
-- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED`
-- **AND** later logical lines in the same stream MUST continue normal runtime parsing and publication
+- **WHEN** an oversized NDJSON line is classified as a non-message payload such as `tool_result`, `tool_call`, or `command_execution`
+- **THEN** runtime MUST continue using the existing repair / sanitize / diagnostic substitution path
+- **AND** overflow diagnostics such as `RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED` and `RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED` MUST continue to apply
 
 ### Requirement: Runtime audit writing MUST NOT block the single-worker execution hot path
 
@@ -505,4 +499,80 @@ The system MUST keep terminal protocol/history reads responsive even if backgrou
 - **AND** the bounded mirror flush does not finish within its budget
 - **THEN** the system MUST return the currently available live protocol rows without synchronously waiting for audit completion
 - **AND** the response shape and event schema MUST remain unchanged
+
+### Requirement: Qwen is a first-class supported engine
+
+The runtime adapter layer SHALL treat `qwen` as a first-class supported engine with a dedicated adapter package under `server/engines/qwen/**`.
+
+#### Scenario: Qwen adapter is registered
+
+- **WHEN** the engine adapter registry is initialized
+- **THEN** it MUST validate and register the `qwen` adapter profile
+- **AND** `engine=qwen` MUST resolve to a concrete execution adapter
+
+### Requirement: Qwen non-interactive execution uses the top-level qwen CLI contract
+
+Qwen non-interactive execution SHALL use the top-level `qwen` command with `stream-json` output and `--resume`-based session continuation.
+
+#### Scenario: Build Qwen start command
+
+- **WHEN** the runtime builds a Qwen start command
+- **THEN** it MUST invoke the top-level `qwen` executable
+- **AND** it MUST include `--output-format stream-json`
+- **AND** it MUST include `--approval-mode yolo`
+- **AND** it MUST include `-p "<prompt>"`
+
+#### Scenario: Build Qwen resume command
+
+- **WHEN** the runtime builds a Qwen resume command
+- **THEN** it MUST invoke the top-level `qwen` executable
+- **AND** it MUST include `--output-format stream-json`
+- **AND** it MUST include `--approval-mode yolo`
+- **AND** it MUST include `--resume <session_id>`
+- **AND** it MUST include `-p "<prompt>"`
+
+### Requirement: Qwen parser extracts stable non-live semantics
+
+Qwen phase-1 stream parsing SHALL only extract the semantic subset needed by Skill Runner from non-live NDJSON output.
+
+#### Scenario: Parse Qwen stream-json output
+
+- **WHEN** Qwen emits NDJSON events
+- **THEN** the parser MUST extract `session_initialized` for session handle recovery
+- **AND** it MUST extract `assistant` payloads for assistant text
+- **AND** it MUST extract `result` payloads for final result text
+- **AND** live streaming support is not required in this phase
+
+### Requirement: Engine enumeration includes qwen
+
+The `ENGINE_KEYS` configuration SHALL include `qwen` in the tuple of supported engines.
+
+#### Scenario: Engine keys registry
+
+- **WHEN** the system loads engine keys
+- **THEN** `qwen` MUST be present in the `ENGINE_KEYS` tuple
+
+### Requirement: Qwen runtime parser MUST conform to the shared adapter runtime contract
+Qwen parser 语义 MUST 作为共享 adapter runtime contract 的一部分定义，而不是通过独立 qwen parser capability 单独维护。
+
+#### Scenario: qwen runtime stream parsing uses shared contract fields
+- **WHEN** Qwen 解析 `stream-json` NDJSON 运行时输出
+- **THEN** parser MUST 提取 `system/subtype=init` 作为 `session_id` / `run_handle` 候选
+- **AND** 它 MUST 提取 `assistant.message.content[].type=text` 为 `assistant_messages`
+- **AND** 它 MUST 提取 `thinking`、`tool_use`、`tool_result` 为 `process_events`
+- **AND** 它 MUST 提取 `result` 作为 turn-complete 语义与最终文本候选
+
+#### Scenario: qwen live parser remains stdout and pty scoped
+- **WHEN** Qwen live parser session 增量处理 NDJSON
+- **THEN** live session MUST 接受 `stdout` 与 `pty`
+- **AND** 它 MUST 为 `run_handle`、`turn_marker`、`assistant_message`、`process_event` 发出共享 emission
+- **AND** 普通 `stderr` auth banner MUST NOT 被当作 live semantic event 处理
+
+### Requirement: Adapter profile MAY declare UI shell config assets for session-local security
+支持 UI shell 的 adapter profile MUST 能声明 session-local config 资产与目标路径，使安全限制通过共享 runtime contract 装配，而不是依赖 engine-specific capability。
+
+#### Scenario: qwen adapter profile resolves ui shell config assets
+- **WHEN** runtime 读取 qwen adapter profile 的 `ui_shell.config_assets`
+- **THEN** profile MUST 能解析 default、enforced、settings schema 与 target relpath
+- **AND** target relpath MUST 指向 `.qwen/settings.json`
 

@@ -6,6 +6,7 @@ import pytest
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.stream_parser import CodexStreamParser
 from server.engines.opencode.adapter.stream_parser import OpencodeStreamParser
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.live_stream_parser_common import (
     LIVE_STREAM_LINE_OVERFLOW_REPAIRED,
@@ -13,6 +14,7 @@ from server.runtime.adapter.common.live_stream_parser_common import (
     NdjsonIngressSanitizer,
     RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
     RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
+    parse_repaired_ndjson_dict,
     repair_truncated_json_line,
 )
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
@@ -160,6 +162,46 @@ class _RecordingNdjsonSession(NdjsonLiveStreamParserSession):
         ]
 
 
+def _test_exemption_probe(stream: str, line_text: str) -> str | None:
+    if stream not in {"stdout", "pty"}:
+        return None
+    payload = parse_repaired_ndjson_dict(line_text)
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("type") or "") != "assistant":
+        return None
+    message_obj = payload.get("message")
+    content_obj = message_obj.get("content") if isinstance(message_obj, dict) else None
+    if not isinstance(content_obj, list):
+        return None
+    for block in content_obj:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get("type") or "")
+        if block_type == "thinking":
+            text_obj = block.get("thinking")
+            if isinstance(text_obj, str) and text_obj.strip():
+                return "reasoning"
+        if block_type == "text":
+            text_obj = block.get("text")
+            if isinstance(text_obj, str) and text_obj.strip():
+                return "assistant_message"
+    return None
+
+
+class _RecordingExemptNdjsonSession(NdjsonLiveStreamParserSession):
+    def __init__(self) -> None:
+        super().__init__(
+            accepted_streams={"stdout", "pty"},
+            overflow_exemption_probe=_test_exemption_probe,
+        )
+        self.rows: list[tuple[str, dict, dict]] = []
+
+    def handle_live_row(self, *, payload: dict, raw_ref: dict, stream: str):
+        self.rows.append((stream, payload, raw_ref))
+        return []
+
+
 def test_ndjson_live_session_keeps_split_chunk_offsets_stable() -> None:
     session = _RecordingNdjsonSession()
     payload = '{"id":"row-1"}\n{"id":"row-2"}\n'
@@ -291,6 +333,50 @@ def test_ndjson_ingress_sanitizer_substitutes_unrepairable_line_with_runtime_dia
     diagnostic_payload = json.loads(chunk.text)
     assert diagnostic_payload["type"] == "runtime_diagnostic"
     assert diagnostic_payload["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+
+
+def test_ndjson_live_session_preserves_oversized_exempt_reasoning_line() -> None:
+    session = _RecordingExemptNdjsonSession()
+    reasoning_text = "A" * 5000
+    payload = (
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"'
+        + reasoning_text
+        + '"}]}}\n'
+    )
+
+    emissions = session.feed(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+
+    assert emissions == []
+    assert len(session.rows) == 1
+    assert session.rows[0][1]["message"]["content"][0]["thinking"] == reasoning_text
+    assert session.rows[0][2]["byte_to"] > 4096
+
+
+def test_ndjson_ingress_sanitizer_preserves_oversized_exempt_assistant_message() -> None:
+    sanitizer = NdjsonIngressSanitizer(
+        accepted_streams={"stdout"},
+        overflow_exemption_probe=_test_exemption_probe,
+    )
+    assistant_text = "B" * 5000
+    payload = (
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"'
+        + assistant_text
+        + '"}]}}\n'
+    )
+
+    sanitized = sanitizer.feed(stream="stdout", text=payload)
+
+    assert len(sanitized) == 1
+    chunk = sanitized[0]
+    assert chunk.diagnostics == []
+    repaired_payload = json.loads(chunk.text)
+    assert repaired_payload["message"]["content"][0]["text"] == assistant_text
+    assert len(chunk.text.encode("utf-8")) > 4096
 
 
 def test_codex_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> None:
@@ -664,3 +750,112 @@ async def test_live_runtime_emitter_repairs_overflowed_claude_tool_result_and_re
     assert "diagnostic.warning" in fcmp_types
     assert "assistant.tool_call" in fcmp_types
     assert "assistant.message.final" in fcmp_types
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_preserves_oversized_claude_assistant_message(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-claude-long-assistant"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-long-assistant")
+    rasp_live_journal.clear("run-live-claude-long-assistant")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-long-assistant",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    long_text = "assistant-" + ("C" * 5200)
+    payload = (
+        '{"type":"system","subtype":"init","session_id":"session-claude-long"}\n'
+        + '{"type":"assistant","message":{"content":[{"type":"text","text":"'
+        + long_text
+        + '"}]}}\n'
+        + '{"type":"result","subtype":"success","session_id":"session-claude-long","result":"done"}\n'
+    )
+
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+    await emitter.on_process_exit(exit_code=0, failure_reason=None)
+
+    rasp_payload = rasp_live_journal.replay(run_id="run-live-claude-long-assistant", after_seq=0)
+    warning_codes = [
+        row.get("data", {}).get("code")
+        for row in rasp_payload["events"]
+        if row.get("event", {}).get("type") == "diagnostic.warning"
+    ]
+    assert LIVE_STREAM_LINE_OVERFLOW_REPAIRED not in warning_codes
+    reasoning_event = next(
+        row for row in rasp_payload["events"]
+        if row.get("event", {}).get("type") == "agent.reasoning"
+        and row.get("data", {}).get("text") == long_text
+    )
+    assert reasoning_event["data"]["text"] == long_text
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_emits_qwen_process_events_and_single_final(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-qwen-semantic"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-qwen-semantic")
+    rasp_live_journal.clear("run-live-qwen-semantic")
+
+    adapter = QwenExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-qwen-semantic",
+        run_dir=run_dir,
+        engine="qwen",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    payload = (
+        '{"type":"system","subtype":"init","session_id":"session-qwen-live"}\n'
+        '{"type":"assistant","message":{"id":"msg-think","content":[{"type":"thinking","thinking":"draft plan"}]}}\n'
+        '{"type":"assistant","message":{"id":"msg-skill","content":[{"type":"tool_use","id":"toolu_skill","name":"skill","input":{"skill":"literature-digest"}}]}}\n'
+        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill","is_error":false}]}}\n'
+        '{"type":"assistant","message":{"id":"msg-bash","content":[{"type":"tool_use","id":"toolu_bash","name":"run_shell_command","input":{"command":"pwd"}}]}}\n'
+        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"/tmp/run","is_error":false}]}}\n'
+        '{"type":"assistant","message":{"id":"msg-final","content":[{"type":"text","text":"{\\"ok\\": true}"}]}}\n'
+        '{"type":"result","subtype":"success","session_id":"session-qwen-live","usage":{"input_tokens":4},"result":"{\\"ok\\": true}"}\n'
+    )
+
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+    await emitter.on_process_exit(exit_code=0, failure_reason=None)
+
+    rasp_payload = rasp_live_journal.replay(run_id="run-live-qwen-semantic", after_seq=0)
+    rasp_types = [row.get("event", {}).get("type") for row in rasp_payload["events"]]
+    assert "lifecycle.run_handle" in rasp_types
+    assert "agent.reasoning" in rasp_types
+    assert "agent.tool_call" in rasp_types
+    assert "agent.command_execution" in rasp_types
+    assert "agent.message.final" in rasp_types
+
+    fcmp_payload = fcmp_live_journal.replay(run_id="run-live-qwen-semantic", after_seq=0)
+    fcmp_types = [row.get("type") for row in fcmp_payload["events"]]
+    assert "assistant.reasoning" in fcmp_types
+    assert "assistant.tool_call" in fcmp_types
+    assert "assistant.command_execution" in fcmp_types
+    assert fcmp_types.count("assistant.message.final") == 1
+    final_payloads = [
+        row.get("data", {}).get("text")
+        for row in fcmp_payload["events"]
+        if row.get("type") == "assistant.message.final"
+    ]
+    assert final_payloads == ['{"ok": true}']

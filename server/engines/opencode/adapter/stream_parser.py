@@ -4,7 +4,11 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
+from server.runtime.adapter.common.live_stream_parser_common import (
+    NdjsonLiveStreamParserSession,
+    parse_repaired_ndjson_dict,
+    SemanticOverflowExemptionKind,
+)
 from server.runtime.adapter.common.parser_auth_signal_matcher import (
     detect_auth_signal_from_patterns,
 )
@@ -31,6 +35,21 @@ if TYPE_CHECKING:
 class OpencodeStreamParser:
     def __init__(self, adapter: "OpencodeExecutionAdapter") -> None:
         self._adapter = adapter
+
+    def classify_ndjson_overflow_exemption(
+        self,
+        stream: str,
+        line_text: str,
+    ) -> SemanticOverflowExemptionKind | None:
+        if stream not in {"stdout", "pty"}:
+            return None
+        payload = parse_repaired_ndjson_dict(line_text)
+        if not isinstance(payload, dict):
+            return None
+        extracted = self._extract_text_event(payload)
+        if isinstance(extracted, str) and extracted.strip():
+            return "assistant_message"
+        return None
 
     def _slice_latest_step_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not rows:
@@ -408,7 +427,10 @@ class OpencodeStreamParser:
 
 class _OpencodeLiveSession(NdjsonLiveStreamParserSession):
     def __init__(self, parser: OpencodeStreamParser) -> None:
-        super().__init__(accepted_streams={"stdout", "pty"})
+        super().__init__(
+            accepted_streams={"stdout", "pty"},
+            overflow_exemption_probe=parser.classify_ndjson_overflow_exemption,
+        )
         self._parser = parser
         self._last_text: str | None = None
         self._turn_start_emitted = False

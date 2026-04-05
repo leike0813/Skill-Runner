@@ -2,7 +2,6 @@
 
 ## Purpose
 定义 engine 版本缓存的 SQLite SSOT、受控探测触发时机，以及页面和 management API 的只读缓存语义。
-
 ## Requirements
 ### Requirement: Engine 版本状态 MUST 持久化到统一数据库缓存
 系统 MUST 将 engine 版本探测结果写入 `runs.db` 的 `engine_status_cache` 表，作为 engine 管理域的版本缓存 SSOT。
@@ -51,3 +50,19 @@
 #### Scenario: 调用旧 auth probe API
 - **WHEN** 客户端调用 `GET /v1/engines/auth-status`
 - **THEN** 该接口不再可用
+
+### Requirement: Engine status cache service supports qwen
+
+The engine status cache service SHALL handle `qwen` alongside the other registered engines.
+
+#### Scenario: Initialize Qwen cache row
+
+- **WHEN** the engine status cache service initializes or refreshes engine rows
+- **THEN** `qwen` MUST be part of the cached engine set
+
+#### Scenario: UI home status renders qwen stably
+
+- **WHEN** the home page renders engine status indicators
+- **THEN** it MUST render a stable `qwen` row even if Qwen is not installed
+- **AND** missing Qwen version information MUST degrade to empty version / unavailable status without triggering live probe
+

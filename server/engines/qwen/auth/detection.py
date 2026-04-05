@@ -26,7 +26,18 @@ class QwenAuthDetector:
         extracted: dict[str, Any] = {
             "auth_error_detected": False,
             "error_id": None,
+            "auth_waiting_detected": False,
+            "waiting_method": None,
         }
+
+        # Check for OAuth device flow waiting authorization (higher priority)
+        if re.search(r"Qwen OAuth Device Authorization", combined, re.IGNORECASE):
+            if re.search(r"https://chat\.qwen\.ai/authorize\?user_code=", combined):
+                if re.search(r"Waiting for authorization to complete", combined, re.IGNORECASE):
+                    extracted["auth_waiting_detected"] = True
+                    extracted["waiting_method"] = "oauth_device_flow"
+
+        # Check for auth errors
         for error_id, pattern in (
             ("qwen_oauth_token_expired", r"OAuth.*token.*expired|401.*Unauthorized|invalid.*token"),
             ("qwen_api_key_missing", r"API key is missing|Invalid API key|Missing.*authentication"),

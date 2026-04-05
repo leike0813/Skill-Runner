@@ -4,7 +4,11 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, cast
 
-from server.runtime.adapter.common.live_stream_parser_common import NdjsonLiveStreamParserSession
+from server.runtime.adapter.common.live_stream_parser_common import (
+    NdjsonLiveStreamParserSession,
+    parse_repaired_ndjson_dict,
+    SemanticOverflowExemptionKind,
+)
 from server.runtime.adapter.common.parser_auth_signal_matcher import detect_auth_signal_from_patterns
 from server.runtime.adapter.types import (
     LiveParserEmission,
@@ -47,6 +51,41 @@ _SANDBOX_RUNTIME_FAILURE_PATTERNS = (
 class ClaudeStreamParser:
     def __init__(self, adapter: "ClaudeExecutionAdapter") -> None:
         self._adapter = adapter
+
+    def classify_ndjson_overflow_exemption(
+        self,
+        stream: str,
+        line_text: str,
+    ) -> SemanticOverflowExemptionKind | None:
+        if stream not in {"stdout", "pty"}:
+            return None
+        payload = parse_repaired_ndjson_dict(line_text)
+        if not isinstance(payload, dict):
+            return None
+        payload_type = str(payload.get("type") or "")
+        if payload_type == "assistant":
+            message_obj = payload.get("message")
+            content_obj = message_obj.get("content") if isinstance(message_obj, dict) else None
+            if not isinstance(content_obj, list):
+                return None
+            for block in content_obj:
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get("type") or "")
+                if block_type == "thinking":
+                    text_obj = block.get("thinking")
+                    if isinstance(text_obj, str) and text_obj.strip():
+                        return "reasoning"
+                if block_type == "text":
+                    text_obj = block.get("text")
+                    if isinstance(text_obj, str) and text_obj.strip():
+                        return "assistant_message"
+            return None
+        if payload_type == "result":
+            text_obj = payload.get("result")
+            if isinstance(text_obj, str) and text_obj.strip():
+                return "assistant_message"
+        return None
 
     @staticmethod
     def _raw_ref(row: dict[str, Any]) -> RuntimeStreamRawRef:
@@ -515,7 +554,10 @@ class ClaudeStreamParser:
 
 class _ClaudeLiveSession(NdjsonLiveStreamParserSession):
     def __init__(self, parser: ClaudeStreamParser) -> None:
-        super().__init__(accepted_streams={"stdout", "pty"})
+        super().__init__(
+            accepted_streams={"stdout", "pty"},
+            overflow_exemption_probe=parser.classify_ndjson_overflow_exemption,
+        )
         self._parser = parser
         self._run_handle_emitted = False
         self._turn_start_emitted = False

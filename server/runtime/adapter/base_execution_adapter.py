@@ -32,7 +32,10 @@ from ...services.platform.process_supervisor import process_supervisor
 from ...services.platform.process_termination import terminate_asyncio_process_tree
 from ..common.async_audit_writer import BufferedAsyncTextFileWriter
 from ..auth_detection.signal import extract_auth_signal, is_high_confidence_auth_signal
-from .common.live_stream_parser_common import NdjsonIngressSanitizer
+from .common.live_stream_parser_common import (
+    NdjsonIngressSanitizer,
+    resolve_ndjson_overflow_exemption_probe,
+)
 from .common.prompt_builder_common import render_global_first_attempt_prefix
 from .common.stream_text_decoder import IncrementalUtf8TextDecoder
 from .contracts import (
@@ -64,7 +67,7 @@ AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 1.5
 AUTH_DETECTION_STDOUT_WINDOW_BYTES = 64 * 1024
 AUTH_DETECTION_STDERR_WINDOW_BYTES = 16 * 1024
 RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS = 0.2
-NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode"}
+NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode", "qwen"}
 
 
 @dataclass
@@ -775,7 +778,7 @@ class EngineExecutionAdapter:
                             auth_engine,
                             matched_pattern,
                         )
-                    auth_detection_armed = True
+                        auth_detection_armed = True
 
         async def read_stream(
             stream: asyncio.StreamReader | None,
@@ -792,7 +795,10 @@ class EngineExecutionAdapter:
             offset = 0
             text_decoder = IncrementalUtf8TextDecoder()
             ingress_sanitizer = (
-                NdjsonIngressSanitizer(accepted_streams={"stdout"})
+                NdjsonIngressSanitizer(
+                    accepted_streams={"stdout"},
+                    overflow_exemption_probe=resolve_ndjson_overflow_exemption_probe(self.stream_parser),
+                )
                 if use_ndjson_ingress_sanitizer and stream_name == "stdout"
                 else None
             )
@@ -947,6 +953,7 @@ class EngineExecutionAdapter:
             while True:
                 if proc.returncode is not None:
                     break
+                await _probe_auth_detection()
                 now = time.monotonic()
                 if now - started_monotonic >= timeout_sec:
                     timed_out = True

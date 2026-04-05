@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.live_stream_parser_common import (
     RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
@@ -145,3 +146,86 @@ async def test_capture_process_output_sanitizes_oversized_ndjson_before_io_chunk
     assert "[truncated by live overflow guard]" in overflow_text
     assert len(overflow_text) < 6000
     assert json.loads(lines[2])["message"]["content"][0]["text"] == "after"
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_preserves_oversized_qwen_assistant_message_in_io_chunks(tmp_path: Path) -> None:
+    class _Emitter:
+        def __init__(self) -> None:
+            self.text_by_stream: dict[str, list[str]] = {"stdout": [], "stderr": []}
+            self.diagnostic_codes: list[str] = []
+
+        async def on_process_started(self, *, event_ts=None) -> None:
+            _ = event_ts
+
+        async def on_stream_chunk(
+            self,
+            *,
+            stream: str,
+            text: str,
+            byte_from: int,
+            byte_to: int,
+            event_ts=None,
+        ) -> None:
+            _ = byte_from, byte_to, event_ts
+            self.text_by_stream.setdefault(stream, []).append(text)
+
+        async def on_process_exit(self, *, exit_code: int, failure_reason: str | None, event_ts=None) -> None:
+            _ = exit_code, failure_reason, event_ts
+
+        async def publish_runtime_diagnostics(self, *, emissions: list[dict], event_ts=None) -> None:
+            _ = event_ts
+            self.diagnostic_codes.extend(str(item.get("code") or "") for item in emissions)
+
+    run_dir = tmp_path / "run-io-chunks-qwen-exempt"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    adapter = QwenExecutionAdapter()
+    emitter = _Emitter()
+    assistant_text = "assistant-" + ("Q" * 6000)
+    proc = await asyncio.create_subprocess_exec(
+        "python",
+        "-c",
+        (
+            "import json,sys;"
+            "rows=["
+            "{'type':'system','subtype':'init','session_id':'session-qwen'},"
+            "{'type':'assistant','message':{'content':[{'type':'text','text':"
+            + json.dumps(assistant_text)
+            + "}]}},"
+            "{'type':'result','subtype':'success','session_id':'session-qwen','result':'done'}"
+            "];"
+            "sys.stdout.write('\\n'.join(json.dumps(row, ensure_ascii=False) for row in rows)+'\\n')"
+        ),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    result = await adapter._capture_process_output(  # noqa: SLF001
+        proc=proc,
+        run_dir=run_dir,
+        options={"__attempt_number": 1, "__engine_name": "qwen"},
+        prefix="Test",
+        live_runtime_emitter=emitter,
+    )
+
+    audit_dir = run_dir / ".audit"
+    io_chunks_path = audit_dir / "io_chunks.1.jsonl"
+    stdout_path = audit_dir / "stdout.1.log"
+    rows = [
+        json.loads(line)
+        for line in io_chunks_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    reconstructed = bytearray()
+    max_payload_len = 0
+    for row in rows:
+        payload = base64.b64decode(row["payload_b64"], validate=True)
+        reconstructed.extend(payload)
+        max_payload_len = max(max_payload_len, len(payload))
+
+    stdout_text = stdout_path.read_text(encoding="utf-8")
+    assert reconstructed.decode("utf-8") == stdout_text == result.raw_stdout == "".join(emitter.text_by_stream["stdout"])
+    assert RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED not in emitter.diagnostic_codes
+    assert max_payload_len > 4096
+    payload_lines = [json.loads(line) for line in stdout_text.splitlines()]
+    assert payload_lines[1]["message"]["content"][0]["text"] == assistant_text

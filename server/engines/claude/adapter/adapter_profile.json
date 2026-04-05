@@ -110,7 +110,7 @@
             {
               "field": "combined_text",
               "op": "regex",
-              "value": "Not\\s+logged\\s+in\\.\\s+Run\\s+claude\\s+auth\\s+login\\s+to\\s+authenticate"
+              "value": "((Not\\s+logged\\s+in\\.\\s+Run\\s+claude\\s+auth\\s+login\\s+to\\s+authenticate)|(Not\\s+logged\\s+in\\s*[·•]?\\s*Please\\s+run\\s+/login)|(authentication_failed))"
             }
           ]
         }

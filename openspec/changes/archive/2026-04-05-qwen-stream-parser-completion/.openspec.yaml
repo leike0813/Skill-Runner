@@ -1,0 +1,4 @@
+name: qwen-stream-parser-completion
+type: feature-completion
+status: done
+completed_at: 2026-04-04

@@ -74,6 +74,8 @@ def test_run_observe_template_supports_auth_challenge_and_redacted_submission():
     assert "executeWaitingAuthWatchdogTick" in content
     assert "maybeStartWaitingAuthWatchdog" in content
     assert "clearWaitingAuthWatchdog" in content
+    assert "async function restartStreamAfterWaitingExit()" in content
+    assert "await restartStreamAfterWaitingExit();" in content
     assert 'selection: {' in content
     assert 'kind: "auth_method"' in content
     assert "const askUser = payload && typeof payload.ask_user === \"object\" ? payload.ask_user : null;" in content
@@ -189,6 +191,19 @@ def test_run_observe_template_catches_up_history_for_waiting_and_terminal_states
     assert "catchUpHistory()\n                .catch(() => {})" in content
     assert "function shouldShowBackendUnreachable(evt)" in content
     assert "if (shouldShowBackendUnreachable(evt)) {" in content
+
+
+def test_run_observe_template_restarts_stream_after_waiting_exit_even_if_existing_stream_is_open() -> None:
+    content = _read_template()
+    assert "await restartStreamAfterWaitingExit();" in content
+    waiting_user_idx = content.find("async function executeWaitingUserWatchdogTick()")
+    waiting_auth_idx = content.find("async function executeWaitingAuthWatchdogTick()")
+    assert waiting_user_idx >= 0
+    assert waiting_auth_idx >= 0
+    assert "if (!stream && !isTerminal(currentStatus))" not in content[waiting_user_idx:waiting_auth_idx]
+    assert "if (!stream && !isTerminal(currentStatus))" not in content[waiting_auth_idx:content.find("async function restartStreamAfterWaitingExit()")]
+    assert "if (isTerminal(currentStatus)) return;" in content
+    assert "await startStream();" in content
 
 
 def test_run_observe_template_result_link_removed_and_file_tree_layout_stable():

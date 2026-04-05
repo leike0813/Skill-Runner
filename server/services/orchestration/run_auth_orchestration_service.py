@@ -67,6 +67,11 @@ _HIGH_RISK_SHORT_LABEL = "High risk!"
 _HIGH_RISK_NOTICE = (
     "This third-party login path may violate Google policies and could lead to account suspension."
 )
+_AUTH_SIGNAL_PROVIDER_FALLBACKS: dict[str, dict[str, str]] = {
+    "qwen": {
+        "qwen_oauth_waiting_authorization": "qwen-oauth",
+    }
+}
 
 
 def _utc_now() -> datetime:
@@ -2187,8 +2192,27 @@ class RunAuthOrchestrationService:
             return (
                 self._normalize_provider_id(canonical_provider_id)
                 or self._normalize_provider_id(auth_detection.provider_id)
+                or self._provider_id_from_auth_detection(
+                    engine_name=normalized_engine,
+                    auth_detection=auth_detection,
+                )
             )
         return self._normalize_provider_id(auth_detection.provider_id)
+
+    def _provider_id_from_auth_detection(
+        self,
+        *,
+        engine_name: str,
+        auth_detection: AuthDetectionResult,
+    ) -> str | None:
+        engine_fallbacks = _AUTH_SIGNAL_PROVIDER_FALLBACKS.get(engine_name)
+        if not engine_fallbacks:
+            return None
+        for rule_id in auth_detection.matched_rule_ids:
+            provider_id = engine_fallbacks.get(rule_id.strip().lower())
+            if provider_id:
+                return provider_id
+        return None
 
     def _normalize_string(self, value: Any) -> str | None:
         if not isinstance(value, str):

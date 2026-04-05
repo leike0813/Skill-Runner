@@ -91,6 +91,22 @@ def test_resolve_effective_provider_id_prefers_canonical_for_provider_aware_engi
     assert resolved == "qwen-oauth"
 
 
+def test_resolve_effective_provider_id_uses_qwen_rule_fallback_when_provider_missing() -> None:
+    service = RunAuthOrchestrationService()
+
+    resolved = service._resolve_effective_provider_id(  # noqa: SLF001
+        engine_name="qwen",
+        auth_detection=_build_detection(
+            engine="qwen",
+            provider_id=None,
+            matched_rule_ids=["qwen_oauth_waiting_authorization"],
+        ),
+        canonical_provider_id=None,
+    )
+
+    assert resolved == "qwen-oauth"
+
+
 def test_build_import_pending_auth_embeds_upload_files_ask_user(monkeypatch) -> None:
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.auth_import_service.get_import_spec",
@@ -1075,6 +1091,102 @@ async def test_reconcile_waiting_auth_non_terminal_snapshot_is_noop(monkeypatch,
     backend.clear_pending_auth.assert_not_awaited()
     backend.clear_pending_auth_method_selection.assert_not_awaited()
     backend.clear_auth_resume_context.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_auth_session_status_reconciles_completed_qwen_auto_poll(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-status-qwen-complete"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.get_session",
+        lambda _session_id: {
+            "session_id": "auth-qwen-1",
+            "engine": "qwen",
+            "provider_id": "qwen-oauth",
+            "status": "succeeded",
+            "created_at": "2026-04-04T00:00:00Z",
+            "expires_at": "2026-04-04T00:15:00Z",
+            "error": None,
+        },
+    )
+    backend = SimpleNamespace(
+        get_auth_session_status=AsyncMock(
+            side_effect=[
+                {
+                    "waiting_auth": True,
+                    "phase": "challenge_active",
+                    "timed_out": False,
+                    "available_methods": ["auth_code_or_url"],
+                    "selected_method": "auth_code_or_url",
+                    "auth_session_id": "auth-qwen-1",
+                    "challenge_kind": "auth_code_or_url",
+                    "timeout_sec": 900,
+                    "created_at": "2026-04-04T00:00:00Z",
+                    "expires_at": "2026-04-04T00:15:00Z",
+                    "server_now": "2026-04-04T00:05:00Z",
+                    "last_error": None,
+                },
+                {
+                    "waiting_auth": False,
+                    "phase": None,
+                    "timed_out": False,
+                    "available_methods": [],
+                    "selected_method": None,
+                    "auth_session_id": None,
+                    "challenge_kind": None,
+                    "timeout_sec": None,
+                    "created_at": None,
+                    "expires_at": None,
+                    "server_now": "2026-04-04T00:05:01Z",
+                    "last_error": None,
+                },
+            ]
+        ),
+        get_request_id_for_auth_session=AsyncMock(return_value="req-1"),
+        get_request=AsyncMock(
+            return_value={
+                "request_id": "req-1",
+                "run_id": "run-1",
+                "skill_id": "demo-skill",
+                "engine": "qwen",
+                "engine_options": {"model": "coder-model", "provider_id": "qwen-oauth"},
+                "runtime_options": {"execution_mode": "interactive"},
+            }
+        ),
+        get_pending_auth=AsyncMock(return_value=None),
+        get_auth_resume_context=AsyncMock(return_value=None),
+        clear_pending_auth=AsyncMock(),
+        clear_pending_auth_method_selection=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-qwen-2"}),
+        mark_resume_ticket_dispatched=AsyncMock(return_value=True),
+        update_run_status=AsyncMock(),
+    )
+    appended: list[dict[str, object]] = []
+    resume_run_job = AsyncMock()
+
+    service = RunAuthOrchestrationService()
+    status = await service.get_auth_session_status(
+        request_id="req-1",
+        append_orchestrator_event=lambda **kwargs: appended.append(kwargs),
+        update_status=lambda *_args, **_kwargs: None,
+        resume_run_job=resume_run_job,
+        run_store_backend=backend,
+    )
+
+    assert status.waiting_auth is False
+    assert appended[0]["type_name"] == "auth.session.completed"
+    assert appended[0]["data"]["auth_session_id"] == "auth-qwen-1"
+    assert appended[0]["data"]["resume_ticket_id"] == "ticket-qwen-2"
+    backend.clear_pending_auth.assert_awaited_once_with("req-1")
+    backend.issue_resume_ticket.assert_awaited_once()
+    backend.mark_resume_ticket_dispatched.assert_awaited_once_with("req-1", "ticket-qwen-2")
+    backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.QUEUED)
 
 
 @pytest.mark.asyncio

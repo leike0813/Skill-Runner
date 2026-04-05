@@ -25,7 +25,10 @@ from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.adapter.types import RuntimeStreamRawRow
-from server.runtime.adapter.common.live_stream_parser_common import NdjsonLineBuffer
+from server.runtime.adapter.common.live_stream_parser_common import (
+    NdjsonLineBuffer,
+    resolve_ndjson_overflow_exemption_probe,
+)
 
 from .contracts import LiveRuntimeEmitter, LiveStreamParserSession
 from .factories import make_fcmp_event, make_rasp_event
@@ -634,7 +637,10 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             self._parser_session = start_live_session()
         else:
             self._parser_session = _BufferedLiveParserSession(stream_parser=stream_parser)
-        self._raw_line_buffer = NdjsonLineBuffer(accepted_streams={"stdout", "stderr", "pty"})
+        self._raw_line_buffer = NdjsonLineBuffer(
+            accepted_streams={"stdout", "stderr", "pty"},
+            overflow_exemption_probe=resolve_ndjson_overflow_exemption_probe(stream_parser),
+        )
         self._pending_raw_rows: dict[str, list[RuntimeStreamRawRow]] = {"stdout": [], "stderr": [], "pty": []}
         self._suppressed_raw_ranges: dict[str, list[tuple[int, int]]] = {
             "stdout": [],

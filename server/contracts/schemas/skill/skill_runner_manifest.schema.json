@@ -134,7 +134,8 @@
         "claude",
         "gemini",
         "iflow",
-        "opencode"
+        "opencode",
+        "qwen"
       ]
     }
   }

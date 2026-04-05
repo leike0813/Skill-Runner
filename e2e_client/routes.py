@@ -60,6 +60,7 @@ ENGINE_DEFAULT_PROVIDER = {
     "codex": "openai",
     "gemini": "google",
     "iflow": "iflowcn",
+    "qwen": "qwen-oauth",
 }
 
 
@@ -253,6 +254,8 @@ async def submit_run(
         "parameter": submission["parameter_input"],
         "runtime_options": submission["runtime_options"],
     }
+    if submission["selected_provider_id"]:
+        create_payload["provider_id"] = submission["selected_provider_id"]
     if submission["selected_model"]:
         create_payload["model"] = submission["selected_model"]
 
@@ -334,6 +337,8 @@ async def submit_fixture_run(
         "parameter": submission["parameter_input"],
         "runtime_options": submission["runtime_options"],
     }
+    if submission["selected_provider_id"]:
+        create_payload["provider_id"] = submission["selected_provider_id"]
     if submission["selected_model"]:
         create_payload["model"] = submission["selected_model"]
 
@@ -900,11 +905,20 @@ async def _collect_run_submission(
         else:
             submitted_model = submitted_model_value
     execution_mode, mode_error = _resolve_execution_mode(submitted_execution_mode, detail)
-    selected_model, model_error = _resolve_model(
+    selected_model, selected_provider_id, model_error = _resolve_model_selection(
         selected=submitted_model,
-        allowed_models=_extract_engine_model_ids(engine_models_by_engine, engine),
+        selected_provider=submitted_provider,
+        rows=engine_models_by_engine.get(engine, []),
     )
-    provider_for_form = submitted_provider or _derive_provider_from_model(selected_model, engine=engine)
+    provider_for_form = (
+        submitted_provider
+        or selected_provider_id
+        or _derive_provider_from_model_selection(
+            selected_model,
+            engine=engine,
+            rows=engine_models_by_engine.get(engine, []),
+        )
+    )
     if not provider_for_form:
         provider_for_form = ENGINE_DEFAULT_PROVIDER.get(engine, "")
     runtime_options, runtime_errors = _build_runtime_options(
@@ -944,6 +958,7 @@ async def _collect_run_submission(
         "errors": errors,
         "engine": engine,
         "engine_for_form": engine,
+        "selected_provider_id": provider_for_form,
         "provider_for_form": provider_for_form,
         "execution_mode": execution_mode,
         "execution_mode_for_form": execution_mode if not mode_error else submitted_execution_mode,
@@ -1224,7 +1239,11 @@ def _build_run_form_context(
         selected_execution_mode = execution_modes[0]
     selected_model = str(submitted.get("model") or "")
     submitted_provider = str(submitted.get("provider") or "")
-    selected_provider = submitted_provider or _derive_provider_from_model(selected_model, engine=selected_engine)
+    selected_provider = submitted_provider or _derive_provider_from_model_selection(
+        selected_model,
+        engine=selected_engine,
+        rows=engine_models_by_engine.get(selected_engine, []),
+    )
     if not selected_provider:
         selected_provider = ENGINE_DEFAULT_PROVIDER.get(selected_engine, "")
     submitted_runtime_options = submitted.get("runtime_options", {})
@@ -1409,20 +1428,6 @@ def _resolve_execution_mode(selected: str, detail: Mapping[str, Any]) -> tuple[s
     return selected, f"execution_mode '{selected}' is not allowed for this skill"
 
 
-def _resolve_model(
-    *,
-    selected: str,
-    allowed_models: list[str],
-) -> tuple[str, str | None]:
-    if not selected:
-        return "", None
-    if not allowed_models:
-        return selected, None
-    if selected in allowed_models:
-        return selected, None
-    return selected, f"model '{selected}' is not available for selected engine"
-
-
 def _extract_engines(detail: Mapping[str, Any]) -> list[str]:
     engines_obj = detail.get("effective_engines")
     if not isinstance(engines_obj, list) or not engines_obj:
@@ -1493,22 +1498,90 @@ def _resolve_hard_timeout_form_value(
     return ""
 
 
-def _extract_engine_model_ids(
-    engine_models_by_engine: dict[str, list[dict[str, Any]]],
-    engine: str,
-) -> list[str]:
-    rows = engine_models_by_engine.get(engine, [])
-    model_ids: list[str] = []
+def _normalize_catalog_string(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _split_provider_model(value: str) -> tuple[str, str]:
+    if "/" not in value:
+        return "", value
+    provider, model = value.split("/", 1)
+    return provider.strip(), model.strip()
+
+
+def _provider_from_model_row(row: Mapping[str, Any]) -> str:
+    for key in ("provider_id", "provider"):
+        value = _normalize_catalog_string(row.get(key))
+        if value:
+            return value
+    provider, _model = _split_provider_model(_normalize_catalog_string(row.get("id")))
+    return provider
+
+
+def _model_value_from_row(row: Mapping[str, Any]) -> str:
+    model = _normalize_catalog_string(row.get("model"))
+    if model:
+        return model
+    row_id = _normalize_catalog_string(row.get("id"))
+    _provider, parsed_model = _split_provider_model(row_id)
+    return parsed_model if parsed_model and parsed_model != row_id else row_id
+
+
+def _resolve_model_selection(
+    *,
+    selected: str,
+    selected_provider: str,
+    rows: list[dict[str, Any]],
+) -> tuple[str, str, str | None]:
+    selected_text = selected.strip()
+    selected_provider_text = selected_provider.strip()
+    if not selected_text:
+        return "", selected_provider_text, None
+    if not rows:
+        return selected_text, selected_provider_text, None
+
+    matches: list[tuple[str, str, str]] = []
     for row in rows:
-        value = row.get("id")
-        if isinstance(value, str) and value.strip():
-            model_ids.append(value.strip())
-    return list(dict.fromkeys(model_ids))
+        row_id = _normalize_catalog_string(row.get("id"))
+        row_provider = _provider_from_model_row(row)
+        row_model = _model_value_from_row(row)
+        candidates = {item for item in (row_id, row_model) if item}
+        if selected_text in candidates:
+            matches.append((row_provider, row_model or row_id, row_id))
+
+    if selected_provider_text:
+        provider_matches = [
+            item for item in matches if not item[0] or item[0] == selected_provider_text
+        ]
+        if provider_matches:
+            provider_id, model_value, _row_id = provider_matches[0]
+            return model_value, provider_id or selected_provider_text, None
+
+    if len(matches) == 1:
+        provider_id, model_value, _row_id = matches[0]
+        return model_value, provider_id or selected_provider_text, None
+
+    return selected_text, selected_provider_text, f"model '{selected_text}' is not available for selected engine"
 
 
-def _derive_provider_from_model(model: str, *, engine: str) -> str:
-    if model and "/" in model:
-        provider = model.split("/", 1)[0].strip()
+def _derive_provider_from_model_selection(
+    model: str,
+    *,
+    engine: str,
+    rows: list[dict[str, Any]],
+) -> str:
+    model_text = model.strip()
+    if model_text:
+        for row in rows:
+            row_id = _normalize_catalog_string(row.get("id"))
+            row_model = _model_value_from_row(row)
+            if model_text == row_id or model_text == row_model:
+                provider_id = _provider_from_model_row(row)
+                if provider_id:
+                    return provider_id
+        provider, _parsed_model = _split_provider_model(model_text)
         if provider:
             return provider
     return ENGINE_DEFAULT_PROVIDER.get(engine, "")

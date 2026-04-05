@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Literal
 
 from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.protocol.contracts import LiveStreamParserSession
@@ -16,6 +16,8 @@ RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED = "RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED
 RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED = (
     "RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED"
 )
+SemanticOverflowExemptionKind = Literal["reasoning", "assistant_message"]
+NdjsonOverflowExemptionProbe = Callable[[str, str], SemanticOverflowExemptionKind | None]
 
 
 @dataclass
@@ -31,6 +33,7 @@ class _LineState:
     prefix_text: str = ""
     prefix_bytes: int = 0
     overflowed: bool = False
+    exemption_kind: SemanticOverflowExemptionKind | None = None
 
 
 @dataclass
@@ -51,6 +54,26 @@ class SanitizedIngressChunk:
     diagnostics: list[LiveParserEmission]
 
 
+def parse_repaired_ndjson_dict(line_text: str) -> dict[str, Any] | None:
+    candidate = repair_truncated_json_line(line_text.rstrip("\n"))
+    if candidate is None:
+        return None
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def resolve_ndjson_overflow_exemption_probe(stream_parser: Any) -> NdjsonOverflowExemptionProbe | None:
+    probe = getattr(stream_parser, "classify_ndjson_overflow_exemption", None)
+    if callable(probe):
+        return probe
+    return None
+
+
 def _truncate_text_to_byte_limit(text: str, limit_bytes: int) -> str:
     if limit_bytes <= 0 or not text:
         return ""
@@ -59,6 +82,68 @@ def _truncate_text_to_byte_limit(text: str, limit_bytes: int) -> str:
         return text
     truncated = encoded[:limit_bytes]
     return truncated.decode("utf-8", errors="ignore")
+
+
+def _append_retained_segment(
+    *,
+    state: _LineState,
+    segment: str,
+    segment_bytes: int,
+) -> None:
+    state.prefix_text = f"{state.prefix_text}{segment}"
+    state.prefix_bytes += segment_bytes
+
+
+def _classify_overflow_exemption(
+    *,
+    probe: NdjsonOverflowExemptionProbe | None,
+    stream: str,
+    line_text: str,
+) -> SemanticOverflowExemptionKind | None:
+    if probe is None:
+        return None
+    return probe(stream, line_text)
+
+
+def _append_ndjson_segment_with_limit(
+    *,
+    state: _LineState,
+    stream: str,
+    segment: str,
+    limit_bytes: int,
+    exemption_probe: NdjsonOverflowExemptionProbe | None,
+) -> None:
+    if state.overflowed or not segment:
+        return
+    segment_bytes = len(segment.encode("utf-8", errors="replace"))
+    if state.exemption_kind is not None:
+        _append_retained_segment(
+            state=state,
+            segment=segment,
+            segment_bytes=segment_bytes,
+        )
+        return
+    exemption_kind = _classify_overflow_exemption(
+        probe=exemption_probe,
+        stream=stream,
+        line_text=f"{state.prefix_text}{segment}",
+    )
+    if exemption_kind is not None:
+        state.exemption_kind = exemption_kind
+        _append_retained_segment(
+            state=state,
+            segment=segment,
+            segment_bytes=segment_bytes,
+        )
+        return
+    remaining = limit_bytes - state.prefix_bytes
+    if remaining > 0:
+        kept = _truncate_text_to_byte_limit(segment, remaining)
+        if kept:
+            state.prefix_text = f"{state.prefix_text}{kept}"
+            state.prefix_bytes += len(kept.encode("utf-8", errors="replace"))
+    if state.prefix_bytes >= limit_bytes:
+        state.overflowed = True
 
 
 def _append_closing_value(parts: list[str], *, ctx: _JsonContext) -> None:
@@ -267,9 +352,11 @@ class NdjsonIngressSanitizer:
         *,
         accepted_streams: set[str],
         limit_bytes: int = LIVE_STREAM_LINE_LIMIT_BYTES,
+        overflow_exemption_probe: NdjsonOverflowExemptionProbe | None = None,
     ) -> None:
         self._accepted_streams = set(accepted_streams)
         self._limit_bytes = max(1, int(limit_bytes))
+        self._overflow_exemption_probe = overflow_exemption_probe
         self._states: dict[str, _LineState] = {
             stream: _LineState() for stream in self._accepted_streams
         }
@@ -292,7 +379,7 @@ class NdjsonIngressSanitizer:
                 segment = text[index : newline_index + 1]
                 has_newline = True
                 index = newline_index + 1
-            self._append_segment(state=state, segment=segment)
+            self._append_segment(stream=stream, state=state, segment=segment)
             if has_newline:
                 finalized = self._finalize_line(stream=stream, include_newline=True)
                 if finalized is not None:
@@ -308,21 +395,18 @@ class NdjsonIngressSanitizer:
             return None
         return self._finalize_line(stream=stream, include_newline=False)
 
-    def _append_segment(self, *, state: _LineState, segment: str) -> None:
+    def _append_segment(self, *, stream: str, state: _LineState, segment: str) -> None:
         segment_bytes = len(segment.encode("utf-8", errors="replace"))
         if state.start_byte is None:
             state.start_byte = state.total_bytes
         state.total_bytes += segment_bytes
-        if state.overflowed or not segment:
-            return
-        remaining = self._limit_bytes - state.prefix_bytes
-        if remaining > 0:
-            kept = _truncate_text_to_byte_limit(segment, remaining)
-            if kept:
-                state.prefix_text = f"{state.prefix_text}{kept}"
-                state.prefix_bytes += len(kept.encode("utf-8", errors="replace"))
-        if state.prefix_bytes >= self._limit_bytes:
-            state.overflowed = True
+        _append_ndjson_segment_with_limit(
+            state=state,
+            stream=stream,
+            segment=segment,
+            limit_bytes=self._limit_bytes,
+            exemption_probe=self._overflow_exemption_probe,
+        )
 
     def _finalize_line(self, *, stream: str, include_newline: bool) -> SanitizedIngressChunk | None:
         state = self._states.get(stream)
@@ -330,7 +414,7 @@ class NdjsonIngressSanitizer:
             return None
         line_start = self._output_offsets.get(stream, 0)
         diagnostics: list[LiveParserEmission] = []
-        if not state.overflowed:
+        if not state.overflowed or state.exemption_kind is not None:
             body = state.prefix_text.rstrip("\n")
         else:
             detail_payload = {
@@ -390,9 +474,11 @@ class NdjsonLineBuffer:
         *,
         accepted_streams: set[str],
         limit_bytes: int = LIVE_STREAM_LINE_LIMIT_BYTES,
+        overflow_exemption_probe: NdjsonOverflowExemptionProbe | None = None,
     ) -> None:
         self._accepted_streams = set(accepted_streams)
         self._limit_bytes = max(1, int(limit_bytes))
+        self._overflow_exemption_probe = overflow_exemption_probe
         self._states: dict[str, _LineState] = {
             stream: _LineState() for stream in self._accepted_streams
         }
@@ -432,16 +518,13 @@ class NdjsonLineBuffer:
             if state.start_byte is None:
                 state.start_byte = segment_start
             state.total_bytes += segment_bytes
-
-            if not state.overflowed and segment:
-                remaining = self._limit_bytes - state.prefix_bytes
-                if remaining > 0:
-                    kept = _truncate_text_to_byte_limit(segment, remaining)
-                    if kept:
-                        state.prefix_text = f"{state.prefix_text}{kept}"
-                        state.prefix_bytes += len(kept.encode("utf-8", errors="replace"))
-                if state.prefix_bytes >= self._limit_bytes:
-                    state.overflowed = True
+            _append_ndjson_segment_with_limit(
+                state=state,
+                stream=stream,
+                segment=segment,
+                limit_bytes=self._limit_bytes,
+                exemption_probe=self._overflow_exemption_probe,
+            )
 
             if has_newline:
                 prepared = self._finalize_state(state)
@@ -469,7 +552,7 @@ class NdjsonLineBuffer:
         raw_text = state.prefix_text.rstrip("\n")
         byte_from = state.start_byte
         byte_to = state.start_byte + state.total_bytes
-        if not state.overflowed:
+        if not state.overflowed or state.exemption_kind is not None:
             return PreparedNdjsonLine(text=raw_text, byte_from=byte_from, byte_to=byte_to)
 
         details = {
@@ -497,9 +580,17 @@ class NdjsonLineBuffer:
 
 
 class NdjsonLiveStreamParserSession(LiveStreamParserSession, ABC):
-    def __init__(self, *, accepted_streams: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        accepted_streams: set[str] | None = None,
+        overflow_exemption_probe: NdjsonOverflowExemptionProbe | None = None,
+    ) -> None:
         self._accepted_streams = set(accepted_streams or {"stdout", "pty"})
-        self._line_buffer = NdjsonLineBuffer(accepted_streams=self._accepted_streams)
+        self._line_buffer = NdjsonLineBuffer(
+            accepted_streams=self._accepted_streams,
+            overflow_exemption_probe=overflow_exemption_probe,
+        )
 
     @abstractmethod
     def handle_live_row(

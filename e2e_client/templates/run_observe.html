@@ -1186,9 +1186,7 @@
             await refreshState();
             if (currentStatus !== "waiting_user") {
                 clearWaitingUserWatchdog();
-                if (!stream && !isTerminal(currentStatus)) {
-                    await startStream();
-                }
+                await restartStreamAfterWaitingExit();
                 return;
             }
         } finally {
@@ -1213,9 +1211,7 @@
             await refreshState();
             if (currentStatus !== "waiting_auth") {
                 clearWaitingAuthWatchdog();
-                if (!stream && !isTerminal(currentStatus)) {
-                    await startStream();
-                }
+                await restartStreamAfterWaitingExit();
                 return;
             }
             const res = await fetch(apiUrl(`/api/runs/${requestId}/auth/session`));
@@ -1228,9 +1224,7 @@
             }
             if (payload.waiting_auth !== true) {
                 await refreshState();
-                if (!stream && !isTerminal(currentStatus)) {
-                    await startStream();
-                }
+                await restartStreamAfterWaitingExit();
                 if (currentStatus !== "waiting_auth") {
                     clearWaitingAuthWatchdog();
                     return;
@@ -1244,6 +1238,11 @@
             return;
         }
         waitingAuthWatchdogTimer = setTimeout(executeWaitingAuthWatchdogTick, AUTH_WATCHDOG_INTERVAL_MS);
+    }
+
+    async function restartStreamAfterWaitingExit() {
+        if (isTerminal(currentStatus)) return;
+        await startStream();
     }
 
     function maybeStartWaitingUserWatchdog() {

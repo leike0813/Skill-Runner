@@ -101,18 +101,21 @@
 - **THEN** 数据来源与外部前端可消费的管理接口语义一致
 
 ### Requirement: 执行表单模型选择 MUST 支持 provider/model 双下拉
+
 系统 MUST 在执行表单中提供统一的 provider + model 选择交互，兼容现有单 `model` 字段提交。
 
-#### Scenario: 非 opencode 引擎使用固定 provider
-- **WHEN** 用户在执行表单选择 `codex`、`gemini` 或 `iflow`
-- **THEN** provider 下拉仅显示一个固定值（`openai/google/iflowcn`）
-- **AND** 提交给后端的 `model` 语义与现有行为一致
+#### Scenario: provider-aware engines use backend provider metadata
 
-#### Scenario: opencode 引擎按 provider 过滤模型
-- **WHEN** 用户在执行表单选择 `opencode`
-- **THEN** provider 选项来自后端模型返回
-- **AND** model 下拉按所选 provider 过滤
-- **AND** 最终提交 `model` 为 `provider/model` 形式
+- **WHEN** 用户在执行表单选择 `opencode` 或 `qwen`
+- **THEN** provider 选项 MUST 来自后端模型元数据
+- **AND** model 选项 MUST 按当前 provider 过滤
+- **AND** UI 请求 SHOULD 提交 `provider_id + model`
+
+#### Scenario: legacy opencode model syntax remains compatible
+
+- **WHEN** 旧客户端仍提交 `opencode` 的 `provider/model`
+- **THEN** 系统保持兼容
+- **AND** 新 UI 不再把该格式作为首选提交方式
 
 ### Requirement: 管理 UI 鉴权行为 MUST 对重构透明
 系统 MUST 保持 `/ui/engines` 鉴权交互与现有 transport 接口契约兼容，不因内部目录重构改变用户可见行为。
@@ -670,3 +673,78 @@ Run Detail 在 run 进入 terminal 后，RASP 面板 MUST 以 audit 结果为最
 - **THEN** `present=true` 且 `version` 非空显示绿灯
 - **AND** `present=true` 且 `version` 为空显示黄灯
 - **AND** `present=false` 显示红灯
+
+### Requirement: UI engine list MUST include qwen
+
+The engine management UI SHALL display `qwen` as an available engine.
+
+#### Scenario: Display Qwen in engine list
+
+- **WHEN** the user opens the engine management page
+- **THEN** the UI MUST show `Qwen Code` with identifier `qwen`
+- **AND** it MUST display installation status
+- **AND** it MUST display version if installed
+
+### Requirement: UI MUST allow installing Qwen engine
+
+The engine management UI SHALL provide an install action for Qwen.
+
+#### Scenario: Install Qwen from UI
+
+- **WHEN** the user clicks "Install" on the Qwen engine card
+- **THEN** the UI MUST trigger the install/upgrade API
+- **AND** it MUST show progress
+- **AND** it MUST update the rendered status after completion
+
+### Requirement: UI MUST expose qwen provider-aware auth options
+
+The Qwen entry in `/ui/engines` SHALL expose provider-aware auth actions that match the backend strategy matrix.
+
+#### Scenario: Qwen auth menu shows three providers
+
+- **WHEN** the user opens the Qwen auth menu
+- **THEN** the UI MUST show:
+  - `Qwen OAuth (Free)`
+  - `Coding Plan (China)`
+  - `Coding Plan (Global)`
+
+#### Scenario: Qwen OAuth shows import action
+
+- **WHEN** the selected provider is `qwen-oauth`
+- **THEN** the UI MUST show the import credentials entry
+
+#### Scenario: Qwen Coding Plan hides import action
+
+- **WHEN** the selected provider is `coding-plan-china` or `coding-plan-global`
+- **THEN** the UI MUST NOT show the import credentials entry
+
+### Requirement: Engine selector includes qwen
+
+The run form engine selector SHALL include `qwen` as an option.
+
+#### Scenario: Select Qwen engine for a run
+
+- **WHEN** the user creates a new run
+- **THEN** the engine selector MUST include `Qwen Code`
+- **AND** selecting it MUST set `engine=qwen` in the run request
+
+### Requirement: 管理 UI 鉴权行为 MUST 对 provider-aware engine 透明
+
+系统 MUST 在 `/ui/engines` 以共享框架渲染 provider-aware engine 的 provider 选择、方法选择和导入可见性。
+
+#### Scenario: provider-aware auth menu is backend-driven
+
+- **WHEN** 用户打开 `opencode` 或 `qwen` 的鉴权菜单
+- **THEN** provider 列表与 method 列表 MUST 来自后端注入能力矩阵与 provider 元数据
+- **AND** 前端 MUST NOT 通过 engine 名称硬编码 provider 规则
+
+#### Scenario: import entry follows provider metadata
+
+- **WHEN** provider 元数据声明 `supports_import=false`
+- **THEN** UI MUST 隐藏该 provider 的导入入口
+
+#### Scenario: qwen coding-plan hides import action
+
+- **WHEN** 用户选择 `qwen` 的 `coding-plan-china` 或 `coding-plan-global`
+- **THEN** UI MUST NOT 展示 import 入口
+

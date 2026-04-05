@@ -44,12 +44,12 @@
   "command_defaults": {
     "start": [
       "--output-format", "stream-json",
-      "--yolo",
+      "--approval-mode", "yolo",
       "-p"
     ],
     "resume": [
       "--output-format", "stream-json",
-      "--yolo",
+      "--approval-mode", "yolo",
       "--resume"
     ],
     "ui_shell": []
@@ -65,10 +65,10 @@
     "auth_hint_strategy": "none",
     "runtime_override_strategy": "none",
     "config_assets": {
-      "default_path": null,
-      "enforced_path": null,
-      "settings_schema_path": null,
-      "target_relpath": null
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
+      "settings_schema_path": "../schemas/qwen_config_schema.json",
+      "target_relpath": ".qwen/settings.json"
     }
   },
   "cli_management": {
@@ -100,6 +100,25 @@
   "parser_auth_patterns": {
     "rules": [
       {
+        "id": "qwen_oauth_waiting_authorization",
+        "enabled": true,
+        "priority": 950,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Qwen OAuth Device Authorization|https://chat\\.qwen\\.ai/authorize\\?user_code="
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Waiting for authorization to complete"
+            }
+          ]
+        }
+      },
+      {
         "id": "qwen_oauth_token_expired",
         "enabled": true,
         "priority": 900,
@@ -108,7 +127,7 @@
             {
               "field": "combined_text",
               "op": "regex",
-              "value": "OAuth.*token.*expired|401.*Unauthorized"
+              "value": "OAuth.*token.*expired|401.*Unauthorized|invalid.*token"
             }
           ]
         }
@@ -122,7 +141,21 @@
             {
               "field": "combined_text",
               "op": "regex",
-              "value": "API key is missing|Invalid API key"
+              "value": "API key is missing|Invalid API key|Missing.*authentication"
+            }
+          ]
+        }
+      },
+      {
+        "id": "qwen_coding_plan_error",
+        "enabled": true,
+        "priority": 880,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "Coding Plan.*error|subscription.*expired|quota.*exceeded"
             }
           ]
         }

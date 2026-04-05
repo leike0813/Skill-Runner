@@ -7,6 +7,8 @@ from unittest.mock import patch
 import pytest
 
 from server.config import config
+from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.models import (
     AdapterTurnInteraction,
     AdapterTurnOutcome,
@@ -249,6 +251,68 @@ class _LowConfidenceAttributedAuthAdapter:
                 "subcategory": None,
                 "matched_pattern_id": "generic_token_expired_text_fallback",
             },
+        )
+
+
+class _QwenOAuthWaitingAdapter:
+    def __init__(self, stderr_text: str):
+        self.stderr_text = stderr_text
+        self._adapter = QwenExecutionAdapter()
+        self.stream_parser = self._adapter.stream_parser
+
+    def parse_runtime_stream(self, **kwargs):
+        return self._adapter.parse_runtime_stream(**kwargs)
+
+    async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
+        _ = skill
+        _ = input_data
+        _ = run_dir
+        _ = options
+        _ = live_runtime_emitter
+        parsed = self.parse_runtime_stream(
+            stdout_raw=b"",
+            stderr_raw=self.stderr_text.encode("utf-8"),
+            pty_raw=b"",
+        )
+        auth_signal = parsed.get("auth_signal")
+        return EngineRunResult(
+            exit_code=130,
+            raw_stdout="",
+            raw_stderr=self.stderr_text,
+            artifacts_created=[],
+            failure_reason="AUTH_REQUIRED",
+            auth_signal_snapshot=dict(auth_signal) if isinstance(auth_signal, dict) else None,
+        )
+
+
+class _ClaudeLoginPromptAdapter:
+    def __init__(self, stdout_text: str):
+        self.stdout_text = stdout_text
+        self._adapter = ClaudeExecutionAdapter()
+        self.stream_parser = self._adapter.stream_parser
+
+    def parse_runtime_stream(self, **kwargs):
+        return self._adapter.parse_runtime_stream(**kwargs)
+
+    async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
+        _ = skill
+        _ = input_data
+        _ = run_dir
+        _ = options
+        _ = live_runtime_emitter
+        parsed = self.parse_runtime_stream(
+            stdout_raw=self.stdout_text.encode("utf-8"),
+            stderr_raw=b"",
+            pty_raw=b"",
+        )
+        auth_signal = parsed.get("auth_signal")
+        return EngineRunResult(
+            exit_code=1,
+            raw_stdout=self.stdout_text,
+            raw_stderr="",
+            artifacts_created=[],
+            failure_reason="AUTH_REQUIRED",
+            auth_signal_snapshot=dict(auth_signal) if isinstance(auth_signal, dict) else None,
         )
 
 
@@ -663,6 +727,143 @@ async def test_codex_refresh_token_reauth_high_confidence_enters_waiting_auth(
         assert "device_auth" in pending_selection["available_methods"]
         assert meta_data["auth_detection"]["classification"] == "auth_required"
         assert meta_data["auth_detection"]["confidence"] == "high"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_qwen_oauth_waiting_banner_enters_waiting_auth_without_protocol_schema_failure(
+    tmp_path: Path,
+) -> None:
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-qwen-oauth", engine="qwen")
+        run_id = _create_run(skill, "qwen")
+        await _seed_interactive_request(
+            local_store,
+            request_id="req-auth-qwen-oauth",
+            run_id=run_id,
+            skill_id=skill.id,
+            engine="qwen",
+            engine_options={"model": "coder-model"},
+        )
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "qwen": _QwenOAuthWaitingAdapter(
+                stderr_text=(
+                    "Qwen OAuth Device Authorization\n"
+                    "https://chat.qwen.ai/authorize?user_code=TEST-123\n"
+                    "Waiting for authorization to complete...\n"
+                )
+            )
+        }
+
+        with patch(
+            "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
+            lambda **_kwargs: {
+                "session_id": "auth-qwen-1",
+                "engine": "qwen",
+                "provider_id": "qwen-oauth",
+                "status": "waiting_user",
+                "input_kind": None,
+                "auth_url": "https://chat.qwen.ai/authorize?user_code=TEST-123",
+                "user_code": "TEST-123",
+                "created_at": "2099-03-03T00:00:00Z",
+                "expires_at": "2099-03-03T00:15:00Z",
+                "error": None,
+            },
+        ), patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "qwen",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        state_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        pending_auth = state_data["pending"]["payload"]
+        assert state_data["status"] == RunStatus.WAITING_AUTH.value
+        assert state_data["error"] is None
+        assert state_data["pending"]["owner"] == "waiting_auth.challenge_active"
+        assert pending_auth["provider_id"] == "qwen-oauth"
+        assert pending_auth["auth_url"] == "https://chat.qwen.ai/authorize?user_code=TEST-123"
+        assert pending_auth["user_code"] == "TEST-123"
+        assert meta_data["auth_detection"]["classification"] == "auth_required"
+        assert meta_data["auth_detection"]["confidence"] == "high"
+        assert meta_data["auth_detection"]["provider_id"] is None
+        assert meta_data["auth_session"]["status"] == "waiting"
+        assert meta_data["auth_session"]["provider_id"] == "qwen-oauth"
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_claude_not_logged_in_login_prompt_enters_waiting_auth(
+    tmp_path: Path,
+) -> None:
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-claude-login-prompt", engine="claude")
+        run_id = _create_run(skill, "claude")
+        await _seed_interactive_request(
+            local_store,
+            request_id="req-auth-claude-login-prompt",
+            run_id=run_id,
+            skill_id=skill.id,
+            engine="claude",
+        )
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "claude": _ClaudeLoginPromptAdapter(
+                stdout_text=(
+                    '{"type":"system","subtype":"init","session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa"}\n'
+                    '{"type":"assistant","message":{"id":"6855d0ed-b48c-4fab-8311-cb2549387d8b","content":[{"type":"text","text":"Not logged in \\u00b7 Please run /login"}]},"session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa","error":"authentication_failed"}\n'
+                    '{"type":"result","subtype":"success","is_error":true,"session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa","result":"Not logged in \\u00b7 Please run /login"}\n'
+                )
+            )
+        }
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "claude",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        state_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        pending_selection = state_data["pending"]["payload"]
+        assert state_data["status"] == RunStatus.WAITING_AUTH.value
+        assert state_data["error"] is None
+        assert state_data["pending"]["owner"] == "waiting_auth.method_selection"
+        assert "callback" in pending_selection["available_methods"]
+        assert "auth_code_or_url" in pending_selection["available_methods"]
+        assert "custom_provider" not in pending_selection["available_methods"]
+        assert meta_data["auth_detection"]["classification"] == "auth_required"
+        assert meta_data["auth_detection"]["confidence"] == "high"
+        assert meta_data["auth_detection"]["matched_rule_ids"] == ["claude_not_logged_in"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

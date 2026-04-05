@@ -472,15 +472,53 @@ class FakeBackendOpencode(FakeBackend):
             "models": [
                 {
                     "id": "openai/gpt-5",
+                    "provider_id": "openai",
                     "provider": "openai",
                     "model": "gpt-5",
                     "display_name": "OpenAI GPT-5",
                 },
                 {
                     "id": "anthropic/claude-sonnet-4.5",
+                    "provider_id": "anthropic",
                     "provider": "anthropic",
                     "model": "claude-sonnet-4.5",
                     "display_name": "Claude Sonnet 4.5",
+                },
+            ],
+        }
+
+
+class FakeBackendQwen(FakeBackend):
+    async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
+        assert skill_id == "demo-skill"
+        return {
+            "id": "demo-skill",
+            "name": "Demo Skill",
+            "version": "1.0.0",
+            "engines": ["qwen"],
+            "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
+        }
+
+    async def get_engine_detail(self, engine: str) -> dict[str, Any]:
+        if engine != "qwen":
+            return {"engine": engine, "models": []}
+        return {
+            "engine": "qwen",
+            "models": [
+                {
+                    "id": "coder-model",
+                    "provider_id": "qwen-oauth",
+                    "provider": "qwen-oauth",
+                    "model": "coder-model",
+                    "display_name": "Qwen OAuth Coder",
+                },
+                {
+                    "id": "qwen3-coder-plus",
+                    "provider_id": "coding-plan-global",
+                    "provider": "coding-plan-global",
+                    "model": "qwen3-coder-plus",
+                    "display_name": "Qwen3 Coder Plus",
                 },
             ],
         }
@@ -994,7 +1032,45 @@ async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path
         )
         assert create.status_code == 303
         assert fake_backend.create_payloads[-1]["engine"] == "opencode"
-        assert fake_backend.create_payloads[-1]["model"] == "openai/gpt-5"
+        assert fake_backend.create_payloads[-1]["provider_id"] == "openai"
+        assert fake_backend.create_payloads[-1]["model"] == "gpt-5"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_example_client_qwen_provider_model_payload(tmp_path: Path):
+    app = create_app()
+    fake_backend = FakeBackendQwen()
+    _install_backend_override(app, fake_backend)
+    try:
+        run_form = await _request(app, "GET", "/skills/demo-skill/run")
+        assert run_form.status_code == 200
+        assert "qwen-oauth" in run_form.text
+        assert "coder-model" in run_form.text
+
+        create = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data={
+                "engine": "qwen",
+                "provider": "qwen-oauth",
+                "model_value": "coder-model",
+                "execution_mode": "auto",
+                "input__prompt": "hello",
+                "parameter__top_k": "3",
+                "runtime__hard_timeout_seconds": "1800",
+            },
+            files={
+                "file__input_file": ("input.txt", b"1\n2\n3\n", "text/plain"),
+            },
+            follow_redirects=False,
+        )
+        assert create.status_code == 303
+        assert fake_backend.create_payloads[-1]["engine"] == "qwen"
+        assert fake_backend.create_payloads[-1]["provider_id"] == "qwen-oauth"
+        assert fake_backend.create_payloads[-1]["model"] == "coder-model"
     finally:
         app.dependency_overrides.clear()
 

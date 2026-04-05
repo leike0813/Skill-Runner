@@ -238,6 +238,116 @@ async def test_capture_process_output_auth_required_early_exit_on_blocking_idle(
 
 
 @pytest.mark.asyncio
+async def test_capture_process_output_auth_probe_retries_after_throttled_chunk_completion(tmp_path: Path):
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    old_idle_grace = config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS
+    config.defrost()
+    config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = 0.4
+    config.freeze()
+    try:
+        start = time.monotonic()
+        result = await adapter._execute_process(
+            "noop",
+            run_dir,
+            SkillManifest(id="x"),
+            {
+                "__engine_name": "iflow",
+                "command": [
+                    "python",
+                    "-c",
+                    (
+                        "import sys,time;"
+                        "sys.stderr.write('SERVER_'); sys.stderr.flush();"
+                        "time.sleep(0.05);"
+                        "sys.stderr.write('OAUTH2_REQUIRED\\n'); sys.stderr.flush();"
+                        "time.sleep(60)"
+                    ),
+                ],
+                "hard_timeout_seconds": 30,
+            },
+        )
+        elapsed = time.monotonic() - start
+        assert result.failure_reason == "AUTH_REQUIRED"
+        assert result.auth_signal_snapshot is not None
+        assert result.auth_signal_snapshot["matched_pattern_id"] == "test_server_oauth2_required"
+        assert elapsed < 10
+    finally:
+        config.defrost()
+        config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = old_idle_grace
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_auth_required_does_not_depend_on_live_diagnostic_publish(
+    tmp_path: Path,
+):
+    class _MinimalLiveEmitter:
+        async def on_process_started(self) -> None:
+            return None
+
+        async def on_stream_chunk(
+            self,
+            *,
+            stream: str,
+            text: str,
+            byte_from: int,
+            byte_to: int,
+            event_ts=None,
+        ) -> None:
+            _ = stream, text, byte_from, byte_to, event_ts
+            return None
+
+        async def on_process_exit(
+            self,
+            *,
+            exit_code: int,
+            failure_reason: str | None,
+            event_ts=None,
+        ) -> None:
+            _ = exit_code, failure_reason, event_ts
+            return None
+
+    adapter = _TestAdapter()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    old_idle_grace = config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS
+    config.defrost()
+    config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = 0.2
+    config.freeze()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "python",
+            "-c",
+            (
+                "import sys,time;"
+                "sys.stderr.write('SERVER_OAUTH2_REQUIRED\\n'); sys.stderr.flush();"
+                "time.sleep(60)"
+            ),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(run_dir),
+        )
+
+        result = await adapter._capture_process_output(
+            proc,
+            run_dir,
+            {"__engine_name": "iflow", "hard_timeout_seconds": 30},
+            "Test",
+            live_runtime_emitter=_MinimalLiveEmitter(),
+        )
+
+        assert result.failure_reason == "AUTH_REQUIRED"
+        assert result.auth_signal_snapshot is not None
+        assert result.auth_signal_snapshot["matched_pattern_id"] == "test_server_oauth2_required"
+    finally:
+        config.defrost()
+        config.SYSTEM.AUTH_DETECTION_IDLE_GRACE_SECONDS = old_idle_grace
+        config.freeze()
+
+
+@pytest.mark.asyncio
 async def test_capture_process_output_stream_writes_logs_during_run(tmp_path: Path):
     adapter = _TestAdapter()
     run_dir = tmp_path / "run"

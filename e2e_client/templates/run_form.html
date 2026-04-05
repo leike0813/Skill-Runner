@@ -142,6 +142,7 @@
         codex: "openai",
         gemini: "google",
         iflow: "iflowcn",
+        qwen: "qwen-oauth",
     };
     const engineSelect = document.getElementById("engine");
     const executionModeSelect = document.getElementById("execution_mode");
@@ -153,27 +154,34 @@
     const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
     const timeoutGroup = document.getElementById("runtime_timeout_group");
 
+    function normalizeText(value) {
+        return typeof value === "string" ? value.trim() : "";
+    }
+
     function splitProviderModel(id) {
-        if (typeof id !== "string") return null;
-        const idx = id.indexOf("/");
-        if (idx <= 0 || idx >= id.length - 1) return null;
-        return { provider: id.slice(0, idx), model: id.slice(idx + 1) };
+        const normalized = normalizeText(id);
+        const idx = normalized.indexOf("/");
+        if (idx <= 0 || idx >= normalized.length - 1) return null;
+        return { provider: normalized.slice(0, idx), model: normalized.slice(idx + 1) };
     }
 
     function providerFromRow(row) {
-        if (row && typeof row.provider === "string" && row.provider.trim()) {
-            return row.provider.trim();
-        }
-        const parsed = splitProviderModel(row && typeof row.id === "string" ? row.id.trim() : "");
+        const providerId = normalizeText(row && row.provider_id);
+        if (providerId) return providerId;
+        const provider = normalizeText(row && row.provider);
+        if (provider) return provider;
+        const parsed = splitProviderModel(normalizeText(row && row.id));
         return parsed ? parsed.provider : "";
     }
 
     function modelNameFromRow(row) {
-        if (row && typeof row.model === "string" && row.model.trim()) {
-            return row.model.trim();
+        const model = normalizeText(row && row.model);
+        if (model) {
+            return model;
         }
-        const parsed = splitProviderModel(row && typeof row.id === "string" ? row.id.trim() : "");
-        return parsed ? parsed.model : "";
+        const rowId = normalizeText(row && row.id);
+        const parsed = splitProviderModel(rowId);
+        return parsed ? parsed.model : rowId;
     }
 
     function normalizeRows(engine) {
@@ -237,18 +245,11 @@
             if (selectedProviderValue && rowProvider && rowProvider !== selectedProviderValue) {
                 continue;
             }
-            let modelId = typeof row.id === "string" ? row.id.trim() : "";
-            if (!modelId && rowProvider && rowModel) {
-                modelId = `${rowProvider}/${rowModel}`;
-            }
+            const modelId = rowModel || normalizeText(row && row.id);
             if (!modelId) continue;
             const option = document.createElement("option");
             option.value = modelId;
-            if (engine === "opencode") {
-                option.textContent = row.display_name ? `${row.display_name} (${rowModel || modelId})` : (rowModel || modelId);
-            } else {
-                option.textContent = row.display_name ? `${row.display_name} (${modelId})` : modelId;
-            }
+            option.textContent = row.display_name ? `${row.display_name} (${modelId})` : modelId;
             modelSelect.appendChild(option);
         }
         if ([...modelSelect.options].some((item) => item.value === current)) {

@@ -137,6 +137,25 @@ def test_claude_runtime_stream_detects_not_logged_in_auth_signal():
     assert auth_signal.get("confidence") == "high"
 
 
+def test_claude_runtime_stream_detects_not_logged_in_auth_signal_from_ndjson_login_prompt():
+    adapter = ClaudeExecutionAdapter()
+    stdout_raw = (
+        b'{"type":"system","subtype":"init","session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa"}\n'
+        b'{"type":"assistant","message":{"id":"6855d0ed-b48c-4fab-8311-cb2549387d8b","content":[{"type":"text","text":"Not logged in \\u00b7 Please run /login"}]},"session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa","error":"authentication_failed"}\n'
+        b'{"type":"result","subtype":"success","is_error":true,"session_id":"598c65f0-e19e-4934-9a19-ccba33cab8aa","result":"Not logged in \\u00b7 Please run /login"}\n'
+    )
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=stdout_raw,
+        stderr_raw=b"",
+    )
+
+    auth_signal = parsed.get("auth_signal")
+    assert isinstance(auth_signal, dict)
+    assert auth_signal.get("required") is True
+    assert auth_signal.get("confidence") == "high"
+    assert auth_signal.get("matched_pattern_id") == "claude_not_logged_in"
+
+
 def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events():
     adapter = ClaudeExecutionAdapter()
     parsed = adapter.parse_runtime_stream(

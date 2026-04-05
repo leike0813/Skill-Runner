@@ -2,7 +2,6 @@
 
 ## Purpose
 定义 harness CLI 的独立入口、参数透传和与主服务解耦的约束。
-
 ## Requirements
 ### Requirement: Harness CLI MUST 提供独立入口并保持与主服务解耦
 系统 MUST 提供独立的 harness CLI 入口，运行于独立代码目录；其执行不依赖启动主服务 UI 或改写主服务路由行为。系统同时 MUST 在容器部署场景提供独立的宿主机 wrapper，将调用显式转发到容器内 harness。
@@ -134,3 +133,26 @@
 - **WHEN** 用户执行 opencode start/resume 且运行环境缺失 opencode 可执行文件
 - **THEN** harness 返回结构化缺失错误并附带可诊断信息
 - **AND** MUST NOT 静默回退到其它引擎
+
+### Requirement: Agent harness skill injection includes qwen
+
+The agent harness skill injection system SHALL support `qwen` as a target engine.
+
+#### Scenario: Inject skills into qwen run folder
+
+- **WHEN** agent harness runs with `engine=qwen`
+- **THEN** it MUST copy skills to `run_dir/.qwen/skills/`
+- **AND** it MUST return `supported=True` in the injection result
+- **AND** it MUST patch SKILL.md files for the execution mode
+
+### Requirement: Agent harness skill injection includes claude
+
+The agent harness skill injection system SHALL support `claude` as a target engine.
+
+#### Scenario: Inject skills into claude run folder
+
+- **WHEN** agent harness runs with `engine=claude`
+- **THEN** it MUST copy skills to `run_dir/.claude/skills/`
+- **AND** it MUST return `supported=True` in the injection result
+- **AND** it MUST patch SKILL.md files for the execution mode
+

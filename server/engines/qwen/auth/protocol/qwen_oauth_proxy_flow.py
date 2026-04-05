@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import urllib.error
 import urllib.parse
@@ -12,6 +13,8 @@ from typing import Any
 from uuid import uuid4
 
 from server.engines.common.openai_auth.common import generate_pkce_pair
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -25,7 +28,7 @@ def _http_status(response: Any) -> str:
         if callable(getcode):
             try:
                 status = getcode()
-            except Exception:  # pragma: no cover - defensive fallback
+            except (AttributeError, OSError, TypeError, ValueError):  # pragma: no cover - defensive fallback
                 status = None
     return str(status) if status is not None else "unknown"
 
@@ -65,7 +68,7 @@ def _request_headers(*, include_request_id: bool) -> dict[str, str]:
 def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
     try:
         return exc.read().decode("utf-8", errors="replace")
-    except Exception:  # pragma: no cover - defensive fallback
+    except (AttributeError, OSError, TypeError, ValueError):  # pragma: no cover - defensive fallback
         return ""
 
 
@@ -104,6 +107,9 @@ class QwenOAuthSession:
     completed: bool = False
     last_poll_at: datetime | None = None
     next_poll_at: datetime | None = None
+    poll_attempts: int = 0
+    last_poll_result: str | None = None
+    last_poll_error: str | None = None
 
 
 class QwenOAuthProxyFlow:
@@ -161,7 +167,7 @@ class QwenOAuthProxyFlow:
             ) from exc
         except RuntimeError as exc:
             raise RuntimeError(f"Failed to request Qwen device code: {exc}") from exc
-        except Exception as exc:  # pragma: no cover - urllib error shape differs by platform
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:  # pragma: no cover - platform/network boundary
             raise RuntimeError(f"Failed to request Qwen device code: {exc}") from exc
 
         required_keys = {
@@ -209,6 +215,8 @@ class QwenOAuthProxyFlow:
         runtime.updated_at = submitted_at
         runtime.polling_started = True
         runtime.last_poll_at = None
+        runtime.last_poll_result = "polling"
+        runtime.last_poll_error = None
         if poll_now or runtime.next_poll_at is None:
             runtime.next_poll_at = submitted_at
 
@@ -223,7 +231,10 @@ class QwenOAuthProxyFlow:
             raise RuntimeError("Authorization timeout")
 
         runtime.last_poll_at = current
+        runtime.poll_attempts += 1
         runtime.next_poll_at = current + timedelta(seconds=self.POLL_INTERVAL_SECONDS)
+        runtime.last_poll_result = "polling"
+        runtime.last_poll_error = None
 
         body = urllib.parse.urlencode(
             {
@@ -247,37 +258,127 @@ class QwenOAuthProxyFlow:
                 )
         except urllib.error.HTTPError as exc:
             error_raw = _read_http_error_body(exc)
-            if exc.code == 400:
-                try:
-                    error_payload = json.loads(error_raw) if error_raw.strip() else {}
-                except Exception:  # pragma: no cover - defensive fallback
-                    error_payload = {}
-                error_code = str(error_payload.get("error") or "").strip().lower()
-                if error_code == "authorization_pending":
-                    return False
-                if error_code == "slow_down":
-                    runtime.next_poll_at = current + timedelta(seconds=self.POLL_INTERVAL_SECONDS * 2)
-                    return False
-                if error_code in {"expired_token", "access_denied"}:
-                    raise RuntimeError(f"Authorization failed: {error_code}") from exc
+            error_payload = self._parse_error_payload(error_raw)
+            error_code = str(error_payload.get("error") or "").strip().lower()
+            if exc.code == 400 and error_code == "authorization_pending":
+                runtime.last_poll_result = "authorization_pending"
+                return False
+            if exc.code in {400, 429} and error_code == "slow_down":
+                runtime.next_poll_at = current + timedelta(seconds=self.POLL_INTERVAL_SECONDS * 2)
+                runtime.last_poll_result = "slow_down"
+                return False
+            if error_code in {"expired_token", "access_denied"}:
+                detail = self._describe_error_payload(error_payload) or error_code
+                runtime.last_poll_result = "failed"
+                runtime.last_poll_error = detail
+                raise RuntimeError(f"Authorization failed: {detail}") from exc
+            if _is_waf_html(error_raw):
+                preview = _body_preview(error_raw)
+                runtime.last_poll_result = "failed"
+                runtime.last_poll_error = preview
+                raise RuntimeError(
+                    f"Token request appears blocked by upstream WAF (status={exc.code}, body={preview})"
+                ) from exc
             detail = _body_preview(error_raw)
+            runtime.last_poll_result = "failed"
+            runtime.last_poll_error = detail
             raise RuntimeError(f"Token request failed: {exc.code} {exc.reason}. Response: {detail}") from exc
         except RuntimeError:
             raise
-        except Exception as exc:  # pragma: no cover - urllib error shape differs by platform
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:  # pragma: no cover - platform/network boundary
+            runtime.last_poll_result = "failed"
+            runtime.last_poll_error = str(exc)
             raise RuntimeError(f"Token request failed: {exc}") from exc
 
-        credentials = {
-            "access_token": payload.get("access_token"),
-            "refresh_token": payload.get("refresh_token"),
-            "token_type": payload.get("token_type", "Bearer"),
-            "expiry_date": int(current.timestamp() * 1000)
-            + int(payload.get("expires_in", 0)) * 1000,
-        }
+        outcome = self._interpret_token_payload(payload, runtime=runtime, now=current)
+        if not outcome:
+            return False
+
+        credentials = self._build_credentials(payload=payload, now=current)
         self._store_credentials(credentials)
         runtime.completed = True
         runtime.updated_at = current
+        runtime.last_poll_result = "succeeded"
+        runtime.last_poll_error = None
+        logger.info("qwen oauth proxy token poll succeeded")
         return True
+
+    def _parse_error_payload(self, raw: str) -> dict[str, Any]:
+        if not raw.strip():
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:  # pragma: no cover - defensive fallback
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _describe_error_payload(self, payload: dict[str, Any]) -> str:
+        code = str(payload.get("error") or "").strip()
+        description = str(payload.get("error_description") or "").strip()
+        if code and description:
+            return f"{code} - {description}"
+        return code or description
+
+    def _interpret_token_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        runtime: QwenOAuthSession,
+        now: datetime,
+    ) -> bool:
+        access_token = str(payload.get("access_token") or "").strip()
+        if access_token:
+            return True
+        error_code = str(payload.get("error") or "").strip().lower()
+        if error_code == "authorization_pending":
+            runtime.last_poll_result = "authorization_pending"
+            return False
+        if error_code == "slow_down":
+            runtime.next_poll_at = now + timedelta(seconds=self.POLL_INTERVAL_SECONDS * 2)
+            runtime.last_poll_result = "slow_down"
+            return False
+        detail = self._describe_error_payload(payload)
+        if detail:
+            runtime.last_poll_result = "failed"
+            runtime.last_poll_error = detail
+            raise RuntimeError(f"Authorization failed: {detail}")
+        runtime.last_poll_result = "failed"
+        runtime.last_poll_error = "missing_access_token"
+        raise RuntimeError("Qwen token response missing access_token")
+
+    def _build_credentials(
+        self,
+        *,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, Any]:
+        credentials: dict[str, Any] = {
+            "access_token": str(payload.get("access_token") or "").strip(),
+            "refresh_token": self._optional_string(payload.get("refresh_token")),
+            "token_type": str(payload.get("token_type") or "Bearer").strip() or "Bearer",
+        }
+        resource_url = self._optional_string(payload.get("resource_url"))
+        if resource_url is not None:
+            credentials["resource_url"] = resource_url
+        expires_in = self._positive_int_or_none(payload.get("expires_in"))
+        if expires_in is not None:
+            credentials["expiry_date"] = int(now.timestamp() * 1000) + expires_in * 1000
+        return credentials
+
+    def _optional_string(self, value: Any) -> str | None:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return None
+
+    def _positive_int_or_none(self, value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed > 0 else None
 
     def _store_credentials(self, credentials: dict[str, Any]) -> None:
         config_dir = self._qwen_config_dir()

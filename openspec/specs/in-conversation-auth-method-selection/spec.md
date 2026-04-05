@@ -88,12 +88,13 @@ auth timeout MUST 仅在 auth session 进入 challenge 活跃阶段后生效。
 
 ### Requirement: 会话内鉴权 MUST 固定使用策略声明的 in-conversation transport
 
-会话内鉴权流程 MUST 按策略声明的 `in_conversation.transport` 计算可用方法；本阶段不向用户暴露 transport 选择。
+会话内鉴权流程 MUST 按策略声明的 `in_conversation.transport` 计算 challenge 语义；本阶段不向用户暴露 transport 选择。
 
-#### Scenario: in-conversation transport is oauth_proxy
-- **WHEN** 系统在会话内计算可用鉴权方式
-- **THEN** 仅使用策略声明的会话 transport（当前为 `oauth_proxy`）
-- **AND** 客户端交互仍只选择 auth_method
+#### Scenario: waiting_auth consumes declared session behavior
+
+- **WHEN** 系统在会话内基于策略 transport 构造 challenge
+- **THEN** `accepts_chat_input` 与 `input_kind` MUST 与该 transport 的 `session_behavior` 一致
+- **AND** 不得在编排器中为特定 engine 手写隐藏输入框分支
 
 ### Requirement: 会话内高风险鉴权方式 MUST 显示风险提示
 系统 MUST 在会话内鉴权 method selection 与 challenge prompt 中对高风险链路显示风险提示。
@@ -110,4 +111,13 @@ auth timeout MUST 仅在 auth session 进入 challenge 活跃阶段后生效。
 - **AND** 该方式在策略中标记为高风险
 - **WHEN** 系统生成 `pending_auth.prompt`
 - **THEN** prompt MUST 包含高风险提示语句
+
+### Requirement: 鉴权输入种类 MUST 区分 callback_url / auth_code_or_url / api_key
+
+系统 MUST 将鉴权提交种类规范化为 `callback_url`、`auth_code_or_url` 或 `api_key`。
+
+#### Scenario: auth code or redirect URL submission
+
+- **WHEN** 用户在聊天窗口中提交 redirect URL 或授权码
+- **THEN** submission kind MUST 为 `auth_code_or_url`
 

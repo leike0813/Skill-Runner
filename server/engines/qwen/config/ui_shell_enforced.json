@@ -1,0 +1,16 @@
+{
+  "$schema": "../schemas/qwen_config_schema.json",
+  "permissions": {
+    "defaultMode": "plan",
+    "deny": [
+      "Bash",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "Agent",
+      "Skill"
+    ]
+  }
+}

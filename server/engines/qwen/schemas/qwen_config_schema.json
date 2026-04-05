@@ -11,7 +11,15 @@
           "properties": {
             "selectedType": {
               "type": "string",
-              "enum": ["qwen-oauth", "openai"]
+              "enum": ["qwen-oauth", "openai", "alibaba-cloud-coding-plan"]
+            }
+          }
+        },
+        "folderTrust": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
             }
           }
         }
@@ -35,6 +43,134 @@
       "properties": {
         "name": {
           "type": "string"
+        },
+        "maxSessionTurns": {
+          "type": "integer"
+        },
+        "generationConfig": {
+          "type": "object"
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "sandbox": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string" }
+          ]
+        },
+        "approvalMode": {
+          "type": "string",
+          "enum": ["plan", "default", "auto-edit", "yolo"]
+        },
+        "enableInteractiveShell": {
+          "type": "boolean"
+        },
+        "useRipgrep": {
+          "type": "boolean"
+        },
+        "useBuiltinRipgrep": {
+          "type": "boolean"
+        },
+        "truncateToolOutputThreshold": {
+          "type": "number"
+        },
+        "truncateToolOutputLines": {
+          "type": "number"
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "defaultMode": {
+          "type": "string",
+          "enum": ["plan", "default", "auto-edit", "yolo"]
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ask": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "general": {
+      "type": "object",
+      "properties": {
+        "preferredEditor": {
+          "type": "string"
+        },
+        "vimMode": {
+          "type": "boolean"
+        },
+        "enableAutoUpdate": {
+          "type": "boolean"
+        },
+        "gitCoAuthor": {
+          "type": "boolean"
+        },
+        "checkpointing": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "defaultFileEncoding": {
+          "type": "string"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "includeDirectories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "loadFromIncludeDirectories": {
+          "type": "boolean"
+        },
+        "fileFiltering": {
+          "type": "object",
+          "properties": {
+            "respectGitIgnore": {
+              "type": "boolean"
+            },
+            "respectQwenIgnore": {
+              "type": "boolean"
+            },
+            "enableRecursiveFileSearch": {
+              "type": "boolean"
+            },
+            "enableFuzzySearch": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
