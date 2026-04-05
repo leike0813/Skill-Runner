@@ -1,5 +1,9 @@
 {
   "engine": "codex",
+  "provider_contract": {
+    "multi_provider": false,
+    "canonical_provider_id": "openai"
+  },
   "prompt_builder": {
     "engine_key": "codex",
     "default_template_path": "../../../assets/templates/codex_default.j2",

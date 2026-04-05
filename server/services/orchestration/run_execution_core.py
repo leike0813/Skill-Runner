@@ -41,17 +41,26 @@ def validate_runtime_and_model_options(
     engine: str,
     model: str | None,
     provider_id: str | None = None,
+    effort: str | None = None,
     runtime_options: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     runtime_opts = options_policy.validate_runtime_options(runtime_options)
     engine_opts: dict[str, Any] = {}
-    if model:
-        validated = model_registry.validate_model(engine, model)
-        engine_opts["model"] = validated["model"]
-        if "model_reasoning_effort" in validated:
-            engine_opts["model_reasoning_effort"] = validated["model_reasoning_effort"]
-    if isinstance(provider_id, str) and provider_id.strip():
-        engine_opts["provider_id"] = provider_id.strip().lower()
+    if model or provider_id or effort:
+        normalized = model_registry.normalize_model_selection(
+            engine,
+            model=model,
+            provider_id=provider_id,
+            effort=effort,
+        )
+        if normalized.model is not None:
+            engine_opts["model"] = normalized.model
+        if normalized.provider_id is not None:
+            engine_opts["provider_id"] = normalized.provider_id
+        if normalized.runtime_model is not None and normalized.runtime_model != normalized.model:
+            engine_opts["runtime_model"] = normalized.runtime_model
+        if normalized.effective_effort is not None:
+            engine_opts["model_reasoning_effort"] = normalized.effective_effort
     return runtime_opts, engine_opts
 
 

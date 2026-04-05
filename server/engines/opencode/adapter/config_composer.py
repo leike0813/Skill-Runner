@@ -45,10 +45,30 @@ class OpencodeConfigComposer:
         return {"permission": {"question": question_mode}}
 
     def _model_overlay(self, options: dict[str, Any]) -> dict[str, Any]:
-        model_obj = options.get("model")
+        model_obj = options.get("runtime_model")
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            model_obj = options.get("model")
         if isinstance(model_obj, str) and model_obj.strip():
             return {"model": model_obj.strip()}
         return {}
+
+    def _effort_overlay(self, options: dict[str, Any]) -> dict[str, Any]:
+        effort_obj = options.get("model_reasoning_effort")
+        model_obj = options.get("runtime_model")
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            model_obj = options.get("model")
+        if not isinstance(effort_obj, str) or not effort_obj.strip():
+            return {}
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            return {}
+        return {
+            "agent": {
+                "build": {
+                    "model": model_obj.strip(),
+                    "variant": effort_obj.strip(),
+                }
+            }
+        }
 
     def compose(self, ctx: AdapterExecutionContext) -> Path:
         skill = ctx.skill
@@ -83,6 +103,7 @@ class OpencodeConfigComposer:
             runtime_override = options["opencode_config"]
         layers.append(runtime_override)
         layers.append(self._model_overlay(options))
+        layers.append(self._effort_overlay(options))
 
         enforced_path = self._adapter.profile.resolve_enforced_config_path()
         layers.append(self._load_json_config(enforced_path, label="opencode enforced"))

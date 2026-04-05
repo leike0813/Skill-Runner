@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from server.config import config
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
@@ -44,6 +44,18 @@ class ModelCatalog:
     fallback_reason: Optional[str]
     models: List[ModelEntry]
     source: str = "pinned_snapshot"
+
+
+@dataclass(frozen=True)
+class NormalizedModelSelection:
+    engine: str
+    provider_id: str | None
+    model: str | None
+    model_id: str | None
+    runtime_model: str | None
+    requested_effort: str
+    effective_effort: str | None
+    supported_effort: List[str]
 
 
 class ModelRegistry:
@@ -191,31 +203,94 @@ class ModelRegistry:
         return self.get_manifest_view(engine)
 
     def validate_model(self, engine: str, model_spec: str) -> Dict[str, str]:
-        catalog = self.get_models(engine)
-        model_name, effort = self._parse_model_spec(engine, model_spec)
-        model_entry = self._find_model(catalog.models, model_name)
-        if not model_entry and self._is_claude_custom_model_spec(engine, model_name):
-            model_entry = ModelEntry(
-                id=model_name,
-                display_name=model_name,
-                deprecated=False,
-                notes=None,
-                    supported_effort=None,
-                    provider=self._provider_from_model_spec(model_name),
-                    provider_id=self._provider_from_model_spec(model_name),
-                    model=self._model_name_from_model_spec(model_name),
-                    source="custom_provider",
-                )
-        if not model_entry:
-            raise ValueError(f"Model '{model_name}' not allowed for engine '{engine}'")
-        if effort:
-            allowed = model_entry.supported_effort or self._default_effort_levels()
-            if effort not in allowed:
-                raise ValueError(f"Reasoning effort '{effort}' not supported for model '{model_name}'")
-        payload = {"model": model_name}
-        if effort:
-            payload["model_reasoning_effort"] = effort
+        normalized = self.normalize_model_selection(engine, model=model_spec)
+        if normalized.model is None:
+            raise ValueError(f"Model '{model_spec}' not allowed for engine '{engine}'")
+        payload: Dict[str, str] = {"model": normalized.model}
+        if normalized.provider_id is not None:
+            payload["provider_id"] = normalized.provider_id
+        if normalized.runtime_model is not None and normalized.runtime_model != normalized.model:
+            payload["runtime_model"] = normalized.runtime_model
+        if normalized.effective_effort is not None:
+            payload["model_reasoning_effort"] = normalized.effective_effort
         return payload
+
+    def normalize_model_selection(
+        self,
+        engine: str,
+        *,
+        model: str | None = None,
+        provider_id: str | None = None,
+        effort: str | None = None,
+    ) -> NormalizedModelSelection:
+        catalog = self.get_models(engine)
+        normalized_engine = engine.strip().lower()
+        parsed = self._parse_model_selector(model)
+        requested_effort = self._normalize_effort(effort or parsed["effort"])
+        profile = self._adapter_profile(normalized_engine)
+        multi_provider = profile.provider_contract.multi_provider
+        canonical_provider = profile.provider_contract.canonical_provider_id
+        normalized_provider = self._normalize_provider_id(provider_id or parsed["provider"])
+
+        if not parsed["model"]:
+            if multi_provider and normalized_provider is None:
+                raise ValueError(f"provider_id is required for multi-provider engine '{normalized_engine}'")
+            return NormalizedModelSelection(
+                engine=normalized_engine,
+                provider_id=normalized_provider or canonical_provider,
+                model=None,
+                model_id=None,
+                runtime_model=None,
+                requested_effort=requested_effort,
+                effective_effort=None,
+                supported_effort=["default"],
+            )
+
+        if multi_provider and normalized_provider is None:
+            raise ValueError(f"provider_id is required for multi-provider engine '{normalized_engine}'")
+
+        selected_model = cast(str, parsed["model"])
+        entry = self._resolve_model_entry(
+            engine=normalized_engine,
+            models=catalog.models,
+            model=selected_model,
+            provider_id=normalized_provider,
+        )
+        if entry is None:
+            unresolved = (
+                f"{normalized_provider}/{selected_model}"
+                if normalized_provider and multi_provider
+                else selected_model
+            )
+            raise ValueError(f"Model '{unresolved}' not allowed for engine '{normalized_engine}'")
+
+        effective_provider = self._effective_provider_for_entry(
+            engine=normalized_engine,
+            entry=entry,
+            requested_provider_id=normalized_provider,
+        )
+        supported_effort = self._normalize_supported_effort(entry.supported_effort)
+        effective_effort = self._resolve_effective_effort(
+            requested_effort=requested_effort,
+            supported_effort=supported_effort,
+        )
+        model_value = self._model_value_for_entry(entry)
+        runtime_model = self._runtime_model_for_entry(
+            engine=normalized_engine,
+            entry=entry,
+            provider_id=effective_provider,
+            model=model_value,
+        )
+        return NormalizedModelSelection(
+            engine=normalized_engine,
+            provider_id=effective_provider,
+            model=model_value,
+            model_id=entry.id,
+            runtime_model=runtime_model,
+            requested_effort=requested_effort,
+            effective_effort=effective_effort,
+            supported_effort=supported_effort,
+        )
 
     def _supported_engines(self) -> List[str]:
         return supported_engines()
@@ -282,8 +357,9 @@ class ModelRegistry:
 
     def _build_manifest_models(self, engine: str, snapshot_file: Path) -> List[ModelEntry]:
         models = self._load_models(snapshot_file)
-        normalized = self._normalize_official_models(engine, models)
-        return self._merge_custom_provider_models(engine, normalized)
+        normalized = self._normalize_catalog_models(engine, models)
+        merged = self._merge_custom_provider_models(engine, normalized)
+        return self._normalize_catalog_models(engine, merged)
 
     def _load_models(self, path: Path) -> List[ModelEntry]:
         if not path.exists():
@@ -307,35 +383,31 @@ class ModelRegistry:
             )
         return models
 
-    def _normalize_official_models(self, engine: str, models: List[ModelEntry]) -> List[ModelEntry]:
-        if engine != "claude":
-            return [
-                ModelEntry(
-                    id=item.id,
-                    display_name=item.display_name,
-                    deprecated=item.deprecated,
-                    notes=item.notes,
-                    supported_effort=item.supported_effort,
-                    provider=item.provider,
-                    provider_id=item.provider_id,
-                    model=item.model,
-                    source="official",
-                )
-                for item in models
-            ]
+    def _normalize_catalog_models(self, engine: str, models: List[ModelEntry]) -> List[ModelEntry]:
+        normalized_engine = engine.strip().lower()
+        profile = self._adapter_profile(normalized_engine)
+        multi_provider = profile.provider_contract.multi_provider
+        canonical_provider = profile.provider_contract.canonical_provider_id
         normalized: List[ModelEntry] = []
         for item in models:
+            parsed_provider, parsed_model = self._split_provider_model(item.id)
+            provider = self._normalize_provider_id(item.provider_id or item.provider or parsed_provider)
+            model_name = item.model.strip() if isinstance(item.model, str) and item.model.strip() else parsed_model or item.id
+            if not multi_provider:
+                provider = canonical_provider
+            elif provider is None and normalized_engine == "claude":
+                provider = "anthropic"
             normalized.append(
                 ModelEntry(
                     id=item.id,
                     display_name=item.display_name,
                     deprecated=item.deprecated,
                     notes=item.notes,
-                    supported_effort=item.supported_effort,
-                    provider=item.provider or "anthropic",
-                    provider_id=item.provider_id,
-                    model=item.model or item.id,
-                    source="official",
+                    supported_effort=self._normalize_supported_effort(item.supported_effort),
+                    provider=provider,
+                    provider_id=provider,
+                    model=model_name,
+                    source=item.source,
                 )
             )
         return normalized
@@ -393,6 +465,7 @@ class ModelRegistry:
                         source=str(row.get("source") or "official"),
                     )
                 )
+        models = self._normalize_catalog_models(engine, models)
         status = snapshot.get("status")
         last_error = snapshot.get("last_error")
         fallback_reason: Optional[str] = None
@@ -559,29 +632,30 @@ class ModelRegistry:
         parsed = self._parse_semver(version)
         return parsed if parsed is not None else (0,)
 
-    def _parse_model_spec(self, engine: str, model_spec: str) -> Tuple[str, Optional[str]]:
-        if self._uses_runtime_probe_catalog(engine):
-            if "@" in model_spec:
-                raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
-            if not re.fullmatch(r"[^/\s]+/[^/\s]+", model_spec):
-                raise ValueError(
-                    f"Engine '{engine}' requires model format '<provider>/<model>'"
-                )
-            return model_spec, None
-        if engine == "claude":
-            if "@" in model_spec:
-                raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
-            return model_spec, None
-        if engine != "codex":
-            if "@" in model_spec:
-                raise ValueError(f"Engine '{engine}' does not support model reasoning suffix")
-            return model_spec, None
-        if "@" not in model_spec:
-            return model_spec, None
-        name, effort = model_spec.split("@", 1)
-        if not name or not effort:
-            raise ValueError("Invalid model specification format")
-        return name, effort
+    def is_multi_provider_engine(self, engine: str) -> bool:
+        profile = self._adapter_profile(engine.strip().lower())
+        return bool(profile.provider_contract.multi_provider)
+
+    def canonical_provider_id(self, engine: str) -> str | None:
+        profile = self._adapter_profile(engine.strip().lower())
+        return profile.provider_contract.canonical_provider_id
+
+    def _parse_model_selector(self, model_spec: str | None) -> Dict[str, Optional[str]]:
+        raw = model_spec.strip() if isinstance(model_spec, str) else ""
+        if not raw:
+            return {"provider": None, "model": None, "effort": None}
+        model_part = raw
+        effort: Optional[str] = None
+        if "@" in raw:
+            model_part, effort_part = raw.rsplit("@", 1)
+            if not model_part.strip() or not effort_part.strip():
+                raise ValueError("Invalid model specification format")
+            model_part = model_part.strip()
+            effort = effort_part.strip().lower()
+        provider, model_name = self._split_provider_model(model_part)
+        if provider and model_name:
+            return {"provider": provider, "model": model_name, "effort": effort}
+        return {"provider": None, "model": model_part.strip(), "effort": effort}
 
     def _find_model(self, models: List[ModelEntry], model_id: str) -> Optional[ModelEntry]:
         for entry in models:
@@ -589,25 +663,109 @@ class ModelRegistry:
                 return entry
         return None
 
-    def _default_effort_levels(self) -> List[str]:
-        return ["minimal", "low", "medium", "high", "xhigh"]
-
-    def _is_claude_custom_model_spec(self, engine: str, model_spec: str) -> bool:
-        if engine != "claude":
-            return False
-        return re.fullmatch(r"[^/\s]+/[^/\s]+", model_spec) is not None
-
-    def _provider_from_model_spec(self, model_spec: str) -> str | None:
-        if "/" not in model_spec:
+    def _resolve_model_entry(
+        self,
+        *,
+        engine: str,
+        models: List[ModelEntry],
+        model: str,
+        provider_id: str | None,
+    ) -> Optional[ModelEntry]:
+        profile = self._adapter_profile(engine)
+        if not profile.provider_contract.multi_provider:
+            for entry in models:
+                candidates = {entry.id, self._model_value_for_entry(entry)}
+                if model in candidates:
+                    return entry
             return None
-        provider, _ = model_spec.split("/", 1)
-        return provider or None
-
-    def _model_name_from_model_spec(self, model_spec: str) -> str | None:
-        if "/" not in model_spec:
+        if provider_id is None:
             return None
-        _provider, model = model_spec.split("/", 1)
-        return model or None
+        for entry in models:
+            entry_provider = self._normalize_provider_id(entry.provider_id or entry.provider)
+            if entry_provider != provider_id:
+                continue
+            if model in {entry.id, self._model_value_for_entry(entry)}:
+                return entry
+        return None
+
+    def _normalize_provider_id(self, provider_id: str | None) -> str | None:
+        if not isinstance(provider_id, str):
+            return None
+        normalized = provider_id.strip().lower()
+        return normalized or None
+
+    def _normalize_effort(self, effort: str | None) -> str:
+        if not isinstance(effort, str) or not effort.strip():
+            return "default"
+        return effort.strip().lower()
+
+    def _normalize_supported_effort(self, supported_effort: Optional[List[str]]) -> List[str]:
+        if not supported_effort:
+            return ["default"]
+        normalized: List[str] = []
+        for item in supported_effort:
+            if not isinstance(item, str):
+                continue
+            text = item.strip().lower()
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized or ["default"]
+
+    def _resolve_effective_effort(self, *, requested_effort: str, supported_effort: List[str]) -> str | None:
+        normalized_supported = self._normalize_supported_effort(supported_effort)
+        if normalized_supported == ["default"]:
+            return None
+        if requested_effort == "default":
+            if "medium" in normalized_supported:
+                return "medium"
+            return normalized_supported[0]
+        if requested_effort not in normalized_supported:
+            raise ValueError(
+                f"Reasoning effort '{requested_effort}' not supported for selected model"
+            )
+        return requested_effort
+
+    def _model_value_for_entry(self, entry: ModelEntry) -> str:
+        if isinstance(entry.model, str) and entry.model.strip():
+            return entry.model.strip()
+        _provider, parsed_model = self._split_provider_model(entry.id)
+        return parsed_model or entry.id
+
+    def _split_provider_model(self, value: str | None) -> Tuple[str | None, str | None]:
+        if not isinstance(value, str) or "/" not in value:
+            return None, None
+        provider, model = value.split("/", 1)
+        provider = provider.strip().lower()
+        model = model.strip()
+        if not provider or not model:
+            return None, None
+        return provider, model
+
+    def _effective_provider_for_entry(
+        self,
+        *,
+        engine: str,
+        entry: ModelEntry,
+        requested_provider_id: str | None,
+    ) -> str | None:
+        profile = self._adapter_profile(engine)
+        if not profile.provider_contract.multi_provider:
+            return profile.provider_contract.canonical_provider_id
+        return self._normalize_provider_id(entry.provider_id or entry.provider or requested_provider_id)
+
+    def _runtime_model_for_entry(
+        self,
+        *,
+        engine: str,
+        entry: ModelEntry,
+        provider_id: str | None,
+        model: str,
+    ) -> str | None:
+        if engine == "opencode":
+            return entry.id
+        if engine == "claude" and entry.source == "custom_provider" and provider_id:
+            return f"{provider_id}/{model}"
+        return model
 
 
 model_registry = ModelRegistry()

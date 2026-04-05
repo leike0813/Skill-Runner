@@ -65,6 +65,7 @@ def test_validate_model_codex_effort(monkeypatch):
 
     result = registry.validate_model("codex", "gpt-5.2-codex@high")
     assert result["model"] == "gpt-5.2-codex"
+    assert result["provider_id"] == "openai"
     assert result["model_reasoning_effort"] == "high"
 
 
@@ -79,15 +80,18 @@ def test_validate_model_codex_unsupported_effort(monkeypatch):
         registry.validate_model("codex", "gpt-5.1-codex-mini@xhigh")
 
 
-def test_validate_model_non_codex_rejects_suffix(monkeypatch):
+def test_validate_model_non_codex_ignores_suffix_when_effort_is_unsupported(monkeypatch):
     registry = ModelRegistry()
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
         lambda _engine: None,
     )
 
-    with pytest.raises(ValueError, match="does not support"):
-        registry.validate_model("gemini", "gemini-2.5-pro@high")
+    result = registry.validate_model("gemini", "gemini-2.5-pro@high")
+    assert result == {
+        "model": "gemini-2.5-pro",
+        "provider_id": "google",
+    }
 
 
 def test_validate_model_opencode_requires_provider_model(monkeypatch):
@@ -116,9 +120,13 @@ def test_validate_model_opencode_requires_provider_model(monkeypatch):
     )
 
     result = registry.validate_model("opencode", "openai/gpt-5")
-    assert result["model"] == "openai/gpt-5"
+    assert result == {
+        "model": "gpt-5",
+        "provider_id": "openai",
+        "runtime_model": "openai/gpt-5",
+    }
 
-    with pytest.raises(ValueError, match="provider>/<model"):
+    with pytest.raises(ValueError, match="provider_id is required"):
         registry.validate_model("opencode", "gpt-5")
 
 
@@ -229,8 +237,14 @@ def _build_models_fixture(tmp_path: Path, engine: str) -> Path:
 
 
 class _FakeAdapterProfile:
+    class _ProviderContract:
+        def __init__(self) -> None:
+            self.multi_provider = False
+            self.canonical_provider_id = "google"
+
     def __init__(self, root: Path) -> None:
         self._root = root
+        self.provider_contract = self._ProviderContract()
 
     def resolve_manifest_path(self) -> Path:
         return self._root / "manifest.json"
@@ -366,7 +380,27 @@ def test_claude_validate_model_accepts_strict_custom_provider_spec(monkeypatch):
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
         lambda _engine: None,
     )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_custom_provider_service.list_model_entries",
+        lambda engine: [
+            type(
+                "_Entry",
+                (),
+                {
+                    "id": "openrouter/qwen-3",
+                    "display_name": "openrouter/qwen-3",
+                    "provider": "openrouter",
+                    "model": "qwen-3",
+                    "source": "custom_provider",
+                },
+            )()
+        ] if engine == "claude" else [],
+    )
 
     payload = registry.validate_model("claude", "openrouter/qwen-3")
 
-    assert payload == {"model": "openrouter/qwen-3"}
+    assert payload == {
+        "model": "qwen-3",
+        "provider_id": "openrouter",
+        "runtime_model": "openrouter/qwen-3",
+    }

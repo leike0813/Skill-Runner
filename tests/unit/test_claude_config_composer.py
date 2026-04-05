@@ -59,6 +59,7 @@ def test_claude_config_composer_writes_headless_run_settings_with_run_local_sand
     assert payload["env"]["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
     assert payload["permissions"]["defaultMode"] == "bypassPermissions"
     assert payload["includeGitInstructions"] is False
+    assert payload["effortLevel"] == "high"
     assert payload["sandbox"]["enabled"] is True
     assert payload["sandbox"]["autoAllowBashIfSandboxed"] is True
     assert payload["sandbox"]["allowUnsandboxedCommands"] is True
@@ -67,7 +68,6 @@ def test_claude_config_composer_writes_headless_run_settings_with_run_local_sand
         f"//{run_dir.resolve()}",
     ]
     assert f"//{agent_home.resolve()}" in payload["sandbox"]["filesystem"]["denyWrite"]
-    assert "effort" not in payload
 
 
 def test_claude_config_composer_merges_runtime_sandbox_allowwrite_with_headless_defaults(

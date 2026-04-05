@@ -1,5 +1,9 @@
 {
   "engine": "qwen",
+  "provider_contract": {
+    "multi_provider": true,
+    "canonical_provider_id": null
+  },
   "prompt_builder": {
     "engine_key": "qwen",
     "default_template_path": "../../../assets/templates/qwen_default.j2",

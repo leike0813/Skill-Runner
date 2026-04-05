@@ -79,8 +79,9 @@ class IFlowConfigComposer:
             logger.warning("Failed to load iFlow skill defaults: %s", skill_config_resolution.path)
 
         user_overrides: dict[str, object] = {}
-        if "model" in options:
-            user_overrides["modelName"] = options["model"]
+        model_obj = options.get("runtime_model", options.get("model"))
+        if model_obj is not None:
+            user_overrides["modelName"] = model_obj
 
         runtime_engine_overrides: dict[str, object] = {}
         if isinstance(options.get("iflow_config"), dict):

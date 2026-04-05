@@ -72,8 +72,9 @@ class GeminiConfigComposer:
             logger.warning("Failed to load Gemini skill defaults: %s", skill_config_resolution.path)
 
         user_overrides: dict[str, object] = {}
-        if "model" in options:
-            user_overrides.setdefault("model", {})["name"] = options["model"]  # type: ignore[index]
+        model_obj = options.get("runtime_model", options.get("model"))
+        if model_obj is not None:
+            user_overrides.setdefault("model", {})["name"] = model_obj  # type: ignore[index]
         if "temperature" in options:
             user_overrides.setdefault("model", {})["temperature"] = float(options["temperature"])  # type: ignore[index]
         if "max_tokens" in options:

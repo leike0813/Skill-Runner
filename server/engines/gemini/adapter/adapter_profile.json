@@ -1,5 +1,9 @@
 {
   "engine": "gemini",
+  "provider_contract": {
+    "multi_provider": false,
+    "canonical_provider_id": "google"
+  },
   "prompt_builder": {
     "engine_key": "gemini",
     "default_template_path": "../../../assets/templates/gemini_default.j2",

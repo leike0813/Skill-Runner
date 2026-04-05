@@ -15,7 +15,9 @@ class OpencodeCommandBuilder:
         self._adapter = adapter
 
     def _model_args(self, options: dict[str, object]) -> list[str]:
-        model_obj = options.get("model")
+        model_obj = options.get("runtime_model")
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            model_obj = options.get("model")
         if isinstance(model_obj, str) and model_obj.strip():
             return ["--model", model_obj.strip()]
         return []

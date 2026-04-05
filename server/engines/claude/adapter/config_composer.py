@@ -194,13 +194,18 @@ class ClaudeConfigComposer:
         runtime_overrides: dict[str, object] = {}
         if isinstance(options.get("claude_config"), dict):
             runtime_overrides = dict(options["claude_config"])
-        model_obj = options.get("model")
+        model_obj = options.get("runtime_model")
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            model_obj = options.get("model")
         if isinstance(model_obj, str) and model_obj.strip():
             env_overrides = build_claude_model_env_overrides(model_obj)
             current_env = runtime_overrides.get("env")
             merged_env = dict(current_env) if isinstance(current_env, dict) else {}
             merged_env.update(env_overrides)
             runtime_overrides["env"] = merged_env
+        effort_obj = options.get("model_reasoning_effort")
+        if isinstance(effort_obj, str) and effort_obj.strip():
+            runtime_overrides["effortLevel"] = effort_obj.strip()
 
         enforced: dict[str, object] = {}
         enforced_path = self._adapter.profile.resolve_enforced_config_path()

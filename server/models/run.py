@@ -35,6 +35,7 @@ class RunCreateRequest(BaseModel):
     parameter: Dict[str, Any] = {}
     model: Optional[str] = None
     provider_id: Optional[str] = None
+    effort: Optional[str] = None
     runtime_options: Dict[str, Any] = {}
     client_metadata: ClientMetadata = Field(default_factory=ClientMetadata)
 
@@ -63,6 +64,7 @@ class TempSkillRunCreateRequest(BaseModel):
     parameter: Dict[str, Any] = {}
     model: Optional[str] = None
     provider_id: Optional[str] = None
+    effort: Optional[str] = None
     runtime_options: Dict[str, Any] = {}
     client_metadata: ClientMetadata = Field(default_factory=ClientMetadata)
 

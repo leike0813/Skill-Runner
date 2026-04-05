@@ -1,5 +1,9 @@
 {
   "engine": "claude",
+  "provider_contract": {
+    "multi_provider": true,
+    "canonical_provider_id": null
+  },
   "prompt_builder": {
     "engine_key": "claude",
     "default_template_path": "../../../assets/templates/claude_default.j2",

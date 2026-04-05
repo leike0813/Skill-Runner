@@ -45,9 +45,7 @@ from server.services.orchestration.run_result_file_fallback import (
 from server.services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
-from server.services.engine_management.provider_aware_auth import (
-    is_provider_aware_engine,
-)
+from server.services.engine_management.model_registry import model_registry
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
@@ -103,27 +101,26 @@ def _resolve_provider_id(
     request_record: Dict[str, Any] | None,
 ) -> str | None:
     normalized_engine = engine_name.strip().lower()
-    if not is_provider_aware_engine(normalized_engine):
-        return None
+    explicit_provider = None
     for candidate in _iter_request_option_candidates(
         options=options,
         request_record=request_record,
         key="provider_id",
     ):
-        provider_id = _normalize_provider_id(candidate)
-        if provider_id is not None:
-            return provider_id
-    if normalized_engine != "opencode":
+        explicit_provider = _normalize_provider_id(candidate)
+        if explicit_provider is not None:
+            break
+    if not model_registry.is_multi_provider_engine(normalized_engine):
         return None
-    for candidate in _iter_request_option_candidates(
-        options=options,
-        request_record=request_record,
-        key="model",
-    ):
-        provider_id = _provider_from_prefixed_model(candidate)
-        if provider_id is not None:
-            return provider_id
-    return None
+    try:
+        normalized = model_registry.normalize_model_selection(
+            normalized_engine,
+            model=_resolve_requested_model(options=options, request_record=request_record),
+            provider_id=explicit_provider,
+        )
+        return normalized.provider_id
+    except ValueError:
+        return explicit_provider
 
 
 def _resolve_requested_model(
@@ -149,13 +146,17 @@ def _resolve_claude_custom_model(
 ) -> str | None:
     if engine_name.strip().lower() != "claude":
         return None
+    provider_id = _resolve_provider_id(
+        engine_name=engine_name,
+        options=options,
+        request_record=request_record,
+    )
     model = _resolve_requested_model(options=options, request_record=request_record)
-    if not isinstance(model, str) or "/" not in model:
+    if not provider_id or not isinstance(model, str) or not model.strip():
         return None
-    provider_id, model_name = model.split("/", 1)
-    if not provider_id.strip() or not model_name.strip():
+    if provider_id == "anthropic":
         return None
-    return model
+    return f"{provider_id}/{model.strip()}"
 
 
 def _provider_unresolved_detail(
@@ -1086,7 +1087,7 @@ class _RunJobLifecyclePipeline:
                             pending_auth_method_selection = created_pending_payload
                         forced_failure_reason = None
                     else:
-                        if is_provider_aware_engine(engine_name) and canonical_provider_id is None:
+                        if model_registry.is_multi_provider_engine(engine_name) and canonical_provider_id is None:
                             warning_code = (
                                 "OPENCODE_PROVIDER_UNRESOLVED_FROM_MODEL"
                                 if engine_name.strip().lower() == "opencode"

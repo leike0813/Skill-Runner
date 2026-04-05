@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "engine",
+    "provider_contract",
     "prompt_builder",
     "session_codec",
     "attempt_workspace",
@@ -20,6 +21,27 @@
     "engine": {
       "type": "string",
       "enum": ["codex", "gemini", "iflow", "opencode", "claude", "qwen"]
+    },
+    "provider_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["multi_provider", "canonical_provider_id"],
+      "properties": {
+        "multi_provider": { "type": "boolean" },
+        "canonical_provider_id": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "multi_provider": { "const": false } }
+          },
+          "then": {
+            "properties": {
+              "canonical_provider_id": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
     },
     "prompt_builder": {
       "type": "object",

@@ -41,6 +41,13 @@
             <input type="hidden" id="model" name="model" value="{{ selected_model }}">
             <div class="muted">{{ t("client.run_form_model_hint", default="Models are loaded from management engine detail for selected engine.") }}</div>
         </div>
+        <div style="margin-bottom: 14px;">
+            <label for="effort"><strong>{{ t("client.run_form_effort", default="Effort") }}</strong></label><br>
+            <select id="effort" name="effort" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 200px; background:#fff;">
+                <option value="default">default</option>
+            </select>
+            <div class="muted">{{ t("client.run_form_effort_hint", default="Disabled when the selected model does not support effort selection.") }}</div>
+        </div>
 
         <div class="row">
             <div class="card" style="flex: 1 1 320px;">
@@ -137,6 +144,7 @@
     const engineModels = {{ engine_models_by_engine | tojson }};
     const selectedProvider = {{ selected_provider | tojson }};
     const selectedModel = {{ selected_model | tojson }};
+    const selectedEffort = {{ selected_effort | tojson }};
     const runSource = {{ run_source | tojson }};
     const fallbackProviders = {
         codex: "openai",
@@ -149,6 +157,7 @@
     const providerSelect = document.getElementById("provider");
     const modelSelect = document.getElementById("model_value");
     const modelHidden = document.getElementById("model");
+    const effortSelect = document.getElementById("effort");
     const noCacheCheckbox = document.getElementById("runtime__no_cache");
     const interactiveSection = document.getElementById("runtime_interactive_section");
     const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
@@ -187,6 +196,35 @@
     function normalizeRows(engine) {
         const rows = Array.isArray(engineModels[engine]) ? engineModels[engine] : [];
         return rows.filter((row) => row && typeof row.id === "string");
+    }
+
+    function supportedEffortsFromRow(row) {
+        const raw = Array.isArray(row && row.supported_effort) ? row.supported_effort : [];
+        const efforts = [];
+        for (const item of raw) {
+            const normalized = normalizeText(item).toLowerCase();
+            if (normalized && !efforts.includes(normalized)) {
+                efforts.push(normalized);
+            }
+        }
+        return efforts.length ? efforts : ["default"];
+    }
+
+    function findSelectedRow() {
+        const engine = engineSelect.value;
+        const rows = normalizeRows(engine);
+        const selectedProviderValue = providerSelect.value || "";
+        const selectedValue = modelHidden.value || "";
+        if (!selectedValue) return null;
+        for (const row of rows) {
+            const rowProvider = providerFromRow(row);
+            const rowModel = modelNameFromRow(row);
+            const rowId = normalizeText(row && row.id);
+            if (![rowModel, rowId].includes(selectedValue)) continue;
+            if (selectedProviderValue && rowProvider && rowProvider !== selectedProviderValue) continue;
+            return row;
+        }
+        return null;
     }
 
     function renderProviders() {
@@ -260,9 +298,39 @@
         modelHidden.value = modelSelect.value || "";
     }
 
+    function renderEfforts() {
+        const row = findSelectedRow();
+        const current = normalizeText(effortSelect.value || selectedEffort).toLowerCase() || "default";
+        effortSelect.innerHTML = "";
+        if (!row) {
+            const option = document.createElement("option");
+            option.value = "default";
+            option.textContent = "default";
+            effortSelect.appendChild(option);
+            effortSelect.value = "default";
+            effortSelect.disabled = true;
+            return;
+        }
+        const supported = supportedEffortsFromRow(row);
+        const choices = supported.length === 1 && supported[0] === "default" ? ["default"] : ["default", ...supported];
+        for (const effort of choices) {
+            const option = document.createElement("option");
+            option.value = effort;
+            option.textContent = effort;
+            effortSelect.appendChild(option);
+        }
+        effortSelect.disabled = supported.length === 1 && supported[0] === "default";
+        if ([...effortSelect.options].some((item) => item.value === current)) {
+            effortSelect.value = current;
+        } else {
+            effortSelect.value = "default";
+        }
+    }
+
     engineSelect.addEventListener("change", () => {
         renderProviders();
         renderModels();
+        renderEfforts();
     });
     function updateRuntimeOptionVisibility() {
         const isInteractive = executionModeSelect && executionModeSelect.value === "interactive";
@@ -287,13 +355,16 @@
     }
     providerSelect.addEventListener("change", () => {
         renderModels();
+        renderEfforts();
     });
     modelSelect.addEventListener("change", () => {
         modelHidden.value = modelSelect.value || "";
+        renderEfforts();
     });
 
     renderProviders();
     renderModels();
+    renderEfforts();
     updateRuntimeOptionVisibility();
 })();
 </script>

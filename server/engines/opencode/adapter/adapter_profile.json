@@ -1,5 +1,9 @@
 {
   "engine": "opencode",
+  "provider_contract": {
+    "multi_provider": true,
+    "canonical_provider_id": null
+  },
   "prompt_builder": {
     "engine_key": "opencode",
     "default_template_path": "../../../assets/templates/opencode_default.j2",

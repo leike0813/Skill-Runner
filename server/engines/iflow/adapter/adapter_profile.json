@@ -1,5 +1,9 @@
 {
   "engine": "iflow",
+  "provider_contract": {
+    "multi_provider": false,
+    "canonical_provider_id": "iflowcn"
+  },
   "prompt_builder": {
     "engine_key": "iflow",
     "default_template_path": "../../../assets/templates/iflow_default.j2",

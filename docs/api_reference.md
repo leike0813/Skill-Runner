@@ -585,6 +585,7 @@
   "skill_id": "demo-prime-number",
   "engine": "qwen",            // 可选: "gemini" / "codex" / "iflow" / "opencode" / "claude" / "qwen" (默认: codex)
   "provider_id": "qwen-oauth",
+  "effort": "default",
   "input": {
     "query": "some inline input payload"
   },
@@ -603,11 +604,18 @@
   - 对 `x-input-source=file`（或未声明，默认 file）的字段，值也在请求体 `input` 中显式提交，但值必须是 `uploads/` 根下相对路径（例如 `papers/a.pdf`）。
 - **参数分离**: API 请求体中的 `parameter` 字段仅用于传递 `parameter.schema.json` 中定义的数值或配置。
 - **模型字段**:
-  - provider-aware engine（当前为 `opencode`、`qwen`）推荐显式提交 `provider_id + model`。
+  - 新标准写法为 `provider_id + model + effort`。
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
-  - **Codex** 使用 `model_name@reasoning_effort` 格式（例如 `gpt-5.2-codex@high`）。
-  - **OpenCode** 旧客户端仍可使用 `provider/model` 格式（例如 `openai/gpt-5`）；新客户端推荐显式传 `provider_id=openai` 且 `model=gpt-5`。
-  - **Qwen** 的 Coding Plan provider 可能暴露同名模型；新客户端应以 `provider_id + model` 作为规范选择方式。
+  - `effort` 为空时按 `"default"` 处理。
+  - 对支持 effort 的模型，`"default"` 会映射到引擎实际生效值；通常为 `"medium"`。
+  - 对不支持 effort 的模型，`supported_effort` 固定为 `["default"]`；此时传入任何 `effort` 都不会改变行为。
+  - 单 provider 引擎（`codex`、`gemini`、`iflow`）允许 `provider_id` 为空或任意值；系统会统一收口到 canonical provider。
+  - 多 provider 引擎（`claude`、`qwen`、`opencode`）标准写法必须显式带 `provider_id`。
+  - 旧客户端仍兼容：
+    - `model="provider/model@effort"`
+    - `model="provider/model"`
+    - `model="model@effort"`
+  - 兼容仅存在于请求解析层；新客户端不应再主动拼接这些旧式字符串。
   - **iFlow 运行时默认配置（托管环境）**：若未提供 `~/.iflow/settings.json`，服务会写入最小可用默认值：
     - `selectedAuthType = "oauth-iflow"`
     - `baseUrl = "https://apis.iflow.cn/v1"`
@@ -1647,6 +1655,9 @@ iFlow OAuth 代理说明：
   "models": [
     {
       "id": "gpt-5.2-codex",
+      "provider": "openai",
+      "provider_id": "openai",
+      "model": "gpt-5.2-codex",
       "display_name": "GPT-5.2 Codex",
       "deprecated": false,
       "notes": "pinned snapshot",
@@ -1658,7 +1669,11 @@ iFlow OAuth 代理说明：
 
 说明：
 - 同一模型项结构也用于 `GET /v1/management/engines/{engine}` 的 `models[]`。
-- 新客户端应优先读取 `provider_id + model`；`id` 保留兼容语义。
+- 新客户端应优先读取 `provider_id + model + supported_effort`；`id` 保留兼容语义。
+- 单 provider 引擎的 `provider_id` 固定为 canonical provider：
+  - `codex -> openai`
+  - `gemini -> google`
+  - `iflow -> iflowcn`
 
 OpenCode 返回示例（动态探测缓存）：
 ```json
@@ -1677,7 +1692,7 @@ OpenCode 返回示例（动态探测缓存）：
       "display_name": "OpenAI GPT-5",
       "deprecated": false,
       "notes": "runtime_probe_cache",
-      "supported_effort": null
+      "supported_effort": ["default", "low", "medium", "high"]
     }
   ]
 }
@@ -1700,7 +1715,7 @@ Qwen 返回示例（静态 snapshot）：
       "display_name": "Qwen3-Coder Plus",
       "deprecated": false,
       "notes": "Alibaba Cloud Coding Plan (Global)",
-      "supported_effort": null
+      "supported_effort": ["default"]
     }
   ]
 }

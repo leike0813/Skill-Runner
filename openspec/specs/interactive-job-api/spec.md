@@ -28,23 +28,27 @@
 ### Requirement: 系统 MUST 支持任务执行模式选择
 系统 MUST 支持 `auto` 与 `interactive` 两种执行模式，并保持默认向后兼容。
 
-#### Scenario: Skill 默认 runtime options 参与 effective options 合成
-- **GIVEN** skill 在 `runner.json.runtime.default_options` 声明了默认 runtime options
+#### Scenario: run create accepts normalized provider model effort triple
 - **WHEN** 客户端调用 `POST /v1/jobs`
-- **THEN** 系统 MUST 先应用 skill 默认值，再应用请求值覆盖
-- **AND** `effective_runtime_options` 反映合成结果
+- **THEN** 请求体 SHOULD 以 `provider_id + model + effort` 传递模型选择
+- **AND** 系统 MUST 将其规范化为稳定的内部三元组
 
-#### Scenario: 请求值覆盖 skill 默认值
-- **GIVEN** skill 默认值与请求体对同一 runtime option 都有声明
-- **WHEN** 系统构建 `effective_runtime_options`
-- **THEN** 请求体值 MUST 覆盖 skill 默认值
+#### Scenario: legacy provider/model@effort remains input-compatible
+- **WHEN** 客户端仍以 `model="provider/model@effort"`、`model="provider/model"` 或 `model="model@effort"` 提交
+- **THEN** 系统 MUST 继续兼容解析
+- **AND** 兼容仅存在于请求解析层，不改变内部与对外返回的规范化字段语义
 
-#### Scenario: skill 默认值非法时忽略并告警
-- **GIVEN** `runner.json.runtime.default_options` 中存在未知键或非法值
-- **WHEN** 系统执行 runtime option 合成
-- **THEN** 系统 MUST 忽略该默认值
-- **AND** MUST 记录可观测 warning（日志 + lifecycle warning/diagnostic）
-- **AND** MUST NOT 因该默认值阻断 run
+#### Scenario: multi-provider engines reject missing provider in standard form
+- **GIVEN** 引擎为 `claude`、`qwen` 或 `opencode`
+- **WHEN** 客户端以标准三元组方式提交但缺失 `provider_id`
+- **AND** `model` 字段也不包含旧式 provider 前缀
+- **THEN** 系统 MUST 拒绝请求
+
+#### Scenario: single-provider engines ignore provider input
+- **GIVEN** 引擎为 `codex`、`gemini` 或 `iflow`
+- **WHEN** 客户端提交任意值或空值的 `provider_id`
+- **THEN** 系统 MUST 不改变行为
+- **AND** 内部 MUST 收口到该引擎的 canonical provider
 
 ### Requirement: 系统 MUST 提供待决交互查询接口
 The pending payload minimum viability MUST be guaranteed by backend-owned generation and MUST NOT depend on agent-structured ask_user output.

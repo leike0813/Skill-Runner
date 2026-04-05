@@ -98,6 +98,12 @@ class ModelCatalogProfile:
 
 
 @dataclass(frozen=True)
+class ProviderContractProfile:
+    multi_provider: bool
+    canonical_provider_id: str | None
+
+
+@dataclass(frozen=True)
 class CommandDefaultsProfile:
     start: tuple[str, ...]
     resume: tuple[str, ...]
@@ -198,6 +204,7 @@ class ParserProcessExtractProfile:
 class AdapterProfile:
     engine: str
     profile_path: Path
+    provider_contract: ProviderContractProfile
     prompt_builder: PromptBuilderProfile
     session_codec: SessionCodecProfile
     attempt_workspace: AttemptWorkspaceProfile
@@ -358,6 +365,7 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
         )
 
     prompt_raw = payload["prompt_builder"]
+    provider_contract_raw = payload["provider_contract"]
     session_raw = payload["session_codec"]
     workspace_raw = payload["attempt_workspace"]
     config_assets_raw = payload["config_assets"]
@@ -496,6 +504,14 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     return AdapterProfile(
         engine=engine,
         profile_path=profile_path,
+        provider_contract=ProviderContractProfile(
+            multi_provider=bool(provider_contract_raw["multi_provider"]),
+            canonical_provider_id=(
+                str(provider_contract_raw["canonical_provider_id"])
+                if provider_contract_raw.get("canonical_provider_id") is not None
+                else None
+            ),
+        ),
         prompt_builder=PromptBuilderProfile(
             engine_key=str(prompt_raw["engine_key"]),
             default_template_path=prompt_raw.get("default_template_path"),

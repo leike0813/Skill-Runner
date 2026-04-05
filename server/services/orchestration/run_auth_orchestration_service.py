@@ -38,15 +38,13 @@ from server.services.engine_management.engine_auth_flow_manager import engine_au
 from server.services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
+from server.services.engine_management.model_registry import model_registry
 from server.services.engine_management.auth_import_service import (
     AuthImportError,
     AuthImportValidationError,
     auth_import_service,
 )
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
-from server.services.engine_management.provider_aware_auth import (
-    is_provider_aware_engine,
-)
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.workspace_manager import workspace_manager
@@ -1756,15 +1754,14 @@ class RunAuthOrchestrationService:
             dict(current_engine_options_obj) if isinstance(current_engine_options_obj, dict) else {}
         )
         current_model = self._normalize_string(current_engine_options.get("model")) or ""
-        current_provider_id = None
-        if "/" in current_model:
-            current_provider_id = current_model.split("/", 1)[0].strip().lower()
+        current_provider_id = self._normalize_string(current_engine_options.get("provider_id"))
         providers = {
             item.provider_id: item
             for item in engine_custom_provider_service.list_providers(engine)
         }
         action = payload["action"]
         next_model = current_model
+        next_provider_id = current_provider_id
         if action == "replace_api_key":
             if current_provider_id is None or current_provider_id not in providers:
                 raise HTTPException(status_code=422, detail="current provider is not configured")
@@ -1791,6 +1788,7 @@ class RunAuthOrchestrationService:
                 base_url=current.base_url,
                 models=next_models,
             )
+            next_provider_id = updated.provider_id
             next_model = f"{updated.provider_id}/{target_model}"
         elif action == "switch_provider":
             target_provider_id = payload["provider_id"]
@@ -1808,6 +1806,7 @@ class RunAuthOrchestrationService:
                     base_url=target.base_url,
                     models=next_models,
                 )
+            next_provider_id = target.provider_id
             next_model = f"{target.provider_id}/{target_model}"
         elif action == "configure_provider":
             created = engine_custom_provider_service.upsert_provider(
@@ -1817,11 +1816,20 @@ class RunAuthOrchestrationService:
                 base_url=payload["base_url"],
                 models=[payload["model"]],
             )
+            next_provider_id = created.provider_id
             next_model = f"{created.provider_id}/{payload['model']}"
         else:
             raise HTTPException(status_code=422, detail="unsupported custom provider action")
         if next_model:
-            current_engine_options["model"] = next_model
+            if "/" in next_model:
+                provider_part, model_part = next_model.split("/", 1)
+                current_engine_options["provider_id"] = next_provider_id or provider_part
+                current_engine_options["model"] = model_part
+                current_engine_options["runtime_model"] = next_model
+            else:
+                current_engine_options["model"] = next_model
+                if next_provider_id:
+                    current_engine_options["provider_id"] = next_provider_id
             await maybe_await(run_store_backend.update_request_engine_options(request_id, current_engine_options))
 
     def _parse_custom_provider_submission(self, raw: str) -> dict[str, str]:
@@ -2188,7 +2196,7 @@ class RunAuthOrchestrationService:
         canonical_provider_id: str | None,
     ) -> str | None:
         normalized_engine = engine_name.strip().lower()
-        if is_provider_aware_engine(normalized_engine):
+        if model_registry.is_multi_provider_engine(normalized_engine):
             return (
                 self._normalize_provider_id(canonical_provider_id)
                 or self._normalize_provider_id(auth_detection.provider_id)

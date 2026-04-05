@@ -114,8 +114,8 @@ class OpencodeModelCatalog:
             last_error=seed_fallback_error,
         )
 
-    def _split_provider_model(self, value: str) -> tuple[str | None, str | None]:
-        if "/" not in value:
+    def _split_provider_model(self, value: str | None) -> tuple[str | None, str | None]:
+        if not isinstance(value, str) or "/" not in value:
             return None, None
         provider, model = value.split("/", 1)
         provider = provider.strip()
@@ -213,6 +213,7 @@ class OpencodeModelCatalog:
         proc = await asyncio.create_subprocess_exec(
             str(command),
             "models",
+            "--verbose",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -230,24 +231,101 @@ class OpencodeModelCatalog:
             raise RuntimeError(
                 f"opencode models exited with code {proc.returncode}: {(stderr_text or stdout_text).strip()}"
             )
+        return self._parse_verbose_models(stdout_text)
 
-        dedup: Dict[str, Dict[str, Any]] = {}
-        for raw_line in stdout_text.splitlines():
-            line = raw_line.strip()
-            if not line:
+    def _extract_verbose_rows(self, payload: Any) -> List[Dict[str, Any]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            models_obj = payload.get("models")
+            if isinstance(models_obj, list):
+                return [item for item in models_obj if isinstance(item, dict)]
+        return []
+
+    def _extract_verbose_labeled_rows(self, stdout_text: str) -> List[tuple[str | None, Dict[str, Any]]]:
+        try:
+            payload = json.loads(stdout_text)
+        except json.JSONDecodeError:
+            return self._extract_verbose_block_rows(stdout_text)
+        return [(None, row) for row in self._extract_verbose_rows(payload)]
+
+    def _extract_verbose_block_rows(self, stdout_text: str) -> List[tuple[str | None, Dict[str, Any]]]:
+        decoder = json.JSONDecoder()
+        rows: List[tuple[str | None, Dict[str, Any]]] = []
+        position = 0
+        text = stdout_text
+        text_len = len(text)
+        while position < text_len:
+            while position < text_len and text[position].isspace():
+                position += 1
+            if position >= text_len:
+                break
+            label: str | None = None
+            if text[position] != "{":
+                line_end = text.find("\n", position)
+                if line_end == -1:
+                    break
+                candidate = text[position:line_end].strip()
+                position = line_end + 1
+                if candidate:
+                    label = candidate
+                while position < text_len and text[position].isspace():
+                    position += 1
+            if position >= text_len or text[position] != "{":
                 continue
-            provider, model = self._split_provider_model(line)
+            try:
+                payload, next_position = decoder.raw_decode(text, position)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("opencode models --verbose returned malformed object blocks") from exc
+            if isinstance(payload, dict):
+                rows.append((label, payload))
+            position = next_position
+        return rows
+
+    def _supported_effort_from_variants(self, variants_obj: Any) -> List[str]:
+        if not isinstance(variants_obj, dict):
+            return ["default"]
+        efforts: List[str] = []
+        for key in variants_obj.keys():
+            if not isinstance(key, str):
+                continue
+            normalized = key.strip().lower()
+            if normalized and normalized not in efforts:
+                efforts.append(normalized)
+        return efforts or ["default"]
+
+    def _parse_verbose_models(self, stdout_text: str) -> List[Dict[str, Any]]:
+        dedup: Dict[str, Dict[str, Any]] = {}
+        labeled_rows = self._extract_verbose_labeled_rows(stdout_text)
+        if not labeled_rows:
+            raise RuntimeError("opencode models --verbose did not return parseable model data")
+        for label, row in labeled_rows:
+            row_id_obj = row.get("id")
+            short_id = row_id_obj.strip() if isinstance(row_id_obj, str) and row_id_obj.strip() else ""
+            provider_obj = row.get("provider")
+            provider = provider_obj.strip() if isinstance(provider_obj, str) and provider_obj.strip() else None
+            provider_id_obj = row.get("providerID")
+            if provider is None and isinstance(provider_id_obj, str) and provider_id_obj.strip():
+                provider = provider_id_obj.strip()
+            model_obj = row.get("model")
+            model = model_obj.strip() if isinstance(model_obj, str) and model_obj.strip() else None
+            parsed_provider, parsed_model = self._split_provider_model(label)
+            if parsed_model is None:
+                parsed_provider, parsed_model = self._split_provider_model(short_id)
+            provider = provider or parsed_provider
+            model = model or parsed_model or short_id
             if not provider or not model:
                 continue
-            model_id = f"{provider}/{model}"
-            dedup[model_id] = {
-                "id": model_id,
+            canonical_id = label.strip() if isinstance(label, str) and label.strip() else f"{provider}/{model}"
+            dedup[canonical_id] = {
+                "id": canonical_id,
                 "provider": provider,
+                "provider_id": provider,
                 "model": model,
-                "display_name": None,
-                "deprecated": False,
+                "display_name": row.get("name") or row.get("display_name"),
+                "deprecated": bool(row.get("deprecated", False)),
                 "notes": "runtime_probe_cache",
-                "supported_effort": None,
+                "supported_effort": self._supported_effort_from_variants(row.get("variants")),
             }
         return [dedup[key] for key in sorted(dedup.keys())]
 

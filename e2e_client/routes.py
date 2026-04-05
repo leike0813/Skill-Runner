@@ -239,6 +239,7 @@ async def submit_run(
                     "provider": submission["provider_for_form"],
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
+                    "effort": submission["effort_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
                     "input": submission["combined_input"],
                     "parameter": submission["parameter_input"],
@@ -258,6 +259,8 @@ async def submit_run(
         create_payload["provider_id"] = submission["selected_provider_id"]
     if submission["selected_model"]:
         create_payload["model"] = submission["selected_model"]
+    if submission["selected_effort"]:
+        create_payload["effort"] = submission["selected_effort"]
 
     try:
         create_response = await backend.create_run(create_payload)
@@ -323,6 +326,7 @@ async def submit_fixture_run(
                     "provider": submission["provider_for_form"],
                     "execution_mode": submission["execution_mode_for_form"],
                     "model": submission["model_for_form"],
+                    "effort": submission["effort_for_form"],
                     "runtime_options": submission["submitted_runtime_options"],
                     "input": submission["combined_input"],
                     "parameter": submission["parameter_input"],
@@ -341,6 +345,8 @@ async def submit_fixture_run(
         create_payload["provider_id"] = submission["selected_provider_id"]
     if submission["selected_model"]:
         create_payload["model"] = submission["selected_model"]
+    if submission["selected_effort"]:
+        create_payload["effort"] = submission["selected_effort"]
 
     try:
         create_response = await backend.create_temp_run(create_payload)
@@ -893,6 +899,7 @@ async def _collect_run_submission(
     submitted_provider = str(run_form.get("provider", "") or "").strip()
     submitted_model = str(run_form.get("model", "") or "").strip()
     submitted_model_value = str(run_form.get("model_value", "") or "").strip()
+    submitted_effort = str(run_form.get("effort", "") or "").strip().lower()
     submitted_runtime_options = _collect_submitted_runtime_options(run_form)
 
     engine = _resolve_engine(submitted_engine, detail)
@@ -908,6 +915,12 @@ async def _collect_run_submission(
     selected_model, selected_provider_id, model_error = _resolve_model_selection(
         selected=submitted_model,
         selected_provider=submitted_provider,
+        rows=engine_models_by_engine.get(engine, []),
+    )
+    selected_effort, effort_for_form, effort_error = _resolve_effort_selection(
+        selected_effort=submitted_effort,
+        selected_model=selected_model,
+        selected_provider=selected_provider_id or submitted_provider,
         rows=engine_models_by_engine.get(engine, []),
     )
     provider_for_form = (
@@ -954,6 +967,8 @@ async def _collect_run_submission(
         errors.append(mode_error)
     if model_error:
         errors.append(model_error)
+    if effort_error:
+        errors.append(effort_error)
     return {
         "errors": errors,
         "engine": engine,
@@ -964,6 +979,8 @@ async def _collect_run_submission(
         "execution_mode_for_form": execution_mode if not mode_error else submitted_execution_mode,
         "selected_model": selected_model,
         "model_for_form": selected_model if not model_error else submitted_model,
+        "selected_effort": selected_effort,
+        "effort_for_form": effort_for_form,
         "runtime_options": runtime_options,
         "submitted_runtime_options": submitted_runtime_options,
         "inline_input": inline_input,
@@ -1238,6 +1255,7 @@ def _build_run_form_context(
     if not selected_execution_mode and execution_modes:
         selected_execution_mode = execution_modes[0]
     selected_model = str(submitted.get("model") or "")
+    selected_effort = str(submitted.get("effort") or "")
     submitted_provider = str(submitted.get("provider") or "")
     selected_provider = submitted_provider or _derive_provider_from_model_selection(
         selected_model,
@@ -1271,6 +1289,7 @@ def _build_run_form_context(
         "selected_provider": selected_provider,
         "selected_execution_mode": selected_execution_mode,
         "selected_model": selected_model,
+        "selected_effort": selected_effort,
         "submitted_runtime_options": submitted_runtime_options,
         "submitted_input": submitted.get("input", {}),
         "submitted_parameter": submitted.get("parameter", {}),
@@ -1529,6 +1548,42 @@ def _model_value_from_row(row: Mapping[str, Any]) -> str:
     return parsed_model if parsed_model and parsed_model != row_id else row_id
 
 
+def _supported_effort_from_row(row: Mapping[str, Any]) -> list[str]:
+    raw = row.get("supported_effort")
+    if not isinstance(raw, list):
+        return ["default"]
+    efforts: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip().lower()
+        if normalized and normalized not in efforts:
+            efforts.append(normalized)
+    return efforts or ["default"]
+
+
+def _find_catalog_row(
+    *,
+    selected_model: str,
+    selected_provider: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    model_text = selected_model.strip()
+    provider_text = selected_provider.strip()
+    if not model_text:
+        return None
+    for row in rows:
+        row_provider = _provider_from_model_row(row)
+        row_model = _model_value_from_row(row)
+        row_id = _normalize_catalog_string(row.get("id"))
+        if model_text not in {row_model, row_id}:
+            continue
+        if provider_text and row_provider and row_provider != provider_text:
+            continue
+        return row
+    return None
+
+
 def _resolve_model_selection(
     *,
     selected: str,
@@ -1564,6 +1619,31 @@ def _resolve_model_selection(
         return model_value, provider_id or selected_provider_text, None
 
     return selected_text, selected_provider_text, f"model '{selected_text}' is not available for selected engine"
+
+
+def _resolve_effort_selection(
+    *,
+    selected_effort: str,
+    selected_model: str,
+    selected_provider: str,
+    rows: list[dict[str, Any]],
+) -> tuple[str, str, str | None]:
+    row = _find_catalog_row(
+        selected_model=selected_model,
+        selected_provider=selected_provider,
+        rows=rows,
+    )
+    if row is None:
+        return "", "default", None
+    supported_effort = _supported_effort_from_row(row)
+    if supported_effort == ["default"]:
+        return "default", "default", None
+    requested = selected_effort.strip().lower() if isinstance(selected_effort, str) else ""
+    if not requested:
+        return "default", "default", None
+    if requested == "default" or requested in supported_effort:
+        return requested, requested, None
+    return "default", requested, f"effort '{requested}' is not available for selected model"
 
 
 def _derive_provider_from_model_selection(

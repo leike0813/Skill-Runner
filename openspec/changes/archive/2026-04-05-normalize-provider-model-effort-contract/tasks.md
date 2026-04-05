@@ -1,0 +1,9 @@
+- [x] 1. 在 adapter profile schema 与 profile loader 中增加 `multi_provider` / `canonical_provider_id`
+- [x] 2. 为 `codex/gemini/iflow/claude/qwen/opencode` 的 adapter profile 补齐 provider contract
+- [x] 3. 在共享层实现 `provider_id + model + effort` 规范化，并兼容旧式 `provider/model@effort`
+- [x] 4. 更新 run 创建入口与 lifecycle/provider resolution，统一消费规范化结果
+- [x] 5. 让 `effort` 真正写入支持该能力的引擎 run-dir 配置
+- [x] 6. 将 `opencode` runtime probe 改为 `opencode models --verbose`，从 `variants` 提取 `supported_effort`
+- [x] 7. 更新模型列表接口输出，统一返回 `provider_id`、`model`、`supported_effort`
+- [x] 8. 为 E2E run form 增加 provider/model/effort 三级联动，unsupported effort 下拉禁用但不隐藏
+- [x] 9. 更新 API reference 与测试，覆盖新标准与旧式兼容

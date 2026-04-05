@@ -476,6 +476,7 @@ class FakeBackendOpencode(FakeBackend):
                     "provider": "openai",
                     "model": "gpt-5",
                     "display_name": "OpenAI GPT-5",
+                    "supported_effort": ["low", "medium", "high"],
                 },
                 {
                     "id": "anthropic/claude-sonnet-4.5",
@@ -483,6 +484,7 @@ class FakeBackendOpencode(FakeBackend):
                     "provider": "anthropic",
                     "model": "claude-sonnet-4.5",
                     "display_name": "Claude Sonnet 4.5",
+                    "supported_effort": ["default"],
                 },
             ],
         }
@@ -512,6 +514,7 @@ class FakeBackendQwen(FakeBackend):
                     "provider": "qwen-oauth",
                     "model": "coder-model",
                     "display_name": "Qwen OAuth Coder",
+                    "supported_effort": ["default"],
                 },
                 {
                     "id": "qwen3-coder-plus",
@@ -519,6 +522,7 @@ class FakeBackendQwen(FakeBackend):
                     "provider": "coding-plan-global",
                     "model": "qwen3-coder-plus",
                     "display_name": "Qwen3 Coder Plus",
+                    "supported_effort": ["default"],
                 },
             ],
         }
@@ -627,6 +631,8 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert "内联输入" in run_form.text
         assert "执行模式" in run_form.text
         assert "模型" in run_form.text
+        assert "Effort" in run_form.text
+        assert 'name="effort"' in run_form.text
         assert 'name="runtime__hard_timeout_seconds"' in run_form.text
         assert 'type="number"' in run_form.text
         assert 'min="0"' in run_form.text
@@ -655,6 +661,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert create.headers.get("location") == "/runs/req-e2e-1"
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
         assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
+        assert fake_backend.create_payloads[-1]["effort"] == "default"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
         assert fake_backend.create_payloads[-1]["runtime_options"]["hard_timeout_seconds"] == 1800
         assert fake_backend.create_payloads[-1]["input"]["input_file"] == "input_file/input.txt"
@@ -1010,6 +1017,7 @@ async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path
         assert run_form.status_code == 200
         assert "Provider" in run_form.text
         assert "Model" in run_form.text
+        assert "Effort" in run_form.text
         assert "openai" in run_form.text
 
         create = await _request(
@@ -1020,6 +1028,7 @@ async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path
                 "engine": "opencode",
                 "provider": "openai",
                 "model_value": "gpt-5",
+                "effort": "high",
                 "execution_mode": "auto",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
@@ -1034,6 +1043,7 @@ async def test_e2e_example_client_opencode_provider_model_payload(tmp_path: Path
         assert fake_backend.create_payloads[-1]["engine"] == "opencode"
         assert fake_backend.create_payloads[-1]["provider_id"] == "openai"
         assert fake_backend.create_payloads[-1]["model"] == "gpt-5"
+        assert fake_backend.create_payloads[-1]["effort"] == "high"
     finally:
         app.dependency_overrides.clear()
 
@@ -1048,6 +1058,7 @@ async def test_e2e_example_client_qwen_provider_model_payload(tmp_path: Path):
         assert run_form.status_code == 200
         assert "qwen-oauth" in run_form.text
         assert "coder-model" in run_form.text
+        assert "Effort" in run_form.text
 
         create = await _request(
             app,
@@ -1057,6 +1068,7 @@ async def test_e2e_example_client_qwen_provider_model_payload(tmp_path: Path):
                 "engine": "qwen",
                 "provider": "qwen-oauth",
                 "model_value": "coder-model",
+                "effort": "default",
                 "execution_mode": "auto",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
@@ -1071,6 +1083,7 @@ async def test_e2e_example_client_qwen_provider_model_payload(tmp_path: Path):
         assert fake_backend.create_payloads[-1]["engine"] == "qwen"
         assert fake_backend.create_payloads[-1]["provider_id"] == "qwen-oauth"
         assert fake_backend.create_payloads[-1]["model"] == "coder-model"
+        assert fake_backend.create_payloads[-1]["effort"] == "default"
     finally:
         app.dependency_overrides.clear()
 
