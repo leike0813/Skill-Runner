@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.5.0-blue?style=flat-square" alt="Version" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
   <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner は、成熟した AI エージェント CLI ツール — **Codex**、**Gemini CLI**、**iFlow CLI**、**OpenCode** — を統一された Skill プロトコルで包み、決定論的な実行、構造化された成果物管理、内蔵 Web 管理 UI を提供します。
+Skill Runner は、成熟した AI エージェント CLI ツール — **Codex**、**Gemini CLI**、**iFlow CLI**、**OpenCode**、**Claude Code** と **Qwen** — を統一された Skill プロトコルで包み、決定論的な実行、構造化された成果物管理、内蔵 Web 管理 UI を提供します。
 
 ## ✨ ハイライト
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 プラグイン型スキル</strong><br/>ドロップイン型スキルパッケージ<br/><sub>スキーマ駆動の入出力</sub></td>
-<td align="center" width="25%"><strong>🤖 マルチエンジン</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>統一アダプタプロトコル</sub></td>
+<td align="center" width="25%"><strong>🤖 マルチエンジン</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>統一アダプタプロトコル</sub></td>
 <td align="center" width="25%"><strong>🔄 デュアルモード</strong><br/>自動 &amp; 対話型実行<br/><sub>マルチターン会話対応</sub></td>
 <td align="center" width="25%"><strong>📦 構造化出力</strong><br/>JSON + 成果物 + バンドル<br/><sub>コントラクト駆動の分離実行</sub></td>
 </tr>
@@ -87,15 +87,15 @@ mkdir -p data
 docker compose up -d --build
 ```
 
-- **API**: http://localhost:8000/v1
-- **管理 UI**: http://localhost:8000/ui
+- **API**: http://localhost:9813/v1
+- **管理 UI**: http://localhost:9813/ui
 - Docker Compose はデフォルトでユーザー skills 用に bind mount `./skills:/app/skills` を使用します。
 - イメージ内蔵 skills は `/app/skills_builtin` に同梱され、このマウントでは上書きされません。
 
 または単独で実行：
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   leike0813/skill-runner:latest
@@ -145,7 +145,7 @@ docker run --rm -p 8000:8000 -p 17681:17681 \
 #### UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
@@ -226,10 +226,10 @@ docker exec -it <container_id> /bin/bash
 
 ```bash
 # 利用可能なスキルの一覧
-curl -sS http://localhost:8000/v1/skills
+curl -sS http://localhost:9813/v1/skills
 
 # ジョブの作成
-curl -sS -X POST http://localhost:8000/v1/jobs \
+curl -sS -X POST http://localhost:9813/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
@@ -239,7 +239,7 @@ curl -sS -X POST http://localhost:8000/v1/jobs \
   }'
 
 # 結果の取得
-curl -sS http://localhost:8000/v1/jobs/<request_id>/result
+curl -sS http://localhost:9813/v1/jobs/<request_id>/result
 ```
 
 ### フロントエンドの構築
@@ -281,6 +281,8 @@ graph TD
         Orchestrator --> Gemini[Gemini Adapter]
         Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
+        Orchestrator --> ClaudeCode[Claude Code Adapter]
+        Orchestrator --> Qwen[Qwen Adapter]
     end
 
     subgraph ストレージ
@@ -293,6 +295,8 @@ graph TD
     Gemini --> GeminiCLI[Gemini CLI]
     IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
+    ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
+    Qwen --> QwenCLI[Qwen CLI]
 ```
 
 **実行フロー**: `POST /v1/jobs` → 入力アップロード → エンジン実行 → 出力検証 → `GET /v1/jobs/{id}/result`
@@ -305,6 +309,8 @@ graph TD
 | **Gemini CLI** | `@google/gemini-cli` |
 | **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
+| **Claude Code** | `@anthropic-ai/claude-code` |
+| **Qwen** | `@qwen-code/qwen-cli` |
 
 > すべてのエンジンが **Auto** と **Interactive** の両方の実行モードをサポートしています。
 

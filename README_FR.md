@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.5.0-blue?style=flat-square" alt="Version" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
   <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner encapsule des outils CLI d'agents IA matures — **Codex**, **Gemini CLI**, **iFlow CLI** et **OpenCode** — derrière un protocole Skill unifié, offrant une exécution déterministe, une gestion structurée des artefacts et une interface d'administration web intégrée.
+Skill Runner encapsule des outils CLI d'agents IA matures — **Codex**, **Gemini CLI**, **iFlow CLI**, **OpenCode**, **Claude Code** et **Qwen** — derrière un protocole Skill unifié, offrant une exécution déterministe, une gestion structurée des artefacts et une interface d'administration web intégrée.
 
 ## ✨ Points Forts
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 Skills modulaires</strong><br/>Packages plug-and-play<br/><sub>E/S validées par schéma</sub></td>
-<td align="center" width="25%"><strong>🤖 Multi-moteur</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>Protocole d'adaptation unifié</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-moteur</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>Protocole d'adaptation unifié</sub></td>
 <td align="center" width="25%"><strong>🔄 Double mode</strong><br/>Automatique &amp; Interactif<br/><sub>Conversations multi-tours</sub></td>
 <td align="center" width="25%"><strong>📦 Sortie structurée</strong><br/>JSON + artefacts + bundle<br/><sub>Exécutions isolées par contrat</sub></td>
 </tr>
@@ -87,15 +87,15 @@ mkdir -p data
 docker compose up -d --build
 ```
 
-- **API** : http://localhost:8000/v1
-- **Interface d'admin** : http://localhost:8000/ui
+- **API** : http://localhost:9813/v1
+- **Interface d'admin** : http://localhost:9813/ui
 - Docker Compose utilise par défaut le bind mount `./skills:/app/skills` pour les skills utilisateur.
 - Les skills intégrés de l'image sont fournis sous `/app/skills_builtin` et ne sont pas écrasés par ce chemin.
 
 Ou exécution indépendante :
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   leike0813/skill-runner:latest
@@ -145,7 +145,7 @@ Entrée officielle du harness en déploiement conteneurisé :
 #### Authentification UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
@@ -226,10 +226,10 @@ Le service valide les fichiers envoyés puis les écrit automatiquement dans les
 
 ```bash
 # Lister les skills disponibles
-curl -sS http://localhost:8000/v1/skills
+curl -sS http://localhost:9813/v1/skills
 
 # Créer une tâche
-curl -sS -X POST http://localhost:8000/v1/jobs \
+curl -sS -X POST http://localhost:9813/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
@@ -239,7 +239,7 @@ curl -sS -X POST http://localhost:8000/v1/jobs \
   }'
 
 # Obtenir les résultats
-curl -sS http://localhost:8000/v1/jobs/<request_id>/result
+curl -sS http://localhost:9813/v1/jobs/<request_id>/result
 ```
 
 ### Construire un Frontend
@@ -281,6 +281,8 @@ graph TD
         Orchestrator --> Gemini[Gemini Adapter]
         Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
+        Orchestrator --> ClaudeCode[Claude Code Adapter]
+        Orchestrator --> Qwen[Qwen Adapter]
     end
 
     subgraph Stockage
@@ -293,6 +295,8 @@ graph TD
     Gemini --> GeminiCLI[Gemini CLI]
     IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
+    ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
+    Qwen --> QwenCLI[Qwen CLI]
 ```
 
 **Flux d'exécution** : `POST /v1/jobs` → téléversement → exécution moteur → validation → `GET /v1/jobs/{id}/result`
@@ -305,6 +309,8 @@ graph TD
 | **Gemini CLI** | `@google/gemini-cli` |
 | **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
+| **Claude Code** | `@anthropic-ai/claude-code` |
+| **Qwen** | `@qwen-code/qwen-cli` |
 
 > Tous les moteurs supportent les modes d'exécution **Auto** et **Interactif**.
 

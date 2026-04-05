@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.5.0-blue?style=flat-square" alt="Version" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
   <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner 将成熟的 AI Agent CLI 工具 — **Codex**、**Gemini CLI**、**iFlow CLI** 与 **OpenCode** — 统一封装在标准化的 Skill 协议之下，提供确定性执行、结构化产物管理和内置 Web 管理界面。
+Skill Runner 将成熟的 AI Agent CLI 工具 — **Codex**、**Gemini CLI**、**iFlow CLI**、**OpenCode**、**Claude Code** 与 **Qwen** — 统一封装在标准化的 Skill 协议之下，提供确定性执行、结构化产物管理和内置 Web 管理界面。
 
 ## ✨ 核心亮点
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 可插拔技能</strong><br/>即插即用的技能包<br/><sub>Schema 驱动的输入输出</sub></td>
-<td align="center" width="25%"><strong>🤖 多引擎</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>统一适配协议</sub></td>
+<td align="center" width="25%"><strong>🤖 多引擎</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>统一适配协议</sub></td>
 <td align="center" width="25%"><strong>🔄 双模式</strong><br/>全自动 &amp; 交互式执行<br/><sub>支持多轮对话</sub></td>
 <td align="center" width="25%"><strong>📦 结构化输出</strong><br/>JSON + 产物 + Bundle<br/><sub>隔离的合同驱动执行</sub></td>
 </tr>
@@ -87,15 +87,15 @@ mkdir -p data
 docker compose up -d --build
 ```
 
-- **API 地址**：http://localhost:8000/v1
-- **管理界面**：http://localhost:8000/ui
+- **API 地址**：http://localhost:9813/v1
+- **管理界面**：http://localhost:9813/ui
 - Docker Compose 默认使用 bind mount：`./skills:/app/skills`（用户 skills 目录）。
 - 镜像内建 skills 固定在 `/app/skills_builtin`，不受该挂载路径覆盖。
 
 或独立运行：
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   leike0813/skill-runner:latest
@@ -145,7 +145,7 @@ docker run --rm -p 8000:8000 -p 17681:17681 \
 #### UI Basic Auth
 
 ```bash
-docker run --rm -p 8000:8000 -p 17681:17681 \
+docker run --rm -p 9813:9813 -p 17681:17681 \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \
   -e UI_BASIC_AUTH_ENABLED=true \
@@ -226,10 +226,10 @@ docker exec -it <container_id> /bin/bash
 
 ```bash
 # 列出可用 Skill
-curl -sS http://localhost:8000/v1/skills
+curl -sS http://localhost:9813/v1/skills
 
 # 创建任务
-curl -sS -X POST http://localhost:8000/v1/jobs \
+curl -sS -X POST http://localhost:9813/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "skill_id": "demo-bible-verse",
@@ -239,7 +239,7 @@ curl -sS -X POST http://localhost:8000/v1/jobs \
   }'
 
 # 获取结果
-curl -sS http://localhost:8000/v1/jobs/<request_id>/result
+curl -sS http://localhost:9813/v1/jobs/<request_id>/result
 ```
 
 ### 构建前端
@@ -281,6 +281,8 @@ graph TD
         Orchestrator --> Gemini[Gemini Adapter]
         Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
+        Orchestrator --> ClaudeCode[Claude Code Adapter]
+        Orchestrator --> Qwen[Qwen Adapter]
     end
 
     subgraph 存储层
@@ -293,6 +295,8 @@ graph TD
     Gemini --> GeminiCLI[Gemini CLI]
     IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
+    ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
+    Qwen --> QwenCLI[Qwen CLI]
 ```
 
 **执行流程**：`POST /v1/jobs` → 上传输入 → 引擎执行 → 输出校验 → `GET /v1/jobs/{id}/result`
@@ -305,6 +309,8 @@ graph TD
 | **Gemini CLI** | `@google/gemini-cli` |
 | **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
+| **Claude Code** | `@anthropic-ai/claude-code` |
+| **Qwen** | `@qwen-code/qwen-cli` |
 
 > 所有引擎均支持 **Auto** 和 **Interactive** 两种执行模式。
 

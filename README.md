@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue?style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/leike0813/Skill-Runner/releases"><img src="https://img.shields.io/badge/version-0.5.0-blue?style=flat-square" alt="Version" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.11-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
   <a href="https://hub.docker.com/r/leike0813/skill-runner"><img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **iFlow CLI**, and **OpenCode** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
+Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **iFlow CLI**, **OpenCode**, **Claude Code** and **Qwen** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
 
 ## ✨ Highlights
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 Pluggable Skills</strong><br/>Drop-in skill packages<br/><sub>Schema-validated I/O</sub></td>
-<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · iFlow · OpenCode<br/><sub>Unified adapter protocol</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>Unified adapter protocol</sub></td>
 <td align="center" width="25%"><strong>🔄 Dual Mode</strong><br/>Auto &amp; Interactive execution<br/><sub>Multi-turn conversations</sub></td>
 <td align="center" width="25%"><strong>📦 Structured Output</strong><br/>JSON + artifacts + bundle<br/><sub>Isolated, contract-driven runs</sub></td>
 </tr>
@@ -320,6 +320,8 @@ graph TD
         Orchestrator --> Gemini[Gemini Adapter]
         Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
+        Orchestrator --> ClaudeCode[Claude Code Adapter]
+        Orchestrator --> Qwen[Qwen Adapter]
     end
 
     subgraph Storage
@@ -332,6 +334,8 @@ graph TD
     Gemini --> GeminiCLI[Gemini CLI]
     IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
+    ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
+    Qwen --> QwenCLI[Qwen CLI]
 ```
 
 **Execution Flow**: `POST /v1/jobs` → input upload → engine execution → output validation → `GET /v1/jobs/{id}/result`
@@ -344,6 +348,8 @@ graph TD
 | **Gemini CLI** | `@google/gemini-cli` |
 | **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
+| **Claude Code** | `@anthropic-ai/claude-code` |
+| **Qwen** | `@qwen-code/qwen-cli` |
 
 > All engines support both **Auto** and **Interactive** execution modes.
 
