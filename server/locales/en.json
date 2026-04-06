@@ -326,7 +326,7 @@
       "status_waiting_user": "Waiting for user action",
       "subtitle": "View cached engine versions, install missing engines, trigger upgrades, and manage model snapshots.",
       "custom_providers_title": "Custom Providers",
-      "custom_providers_hint": "Manage engine-scoped third-party provider configuration. Full CRUD is currently only available on this page.",
+      "custom_providers_hint": "Manage engine-scoped third-party provider configuration. Full CRUD is currently only available on this page. (Currently only effective for Claude Code; OpenCode uses the native Provider configuration method.)",
       "custom_providers_engine": "Engine",
       "custom_providers_provider_id": "Provider ID",
       "custom_providers_api_key": "API Key",

@@ -317,7 +317,7 @@
       "status_waiting_user": "ユーザー操作待ち",
       "subtitle": "キャッシュされた engine バージョンを確認し、未インストールの engine を導入し、アップグレードの実行とモデルスナップショットの管理を行います。",
       "custom_providers_title": "カスタム Provider",
-      "custom_providers_hint": "エンジン単位のサードパーティ Provider 設定を管理します。完全な CRUD は現在このページのみで利用できます。",
+      "custom_providers_hint": "エンジン単位のサードパーティ Provider 設定を管理します。完全な CRUD は現在このページのみで利用できます。(現在は Claude Code にのみ有効で、OpenCode はネイティブ Provider の設定方法を採用しています。)",
       "custom_providers_engine": "エンジン",
       "custom_providers_provider_id": "Provider ID",
       "custom_providers_api_key": "API キー",

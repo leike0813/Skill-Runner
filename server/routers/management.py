@@ -77,6 +77,22 @@ install_runtime_protocol_ports()
 install_runtime_observability_ports()
 
 
+def _refresh_engine_models_after_custom_provider_mutation(engine: str) -> None:
+    try:
+        model_registry.refresh(engine)
+    except (ValueError, RuntimeError, OSError) as exc:
+        logger.exception(
+            "management.custom_provider model refresh fallback",
+            extra={
+                "component": "router.management",
+                "action": "custom_provider_model_refresh",
+                "engine": engine,
+                "error_type": type(exc).__name__,
+                "fallback": "keep_previous_model_registry_cache",
+            },
+        )
+
+
 def _build_system_settings_response() -> ManagementSystemSettingsResponse:
     logging_payload = get_logging_settings_payload()
     logging_settings = ManagementLoggingSettingsResponse.model_validate(logging_payload)
@@ -380,6 +396,7 @@ async def upsert_management_engine_custom_provider(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    _refresh_engine_models_after_custom_provider_mutation(engine)
     return ManagementEngineCustomProvider(
         provider_id=item.provider_id,
         api_key=item.api_key,
@@ -397,6 +414,7 @@ async def delete_management_engine_custom_provider(engine: str, provider_id: str
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    _refresh_engine_models_after_custom_provider_mutation(engine)
     return {"engine": engine, "provider_id": provider_id.strip().lower(), "deleted": deleted}
 
 

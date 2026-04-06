@@ -183,6 +183,11 @@ async def test_management_engine_custom_provider_crud(monkeypatch):
         "server.routers.management.engine_custom_provider_service.delete_provider",
         lambda **kwargs: kwargs["provider_id"] == "openrouter",
     )
+    refresh_calls: list[str] = []
+    monkeypatch.setattr(
+        "server.routers.management.model_registry.refresh",
+        lambda engine=None: refresh_calls.append(str(engine)),
+    )
 
     list_res = await _request("GET", "/v1/management/engines/claude/custom-providers")
     assert list_res.status_code == 200
@@ -209,6 +214,7 @@ async def test_management_engine_custom_provider_crud(monkeypatch):
     upsert_body = upsert_res.json()
     assert upsert_body["provider_id"] == "openrouter"
     assert upsert_body["models"] == ["qwen-3", "qwen-3-plus"]
+    assert refresh_calls[-1] == "claude"
 
     mismatch_res = await _request(
         "PUT",
@@ -225,6 +231,7 @@ async def test_management_engine_custom_provider_crud(monkeypatch):
     delete_res = await _request("DELETE", "/v1/management/engines/claude/custom-providers/openrouter")
     assert delete_res.status_code == 200
     assert delete_res.json()["deleted"] is True
+    assert refresh_calls[-1] == "claude"
 
 
 @pytest.mark.asyncio

@@ -564,7 +564,7 @@ async def test_ui_engines_page(monkeypatch):
     assert "OAuth Proxy (oauth_proxy)" in response.text
     assert "CLI Delegate (cli_delegate)" in response.text
     assert "const authUiCapabilities = " in response.text
-    assert "Custom Providers" in response.text
+    assert "自定义 Providers" in response.text
     assert 'id="custom-provider-engine"' in response.text
     assert 'id="custom-provider-table-body"' in response.text
     assert 'id="custom-provider-tui-modal"' in response.text

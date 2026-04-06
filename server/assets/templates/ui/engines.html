@@ -222,6 +222,63 @@
         </div>
     </div>
 
+    <div class="card">
+        <h2>{{ t("ui.engines.auth_title", default="Engine Auth") }}</h2>
+        <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
+            {{ t("ui.engines.auth_hint", default="鉴权会话与内嵌 TUI 全局互斥。先选择全局鉴权后台，再在引擎表格中点击“连接”入口选择具体方式。") }}
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+            <label for="auth-transport-select" style="font-size:13px; color:#374151;">{{ t("ui.engines.auth_transport_label", default="鉴权后台") }}</label>
+            <select id="auth-transport-select" style="padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+                <option value="oauth_proxy" selected>{{ t("ui.engines.transport_oauth_proxy", default="OAuth 代理（oauth_proxy）") }}</option>
+                <option value="cli_delegate">{{ t("ui.engines.transport_cli_delegate", default="CLI 委托（cli_delegate）") }}</option>
+            </select>
+            <button id="auth-cancel-btn" class="btn btn-secondary" type="button" disabled>{{ t("ui.common.cancel", default="取消") }}</button>
+        </div>
+        <div class="auth-meta">
+            <div id="auth-engine-row">{{ t("ui.engines.auth_engine_prefix", default="引擎：") }}-</div>
+            <div id="auth-transport-row">{{ t("ui.engines.auth_transport_prefix", default="链路：") }}-</div>
+            <div id="auth-method-row">{{ t("ui.engines.auth_method_prefix", default="鉴权方式：") }}-</div>
+            <div id="auth-state">{{ t("ui.engines.auth_state_prefix", default="状态：") }}idle</div>
+            <div id="auth-url-row" style="display:none;">
+                {{ t("ui.engines.auth_url_label", default="授权地址：") }}
+                <a id="auth-url" class="auth-url" href="#" target="_blank" rel="noopener noreferrer"></a>
+            </div>
+            <div id="auth-code-row" style="display:none;">
+                {{ t("ui.engines.auth_code_label", default="用户代码：") }}
+                <span id="auth-code" class="auth-code"></span>
+                <button id="auth-code-copy-btn" class="btn btn-secondary" type="button" style="margin-left:8px; padding:4px 8px;">{{ t("ui.engines.copy", default="复制") }}</button>
+                <span id="auth-code-copy-result" style="margin-left:8px; font-size:12px; color:#6b7280;"></span>
+            </div>
+            <div id="auth-expire-row" style="display:none;"></div>
+        </div>
+        <div id="auth-input-row" style="display:none; margin-top:10px;">
+            <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.input", default="输入") }}</label>
+            <input id="auth-input-value" type="text" autocomplete="off" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;" />
+            <div style="margin-top:8px;">
+                <button id="auth-input-btn" class="btn btn-primary" type="button">{{ t("ui.common.submit", default="提交") }}</button>
+            </div>
+        </div>
+        <div id="auth-error" class="error"></div>
+        <div id="auth-menu-popover" style="display:none; position:fixed; z-index:80; min-width:220px; background:#ffffff; border:1px solid #d1d5db; box-shadow:0 12px 24px rgba(15,23,42,0.16); border-radius:10px; padding:8px;">
+            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.choose", default="请选择") }}</div>
+            <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
+        </div>
+        <div id="auth-import-modal" class="auth-import-modal" aria-hidden="true">
+            <div class="auth-import-card">
+                <div style="font-size:18px; font-weight:700; color:#111827;" id="auth-import-title">{{ t("ui.engines.import_dialog_title", default="Import Authentication Files") }}</div>
+                <div style="margin-top:4px; color:#6b7280; font-size:13px;" id="auth-import-subtitle"></div>
+                <div id="auth-import-risk" class="auth-import-risk" style="display:none;"></div>
+                <div id="auth-import-error" class="error" style="display:none;"></div>
+                <div id="auth-import-file-list" class="auth-import-file-list"></div>
+                <div class="auth-import-actions">
+                    <button id="auth-import-cancel-btn" class="btn btn-secondary" type="button">{{ t("ui.common.cancel", default="取消") }}</button>
+                    <button id="auth-import-submit-btn" class="btn btn-primary" type="button">{{ t("ui.engines.import_submit", default="Import and Save") }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {% if custom_provider_engines %}
     <div class="card">
         <h2>{{ t("ui.engines.custom_providers_title", default="Custom Providers") }}</h2>
@@ -293,63 +350,6 @@
         </div>
     </div>
     {% endif %}
-
-    <div class="card">
-        <h2>{{ t("ui.engines.auth_title", default="Engine Auth") }}</h2>
-        <div style="font-size:13px; color:#6b7280; margin-bottom:10px;">
-            {{ t("ui.engines.auth_hint", default="鉴权会话与内嵌 TUI 全局互斥。先选择全局鉴权后台，再在引擎表格中点击“连接”入口选择具体方式。") }}
-        </div>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-            <label for="auth-transport-select" style="font-size:13px; color:#374151;">{{ t("ui.engines.auth_transport_label", default="鉴权后台") }}</label>
-            <select id="auth-transport-select" style="padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-                <option value="oauth_proxy" selected>{{ t("ui.engines.transport_oauth_proxy", default="OAuth 代理（oauth_proxy）") }}</option>
-                <option value="cli_delegate">{{ t("ui.engines.transport_cli_delegate", default="CLI 委托（cli_delegate）") }}</option>
-            </select>
-            <button id="auth-cancel-btn" class="btn btn-secondary" type="button" disabled>{{ t("ui.common.cancel", default="取消") }}</button>
-        </div>
-        <div class="auth-meta">
-            <div id="auth-engine-row">{{ t("ui.engines.auth_engine_prefix", default="引擎：") }}-</div>
-            <div id="auth-transport-row">{{ t("ui.engines.auth_transport_prefix", default="链路：") }}-</div>
-            <div id="auth-method-row">{{ t("ui.engines.auth_method_prefix", default="鉴权方式：") }}-</div>
-            <div id="auth-state">{{ t("ui.engines.auth_state_prefix", default="状态：") }}idle</div>
-            <div id="auth-url-row" style="display:none;">
-                {{ t("ui.engines.auth_url_label", default="授权地址：") }}
-                <a id="auth-url" class="auth-url" href="#" target="_blank" rel="noopener noreferrer"></a>
-            </div>
-            <div id="auth-code-row" style="display:none;">
-                {{ t("ui.engines.auth_code_label", default="用户代码：") }}
-                <span id="auth-code" class="auth-code"></span>
-                <button id="auth-code-copy-btn" class="btn btn-secondary" type="button" style="margin-left:8px; padding:4px 8px;">{{ t("ui.engines.copy", default="复制") }}</button>
-                <span id="auth-code-copy-result" style="margin-left:8px; font-size:12px; color:#6b7280;"></span>
-            </div>
-            <div id="auth-expire-row" style="display:none;"></div>
-        </div>
-        <div id="auth-input-row" style="display:none; margin-top:10px;">
-            <label id="auth-input-label" for="auth-input-value" style="display:block; font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.input", default="输入") }}</label>
-            <input id="auth-input-value" type="text" autocomplete="off" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;" />
-            <div style="margin-top:8px;">
-                <button id="auth-input-btn" class="btn btn-primary" type="button">{{ t("ui.common.submit", default="提交") }}</button>
-            </div>
-        </div>
-        <div id="auth-error" class="error"></div>
-        <div id="auth-menu-popover" style="display:none; position:fixed; z-index:80; min-width:220px; background:#ffffff; border:1px solid #d1d5db; box-shadow:0 12px 24px rgba(15,23,42,0.16); border-radius:10px; padding:8px;">
-            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.choose", default="请选择") }}</div>
-            <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
-        </div>
-        <div id="auth-import-modal" class="auth-import-modal" aria-hidden="true">
-            <div class="auth-import-card">
-                <div style="font-size:18px; font-weight:700; color:#111827;" id="auth-import-title">{{ t("ui.engines.import_dialog_title", default="Import Authentication Files") }}</div>
-                <div style="margin-top:4px; color:#6b7280; font-size:13px;" id="auth-import-subtitle"></div>
-                <div id="auth-import-risk" class="auth-import-risk" style="display:none;"></div>
-                <div id="auth-import-error" class="error" style="display:none;"></div>
-                <div id="auth-import-file-list" class="auth-import-file-list"></div>
-                <div class="auth-import-actions">
-                    <button id="auth-import-cancel-btn" class="btn btn-secondary" type="button">{{ t("ui.common.cancel", default="取消") }}</button>
-                    <button id="auth-import-submit-btn" class="btn btn-primary" type="button">{{ t("ui.engines.import_submit", default="Import and Save") }}</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <div class="card">
         <h2>{{ t("ui.engines.terminal_title", default="内嵌终端（ttyd）") }}</h2>
@@ -976,6 +976,22 @@
         }
     }
 
+    async function refreshEnginesTable() {
+        const container = document.getElementById("engines-table-container");
+        if (!container) return;
+        try {
+            const response = await fetch("/ui/engines/table", {
+                headers: { "X-Requested-With": "fetch" },
+            });
+            if (!response.ok) {
+                return;
+            }
+            container.innerHTML = await response.text();
+        } catch (_err) {
+            // Keep custom-provider UX resilient even if the table refresh fails.
+        }
+    }
+
     async function saveCustomProvider() {
         const engine = selectedCustomProviderEngine();
         const providerId = customProviderIdEl ? String(customProviderIdEl.value || "").trim() : "";
@@ -1014,6 +1030,7 @@
             populateCustomProviderForm(payload);
             setCustomProviderStatus({{ t("ui.engines.custom_providers_saved", default="Provider saved.") | tojson }});
             await fetchCustomProviders();
+            await refreshEnginesTable();
         } catch (_err) {
             showCustomProviderError({{ t("ui.engines.custom_providers_save_failed", default="Failed to save custom provider.") | tojson }});
         } finally {
@@ -1042,6 +1059,7 @@
             resetCustomProviderForm();
             setCustomProviderStatus({{ t("ui.engines.custom_providers_deleted", default="Provider deleted.") | tojson }});
             await fetchCustomProviders();
+            await refreshEnginesTable();
         } catch (_err) {
             showCustomProviderError({{ t("ui.engines.custom_providers_delete_failed", default="Failed to delete custom provider.") | tojson }});
         }
