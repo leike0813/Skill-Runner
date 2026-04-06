@@ -12,6 +12,7 @@ def test_dockerfile_uses_non_root_runtime_user() -> None:
 
     assert "addgroup --system" in dockerfile
     assert "adduser --system" in dockerfile
+    assert "/usr/sbin" in dockerfile
     assert "skillrunner" in dockerfile
     assert "USER skillrunner" in dockerfile
     assert "chown -R skillrunner:skillrunner /app /data /opt/cache /home/skillrunner" in dockerfile
