@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Container bootstrap MUST default to non-root runtime execution
 系统 MUST 让官方 Docker 镜像与默认 compose 部署以固定非 root 用户运行，避免运行时能力依赖 root/sudo 姿态。

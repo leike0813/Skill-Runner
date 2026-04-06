@@ -1,0 +1,4 @@
+- [x] Update `Dockerfile` to create a fixed non-root runtime user, chown runtime-writable directories, and switch the final image to `USER skillrunner`.
+- [x] Update `docker-compose.yml` comments to document optional `./data:/data` bind-mount write-permission requirements for the non-root container user.
+- [x] Update `docs/containerization.md` and `docs/api_reference.md` to describe the supported default posture as non-root container execution.
+- [x] Add static/container regression coverage that locks in the non-root Docker runtime posture without changing Claude headless config behavior.
