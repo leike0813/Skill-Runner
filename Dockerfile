@@ -33,8 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     procps \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid "${SKILL_RUNNER_GID}" skillrunner \
-    && useradd --system --uid "${SKILL_RUNNER_UID}" --gid "${SKILL_RUNNER_GID}" --create-home --home-dir /home/skillrunner skillrunner \
+    && addgroup --system --gid "${SKILL_RUNNER_GID}" skillrunner \
+    && adduser --system --uid "${SKILL_RUNNER_UID}" --gid "${SKILL_RUNNER_GID}" --home /home/skillrunner skillrunner \
     && mkdir -p /app /data /opt/cache /home/skillrunner \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && case "${TARGETARCH}" in \

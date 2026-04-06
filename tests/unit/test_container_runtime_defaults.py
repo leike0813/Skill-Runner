@@ -10,7 +10,8 @@ def _repo_root() -> Path:
 def test_dockerfile_uses_non_root_runtime_user() -> None:
     dockerfile = (_repo_root() / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "useradd --system" in dockerfile
+    assert "addgroup --system" in dockerfile
+    assert "adduser --system" in dockerfile
     assert "skillrunner" in dockerfile
     assert "USER skillrunner" in dockerfile
     assert "chown -R skillrunner:skillrunner /app /data /opt/cache /home/skillrunner" in dockerfile
