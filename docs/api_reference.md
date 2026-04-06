@@ -1623,6 +1623,7 @@ Claude bootstrap / runtime 配置说明：
   - `sandbox.allowUnsandboxedCommands = false`
   - sandbox 文件写权限动态约束到 `run_dir`
   - Claude sandbox 依赖 `bubblewrap`（`bwrap`）和 `socat`
+  - 官方容器镜像默认以非 root 用户运行；Claude container/headless 支持依赖这一前提
   - 缺少依赖、sandbox 初始化失败或运行期命令被 sandbox 拦截时，会产生明确的 diagnostics / warnings
   - 这些告警不会单独把 preflight 或 run 变成硬失败
 - Claude inline UI shell 与 headless run 分治：

@@ -47,6 +47,11 @@ The default compose file mounts:
 - `skillrunner_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
 - *(optional)* `./data:/data` (runs.db, runs/, logs, settings)
 
+Containers run as a fixed non-root user by default. If you enable the optional
+`./data:/data` bind mount, the host `./data` directory must be writable by that
+container user. A permissive fallback such as `chmod 777 ./data` works, but it
+is an operator-side convenience tradeoff rather than the recommended default.
+
 Builtin skills are packaged in-image under `/app/skills_builtin` (read-only source).
 User-installable skills live under `/app/skills` (volume/bind mount target).
 
@@ -216,7 +221,7 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
     - known provider `options.timeout = false`
     - this is intentional to avoid long-running SSE responses being aborted by OpenCode's default 5-minute provider timeout
     - enforced config has higher priority than skill defaults and runtime `opencode_config` overrides
-  - Claude runtime config remains separate from bootstrap:
+- Claude runtime config remains separate from bootstrap:
     - bootstrap initializes `${SKILL_RUNNER_AGENT_HOME}/.claude.json`
     - each run still generates run-local `run_dir/.claude/settings.json`
     - headless run / harness use run-local settings with:
@@ -226,6 +231,7 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
       - sandbox filesystem write scope constrained to `run_dir`
     - Claude sandbox in containerized deployments depends on both `bubblewrap` (`bwrap`) and `socat`
     - The runtime image installs both dependencies so Claude sandbox can start normally inside Docker
+    - The official container image runs as a non-root user by default; this is required for Claude headless runs that rely on bypass permissions mode
     - If either dependency is missing, or sandbox initialization later fails at runtime, Skill Runner records a warning/diagnostic but does not block the run
     - inline UI shell uses a separate session-local `.claude/settings.json` with a much stricter posture:
       - `permissions.defaultMode = "dontAsk"`
@@ -330,6 +336,10 @@ For local development, use the repository compose file (build-first):
 
 ```
 docker compose up --build
+
+The default image runtime user is non-root. If you override the container user
+to root, Claude headless runs are not guaranteed to work because Claude Code
+rejects bypass-permissions mode under root/sudo in non-sandboxed launches.
 ```
 
 The API will be available at `http://localhost:9813/v1`.

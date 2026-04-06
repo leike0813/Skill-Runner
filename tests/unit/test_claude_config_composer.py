@@ -52,6 +52,7 @@ def test_claude_config_composer_writes_headless_run_settings_with_run_local_sand
         },
     )
 
+    assert adapter.config_composer is not None
     settings_path = adapter.config_composer.compose(ctx)
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
 
@@ -116,6 +117,7 @@ def test_claude_config_composer_merges_runtime_sandbox_allowwrite_with_headless_
         },
     )
 
+    assert adapter.config_composer is not None
     settings_path = adapter.config_composer.compose(ctx)
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
 
@@ -163,6 +165,7 @@ def test_claude_config_composer_disables_headless_sandbox_when_bootstrap_probe_u
         options={},
     )
 
+    assert adapter.config_composer is not None
     settings_path = adapter.config_composer.compose(ctx)
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
 

@@ -1,10 +1,13 @@
 FROM node:24-bookworm-slim
 ARG TARGETARCH
 ARG TTYD_VERSION=1.7.7
+ARG SKILL_RUNNER_UID=10001
+ARG SKILL_RUNNER_GID=10001
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
+    HOME=/home/skillrunner \
     SKILL_RUNNER_RUNTIME_MODE=container \
     SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner \
     SKILL_RUNNER_AGENT_HOME=/opt/cache/skill-runner/agent-home \
@@ -30,7 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     procps \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /app /data /opt/cache \
+    && groupadd --system --gid "${SKILL_RUNNER_GID}" skillrunner \
+    && useradd --system --uid "${SKILL_RUNNER_UID}" --gid "${SKILL_RUNNER_GID}" --create-home --home-dir /home/skillrunner skillrunner \
+    && mkdir -p /app /data /opt/cache /home/skillrunner \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
     && case "${TARGETARCH}" in \
          amd64) ttyd_arch="x86_64" ;; \
@@ -60,7 +65,10 @@ COPY scripts/agent_manager.sh /app/scripts/agent_manager.sh
 COPY scripts/agent_manager.py /app/scripts/agent_manager.py
 COPY scripts/deploy_local.sh /app/scripts/deploy_local.sh
 RUN chmod +x /entrypoint.sh /entrypoint_e2e.sh /app/scripts/agent_manager.sh /app/scripts/deploy_local.sh
+RUN chown -R skillrunner:skillrunner /app /data /opt/cache /home/skillrunner
 
 EXPOSE 9813 9814 17681
+
+USER skillrunner
 
 ENTRYPOINT ["/entrypoint.sh"]

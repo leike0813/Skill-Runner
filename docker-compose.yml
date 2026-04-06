@@ -32,6 +32,8 @@ services:
       - ./skills:/app/skills
       - skillrunner_cache:/opt/cache
       # Optional: persist run/request data for debugging
+      # If you enable ./data:/data, ensure ./data is writable by the container's non-root user.
+      # Quick-and-dirty fallback: chmod 777 ./data
       # - ./data:/data
     networks:
       - skillrunner_net
