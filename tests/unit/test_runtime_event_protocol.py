@@ -661,6 +661,62 @@ def test_fcmp_emits_auth_required_and_waiting_auth_transition(tmp_path: Path):
     assert state_changed.data["pending_auth_session_id"] == "auth-1"
 
 
+def test_fcmp_emits_auth_required_for_custom_provider_challenge(tmp_path: Path):
+    run_dir = tmp_path / "run-state-auth-custom-provider"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    pending_auth = {
+        "auth_session_id": "provider-config::req-1",
+        "engine": "claude",
+        "provider_id": "openrouter",
+        "auth_method": "custom_provider",
+        "challenge_kind": "custom_provider",
+        "prompt": "Configure provider settings in chat.",
+        "auth_url": None,
+        "user_code": None,
+        "instructions": "Submit provider_id, api_key, base_url, and model JSON.",
+        "accepts_chat_input": True,
+        "input_kind": "custom_provider",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "challenge_active",
+    }
+
+    rasp_events = build_rasp_events(
+        run_id="run-state-auth-custom-provider",
+        engine="claude",
+        attempt_number=1,
+        status="waiting_auth",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "awaiting_auth", "reason_code": "WAITING_AUTH_REQUIRED", "diagnostics": []},
+    )
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="waiting_auth",
+        status_updated_at="2026-03-04T00:00:00",
+        pending_auth=pending_auth,
+        orchestrator_events=[
+            {
+                "ts": "2026-03-04T00:00:00",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "interaction",
+                "type": "auth.session.created",
+                "data": pending_auth,
+            }
+        ],
+    )
+
+    auth_required = next(event for event in fcmp_events if event.type == "auth.required")
+    assert auth_required.data["provider_id"] == "openrouter"
+    assert auth_required.data["auth_method"] == "custom_provider"
+    assert auth_required.data["challenge_kind"] == "custom_provider"
+
+
 def test_fcmp_auth_required_prefers_pending_auth_provider_when_orchestrator_payload_is_missing_it(tmp_path: Path):
     run_dir = tmp_path / "run-state-auth-fallback-provider"
     logs_dir = run_dir / "logs"

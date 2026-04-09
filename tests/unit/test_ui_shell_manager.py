@@ -341,7 +341,7 @@ def test_ui_shell_manager_claude_custom_model_injects_provider_env(
             api_key="sk-provider",
             base_url="https://bailian.example/v1",
         )
-        if engine == "claude" and model_spec == "bailian/qwen3.5-plus"
+        if engine == "claude" and model_spec in {"bailian/qwen3.5-plus", "bailian/qwen3.5-plus[1m]"}
         else None,
     )
 
@@ -354,6 +354,38 @@ def test_ui_shell_manager_claude_custom_model_injects_provider_env(
     assert payload["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-provider"
     assert payload["env"]["ANTHROPIC_BASE_URL"] == "https://bailian.example/v1"
     assert payload["env"]["ANTHROPIC_MODEL"] == "qwen3.5-plus"
+
+
+def test_ui_shell_manager_claude_custom_model_1m_mode_uses_root_model_and_default_sonnet(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+):
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        "server.services.engine_management.engine_custom_provider_service.engine_custom_provider_service.resolve_model",
+        lambda engine, model_spec: SimpleNamespace(
+            provider_id="bailian",
+            model="qwen3.5-plus",
+            api_key="sk-provider",
+            base_url="https://bailian.example/v1",
+        )
+        if engine == "claude" and model_spec in {"bailian/qwen3.5-plus", "bailian/qwen3.5-plus[1m]"}
+        else None,
+    )
+
+    started = manager.start_session("claude", custom_model="bailian/qwen3.5-plus[1m]")
+    session_dir = Path(started["session_dir"])
+    settings_path = session_dir / ".claude" / "settings.json"
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+
+    assert started["custom_model"] == "bailian/qwen3.5-plus[1m]"
+    assert payload["model"] == "sonnet[1m]"
+    assert payload["env"]["ANTHROPIC_AUTH_TOKEN"] == "sk-provider"
+    assert payload["env"]["ANTHROPIC_BASE_URL"] == "https://bailian.example/v1"
+    assert payload["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "qwen3.5-plus"
+    assert payload["env"]["CLAUDE_CODE_DISABLE_1M_CONTEXT"] == "0"
+    assert "ANTHROPIC_MODEL" not in payload["env"]
 
 
 def test_ui_shell_manager_rejects_invalid_custom_model_format(tmp_path: Path, patch_fake_popen):

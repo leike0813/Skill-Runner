@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -29,17 +30,62 @@ _JSON_LOAD_EXCEPTIONS = (
 )
 
 
-def build_claude_model_env_overrides(model_spec: str) -> dict[str, object]:
+@dataclass(frozen=True)
+class ClaudeModelRuntimeOverride:
+    runtime_overrides: dict[str, object]
+    unset_env_keys: tuple[str, ...] = ()
+
+
+def _strip_1m_suffix(model_spec: str) -> tuple[str, bool]:
     normalized_model = model_spec.strip()
+    stripped = normalized_model.replace("[1m]", "").strip()
+    return stripped, stripped != normalized_model
+
+
+def build_claude_model_runtime_override(model_spec: str) -> ClaudeModelRuntimeOverride:
+    normalized_model = model_spec.strip()
+    base_model, use_1m_context = _strip_1m_suffix(normalized_model)
     env_overrides: dict[str, object] = {"ANTHROPIC_MODEL": normalized_model}
+    runtime_overrides: dict[str, object] = {"env": env_overrides}
     resolved_custom = engine_custom_provider_service.resolve_model("claude", normalized_model)
     if resolved_custom is not None:
         env_overrides = {
             "ANTHROPIC_AUTH_TOKEN": resolved_custom.api_key,
             "ANTHROPIC_BASE_URL": resolved_custom.base_url,
-            "ANTHROPIC_MODEL": resolved_custom.model,
         }
-    return env_overrides
+        if use_1m_context:
+            env_overrides.update(
+                {
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": resolved_custom.model,
+                    "CLAUDE_CODE_DISABLE_1M_CONTEXT": "0",
+                }
+            )
+            runtime_overrides = {
+                "env": env_overrides,
+                "model": "sonnet[1m]",
+            }
+            return ClaudeModelRuntimeOverride(
+                runtime_overrides=runtime_overrides,
+                unset_env_keys=("ANTHROPIC_MODEL",),
+            )
+        env_overrides["ANTHROPIC_MODEL"] = resolved_custom.model
+        return ClaudeModelRuntimeOverride(runtime_overrides={"env": env_overrides})
+
+    if use_1m_context:
+        env_overrides["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "0"
+    return ClaudeModelRuntimeOverride(runtime_overrides=runtime_overrides)
+
+
+def _unset_claude_env_keys(payload: dict[str, object], keys: tuple[str, ...]) -> None:
+    if not keys:
+        return
+    env_obj = payload.get("env")
+    if not isinstance(env_obj, dict):
+        return
+    for key in keys:
+        env_obj.pop(key, None)
+    if not env_obj:
+        payload.pop("env", None)
 
 
 class ClaudeConfigComposer:
@@ -194,15 +240,16 @@ class ClaudeConfigComposer:
         runtime_overrides: dict[str, object] = {}
         if isinstance(options.get("claude_config"), dict):
             runtime_overrides = dict(options["claude_config"])
+        model_runtime_override = ClaudeModelRuntimeOverride(runtime_overrides={})
         model_obj = options.get("runtime_model")
         if not isinstance(model_obj, str) or not model_obj.strip():
             model_obj = options.get("model")
         if isinstance(model_obj, str) and model_obj.strip():
-            env_overrides = build_claude_model_env_overrides(model_obj)
-            current_env = runtime_overrides.get("env")
-            merged_env = dict(current_env) if isinstance(current_env, dict) else {}
-            merged_env.update(env_overrides)
-            runtime_overrides["env"] = merged_env
+            model_runtime_override = build_claude_model_runtime_override(model_obj)
+            runtime_overrides = config_generator.deep_merge(
+                runtime_overrides,
+                copy.deepcopy(model_runtime_override.runtime_overrides),
+            )
         effort_obj = options.get("model_reasoning_effort")
         if isinstance(effort_obj, str) and effort_obj.strip():
             runtime_overrides["effortLevel"] = effort_obj.strip()
@@ -220,6 +267,7 @@ class ClaudeConfigComposer:
         dynamic_enforced = self._build_dynamic_enforced_config(run_dir=run_dir)
         layers = [engine_defaults, skill_defaults, runtime_overrides, enforced, dynamic_enforced]
         composed_config = self._compose_layers(layers)
+        _unset_claude_env_keys(composed_config, model_runtime_override.unset_env_keys)
         composed_config = self._apply_bootstrap_sandbox_gating(composed_config=composed_config)
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         schema_path = self._adapter.profile.resolve_settings_schema_path()

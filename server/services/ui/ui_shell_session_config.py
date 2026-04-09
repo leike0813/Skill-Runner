@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
 from pathlib import Path
 from typing import Any, Protocol
 
-from server.engines.claude.adapter.config_composer import build_claude_model_env_overrides
+from server.engines.claude.adapter.config_composer import build_claude_model_runtime_override
 from server.engines.common.config.json_layer_config_generator import config_generator
 from server.runtime.adapter.common.profile_loader import AdapterProfile
 
@@ -66,7 +67,8 @@ class _ClaudeUiShellRuntimeOverride:
         _ = session_dir
         runtime: dict[str, object] = {"sandbox": {"enabled": sandbox_enabled}}
         if isinstance(custom_model, str) and custom_model.strip():
-            runtime["env"] = build_claude_model_env_overrides(custom_model)
+            model_override = build_claude_model_runtime_override(custom_model)
+            runtime = config_generator.deep_merge(runtime, copy.deepcopy(model_override.runtime_overrides))
         return runtime
 
 

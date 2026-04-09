@@ -121,3 +121,23 @@ auth timeout MUST 仅在 auth session 进入 challenge 活跃阶段后生效。
 - **WHEN** 用户在聊天窗口中提交 redirect URL 或授权码
 - **THEN** submission kind MUST 为 `auth_code_or_url`
 
+### Requirement: provider-config waiting_auth MUST 支持 custom_provider 语义
+系统 MUST 将 provider-config 会话中的第三方 provider 配置挑战建模为正式的 `custom_provider` 鉴权方式，而不是降级映射到 `api_key`。
+
+#### Scenario: Claude custom provider enters provider-config waiting_auth
+- **GIVEN** Claude run 请求的是第三方 provider 模型
+- **WHEN** 系统进入会话中鉴权
+- **THEN** `auth_method` MUST 为 `custom_provider`
+- **AND** `challenge_kind` MUST 为 `custom_provider`
+- **AND** `input_kind` MUST 为 `custom_provider`
+
+### Requirement: provider-config waiting_auth MUST use custom_provider semantics
+The system MUST represent provider-config waiting_auth challenges with `custom_provider` rather than degrading them to `api_key`.
+
+#### Scenario: Claude custom provider enters challenge_active
+- **GIVEN** a Claude run requests a third-party provider model
+- **WHEN** the backend enters `waiting_auth`
+- **THEN** `auth_method` MUST be `custom_provider`
+- **AND** `challenge_kind` MUST be `custom_provider`
+- **AND** `input_kind` MUST be `custom_provider`
+

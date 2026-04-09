@@ -18,6 +18,7 @@ from server.models import (
     RunStatus,
 )
 from server.runtime.auth_detection.types import AuthDetectionResult
+from server.runtime.protocol.schema_registry import validate_orchestrator_event, validate_pending_auth
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_audit_service import RunAuditService
 from server.services.orchestration.run_auth_orchestration_service import RunAuthOrchestrationService
@@ -177,9 +178,20 @@ async def test_create_custom_provider_pending_auth_persists_provider_config_chal
     assert pending.ask_user is not None
     assert pending.ask_user.ui_hints["widget"] == "provider_config"
     assert pending.ask_user.ui_hints["scenario"] == "provider_missing"
+    assert validate_pending_auth(pending.model_dump(mode="json"))["auth_method"] == "custom_provider"
     backend.set_pending_auth.assert_awaited_once()
     backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.WAITING_AUTH)
     assert appended[0]["type_name"] == "auth.challenge.updated"
+    validate_orchestrator_event(
+        {
+            "ts": "2026-04-09T00:00:00Z",
+            "attempt_number": 2,
+            "seq": 1,
+            "category": "interaction",
+            "type": appended[0]["type_name"],
+            "data": appended[0]["data"],
+        }
+    )
     state_payload = _read_state_payload(run_dir)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
@@ -803,12 +815,30 @@ async def test_submit_custom_provider_input_updates_provider_store_and_retries(m
     assert upsert_calls[0]["provider_id"] == "openrouter"
     backend.update_request_engine_options.assert_awaited_once_with(
         "req-1",
-        {"model": "openrouter/qwen-3-plus"},
+        {
+            "model": "qwen-3-plus",
+            "provider_id": "openrouter",
+            "runtime_model": "openrouter/qwen-3-plus",
+        },
     )
     backend.clear_pending_auth.assert_awaited_once_with("req-1")
     backend.issue_resume_ticket.assert_awaited_once()
     backend.mark_resume_ticket_dispatched.assert_awaited_once_with("req-1", "ticket-claude-1")
     assert appended[0]["type_name"] == "auth.session.completed"
+    validate_orchestrator_event(
+        {
+            "ts": "2026-04-09T00:00:00Z",
+            "attempt_number": 1,
+            "seq": 1,
+            "category": "interaction",
+            "type": "auth.input.accepted",
+            "data": {
+                "auth_session_id": "provider-config::req-1",
+                "submission_kind": "custom_provider",
+                "accepted_at": "2026-04-09T00:00:00Z",
+            },
+        }
+    )
     assert len(background_tasks.tasks) == 1
     state_payload = _read_state_payload(run_dir)
     assert state_payload["status"] == "queued"

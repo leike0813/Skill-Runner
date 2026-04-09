@@ -212,10 +212,10 @@
 - **THEN** 返回 `404` 或 `405`
 
 ### Requirement: 鉴权会话 MUST 使用统一 auth_method 新语义
-系统 MUST 使用 `callback|auth_code_or_url|api_key` 表达鉴权方式，并拒绝历史值。
+系统 MUST 使用 `callback|auth_code_or_url|api_key|custom_provider` 表达鉴权方式，并拒绝历史值。
 
 #### Scenario: 新语义有效
-- **WHEN** 客户端在 start 请求中传入 `auth_method=callback|auth_code_or_url|api_key`
+- **WHEN** 客户端在 start 请求中传入 `auth_method=callback|auth_code_or_url|api_key|custom_provider`
 - **THEN** 会话按 capability 矩阵创建并进入对应状态机
 
 #### Scenario: 旧语义拒绝
@@ -496,4 +496,12 @@ The public jobs API MUST NOT expose a dedicated single-artifact download route o
 
 - **WHEN** 客户端请求 `GET /v1/management/engines/qwen/auth/import/spec?provider_id=coding-plan-global`
 - **THEN** 系统 MUST 拒绝该导入规格或返回 unsupported
+
+### Requirement: management auth semantics MUST reserve custom_provider for provider-config
+The management auth contract MUST recognize `custom_provider` as a legal auth method value when the selected transport is `provider_config`.
+
+#### Scenario: provider-config start request uses custom_provider
+- **WHEN** a client starts a provider-config auth session
+- **THEN** `auth_method=custom_provider` MUST be accepted
+- **AND** it MUST remain distinct from `api_key`
 

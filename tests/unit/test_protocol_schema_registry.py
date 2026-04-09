@@ -6,6 +6,8 @@ from server.runtime.protocol.schema_registry import (
     validate_fcmp_event,
     validate_interaction_history_entry,
     validate_orchestrator_event,
+    validate_pending_auth,
+    validate_pending_auth_method_selection,
     validate_pending_interaction,
     validate_rasp_event,
     validate_resume_command,
@@ -314,6 +316,41 @@ def test_validate_orchestrator_event_accepts_auth_method_selection_with_ask_user
     assert validate_orchestrator_event(payload) == payload
 
 
+def test_validate_pending_auth_accepts_custom_provider_payload() -> None:
+    payload = {
+        "auth_session_id": "provider-config::req-1",
+        "engine": "claude",
+        "provider_id": "openrouter",
+        "auth_method": "custom_provider",
+        "challenge_kind": "custom_provider",
+        "prompt": "Configure provider settings in chat.",
+        "auth_url": None,
+        "user_code": None,
+        "instructions": "Submit provider_id, api_key, base_url, and model JSON.",
+        "accepts_chat_input": True,
+        "input_kind": "custom_provider",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "challenge_active",
+    }
+    assert validate_pending_auth(payload) == payload
+
+
+def test_validate_pending_auth_method_selection_accepts_custom_provider_available_method() -> None:
+    payload = {
+        "engine": "claude",
+        "provider_id": "openrouter",
+        "available_methods": ["custom_provider"],
+        "prompt": "Authentication is required. Choose how to continue.",
+        "instructions": "Configure the selected third-party provider in chat.",
+        "last_error": None,
+        "source_attempt": 1,
+        "phase": "method_selection",
+        "ui_hints": {"widget": "choice"},
+    }
+    assert validate_pending_auth_method_selection(payload) == payload
+
+
 def test_validate_orchestrator_event_accepts_interaction_reply_accepted() -> None:
     payload = {
         "ts": "2026-03-04T00:00:00Z",
@@ -397,6 +434,14 @@ def test_validate_orchestrator_event_accepts_interaction_reply_accepted() -> Non
             {
                 "auth_session_id": "auth-1",
                 "submission_kind": "callback_url",
+                "accepted_at": "2026-03-04T00:00:10Z",
+            },
+        ),
+        (
+            "auth.input.accepted",
+            {
+                "auth_session_id": "provider-config::req-1",
+                "submission_kind": "custom_provider",
                 "accepted_at": "2026-03-04T00:00:10Z",
             },
         ),

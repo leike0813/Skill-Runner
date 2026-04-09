@@ -162,7 +162,7 @@
 - **AND** UI 展示冲突提示
 
 ### Requirement: 管理 UI MUST 以新 auth_method 语义驱动菜单
-系统 MUST 使用 `callback|auth_code_or_url|api_key` 作为 UI 鉴权方式菜单值，不再使用历史方式值。
+系统 MUST 使用 `callback|auth_code_or_url|api_key|custom_provider` 作为 UI 鉴权方式菜单值，不再使用历史方式值。
 
 #### Scenario: 菜单项渲染
 - **WHEN** 用户打开任一引擎鉴权菜单
@@ -747,4 +747,12 @@ The run form engine selector SHALL include `qwen` as an option.
 
 - **WHEN** 用户选择 `qwen` 的 `coding-plan-china` 或 `coding-plan-global`
 - **THEN** UI MUST NOT 展示 import 入口
+
+### Requirement: management UI auth method menu MUST allow custom_provider when supported
+The management UI MUST treat `custom_provider` as a legal auth method menu value when the current engine/provider/transport capability declares provider-config support.
+
+#### Scenario: provider-config menu renders custom_provider
+- **WHEN** the UI renders auth methods for a provider-config capable engine/provider
+- **THEN** the menu MAY include `custom_provider`
+- **AND** it MUST not relabel that option as `api_key`
 

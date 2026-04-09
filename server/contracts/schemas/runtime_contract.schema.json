@@ -229,6 +229,7 @@
             "auth_code_or_url",
             "import",
             "api_key",
+            "custom_provider",
             null
           ]
         },
@@ -240,7 +241,8 @@
             "auth_code_or_url",
             "api_key",
             "import_files",
-            "browser_callback_only"
+            "browser_callback_only",
+            "custom_provider"
           ]
         },
         "prompt": {
@@ -278,6 +280,7 @@
             "auth_code_or_url",
             "import_files",
             "api_key",
+            "custom_provider",
             null
           ]
         },
@@ -362,7 +365,8 @@
               "device_auth",
               "auth_code_or_url",
               "import",
-              "api_key"
+              "api_key",
+              "custom_provider"
             ]
           }
         },
@@ -1444,7 +1448,8 @@
                       "callback_url",
                       "auth_code_or_url",
                       "import_files",
-                      "api_key"
+                      "api_key",
+                      "custom_provider"
                     ]
                   },
                   "accepted_at": {
@@ -2875,7 +2880,8 @@
                       "callback_url",
                       "auth_code_or_url",
                       "import_files",
-                      "api_key"
+                      "api_key",
+                      "custom_provider"
                     ]
                   },
                   "accepted_at": {

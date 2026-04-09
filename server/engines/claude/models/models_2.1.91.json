@@ -3,6 +3,20 @@
   "version": "2.1.91",
   "models": [
     {
+      "id": "sonnet",
+      "display_name": "Claude Sonnet 4.6",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high"]
+    },
+    {
+      "id": "opus",
+      "display_name": "Claude Opus 4.6",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high", "max"]
+    },
+    {
       "id": "sonnet[1m]",
       "display_name": "Claude Sonnet 4.6 (1M context)",
       "deprecated": false,

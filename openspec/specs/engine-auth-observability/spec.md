@@ -156,6 +156,15 @@
 - **AND** 响应包含 `auth_method`
 - **AND** 响应包含 `execution_mode`
 
+### Requirement: provider_config/custom_provider 会话 MUST 作为正式可观测语义存在
+系统 MUST 将 `provider_config + custom_provider` 视为正式鉴权语义，并在快照、审计与 UI 可观测字段中稳定暴露。
+
+#### Scenario: custom provider challenge snapshot
+- **WHEN** Claude 第三方 provider 模型进入 provider-config 会话
+- **THEN** snapshot 中 `transport` MUST 为 `provider_config`
+- **AND** `auth_method` MUST 为 `custom_provider`
+- **AND** `challenge_kind` 与 `input_kind` MUST 为 `custom_provider`
+
 ### Requirement: waiting_orchestrator MUST 仅用于 CLI 委托路径
 系统 MUST 将 `waiting_orchestrator` 限制在 `cli_delegate` 的自动操作阶段。
 
@@ -494,4 +503,13 @@ The auth detector registry SHALL include `qwen` as a supported engine.
 - **WHEN** `coding-plan-china` 或 `coding-plan-global` 鉴权成功
 - **THEN** 系统 MUST 写入 `.qwen/settings.json`
 - **AND** 写盘结果 MUST 作为共享 auth observability 的一部分可被后续状态判断消费
+
+### Requirement: provider_config/custom_provider snapshots MUST be observable
+Auth session observability MUST treat `provider_config/custom_provider` as a first-class waiting_auth semantic.
+
+#### Scenario: provider-config challenge snapshot
+- **WHEN** a Claude third-party provider model triggers provider configuration
+- **THEN** the auth snapshot MUST expose `transport=provider_config`
+- **AND** `auth_method=custom_provider`
+- **AND** `challenge_kind=input_kind=custom_provider`
 

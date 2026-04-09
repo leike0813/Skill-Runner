@@ -255,6 +255,12 @@ The `interaction/reply` request payload MUST support auth method selection and a
 - **THEN** the payload MUST support selecting auth method
 - **AND** the payload MUST support auth submission content
 
+#### Scenario: client submits custom provider auth payload
+- **GIVEN** a Claude run is in `waiting_auth` for provider-config setup
+- **WHEN** the client submits `POST /interaction/reply` with `mode=auth`
+- **THEN** `submission.kind` MUST support `custom_provider`
+- **AND** the backend MUST treat it as the canonical provider-config submission kind
+
 ### Requirement: 系统 MUST 提供 auth session 状态接口
 The backend MUST provide `GET /v1/jobs/{run_id}/auth/session` for auth timeout and status synchronization.
 
@@ -905,4 +911,14 @@ Auth submission kinds MUST include `callback_url`, `auth_code_or_url`, and `api_
 - **THEN** payload MUST 返回 `accepts_chat_input=false`
 - **AND** `input_kind` MUST 为 `null`
 - **AND** 仍 MAY 返回 `auth_url` 与 `user_code`
+
+### Requirement: `interaction/reply` auth submission MUST support custom_provider
+The `interaction/reply` payload in `mode=auth` MUST support `submission.kind=custom_provider` for provider-config waiting_auth sessions.
+
+#### Scenario: client submits provider-config auth payload
+- **GIVEN** a Claude run is in `waiting_auth`
+- **AND** the current auth challenge is a provider-config challenge
+- **WHEN** the client submits `POST /interaction/reply` with `mode=auth`
+- **THEN** `submission.kind` MUST accept `custom_provider`
+- **AND** the backend MUST treat it as the canonical provider-config submission kind
 

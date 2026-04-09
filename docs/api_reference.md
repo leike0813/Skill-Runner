@@ -786,6 +786,7 @@
 
 说明：
 - `status` 固定回到 `queued`，随后由调度器恢复执行下一回合。
+- 当 `mode=auth` 时，`submission.kind` 除 `callback_url` / `auth_code_or_url` / `api_key` 外，也支持 `custom_provider`，用于 Claude 第三方 provider 的会话内配置提交。
 
 **错误语义**:
 - `400`: 当前请求不是 interactive 模式（`runtime_options.execution_mode != interactive`）。
@@ -1120,6 +1121,7 @@
   - `GET /v1/jobs/{request_id}/auth/session`
   - `GET /v1/jobs/{request_id}/interaction/pending`
 - 某些 challenge 会自动推进而不接收聊天输入；这时 `pending_auth` 会表现为 `accepts_chat_input=false`、`input_kind=null`，前端应隐藏输入框并继续轮询。
+- Claude 第三方 provider 配置场景会表现为 `transport=provider_config`、`auth_method=custom_provider`，其聊天侧 `pending_auth.challenge_kind/input_kind` 也都会是 `custom_provider`。
 
 ### 取消运行 (Cancel Run)
 `POST /v1/jobs/{request_id}/cancel`
@@ -1544,7 +1546,7 @@ provider-aware 示例：
 
 说明：
 - `transport` 支持 `oauth_proxy` 与 `cli_delegate`。
-- V2 下 `auth_method` 为必填，仅支持 `callback` / `auth_code_or_url` / `api_key`（取决于引擎与 provider）。
+- V2 下 `auth_method` 为必填；公开引擎鉴权接口当前支持 `callback` / `auth_code_or_url` / `api_key`，而会话内 provider-config 路径还会使用 `custom_provider`。
 - 旧值 `browser-oauth/device-auth/screen-reader-google-oauth/iflow-cli-oauth/opencode-provider-auth` 已废弃并返回 `422`。
 - V2 下不再使用 `method` 历史字段；兼容层仍可接收 `method`。
 - provider-aware engine（当前为 `opencode`、`qwen`）应显式提交 `provider_id`；这也是新的推荐写法。

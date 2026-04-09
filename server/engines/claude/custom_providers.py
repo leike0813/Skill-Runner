@@ -110,17 +110,24 @@ class ClaudeCustomProviderStore:
         provider_part, model_part = normalized_model_spec.split("/", 1)
         provider_id = self._normalize_provider_id(provider_part)
         model_name = self._normalize_model_name(model_part)
+        base_model_name, has_1m_suffix = self._strip_1m_suffix(model_name)
         for provider in self.list_providers():
             if provider.provider_id != provider_id:
                 continue
-            if model_name not in provider.models:
-                return None
-            return ClaudeResolvedCustomModel(
-                provider_id=provider.provider_id,
-                model=model_name,
-                api_key=provider.api_key,
-                base_url=provider.base_url,
-            )
+            if model_name in provider.models:
+                return ClaudeResolvedCustomModel(
+                    provider_id=provider.provider_id,
+                    model=base_model_name,
+                    api_key=provider.api_key,
+                    base_url=provider.base_url,
+                )
+            if has_1m_suffix and base_model_name in provider.models:
+                return ClaudeResolvedCustomModel(
+                    provider_id=provider.provider_id,
+                    model=base_model_name,
+                    api_key=provider.api_key,
+                    base_url=provider.base_url,
+                )
         return None
 
     def list_model_specs(self) -> list[str]:
@@ -233,6 +240,11 @@ class ClaudeCustomProviderStore:
         if "/" in normalized:
             raise ValueError("model name must not contain '/'")
         return normalized
+
+    def _strip_1m_suffix(self, value: str) -> tuple[str, bool]:
+        normalized = value.strip()
+        stripped = normalized.replace("[1m]", "").strip()
+        return stripped, stripped != normalized
 
     def _to_payload_row(self, provider: ClaudeCustomProvider) -> dict[str, Any]:
         return {
