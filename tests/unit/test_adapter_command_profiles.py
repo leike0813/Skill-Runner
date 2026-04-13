@@ -65,6 +65,22 @@ def test_codex_harness_start_command_passthrough_without_profile(monkeypatch) ->
     assert command == [_platform_cmd("/usr/bin/codex"), "exec", "--json", "--full-auto", "-p", "hello"]
 
 
+def test_codex_harness_start_command_does_not_inject_output_schema(monkeypatch) -> None:
+    adapter = CodexExecutionAdapter()
+    monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+
+    command = adapter.build_start_command(
+        prompt="ignored",
+        options={"__target_output_schema_relpath": ".audit/contracts/target_output_schema.json"},
+        passthrough_args=["exec", "--json", "--full-auto", "-p", "hello"],
+        use_profile_defaults=False,
+    )
+
+    assert "--output-schema" not in command
+    assert command == [_platform_cmd("/usr/bin/codex"), "exec", "--json", "--full-auto", "-p", "hello"]
+
+
 def test_codex_start_command_fallbacks_full_auto_to_yolo_when_landlock_disabled(monkeypatch) -> None:
     adapter = CodexExecutionAdapter()
     monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
@@ -168,6 +184,78 @@ def test_codex_resume_command_preserves_profile_flags(monkeypatch) -> None:
     ]
     assert "-p" in command
     assert "--profile=other" in command
+
+
+def test_codex_start_command_injects_output_schema_when_available(monkeypatch) -> None:
+    adapter = CodexExecutionAdapter()
+    monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "--full-auto", "-p", "skill-runner"]
+        if use_profile_defaults and action == "start"
+        else [],
+    )
+
+    command = adapter.build_start_command(
+        prompt="hello",
+        options={"__target_output_schema_relpath": ".audit/contracts/target_output_schema.json"},
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/codex"),
+        "exec",
+        "--json",
+        "--full-auto",
+        "-p",
+        "skill-runner",
+        "--output-schema",
+        ".audit/contracts/target_output_schema.json",
+        "hello",
+    ]
+
+
+def test_codex_resume_command_injects_output_schema_when_available(monkeypatch) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = CodexExecutionAdapter()
+    monkeypatch.setattr(adapter, "_resolve_codex_command", lambda: Path("/usr/bin/codex"))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--json", "--full-auto", "-p", "skill-runner"]
+        if use_profile_defaults and action == "resume"
+        else [],
+    )
+
+    command = adapter.build_resume_command(
+        prompt="next turn",
+        options={"__target_output_schema_relpath": ".audit/contracts/target_output_schema.json"},
+        session_handle=EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="sess-codex",
+            created_at_turn=1,
+        ),
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/codex"),
+        "exec",
+        "-p",
+        "skill-runner",
+        "resume",
+        "--json",
+        "--full-auto",
+        "--output-schema",
+        ".audit/contracts/target_output_schema.json",
+        "sess-codex",
+        "next turn",
+    ]
 
 
 def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None:
@@ -345,7 +433,7 @@ def test_claude_start_command_uses_profile_command_defaults(monkeypatch) -> None
         lambda *, action, use_profile_defaults: [
             "-p",
             "--output-format",
-            "stream-json",
+            "json",
             "--verbose",
         ]
         if use_profile_defaults and action == "start"
@@ -362,9 +450,114 @@ def test_claude_start_command_uses_profile_command_defaults(monkeypatch) -> None
         _platform_cmd("/usr/bin/claude"),
         "-p",
         "--output-format",
-        "stream-json",
+        "json",
         "--verbose",
         "--effort",
         "high",
         "hello",
+    ]
+
+
+def test_claude_start_command_injects_json_schema_when_available(monkeypatch) -> None:
+    adapter = ClaudeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: [
+            "-p",
+            "--output-format",
+            "json",
+            "--verbose",
+        ]
+        if use_profile_defaults and action == "start"
+        else [],
+    )
+
+    command = adapter.build_start_command(
+        prompt="hello",
+        options={
+            "model_reasoning_effort": "high",
+            "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
+        },
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/claude"),
+        "-p",
+        "--output-format",
+        "json",
+        "--verbose",
+        "--effort",
+        "high",
+        "--json-schema",
+        ".audit/contracts/target_output_schema.json",
+        "hello",
+    ]
+
+
+def test_claude_passthrough_start_command_does_not_inject_json_schema(monkeypatch) -> None:
+    adapter = ClaudeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
+
+    command = adapter.build_start_command(
+        prompt="ignored",
+        options={"__target_output_schema_relpath": ".audit/contracts/target_output_schema.json"},
+        passthrough_args=["-p", "--output-format", "json", "--verbose", "hello"],
+        use_profile_defaults=False,
+    )
+
+    assert "--json-schema" not in command
+    assert command == [
+        _platform_cmd("/usr/bin/claude"),
+        "-p",
+        "--output-format",
+        "json",
+        "--verbose",
+        "hello",
+    ]
+
+
+def test_claude_resume_command_injects_json_schema_when_available(monkeypatch) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = ClaudeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: [
+            "-p",
+            "--output-format",
+            "json",
+            "--verbose",
+        ]
+        if use_profile_defaults and action == "resume"
+        else [],
+    )
+
+    command = adapter.build_resume_command(
+        prompt="second turn",
+        options={"__target_output_schema_relpath": ".audit/contracts/target_output_schema.json"},
+        session_handle=EngineSessionHandle(
+            engine="claude",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="session-claude",
+            created_at_turn=1,
+        ),
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/claude"),
+        "--resume",
+        "session-claude",
+        "-p",
+        "--output-format",
+        "json",
+        "--verbose",
+        "--json-schema",
+        ".audit/contracts/target_output_schema.json",
+        "second turn",
     ]

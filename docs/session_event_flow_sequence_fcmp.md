@@ -138,9 +138,11 @@ sequenceDiagram
 - `interaction.auto_decide.timeout` -> `interaction.auto_decide.timeout` + `conversation.state.changed(waiting_user->queued)`
 - `turn.succeeded` -> terminal `conversation.state.changed(... to=succeeded, data.terminal.status=succeeded)`
 - `turn.failed` / `run.canceled` -> terminal `conversation.state.changed(... to=failed|canceled, data.terminal.status=failed|canceled)`
-- interactive 回合在命中 `<ASK_USER_YAML>` 或其他 ask-user 证据时，必须先走 `turn.needs_input`，不得被 soft completion 绕过
-- interactive soft completion 仅在无 ask-user 证据、structured output 提取成功且 schema/artifact 校验通过时成立
-- interactive 若提取到 JSON 但 schema 无效，仍走 `turn.needs_input` 而不是 `turn.failed`
+- 在目标合同下，`turn.needs_input` 的语义来源是合法 pending JSON 分支（`__SKILL_DONE__ = false + message + ui_hints`）投影，而不是独立 YAML ask-user 协议
+- repair retries 属于同一 attempt 的 `internal_round`；唯一执行者是 orchestrator output convergence executor
+- deterministic parse repair、schema repair、result-file fallback 和 interactive waiting/completion legacy heuristics 都属于同一 output convergence 治理链
+- repair exhaustion只回落到 legacy lifecycle fallback，不直接改写 FCMP 终态
+- `<ASK_USER_YAML>` 与 interactive soft completion 若在当前实现中仍出现，只属于 legacy rollout 背景，不是本时序文档描述的目标协议
 - failed/canceled terminal SHOULD 在 `data.terminal.error.code/message` 中携带错误摘要（message 为长度受控摘要）。
 - 过程语义映射：`agent.reasoning/tool_call/command_execution` 必须映射为 `assistant.reasoning/tool_call/command_execution`。
 - `agent.turn_start/agent.turn_complete` 仅属于 RASP 审计层，不映射到 FCMP（FCMP 不允许 `assistant.turn_*`）。

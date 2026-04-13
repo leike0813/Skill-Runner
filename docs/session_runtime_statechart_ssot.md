@@ -36,20 +36,19 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> turn_done_gate
-    turn_done_gate --> completed: done_marker_found && output_valid
-    turn_done_gate --> waiting_user: ask_user_wait(ask_user_evidence)
-    turn_done_gate --> completed: soft_complete(structured_output_valid)
-    turn_done_gate --> waiting_user: need_input(no_json_or_invalid_json)
+    turn_done_gate --> completed: final_json(__SKILL_DONE__=true && output_valid)
+    turn_done_gate --> waiting_user: pending_json(__SKILL_DONE__=false && message && ui_hints)
+    turn_done_gate --> waiting_user: lifecycle_fallback(after repair exhaustion)
     turn_done_gate --> failed: runtime_fail | done_marker_with_invalid_output
 ```
 
 决策优先级：
 
-1. `done-marker` 强证据
-2. `ask-user` 证据（命中即进入 `waiting_user`）
-3. `soft-complete`（无 marker、无 ask_user、structured output + schema/artifact 有效）
-4. `need-input`（无 ask_user 且无可用 structured output）
-5. `runtime` 失败 / `done-marker` 命中但输出无效
+1. 显式最终分支（`__SKILL_DONE__ = true`）
+2. 显式中间分支（`__SKILL_DONE__ = false + message + ui_hints`）
+3. output convergence executor 管理的 attempt 内部 `internal_round` repair loop
+4. repair exhaustion后的 legacy lifecycle fallback
+5. `runtime` 失败 / 显式完成分支命中但输出无效
 
 ## 4. Layer C: Timeout and Recovery Subchart
 
@@ -87,11 +86,14 @@ stateDiagram-v2
 - `assistant.reasoning/tool_call/command_execution` 等过程事件只属于观测层，不得触发状态迁移
 - `agent.turn_start/agent.turn_complete` 为 RASP 审计锚点，不属于 FCMP 状态迁移事件
 - `agent.turn_complete.data` 可携带引擎结构化统计信息（例如 usage/tokens/cost/stats），不得影响状态迁移判定
-- 无回合结束信号时，仅 `succeeded|waiting_user` 允许 fallback 提升为 final；`failed|canceled` 禁止 fallback 提升
-- 命中 `<ASK_USER_YAML>` 或其他 ask-user 证据时，当前 attempt 不得进入 `succeeded`
-- interactive soft completion 必须同时满足：无 ask-user 证据、成功提取标准化 JSON、schema 有效、artifact 修复后仍有效
-- 提取到 JSON 但 schema 无效时，interactive 必须进入 `waiting_user`，不得直接失败
-- 无 ask-user 且未提取到 JSON 时，interactive 仍进入 `waiting_user`
+- repair retries 属于同一 attempt 的 `internal_round`，不得增加 `attempt_number`
+- repair 的唯一决策者是 orchestrator 侧 output convergence executor；parser/adapter 只能提供 subordinate candidate repair
+- repair exhaustion只允许回落到现有 lifecycle normalization path，不得直接决定 `waiting_user` 或 `failed`
+- deterministic parse repair、schema repair、result-file fallback、interactive waiting/completion heuristics 必须被理解为同一 output convergence 治理链中的不同阶段
+- `waiting_user` 的正式富数据来源是合法 pending JSON 分支，而不是独立 YAML ask-user 协议
+- lifecycle fallback 若仍进入 `waiting_user`，只允许生成默认 pending payload，不再从 `<ASK_USER_YAML>`、runtime stream 或 direct interaction-like payload 中提取富字段
+- interactive completion gate 的优先级固定为：合法 final branch -> 合法 pending branch -> soft completion -> default waiting fallback
+- soft completion 与“无 done 输出可等待”的 fallback 仍存在，但在当前实现中只属于 compatibility path，而不是正式输出合同
 - `waiting_auth -> queued` 的唯一合法触发是 canonical `auth.completed`
 - `auth.completed` 的唯一合法来源是 auth session terminal success 或显式 callback/submission completion
 - `waiting_auth` 内部必须区分两条子路径：

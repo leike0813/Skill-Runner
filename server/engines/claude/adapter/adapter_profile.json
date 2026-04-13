@@ -49,13 +49,13 @@
     "start": [
       "-p",
       "--output-format",
-      "stream-json",
+      "json",
       "--verbose"
     ],
     "resume": [
       "-p",
       "--output-format",
-      "stream-json",
+      "json",
       "--verbose"
     ],
     "ui_shell": []

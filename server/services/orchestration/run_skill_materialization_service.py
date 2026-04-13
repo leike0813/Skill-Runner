@@ -9,8 +9,8 @@ from pathlib import Path
 from server.models import RunLocalSkillRef, RunLocalSkillSource, SkillManifest
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
+from server.services.orchestration.run_output_schema_service import run_output_schema_service
 from server.services.skill.skill_package_validator import SkillPackageValidator
-from server.services.skill.skill_asset_resolver import resolve_schema_asset
 from server.services.skill.skill_patcher import skill_patcher
 
 
@@ -35,6 +35,7 @@ class RunFolderBootstrapper:
         snapshot_dir = self.snapshot_dir(run_dir=run_dir, engine_name=engine_name, skill_id=skill.id)
         self._materialize_installed_skill(
             skill=skill,
+            run_dir=run_dir,
             snapshot_dir=snapshot_dir,
             execution_mode=execution_mode,
         )
@@ -97,6 +98,7 @@ class RunFolderBootstrapper:
             manifest = self._load_manifest(snapshot_dir)
             self._patch_materialized_dir(
                 skill=manifest,
+                run_dir=run_dir,
                 snapshot_dir=snapshot_dir,
                 execution_mode=execution_mode,
             )
@@ -144,6 +146,7 @@ class RunFolderBootstrapper:
         self,
         *,
         skill: SkillManifest,
+        run_dir: Path,
         snapshot_dir: Path,
         execution_mode: str,
     ) -> None:
@@ -158,6 +161,7 @@ class RunFolderBootstrapper:
             raise RuntimeError(f"Failed to bootstrap run folder for '{skill.id}'") from exc
         self._patch_materialized_dir(
             skill=skill,
+            run_dir=run_dir,
             snapshot_dir=snapshot_dir,
             execution_mode=execution_mode,
         )
@@ -166,20 +170,21 @@ class RunFolderBootstrapper:
         self,
         *,
         skill: SkillManifest,
+        run_dir: Path,
         snapshot_dir: Path,
         execution_mode: str,
     ) -> None:
         snapshot_skill = skill.model_copy(update={"path": snapshot_dir})
-        output_schema_resolution = resolve_schema_asset(snapshot_skill, "output")
-        output_schema = skill_patcher.load_output_schema(
-            skill_path=snapshot_dir,
-            output_schema_relpath=output_schema_resolution.declared_relpath,
+        output_schema_materialization = run_output_schema_service.materialize(
+            skill=snapshot_skill,
+            execution_mode=execution_mode,
+            run_dir=run_dir,
         )
         skill_patcher.patch_skill_md(
             snapshot_dir,
             list(skill.artifacts or []),
             execution_mode=execution_mode,
-            output_schema=output_schema,
+            output_schema_summary_markdown=output_schema_materialization.prompt_summary_markdown,
         )
 
     def _validate_zip_entry(self, clean_name: str) -> None:

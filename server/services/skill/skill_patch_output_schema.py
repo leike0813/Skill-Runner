@@ -10,7 +10,12 @@ _DONE_MARKER_ROW = (
 )
 
 
-def generate_output_schema_patch(schema: Dict[str, Any]) -> str:
+def generate_output_schema_patch(
+    schema: Dict[str, Any],
+    *,
+    schema_artifact_relpath: str | None = None,
+    compatibility_note: str | None = None,
+) -> str:
     if not schema or not isinstance(schema, dict):
         return ""
     properties = schema.get("properties")
@@ -23,6 +28,8 @@ def generate_output_schema_patch(schema: Dict[str, Any]) -> str:
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str):
             continue
+        if field_name == "__SKILL_DONE__":
+            continue
         field_schema_dict = field_schema if isinstance(field_schema, dict) else {}
         type_str = _describe_type(field_schema_dict)
         req_mark = "✅" if field_name in required_fields else ""
@@ -30,15 +37,30 @@ def generate_output_schema_patch(schema: Dict[str, Any]) -> str:
         rows.append(f"| `{field_name}` | {type_str} | {req_mark} | {desc} |")
 
     skeleton = _build_skeleton(properties)
-    lines = [
-        OUTPUT_SCHEMA_PATCH_MARKER,
-        "",
-        "Your output JSON must conform to the following schema:",
-        "",
-        "| Field | Type | Required | Description |",
-        "|-------|------|----------|-------------|",
-        *rows,
-    ]
+    lines = [OUTPUT_SCHEMA_PATCH_MARKER, ""]
+    if isinstance(schema_artifact_relpath, str) and schema_artifact_relpath.strip():
+        lines.extend(
+            [
+                f"Run-scoped machine schema artifact: `{schema_artifact_relpath.strip()}`.",
+                "",
+            ]
+        )
+    if isinstance(compatibility_note, str) and compatibility_note.strip():
+        lines.extend(
+            [
+                compatibility_note.strip(),
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Your output JSON must conform to the following schema:",
+            "",
+            "| Field | Type | Required | Description |",
+            "|-------|------|----------|-------------|",
+            *rows,
+        ]
+    )
     if additional_props is False:
         lines.append("")
         lines.append("No additional properties are allowed.")
@@ -174,6 +196,8 @@ def _build_skeleton(properties: Dict[str, Any]) -> Dict[str, Any]:
     skeleton: Dict[str, Any] = {"__SKILL_DONE__": True}
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str):
+            continue
+        if field_name == "__SKILL_DONE__":
             continue
         skeleton[field_name] = _skeleton_value(field_schema if isinstance(field_schema, dict) else {})
     return skeleton

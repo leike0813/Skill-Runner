@@ -325,12 +325,14 @@ _parse_output(raw_stdout) → AdapterTurnResult
 - 统一为单一可恢复会话范式（single resumable），不再区分双档位。
 - Orchestrator 在 interactive 首回合前完成恢复能力探测，走统一可恢复路径并持久化 `EngineSessionHandle`。
 - 自动回复开关：`runtime_options.interactive_auto_reply`（默认 `false`）。
-- Interactive 完成判定（双轨）：
-  - 强条件：assistant 回复中检测到 `__SKILL_DONE__`。
-  - 软条件：仅在未命中 ask_user 证据、且成功提取标准化 JSON 并通过 schema / artifact 校验时才允许完成（记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`）。
+- Interactive 目标输出合同：
+  - 最终分支：assistant 返回 JSON 对象，且显式 `__SKILL_DONE__ = true`。
+  - 中间分支：assistant 返回 JSON 对象，且显式 `__SKILL_DONE__ = false`，并包含 `message` 与 `ui_hints`。
+  - 生命周期判定顺序固定为：final branch -> pending branch -> soft completion -> default waiting fallback。
+  - `waiting_user` 的正式富数据来源是合法 pending JSON 分支投影。
   - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
-- ask_user 提示建议采用 YAML 并包裹 `<ASK_USER_YAML>...</ASK_USER_YAML>`。
-- 若该回合输出了 `<ASK_USER_YAML>`，则同回合不得再输出 `__SKILL_DONE__`；命中 ask_user 证据后必须进入 `waiting_user`。
+- legacy waiting fallback 若仍发生，只会生成默认 pending payload，不再从 `<ASK_USER_YAML>`、runtime stream 或 direct interaction-like payload 中提取富字段。
+- soft completion 若仍出现在当前实现中，只属于 compatibility / deprecated rollout 背景，不是正式输出合同。
 - 超时：`runtime_options.interactive_reply_timeout_sec`（默认 1200 秒）。
 - `max_attempt`：当 `attempt_number >= max_attempt` 且未完成时，返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 
@@ -344,6 +346,8 @@ _parse_output(raw_stdout) → AdapterTurnResult
 7. 输出校验与规范化链
 ================================================================================
 ### 解析阶段（Parse）
+- 目标 machine truth 是 run-scoped materialized JSON Schema artifact（例如 `.audit/contracts/target_output_schema.json`）。
+- prompt-facing schema summary 仅是该 machine artifact 的派生视图，不是另一套协议。
 - 优先读取 `run_dir/result/result.json`（若存在）。
 - 否则从 stdout 中提取 JSON：去除 code fence 包裹、提取第一个合法 JSON 对象。
 - 解析结果封装为 `AdapterTurnResult`（`server/runtime/adapter/types.py`）。
@@ -362,6 +366,7 @@ _parse_output(raw_stdout) → AdapterTurnResult
 ### 规范化链（Normalize Pipeline）
 N0 Deterministic Normalize（runner 内置）
 - 去 fence、trim、修复常见格式问题（仅语法层）。
+- 目标方向是 same-attempt repair loop；repair retries 不增加 `attempt_number`。
 
 N1 Skill Normalizer（可选）
 - 若 `runner.json` 声明 `normalizer.command`：执行该脚本。

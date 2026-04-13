@@ -600,6 +600,16 @@ def translate_orchestrator_event_to_fcmp_specs(
     default_attempt_number: int,
 ) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
+    repair_only_types = {
+        OrchestratorEventType.OUTPUT_REPAIR_STARTED.value,
+        OrchestratorEventType.OUTPUT_REPAIR_ROUND_STARTED.value,
+        OrchestratorEventType.OUTPUT_REPAIR_ROUND_COMPLETED.value,
+        OrchestratorEventType.OUTPUT_REPAIR_CONVERGED.value,
+        OrchestratorEventType.OUTPUT_REPAIR_EXHAUSTED.value,
+        OrchestratorEventType.OUTPUT_REPAIR_SKIPPED.value,
+    }
+    if type_name in repair_only_types:
+        return specs
 
     def push(spec_type: str, payload: Dict[str, Any]) -> None:
         specs.append({"type_name": spec_type, "data": payload})
@@ -1308,6 +1318,15 @@ def build_fcmp_events(
             continue
         type_name_obj = row.get("type")
         if not isinstance(type_name_obj, str) or not type_name_obj:
+            continue
+        if type_name_obj in {
+            OrchestratorEventType.OUTPUT_REPAIR_STARTED.value,
+            OrchestratorEventType.OUTPUT_REPAIR_ROUND_STARTED.value,
+            OrchestratorEventType.OUTPUT_REPAIR_ROUND_COMPLETED.value,
+            OrchestratorEventType.OUTPUT_REPAIR_CONVERGED.value,
+            OrchestratorEventType.OUTPUT_REPAIR_EXHAUSTED.value,
+            OrchestratorEventType.OUTPUT_REPAIR_SKIPPED.value,
+        }:
             continue
         row_data_obj = row.get("data")
         row_data = row_data_obj if isinstance(row_data_obj, dict) else {}

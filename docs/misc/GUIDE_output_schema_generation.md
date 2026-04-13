@@ -2,12 +2,12 @@
 
 ## Overview
 
-The output schema patch is dynamically generated at runtime by parsing the skill's `output.schema.json`. It produces two things:
+The canonical output-contract source is the run-scoped materialized JSON Schema artifact, not the prompt patch itself. Runtime derives two artifacts from the skill's business `output.schema.json`:
 
-1. A **Markdown table** describing each field (including `__SKILL_DONE__` as the first row).
-2. A **JSON skeleton** example showing the expected output structure.
+1. A machine-readable JSON Schema artifact (for example `.audit/contracts/target_output_schema.json`).
+2. A prompt-facing Markdown projection that summarizes the final output object contract.
 
-This generated text is appended after `patch_output_format_contract.md` (the static rules) in the patched SKILL.md.
+The Markdown projection is appended after `patch_output_format_contract.md` in the patched `SKILL.md`, but it is only a derived view of the machine schema artifact.
 
 ## Example: Input → Output
 
@@ -86,6 +86,8 @@ This generated text is appended after `patch_output_format_contract.md` (the sta
 ```markdown
 ### Output Schema Specification
 
+Run-scoped machine schema artifact: `.audit/contracts/target_output_schema.json`.
+
 Your output JSON must conform to the following schema:
 
 | Field | Type | Required | Description |
@@ -126,7 +128,16 @@ When a field has `"x-type": "artifact"`, the description column should indicate 
 | `digest_path` | string | ✅ | Artifact output path (set by runtime, see "Runtime Output Overrides" above). |
 ```
 
-These fields should **not** be filtered out of the table — they must still appear in the final JSON output, but the description clarifies that their values are determined by the artifact redirection section.
+These fields should **not** be filtered out of the table — they must still appear in the final JSON output, but the description clarifies that their values are determined by runtime artifact resolution.
+
+## Interactive Contract Note
+
+For `interactive` mode, the machine artifact may be a union schema containing both:
+
+- a final branch: `__SKILL_DONE__ = true`
+- a pending branch: `__SKILL_DONE__ = false + message + ui_hints`
+
+The prompt-facing markdown in stage 1 remains a summary of the final completion object only. Pending-branch guidance belongs to the target protocol contract, not to a separate YAML side channel.
 
 ---
 

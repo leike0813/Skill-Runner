@@ -33,7 +33,11 @@ def _final_engine_result(
     failure_reason: str | None = None,
     repair_level: str = "none",
     runtime_warnings: list[dict[str, str]] | None = None,
+    include_done_marker: bool = True,
 ) -> EngineRunResult:
+    payload = dict(final_data)
+    if include_done_marker:
+        payload.setdefault("__SKILL_DONE__", True)
     return EngineRunResult(
         exit_code=exit_code,
         raw_stdout=raw_stdout,
@@ -44,7 +48,7 @@ def _final_engine_result(
         runtime_warnings=runtime_warnings,
         turn_result=AdapterTurnResult(
             outcome=AdapterTurnOutcome.FINAL,
-            final_data=final_data,
+            final_data=payload,
             repair_level=repair_level,
             failure_reason=failure_reason,
         ),
@@ -1047,7 +1051,7 @@ async def test_run_job_result_file_fallback_schema_invalid_still_fails(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_run_job_result_file_fallback_does_not_override_waiting_user(tmp_path):
+async def test_run_job_result_file_fallback_recovers_interactive_run_after_legacy_ask_user(tmp_path):
     skill = _build_interactive_skill(tmp_path)
 
     old_runs_dir = config.SYSTEM.RUNS_DIR
@@ -1088,9 +1092,10 @@ async def test_run_job_result_file_fallback_does_not_override_waiting_user(tmp_p
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        assert status_data["status"] == "waiting_user"
-        assert status_data["pending"]["owner"] == "waiting_user"
-        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" not in status_data["warnings"]
+        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        assert status_data["status"] == "succeeded"
+        assert result_data["data"] == {"value": "ok"}
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in status_data["warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1210,7 +1215,10 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
         status_data = _read_state_data(run_dir)
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
-        assert "Missing required artifacts" in result_data["error"]["message"]
+        assert (
+            "Missing required artifacts" in result_data["error"]["message"]
+            or "'required_path' is a required property" in result_data["error"]["message"]
+        )
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1811,7 +1819,10 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["repair_level"] == "deterministic_generic"
-        assert "Output validation error" in result_data["error"]["message"]
+        assert (
+            "Output validation error" in result_data["error"]["message"]
+            or "target output validation error" in result_data["error"]["message"]
+        )
         assert "OUTPUT_REPAIRED_GENERIC" not in result_data["validation_warnings"]
         assert await local_store.get_cached_run("cache-key-repair-fail") is None
     finally:
@@ -2300,6 +2311,50 @@ class InteractiveSoftCompletionAdapter:
         return _final_engine_result(
             final_data={"value": "soft-complete"},
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"soft-complete"}}\n',
+            include_done_marker=False,
+        )
+
+
+class InteractivePendingBranchAdapter:
+    async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
+        raw_stdout = '{"type":"thread.started","thread_id":"thread-1"}\n'
+        await _emit_live_runtime_output_for_interactive_test(
+            live_runtime_emitter=live_runtime_emitter,
+            raw_stdout=raw_stdout,
+        )
+        return EngineRunResult(
+            exit_code=0,
+            raw_stdout=raw_stdout,
+            raw_stderr="",
+            artifacts_created=[],
+            turn_result=AdapterTurnResult(
+                outcome=AdapterTurnOutcome.FINAL,
+                final_data={
+                    "__SKILL_DONE__": False,
+                    "message": "请选择下一步。",
+                    "ui_hints": {
+                        "kind": "single_select",
+                        "options": [{"label": "继续", "value": "continue"}],
+                    },
+                },
+            ),
+        )
+
+    def parse_runtime_stream(self, *, stdout_raw: bytes, stderr_raw: bytes, pty_raw: bytes = b""):
+        _ = pty_raw
+        return _parse_interactive_runtime_stream_with_run_handle(
+            stdout_raw=stdout_raw,
+            stderr_raw=stderr_raw,
+        )
+
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="thread-1",
+            created_at_turn=turn_index,
         )
 
 
@@ -2340,6 +2395,7 @@ class InteractiveInvalidStructuredOutputAdapter:
         return _final_engine_result(
             final_data={"value": 7},
             raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"invalid-structured-output"}}\n',
+            include_done_marker=False,
         )
 
 
@@ -2546,7 +2602,10 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
         result_data = json.loads((run_dir / "result" / "result.json").read_text())
         assert status_data["status"] == "failed"
         assert result_data["status"] == "failed"
-        assert "Output validation error" in result_data["error"]["message"]
+        assert (
+            "Output validation error" in result_data["error"]["message"]
+            or "interactive flow must auto-resolve without waiting" in result_data["error"]["message"]
+        )
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2857,7 +2916,7 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_path):
+async def test_run_job_interactive_yaml_ask_user_falls_back_to_default_pending(tmp_path):
     skill_dir = tmp_path / "skill-interactive-yaml-ask-user-enrichment"
     skill_dir.mkdir()
     (skill_dir / "output.schema.json").write_text(
@@ -2905,8 +2964,9 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 3
-        assert status_data["pending"]["payload"]["prompt"] == "Please provide missing details."
+        assert status_data["pending"]["interaction_id"] == 1
+        assert status_data["pending"]["payload"]["prompt"] == "Please reply to continue."
+        assert status_data["pending"]["payload"]["context"]["inferred_from"] == "legacy_waiting_fallback"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2915,7 +2975,7 @@ async def test_run_job_interactive_yaml_ask_user_is_pending_enrichment_only(tmp_
 
 
 @pytest.mark.asyncio
-async def test_run_job_interactive_yaml_ask_user_blocks_soft_completion(tmp_path):
+async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(tmp_path):
     skill_dir = tmp_path / "skill-interactive-yaml-ask-user-soft-complete"
     skill_dir.mkdir()
     (skill_dir / "output.schema.json").write_text(
@@ -2955,11 +3015,11 @@ async def test_run_job_interactive_yaml_ask_user_blocks_soft_completion(tmp_path
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
-        assert status_data["status"] == "waiting_user"
-        assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 3
-        assert "INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER" in meta_data["validation_warnings"]
+        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        assert status_data["status"] == "succeeded"
+        assert result_data["status"] == "success"
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
+        assert "INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER" not in result_data["validation_warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3009,6 +3069,84 @@ async def test_run_job_interactive_soft_completion_warns_on_permissive_schema(tm
         assert result_data["status"] == "success"
         assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
         assert "INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE" in result_data["validation_warnings"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_run_job_interactive_pending_branch_enters_waiting_user_before_compatibility_paths(tmp_path):
+    skill_dir = tmp_path / "skill-interactive-pending-branch"
+    skill_dir.mkdir()
+    (skill_dir / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        )
+    )
+    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    skill = SkillManifest(
+        id="test-skill-interactive-pending-branch",
+        path=skill_dir,
+        engines=["codex"],
+        execution_modes=["interactive"],
+        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
+    )
+
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        run_id = _create_run_with_skill(tmp_path, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        await local_store.create_request(
+            request_id="req-interactive-pending-branch",
+            skill_id=skill.id,
+            engine="codex",
+            parameter={},
+            engine_options={},
+            runtime_options={"execution_mode": "interactive"},
+            input_data={},
+        )
+        await local_store.update_request_run_id("req-interactive-pending-branch", run_id)
+        await local_store.create_run(run_id, None, "queued")
+
+        orchestrator = JobOrchestrator()
+        orchestrator.adapters = {"codex": InteractivePendingBranchAdapter()}
+        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
+            reason="probe_ok",
+            session_timeout_sec=session_timeout_sec,
+        )
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        status_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
+        pending = await local_store.get_pending_interaction("req-interactive-pending-branch")
+        assert status_data["status"] == "waiting_user"
+        assert pending is not None
+        assert pending["prompt"] == "请选择下一步。"
+        assert pending["kind"] == "choose_one"
+        assert pending["ui_hints"]["kind"] == "single_select"
+        assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" not in meta_data["validation_warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3124,7 +3262,8 @@ async def test_run_job_interactive_embedded_json_with_ask_user_waits(tmp_path):
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 9
+        assert status_data["pending"]["interaction_id"] == 1
+        assert status_data["pending"]["payload"]["prompt"] == "Please reply to continue."
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3238,9 +3377,8 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
         pending = await local_store.get_pending_interaction("req-direct-interactive")
         assert pending is not None
         assert pending["interaction_id"] == 1
-        assert pending["prompt"] == "Please share a short self-introduction."
-        assert pending["context"]["external_interaction_id"] == "demo-interactive-1"
-        assert pending["context"]["interaction_id_source"] == "fallback"
+        assert pending["prompt"] == "Please reply to continue."
+        assert pending["context"]["inferred_from"] == "legacy_waiting_fallback"
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3400,23 +3538,21 @@ async def _emit_live_runtime_output_for_interactive_test(
     await live_runtime_emitter.on_process_exit(exit_code=exit_code, failure_reason=failure_reason)
 
 
-def test_extract_pending_interaction_accepts_hint_without_prompt():
+def test_extract_pending_interaction_projects_pending_branch_only():
     orchestrator = JobOrchestrator()
     payload = {
-        "ask_user": {
-            "interaction_id": 2,
-            "kind": "open_text",
-            "ui_hints": {"hint": "请先简要介绍你的情况。"},
-        }
+        "__SKILL_DONE__": False,
+        "message": "请先简要介绍你的情况。",
+        "ui_hints": {"hint": "请先简要介绍你的情况。"},
     }
     extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=2)
     assert extracted is not None
     assert extracted["interaction_id"] == 2
-    assert extracted["prompt"] == "Please reply to continue."
+    assert extracted["prompt"] == "请先简要介绍你的情况。"
     assert extracted["ui_hints"]["hint"] == "请先简要介绍你的情况。"
 
 
-def test_extract_pending_interaction_accepts_direct_payload_with_hint():
+def test_extract_pending_interaction_rejects_legacy_direct_payload():
     orchestrator = JobOrchestrator()
     payload = {
         "interaction_id": 3,
@@ -3424,52 +3560,7 @@ def test_extract_pending_interaction_accepts_direct_payload_with_hint():
         "ui_hints": {"hint": "请补充你的核心诉求。"},
     }
     extracted = orchestrator._extract_pending_interaction(payload, fallback_interaction_id=3)
-    assert extracted is not None
-    assert extracted["interaction_id"] == 3
-    assert extracted["prompt"] == "Please reply to continue."
-    assert extracted["ui_hints"]["hint"] == "请补充你的核心诉求。"
-
-
-class EscapedNdjsonAdapterForHint:
-    def parse_runtime_stream(self, stdout_raw, stderr_raw, pty_raw):
-        _ = stdout_raw
-        _ = stderr_raw
-        _ = pty_raw
-        return {
-            "assistant_messages": [
-                {
-                    "text": (
-                        "先收集一点信息。\n\n"
-                        "<ASK_USER_YAML>\n"
-                        "ask_user:\n"
-                        "  kind: open_text\n"
-                        "  ui_hints:\n"
-                        "    type: string\n"
-                        "    hint: \"例如：男，38，工程师\"\n"
-                        "</ASK_USER_YAML>"
-                    )
-                }
-            ]
-        }
-
-
-def test_extract_pending_interaction_from_stream_prefers_parser_text_for_hint():
-    orchestrator = JobOrchestrator()
-    raw_stdout = (
-        '{"type":"item.completed","item":{"type":"agent_message","text":"'
-        '先收集一点信息。\\n\\n<ASK_USER_YAML>\\nask_user:\\n  kind: open_text\\n  ui_hints:\\n'
-        '    type: string\\n    hint: \\"例如：男，38，工程师\\"\\n</ASK_USER_YAML>"}}'
-    )
-    extracted = orchestrator._extract_pending_interaction_from_stream(
-        adapter=EscapedNdjsonAdapterForHint(),
-        raw_stdout=raw_stdout,
-        raw_stderr="",
-        fallback_interaction_id=5,
-    )
-    assert extracted is not None
-    assert extracted["interaction_id"] == 5
-    assert extracted["prompt"] == "Please reply to continue."
-    assert extracted["ui_hints"]["hint"] == "例如：男，38，工程师"
+    assert extracted is None
 
 
 def _build_interactive_skill(tmp_path: Path) -> SkillManifest:

@@ -39,15 +39,16 @@ from server.services.orchestration.run_artifact_path_autofix import (
     resolve_output_artifact_paths,
 )
 from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
-from server.services.orchestration.run_result_file_fallback import (
-    resolve_result_file_fallback,
-)
 from server.services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
 from server.services.engine_management.model_registry import model_registry
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from server.services.orchestration.run_projection_service import run_projection_service
+from server.services.orchestration.run_output_schema_service import run_output_schema_service
+from server.services.orchestration.run_output_convergence_service import (
+    run_output_convergence_service,
+)
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.schema_validator import schema_validator
@@ -411,6 +412,7 @@ class _RunJobLifecyclePipeline:
                     engine_name=engine_name,
                     options=options,
                 )
+            can_persist_waiting_user = can_wait_for_user
             attempt_override_obj = options.get("__attempt_number_override")
             if isinstance(attempt_override_obj, int) and attempt_override_obj > 0:
                 attempt_number = attempt_override_obj
@@ -657,6 +659,7 @@ class _RunJobLifecyclePipeline:
                 if request_id:
                     run_options["__request_id"] = request_id
                 run_options["__engine_name"] = engine_name
+                run_options.update(run_output_schema_service.build_run_option_fields(run_dir=run_dir))
                 if is_interactive and request_id and interactive_profile:
                     await self._inject_interactive_resume_context(
                         request_id=request_id,
@@ -800,7 +803,6 @@ class _RunJobLifecyclePipeline:
                 repair_level = result.repair_level or "none"
                 has_structured_output = False
                 structured_output_source: str | None = None
-                ask_user_signal_detected = False
 
                 def _append_validation_warning(code: str, *, detail: str | None = None) -> None:
                     if code not in warnings:
@@ -834,200 +836,123 @@ class _RunJobLifecyclePipeline:
                         else None
                     )
                     _append_validation_warning(warning_code, detail=warning_detail)
-                structured_output_candidate = self._resolve_structured_output_candidate(
-                    result=result,
-                    runtime_parse_result=runtime_parse_result,
-                    execution_mode=execution_mode,
-                )
-                structured_output_payload = (
-                    structured_output_candidate.get("payload")
-                    if isinstance(structured_output_candidate, dict)
-                    and isinstance(structured_output_candidate.get("payload"), dict)
-                    else None
-                )
-                structured_output_source = (
-                    str(structured_output_candidate.get("source"))
-                    if isinstance(structured_output_candidate, dict)
-                    and isinstance(structured_output_candidate.get("source"), str)
-                    else None
-                )
-                if isinstance(structured_output_payload, dict):
-                    turn_payload_for_completion = dict(structured_output_payload)
-                done_marker_found_in_stream = self._contains_done_marker_in_stream(
+                convergence = await run_output_convergence_service.converge(
                     adapter=adapter,
-                    raw_stdout=result.raw_stdout,
-                    raw_stderr=result.raw_stderr,
-                )
-                done_signal_found = done_marker_found_in_stream
-                pending_interaction_candidate = None
-                pending_interaction_from_payload: Optional[Dict[str, Any]] = None
-                stream_pending_interaction: Optional[Dict[str, Any]] = None
-                stream_ask_user_signal = False
-                if not done_signal_found and not auth_detection_high:
-                    if structured_output_source == "turn_result_ask_user" and isinstance(structured_output_payload, dict):
-                        pending_interaction_from_payload = self._extract_pending_interaction(
-                            structured_output_payload,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    stream_pending_interaction = self._extract_pending_interaction_from_stream(
-                        adapter=adapter,
-                        raw_stdout=result.raw_stdout,
-                        raw_stderr=result.raw_stderr,
-                        fallback_interaction_id=attempt_number,
-                    )
-                    stream_ask_user_signal = self._contains_ask_user_signal_in_stream(
-                        adapter=adapter,
-                        raw_stdout=result.raw_stdout,
-                        raw_stderr=result.raw_stderr,
-                    )
-                    ask_user_signal_detected = (
-                        pending_interaction_from_payload is not None
-                        or stream_pending_interaction is not None
-                        or stream_ask_user_signal
-                    )
-                if result.exit_code == 0:
-                    if isinstance(structured_output_payload, dict) and structured_output_source != "turn_result_ask_user":
-                        has_structured_output = True
-                        output_data, done_signal_found_in_payload = (
-                            self._strip_done_marker_for_output_validation(structured_output_payload)
-                        )
-                        done_signal_found = (
-                            done_signal_found_in_payload or done_marker_found_in_stream
-                        )
-                        schema_output_errors = schema_validator.validate_output(skill, output_data)
-                        if not schema_output_errors and repair_level == "deterministic_generic":
-                            _append_validation_warning("OUTPUT_REPAIRED_GENERIC")
-                    elif done_signal_found or not is_interactive:
-                        schema_output_errors = ["Output JSON missing or unreadable"]
-
-                if can_wait_for_user and not done_signal_found and not auth_detection_high:
-                    pending_interaction_candidate = pending_interaction_from_payload
-                    if pending_interaction_candidate is None and stream_pending_interaction is not None:
-                        pending_interaction_candidate = stream_pending_interaction
-                    if pending_interaction_candidate is None and has_structured_output:
-                        pending_interaction_candidate = self._extract_pending_interaction(
-                            output_data,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None and has_structured_output:
-                        pending_interaction_candidate = self._infer_pending_interaction(
-                            output_data,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None:
-                        pending_interaction_candidate = self._infer_pending_interaction_from_runtime_stream(
-                            adapter=adapter,
-                            raw_stdout=result.raw_stdout,
-                            raw_stderr=result.raw_stderr,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None:
-                        pending_interaction_candidate = self._infer_pending_interaction(
-                            {},
-                            fallback_interaction_id=attempt_number,
-                        )
-                elif is_interactive and not done_signal_found and not auth_detection_high:
-                    pending_interaction_candidate = pending_interaction_from_payload
-                    if pending_interaction_candidate is None and has_structured_output:
-                        pending_interaction_candidate = self._extract_pending_interaction(
-                            output_data,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None and has_structured_output:
-                        pending_interaction_candidate = self._infer_pending_interaction(
-                            output_data,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None:
-                        pending_interaction_candidate = self._infer_pending_interaction_from_runtime_stream(
-                            adapter=adapter,
-                            raw_stdout=result.raw_stdout,
-                            raw_stderr=result.raw_stderr,
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if pending_interaction_candidate is None:
-                        pending_interaction_candidate = self._infer_pending_interaction(
-                            {},
-                            fallback_interaction_id=attempt_number,
-                        )
-                    if (
-                        pending_interaction_candidate is not None
-                        and request_id
-                        and run_id
-                        and not session_capable
-                        and interactive_auto_reply
-                    ):
-                        pending_interaction_candidate.setdefault("source_attempt", attempt_number)
-                        await maybe_await(
-                            run_store.set_pending_interaction(
-                                request_id,
-                                pending_interaction_candidate,
-                            )
-                        )
-                        await maybe_await(
-                            run_store.append_interaction_history(
-                                request_id=request_id,
-                                interaction_id=int(pending_interaction_candidate["interaction_id"]),
-                                event_type="ask_user",
-                                payload=pending_interaction_candidate,
-                                source_attempt=attempt_number,
-                            )
-                        )
-                        await run_projection_service.write_non_terminal_projection(
-                            run_dir=run_dir,
-                            request_id=request_id,
-                            run_id=run_id,
-                            status=RunStatus.QUEUED,
-                            request_record=request_record,
-                            current_attempt=attempt_number,
-                            pending_owner=None,
-                            source_attempt=attempt_number,
-                            target_attempt=attempt_number + 1,
-                            run_store_backend=run_store,
-                        )
-                        await run_store.update_run_status(run_id, RunStatus.QUEUED)
-                        asyncio.create_task(
-                            self._resume_with_auto_decision(
-                                request_record=request_record or {},
-                                run_id=run_id,
-                                request_id=request_id,
-                                pending_interaction=pending_interaction_candidate,
-                            )
-                        )
-                        final_status = RunStatus.QUEUED
-                        final_validation_warnings = list(warnings)
-                        return RunJobOutcome(run_id=run_id, final_status=RunStatus.QUEUED)
-
-                should_try_result_file_fallback = (
-                    result.exit_code == 0
-                    and not auth_detection_high
-                    and pending_interaction_candidate is None
-                    and not ask_user_signal_detected
-                    and (not has_structured_output or bool(schema_output_errors))
-                )
-                if should_try_result_file_fallback:
-                    result_file_fallback = resolve_result_file_fallback(
-                        skill=skill,
+                    skill=skill,
+                    input_data=input_data,
+                    run_dir=run_dir,
+                    request_id=request_id,
+                    run_store_backend=run_store,
+                    run_id=run_id,
+                    engine_name=engine_name,
+                    execution_mode=execution_mode,
+                    attempt_number=attempt_number,
+                    options=run_options,
+                    initial_result=result,
+                    initial_runtime_parse_result=runtime_parse_result,
+                    auth_detection_result=auth_detection_result,
+                    auth_detection_high=auth_detection_high,
+                    resolve_structured_output_candidate=self._resolve_structured_output_candidate,
+                    strip_done_marker_for_output_validation=self._strip_done_marker_for_output_validation,
+                    extract_pending_interaction=self._extract_pending_interaction,
+                    append_orchestrator_event=self._append_orchestrator_event,
+                    append_output_repair_record=self.audit_service.append_output_repair_record,
+                    live_runtime_emitter_factory=lambda: LiveRuntimeEmitterImpl(
+                        run_id=run_id,
                         run_dir=run_dir,
-                    )
-                    for fallback_warning in result_file_fallback.warnings:
-                        _append_validation_warning(
-                            fallback_warning.code,
-                            detail=fallback_warning.detail,
+                        engine=engine_name,
+                        attempt_number=attempt_number,
+                        stream_parser=adapter_stream_parser,
+                        run_handle_consumer=_consume_run_handle,
+                    ),
+                )
+                result = convergence.engine_result or result
+                runtime_parse_result = convergence.runtime_parse_result
+                if convergence.process_exit_code is not None:
+                    process_exit_code = convergence.process_exit_code
+                if convergence.process_failure_reason is not None:
+                    process_failure_reason = convergence.process_failure_reason
+                process_raw_stdout = getattr(result, "raw_stdout", "") or process_raw_stdout
+                process_raw_stderr = getattr(result, "raw_stderr", "") or process_raw_stderr
+                repair_level = convergence.repair_level or repair_level
+                output_data = dict(convergence.output_data)
+                has_structured_output = convergence.has_structured_output
+                structured_output_source = convergence.structured_output_source
+                done_signal_found = convergence.done_signal_found
+                schema_output_errors = list(convergence.schema_output_errors)
+                pending_interaction_candidate = convergence.pending_interaction_candidate
+                turn_payload_for_completion = dict(convergence.turn_payload_for_completion)
+                for convergence_warning in convergence.validation_warnings:
+                    _append_validation_warning(convergence_warning)
+                if (
+                    not schema_output_errors
+                    and has_structured_output
+                    and convergence.convergence_state == "not_needed"
+                    and repair_level == "deterministic_generic"
+                ):
+                    _append_validation_warning("OUTPUT_REPAIRED_GENERIC")
+                if (
+                    pending_interaction_candidate is not None
+                    and request_id
+                    and run_id
+                    and not session_capable
+                    and interactive_auto_reply
+                ):
+                    pending_interaction_candidate.setdefault("source_attempt", attempt_number)
+                    await maybe_await(
+                        run_store.set_pending_interaction(
+                            request_id,
+                            pending_interaction_candidate,
                         )
-                    if isinstance(result_file_fallback.payload, dict):
-                        output_data = dict(result_file_fallback.payload)
-                        schema_output_errors = []
-                        has_structured_output = True
-                        done_signal_found = True
-                        structured_output_source = "result_file_fallback"
-                        turn_payload_for_completion = dict(output_data)
+                    )
+                    await maybe_await(
+                        run_store.append_interaction_history(
+                            request_id=request_id,
+                            interaction_id=int(pending_interaction_candidate["interaction_id"]),
+                            event_type="ask_user",
+                            payload=pending_interaction_candidate,
+                            source_attempt=attempt_number,
+                        )
+                    )
+                    await run_projection_service.write_non_terminal_projection(
+                        run_dir=run_dir,
+                        request_id=request_id,
+                        run_id=run_id,
+                        status=RunStatus.QUEUED,
+                        request_record=request_record,
+                        current_attempt=attempt_number,
+                        pending_owner=None,
+                        source_attempt=attempt_number,
+                        target_attempt=attempt_number + 1,
+                        run_store_backend=run_store,
+                    )
+                    await run_store.update_run_status(run_id, RunStatus.QUEUED)
+                    asyncio.create_task(
+                        self._resume_with_auto_decision(
+                            request_record=request_record or {},
+                            run_id=run_id,
+                            request_id=request_id,
+                            pending_interaction=pending_interaction_candidate,
+                        )
+                    )
+                    final_status = RunStatus.QUEUED
+                    final_validation_warnings = list(warnings)
+                    return RunJobOutcome(run_id=run_id, final_status=RunStatus.QUEUED)
+
+                done_marker_found_in_stream = self.audit_service.contains_done_marker_in_stream(
+                    adapter=adapter,
+                    raw_stdout=process_raw_stdout,
+                    raw_stderr=process_raw_stderr,
+                )
+                legacy_pending_interaction = self._build_default_pending_interaction(
+                    fallback_interaction_id=attempt_number,
+                )
 
                 # 6.1 Normalization (N0)
                 # Create standard envelope
                 artifacts = collect_run_artifacts(run_dir)
                 artifact_errors: list[str] = []
-                if done_signal_found or (has_structured_output and not ask_user_signal_detected):
+                if done_signal_found or (has_structured_output and pending_interaction_candidate is None):
                     resolution_result = resolve_output_artifact_paths(
                         skill=skill,
                         run_dir=run_dir,
@@ -1149,26 +1074,23 @@ class _RunJobLifecyclePipeline:
                 elif forced_failure_reason or result.exit_code != 0:
                     normalized_status = "failed"
                 elif is_interactive:
+                    final_branch_resolved = bool(done_signal_found)
+                    pending_branch_resolved = (
+                        not final_branch_resolved
+                        and pending_interaction_candidate is not None
+                    )
                     soft_completion = (
-                        (not done_signal_found)
-                        and (not ask_user_signal_detected)
+                        (not final_branch_resolved)
+                        and (not pending_branch_resolved)
                         and has_structured_output
                         and not schema_output_errors
                     )
-                    if done_signal_found:
+                    if final_branch_resolved:
                         terminal_validation_errors = [*schema_output_errors, *artifact_errors]
                         if terminal_validation_errors:
                             normalized_status = "failed"
-                    elif ask_user_signal_detected:
-                        if has_structured_output:
-                            _append_validation_warning("INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER")
-                        max_attempt = skill.max_attempt
-                        if max_attempt is not None and attempt_number >= max_attempt:
-                            forced_failure_reason = (
-                                InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
-                            )
-                            normalized_status = "failed"
-                        elif can_wait_for_user:
+                    elif pending_branch_resolved:
+                        if can_persist_waiting_user:
                             normalized_status = RunStatus.WAITING_USER.value
                             pending_interaction = pending_interaction_candidate
                         else:
@@ -1186,18 +1108,21 @@ class _RunJobLifecyclePipeline:
                                 )
                     elif has_structured_output and schema_output_errors:
                         _append_validation_warning("INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID")
-                        max_attempt = skill.max_attempt
-                        if max_attempt is not None and attempt_number >= max_attempt:
-                            forced_failure_reason = (
-                                InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
-                            )
+                        if done_marker_found_in_stream:
                             normalized_status = "failed"
-                        elif can_wait_for_user:
-                            normalized_status = RunStatus.WAITING_USER.value
-                            pending_interaction = pending_interaction_candidate
                         else:
-                            forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
-                            normalized_status = "failed"
+                            max_attempt = skill.max_attempt
+                            if max_attempt is not None and attempt_number >= max_attempt:
+                                forced_failure_reason = (
+                                    InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
+                                )
+                                normalized_status = "failed"
+                            elif can_persist_waiting_user:
+                                normalized_status = RunStatus.WAITING_USER.value
+                                pending_interaction = pending_interaction_candidate or legacy_pending_interaction
+                            else:
+                                forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
+                                normalized_status = "failed"
                     else:
                         max_attempt = skill.max_attempt
                         if max_attempt is not None and attempt_number >= max_attempt:
@@ -1205,9 +1130,9 @@ class _RunJobLifecyclePipeline:
                                 InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
                             )
                             normalized_status = "failed"
-                        elif can_wait_for_user:
+                        elif can_persist_waiting_user:
                             normalized_status = RunStatus.WAITING_USER.value
-                            pending_interaction = pending_interaction_candidate
+                            pending_interaction = pending_interaction_candidate or legacy_pending_interaction
                         else:
                             forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
                             normalized_status = "failed"

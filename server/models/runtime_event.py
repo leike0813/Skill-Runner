@@ -148,6 +148,12 @@ class OrchestratorEventType(str, Enum):
     AUTH_SESSION_TIMED_OUT = "auth.session.timed_out"
     AUTH_SESSION_BUSY = "auth.session.busy"
     ERROR_RUN_FAILED = "error.run.failed"
+    OUTPUT_REPAIR_STARTED = "diagnostic.output_repair.started"
+    OUTPUT_REPAIR_ROUND_STARTED = "diagnostic.output_repair.round.started"
+    OUTPUT_REPAIR_ROUND_COMPLETED = "diagnostic.output_repair.round.completed"
+    OUTPUT_REPAIR_CONVERGED = "diagnostic.output_repair.converged"
+    OUTPUT_REPAIR_EXHAUSTED = "diagnostic.output_repair.exhausted"
+    OUTPUT_REPAIR_SKIPPED = "diagnostic.output_repair.skipped"
     DIAGNOSTIC_WARNING = "diagnostic.warning"
 
 

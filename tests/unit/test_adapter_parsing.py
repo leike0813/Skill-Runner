@@ -103,7 +103,7 @@ def test_claude_parse_output_from_stream_result_event():
     assert result.repair_level == "none"
 
 
-def test_claude_build_start_command_uses_stream_json_flags(monkeypatch):
+def test_claude_build_start_command_uses_json_output_flags(monkeypatch):
     adapter = ClaudeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
 
@@ -116,7 +116,7 @@ def test_claude_build_start_command_uses_stream_json_flags(monkeypatch):
         str(Path("/usr/bin/claude")),
         "-p",
         "--output-format",
-        "stream-json",
+        "json",
         "--verbose",
         "--effort",
         "high",
@@ -276,7 +276,7 @@ def test_claude_build_resume_command_uses_resume_flag(monkeypatch):
         "session-claude-resume",
         "-p",
         "--output-format",
-        "stream-json",
+        "json",
         "--verbose",
         "second turn",
     ]

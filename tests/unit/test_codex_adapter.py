@@ -371,3 +371,43 @@ async def test_execute_interactive_command_includes_auto_flags(tmp_path):
             )
         args, _ = mock_exec.call_args
         assert "--full-auto" in args or "--yolo" in args
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_first_attempt_spawn_command_with_output_schema(tmp_path):
+    adapter = CodexExecutionAdapter(config_manager=MagicMock())
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = MagicMock()
+    mock_proc.stderr = MagicMock()
+    mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+    mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+    mock_proc.wait = AsyncMock()
+    mock_proc.returncode = 0
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_proc
+        with patch.object(adapter, "_resolve_codex_command", return_value=Path("/usr/bin/codex")):
+            await adapter._execute_process(
+                "schema prompt",
+                run_dir,
+                skill,
+                options={
+                    "__attempt_number": 1,
+                    "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
+                },
+            )
+
+    args, _ = mock_exec.call_args
+    payload = json.loads(request_input_path.read_text(encoding="utf-8"))
+    assert payload["spawn_command_original_first_attempt"] == list(args)
+    assert payload["spawn_command_effective_first_attempt"] == list(args)
+    assert "--output-schema" in args
+    assert args[args.index("--output-schema") + 1] == ".audit/contracts/target_output_schema.json"

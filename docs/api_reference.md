@@ -548,7 +548,8 @@
 - 若 `engines` 与 `unsupported_engines` 同时存在，二者不允许重复；计算后的有效引擎集合必须非空。
 - `runner.json` 必须包含非空 `execution_modes` 列表，且值仅允许 `auto` / `interactive`。
 - `runner.json.max_attempt` 为可选正整数（`>=1`），仅在 `interactive` 模式生效：
-  - 当 `attempt_number >= max_attempt` 且当轮既无 `__SKILL_DONE__` 也无法通过 output schema 软完成时，run 失败并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
+  - 目标合同下，只有显式最终分支（`__SKILL_DONE__ = true`）才算完成。
+  - 当 `attempt_number >= max_attempt` 且当轮既未产出合法最终分支，也未进入合法 pending 分支时，run 失败并返回 `INTERACTIVE_MAX_ATTEMPT_EXCEEDED`。
 - `runner.json` 的 `artifacts` 可选；若提供，必须为数组。  
   若未提供，服务端会基于 `output.schema.json` 中的 artifact 声明推导运行时产物合同。
 - `runner.json.runtime.default_options` 可选；用于声明 skill 默认 runtime options：
@@ -729,15 +730,14 @@
 - `dispatch_ticket_id` / `worker_claim_id`：调度令牌/Worker 认领标识，用于调试与追踪。
 - `resume_ticket_id` / `resume_cause`：恢复令牌/恢复原因，可用于故障排查。
 - `source_attempt` / `target_attempt`：恢复调度时的源/目标尝试轮次。
-- interactive 双轨完成说明：
-  - 在 assistant 回复内容中解析到 `__SKILL_DONE__` 时按强条件完成；
-  - 未解析到 marker 时，仅在未命中 ask_user 证据、且成功提取标准化 JSON 并通过 schema/artifact 校验时才允许软条件完成，并在 warnings/diagnostics 中出现 `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`。
+- interactive 目标输出合同说明：
+  - `interactive` 采用单一 union contract。
+  - 最终分支：JSON 对象，且显式 `__SKILL_DONE__ = true`；业务字段满足 `output.schema.json`。
+  - 中间分支：JSON 对象，且显式 `__SKILL_DONE__ = false`，并包含非空 `message` 与对象型 `ui_hints`。
+  - interactive 生命周期优先级固定为：final branch -> pending branch -> soft completion -> default waiting fallback。
+  - `waiting_user` 的正式富数据来源是合法 pending JSON 分支投影，而不是独立 YAML 协议。
   - `tool_use`/tool 回显中的 marker 文本不参与完成判定。
-  - ask_user 提示建议使用非 JSON 结构化格式（YAML，示例：`<ASK_USER_YAML>...</ASK_USER_YAML>`），避免被结果 JSON 误判。
-  - 若某回合输出了 `<ASK_USER_YAML>`，则该回合不得同时输出 `__SKILL_DONE__`。
-  - 一旦命中 `<ASK_USER_YAML>` 或其他 ask_user 证据，后端必须进入 `waiting_user`，并禁止任何 soft completion / repair 改判完成。
-  - 若提取到 JSON 但 output schema 校验失败，run 进入 `waiting_user`，并产出 `INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID`。
-  - 若以 soft completion 完成且 output schema 过宽松，warnings/diagnostics 中会附带 `INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE`。
+  - 当前实现中 soft completion 与 legacy waiting fallback 仍作为 compatibility path 保留；legacy fallback 只会生成默认 pending payload，不再从 `<ASK_USER_YAML>` 或 direct ask-user object 提取富字段。
 
 ### 查询待决交互 (Get Pending Interaction)
 `GET /v1/jobs/{request_id}/interaction/pending`
@@ -762,6 +762,8 @@
 
 无待决问题时返回 `pending: null`，并保留当前状态。
 `kind` 当前支持：`choose_one`、`confirm`、`fill_fields`、`open_text`、`risk_ack`。
+对外 `PendingInteraction` 形状当前保持不变；目标方向是将其稳定投影自合法 pending JSON 分支。
+若某回合未命中合法 pending/final branch 且 soft completion 也不成立，系统仍可能进入 `waiting_user`，但 payload 只会是默认 fallback 版本。
 
 ### 提交交互回复 (Reply Interaction)
 `POST /v1/jobs/{request_id}/interaction/reply`

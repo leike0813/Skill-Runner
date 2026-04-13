@@ -765,7 +765,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Lifecycle validation warnings. Interactive runs may emit gate-hardening warnings such as INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER, INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE, and INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER."
+          "description": "Lifecycle validation warnings. Interactive runs treat explicit final/pending branches as the formal contract, but phase-5 compatibility paths may still emit INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER, INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, and INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE."
         },
         "error": {
           "type": [
@@ -1142,6 +1142,12 @@
             "auth.session.timed_out",
             "auth.session.busy",
             "error.run.failed",
+            "diagnostic.output_repair.started",
+            "diagnostic.output_repair.round.started",
+            "diagnostic.output_repair.round.completed",
+            "diagnostic.output_repair.converged",
+            "diagnostic.output_repair.exhausted",
+            "diagnostic.output_repair.skipped",
             "diagnostic.warning"
           ]
         },
@@ -1209,7 +1215,7 @@
                   "code": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Stable diagnostic warning code. Interactive gate-hardening may emit INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE, or INTERACTIVE_SOFT_COMPLETION_SUPPRESSED_BY_ASK_USER."
+                    "description": "Stable diagnostic warning code. Interactive phase-5 compatibility paths may continue to emit INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER, INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID, or INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE."
                   },
                   "message": {
                     "type": "string"
@@ -1676,6 +1682,280 @@
                 },
                 "required": [
                   "code"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.round.started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.round.completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.converged"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.exhausted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "legacy_fallback_target": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "reason",
+                  "legacy_fallback_target"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "diagnostic.output_repair.skipped"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {
+                "const": "diagnostic"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "internal_round_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "repair_stage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "candidate_source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "skip_reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "legacy_fallback_target": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "internal_round_index",
+                  "repair_stage",
+                  "candidate_source",
+                  "skip_reason",
+                  "legacy_fallback_target"
                 ]
               }
             }

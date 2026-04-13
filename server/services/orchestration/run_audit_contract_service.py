@@ -20,6 +20,7 @@ class RunAuditContractService:
             run_service_log_path=str(audit_dir / "service.run.log"),
             meta_path=str(audit_dir / f"meta.{attempt_number}.json"),
             orchestrator_events_path=str(audit_dir / f"orchestrator_events.{attempt_number}.jsonl"),
+            output_repair_path=str(audit_dir / f"output_repair.{attempt_number}.jsonl"),
             events_path=str(audit_dir / f"events.{attempt_number}.jsonl"),
             fcmp_events_path=str(audit_dir / f"fcmp_events.{attempt_number}.jsonl"),
             service_log_path=str(audit_dir / f"service.{attempt_number}.log"),
@@ -91,6 +92,7 @@ class RunAuditContractService:
         attempt_paths = [
             contract.run_service_log_path,
             contract.orchestrator_events_path,
+            contract.output_repair_path,
             contract.events_path,
             contract.fcmp_events_path,
             contract.service_log_path,

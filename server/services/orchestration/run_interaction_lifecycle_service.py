@@ -3,12 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-
-import yaml  # type: ignore[import-untyped]
 
 from server.config import config
 from server.models import (
@@ -20,12 +17,7 @@ from server.models import (
     ResumeCause,
     RunStatus,
 )
-from server.runtime.common.ask_user_text import (
-    DEFAULT_INTERACTION_PROMPT,
-    contains_ask_user_yaml_block,
-    normalize_interaction_text,
-    strip_ask_user_yaml_blocks,
-)
+from server.runtime.common.ask_user_text import DEFAULT_INTERACTION_PROMPT, normalize_interaction_text
 from server.runtime.protocol.factories import make_resume_command
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
@@ -146,55 +138,38 @@ class RunInteractionLifecycleService:
     ) -> dict[str, Any] | None:
         if not isinstance(payload, dict):
             return None
-        interaction_payload: dict[str, Any] | None = None
-        if isinstance(payload.get("ask_user"), dict):
-            interaction_payload = payload.get("ask_user")
-        elif payload.get("action") == "ask_user" and isinstance(payload.get("interaction"), dict):
-            interaction_payload = payload.get("interaction")
-        elif payload.get("type") == "ask_user" and isinstance(payload.get("interaction"), dict):
-            interaction_payload = payload.get("interaction")
-        elif self.looks_like_direct_interaction_payload(payload):
-            interaction_payload = payload
-        if interaction_payload is None:
-            return None
+        return self.project_pending_branch(
+            payload,
+            fallback_interaction_id=fallback_interaction_id,
+        )
 
-        ui_hints_raw = interaction_payload.get("ui_hints")
-        ui_hints = ui_hints_raw if isinstance(ui_hints_raw, dict) else {}
-        hint_obj = interaction_payload.get("hint")
-        if not (isinstance(hint_obj, str) and hint_obj.strip()):
-            hint_obj = ui_hints.get("hint")
-        hint_text = (
-            self.normalize_interaction_prompt(hint_obj)
-            if isinstance(hint_obj, str) and hint_obj.strip()
-            else ""
-        )
-        if hint_text:
-            ui_hints = {**ui_hints, "hint": hint_text}
-        prompt_obj = interaction_payload.get("prompt") or interaction_payload.get("question")
-        prompt = (
-            self.normalize_interaction_prompt(prompt_obj)
-            if isinstance(prompt_obj, str) and prompt_obj.strip()
-            else ""
-        )
-        if not prompt:
-            prompt = DEFAULT_INTERACTION_PROMPT
-        interaction_id = 0
-        interaction_id_source = "payload"
-        interaction_id_raw = interaction_payload.get("interaction_id")
-        raw_interaction_id: str | None = None
-        if interaction_id_raw is not None:
-            try:
-                interaction_id = int(interaction_id_raw)
-            except (TypeError, ValueError):
-                interaction_id = 0
-                raw_interaction_id = str(interaction_id_raw).strip() or None
-        if interaction_id <= 0 and fallback_interaction_id is not None and int(fallback_interaction_id) > 0:
-            interaction_id = int(fallback_interaction_id)
-            interaction_id_source = "fallback"
+    def project_pending_branch(
+        self,
+        payload: dict[str, Any],
+        *,
+        fallback_interaction_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("__SKILL_DONE__") is not False:
+            return None
+        message_obj = payload.get("message")
+        ui_hints_obj = payload.get("ui_hints")
+        if not isinstance(message_obj, str) or not message_obj.strip():
+            return None
+        if not isinstance(ui_hints_obj, dict):
+            return None
+        interaction_id = int(fallback_interaction_id or 0)
+        if interaction_id <= 0:
+            interaction_id_obj = payload.get("interaction_id")
+            if isinstance(interaction_id_obj, int) and interaction_id_obj > 0:
+                interaction_id = interaction_id_obj
         if interaction_id <= 0:
             return None
-        kind = self.normalize_interaction_kind_name(interaction_payload.get("kind"))
-        options_payload = interaction_payload.get("options", [])
+        kind = self.normalize_interaction_kind_name(
+            ui_hints_obj.get("kind") or payload.get("kind") or "open_text"
+        )
+        options_payload = ui_hints_obj.get("options")
         options_normalized: list[dict[str, Any]] = []
         if isinstance(options_payload, list):
             for item in options_payload:
@@ -204,55 +179,38 @@ class RunInteractionLifecycleService:
                 if not isinstance(label, str) or not label.strip():
                     continue
                 options_normalized.append({"label": label, "value": item.get("value")})
-        required_fields = interaction_payload.get("required_fields")
-        if not isinstance(required_fields, list):
-            required_fields = []
-        default_decision_policy_raw = interaction_payload.get("default_decision_policy")
+        required_fields_obj = payload.get("required_fields")
+        required_fields = (
+            [item for item in required_fields_obj if isinstance(item, str)]
+            if isinstance(required_fields_obj, list)
+            else []
+        )
+        default_decision_policy_obj = payload.get("default_decision_policy")
         default_decision_policy = (
-            default_decision_policy_raw.strip()
-            if isinstance(default_decision_policy_raw, str) and default_decision_policy_raw.strip()
+            default_decision_policy_obj.strip()
+            if isinstance(default_decision_policy_obj, str) and default_decision_policy_obj.strip()
             else "engine_judgement"
         )
-        context_obj = interaction_payload.get("context")
-        context: dict[str, Any] | None
+        context: dict[str, Any] = {"inferred_from": "interactive_pending_branch"}
+        context_obj = payload.get("context")
         if isinstance(context_obj, dict):
-            context = dict(context_obj)
-        else:
-            context = {}
-        if raw_interaction_id:
-            context["external_interaction_id"] = raw_interaction_id
-        if interaction_id_source != "payload":
-            context["interaction_id_source"] = interaction_id_source
-        if not context:
-            context = None
+            context.update(context_obj)
         return {
             "interaction_id": interaction_id,
             "kind": kind,
-            "prompt": prompt,
+            "prompt": self.normalize_interaction_prompt(message_obj),
             "options": options_normalized,
-            "ui_hints": ui_hints,
+            "ui_hints": dict(ui_hints_obj),
             "default_decision_policy": default_decision_policy,
             "required_fields": required_fields,
             "context": context,
         }
 
-    def infer_pending_interaction(
+    def build_default_pending_interaction(
         self,
-        payload: dict[str, Any],
         *,
         fallback_interaction_id: int,
     ) -> dict[str, Any] | None:
-        if not isinstance(payload, dict):
-            return None
-        outcome_obj = payload.get("outcome")
-        if isinstance(outcome_obj, str) and outcome_obj.strip().lower() == "error":
-            return None
-        extracted = self.extract_pending_interaction(
-            payload,
-            fallback_interaction_id=fallback_interaction_id,
-        )
-        if extracted is not None:
-            return extracted
         if fallback_interaction_id <= 0:
             return None
         return {
@@ -263,100 +221,8 @@ class RunInteractionLifecycleService:
             "ui_hints": {},
             "default_decision_policy": "engine_judgement",
             "required_fields": [],
-            "context": {"inferred_from": "done_marker_missing"},
+            "context": {"inferred_from": "legacy_waiting_fallback"},
         }
-
-    def infer_pending_interaction_from_runtime_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-        fallback_interaction_id: int,
-    ) -> dict[str, Any] | None:
-        if fallback_interaction_id <= 0:
-            return None
-        try:
-            parsed = adapter.parse_runtime_stream(
-                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
-                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
-                pty_raw=b"",
-            )
-        except Exception as exc:
-            # Third-party parser boundary: treat parse failure as "no interaction inferred".
-            logger.warning(
-                "interactive lifecycle runtime stream parse failed",
-                extra={
-                    "component": "orchestration.run_interaction_lifecycle_service",
-                    "action": "infer_pending_interaction_from_runtime_stream.parse_runtime_stream",
-                    "error_type": type(exc).__name__,
-                    "fallback": "skip_runtime_stream_interaction_inference",
-                },
-                exc_info=True,
-            )
-            return None
-        messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
-        if not isinstance(messages, list) or not messages:
-            return None
-        has_message = False
-        for item in reversed(messages):
-            if not isinstance(item, dict):
-                continue
-            text_obj = item.get("text")
-            if isinstance(text_obj, str) and text_obj.strip():
-                has_message = True
-                break
-        if not has_message:
-            return None
-        return {
-            "interaction_id": int(fallback_interaction_id),
-            "kind": "open_text",
-            "prompt": DEFAULT_INTERACTION_PROMPT,
-            "options": [],
-            "ui_hints": {},
-            "default_decision_policy": "engine_judgement",
-            "required_fields": [],
-            "context": {"inferred_from": "runtime_stream_assistant_message"},
-        }
-
-    def contains_ask_user_signal_in_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-    ) -> bool:
-        try:
-            parsed = adapter.parse_runtime_stream(
-                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
-                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
-                pty_raw=b"",
-            )
-            messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
-            if isinstance(messages, list):
-                for item in reversed(messages):
-                    if not isinstance(item, dict):
-                        continue
-                    text_obj = item.get("text")
-                    if contains_ask_user_yaml_block(text_obj):
-                        return True
-        except Exception as exc:
-            logger.warning(
-                "interactive lifecycle ask_user signal probe parse failed",
-                extra={
-                    "component": "orchestration.run_interaction_lifecycle_service",
-                    "action": "contains_ask_user_signal_in_stream.parse_runtime_stream",
-                    "error_type": type(exc).__name__,
-                    "fallback": "scan_raw_stdout_stderr",
-                },
-                exc_info=True,
-            )
-
-        stream_text = "\n".join(part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str))
-        return contains_ask_user_yaml_block(stream_text)
-
-    def strip_prompt_yaml_blocks(self, text: str) -> str:
-        return strip_ask_user_yaml_blocks(text)
 
     def normalize_interaction_prompt(self, raw_prompt: Any) -> str:
         return normalize_interaction_text(raw_prompt)
@@ -374,110 +240,6 @@ class RunInteractionLifecycleService:
         if kind_name not in allowed:
             return "open_text"
         return kind_name
-
-    def looks_like_direct_interaction_payload(self, payload: dict[str, Any]) -> bool:
-        if not isinstance(payload, dict):
-            return False
-        if (
-            "interaction_id" in payload
-            and (
-                "kind" in payload
-                or isinstance(payload.get("options"), list)
-                or isinstance(payload.get("ui_hints"), dict)
-            )
-        ):
-            return True
-        prompt_obj = payload.get("prompt") or payload.get("question")
-        ui_hints_obj = payload.get("ui_hints")
-        hint_obj = payload.get("hint")
-        if not (isinstance(hint_obj, str) and hint_obj.strip()):
-            hint_obj = ui_hints_obj.get("hint") if isinstance(ui_hints_obj, dict) else None
-        has_prompt = isinstance(prompt_obj, str) and bool(prompt_obj.strip())
-        has_hint = isinstance(hint_obj, str) and bool(hint_obj.strip())
-        if not has_prompt and not has_hint:
-            return False
-        if "interaction_id" in payload:
-            return True
-        if "kind" in payload:
-            return True
-        if isinstance(payload.get("options"), list):
-            return True
-        return False
-
-    def extract_pending_interaction_from_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-        fallback_interaction_id: int | None,
-    ) -> dict[str, Any] | None:
-        def _extract_from_text(text: str) -> dict[str, Any] | None:
-            if not text.strip():
-                return None
-            snippets: list[str] = []
-            tag_pattern = re.compile(
-                r"<ASK_USER_YAML>\s*(.*?)\s*</ASK_USER_YAML>",
-                re.IGNORECASE | re.DOTALL,
-            )
-            snippets.extend(match.group(1) for match in tag_pattern.finditer(text))
-            fence_pattern = re.compile(
-                r"```(?:ask_user_yaml|ask-user-yaml)\s*(.*?)```",
-                re.IGNORECASE | re.DOTALL,
-            )
-            snippets.extend(match.group(1) for match in fence_pattern.finditer(text))
-            for snippet in snippets:
-                try:
-                    parsed = yaml.safe_load(snippet)
-                except yaml.YAMLError:
-                    continue
-                if not isinstance(parsed, dict):
-                    continue
-                extracted = self.extract_pending_interaction(
-                    parsed,
-                    fallback_interaction_id=fallback_interaction_id,
-                )
-                if extracted is not None:
-                    return extracted
-            return None
-
-        try:
-            parsed = adapter.parse_runtime_stream(
-                stdout_raw=(raw_stdout or "").encode("utf-8", errors="replace"),
-                stderr_raw=(raw_stderr or "").encode("utf-8", errors="replace"),
-                pty_raw=b"",
-            )
-            messages = parsed.get("assistant_messages") if isinstance(parsed, dict) else None
-            if isinstance(messages, list):
-                for item in reversed(messages):
-                    if not isinstance(item, dict):
-                        continue
-                    text_obj = item.get("text")
-                    if not isinstance(text_obj, str) or not text_obj.strip():
-                        continue
-                    extracted = _extract_from_text(text_obj)
-                    if extracted is not None:
-                        return extracted
-        except Exception as exc:
-            # Third-party parser boundary: fall back to raw stream scanning path.
-            logger.warning(
-                "interactive lifecycle stream extraction parse failed",
-                extra={
-                    "component": "orchestration.run_interaction_lifecycle_service",
-                    "action": "extract_pending_interaction_from_stream.parse_runtime_stream",
-                    "error_type": type(exc).__name__,
-                    "fallback": "scan_raw_stdout_stderr",
-                },
-                exc_info=True,
-            )
-
-        stream_text = "\n".join(part for part in [raw_stdout or "", raw_stderr or ""] if isinstance(part, str))
-        if not stream_text.strip():
-            return None
-        extracted = _extract_from_text(stream_text)
-        if extracted is not None:
-            return extracted
-        return None
 
     def strip_done_marker_for_output_validation(
         self,

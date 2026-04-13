@@ -163,22 +163,36 @@ async def test_persist_waiting_interaction_fails_when_handle_missing(tmp_path: P
     assert status == "SESSION_RESUME_FAILED"
 
 
-def test_infer_pending_interaction_fallback_uses_generic_prompt() -> None:
+def test_build_default_pending_interaction_uses_generic_prompt() -> None:
     service = RunInteractionLifecycleService()
-    pending = service.infer_pending_interaction(
-        {
-            "outcome": "ask_user",
-            "prompt": "Long generated text with trailing meta",
-            "ui_hints": {"hint": "Hint from model"},
-        },
+    pending = service.build_default_pending_interaction(
         fallback_interaction_id=3,
     )
     assert pending is not None
     assert pending["interaction_id"] == 3
     assert pending["prompt"] == "Please reply to continue."
+    assert pending["context"]["inferred_from"] == "legacy_waiting_fallback"
 
 
-def test_extract_pending_interaction_normalizes_single_select_alias() -> None:
+def test_extract_pending_interaction_projects_pending_branch() -> None:
+    service = RunInteractionLifecycleService()
+    pending = service.extract_pending_interaction(
+        {
+            "__SKILL_DONE__": False,
+            "message": "Pick one.",
+            "ui_hints": {
+                "kind": "single_select",
+                "options": [{"label": "A", "value": "a"}],
+            },
+        },
+        fallback_interaction_id=9,
+    )
+    assert pending is not None
+    assert pending["kind"] == "choose_one"
+    assert pending["prompt"] == "Pick one."
+
+
+def test_extract_pending_interaction_rejects_legacy_ask_user_object() -> None:
     service = RunInteractionLifecycleService()
     pending = service.extract_pending_interaction(
         {
@@ -190,5 +204,4 @@ def test_extract_pending_interaction_normalizes_single_select_alias() -> None:
             }
         }
     )
-    assert pending is not None
-    assert pending["kind"] == "choose_one"
+    assert pending is None

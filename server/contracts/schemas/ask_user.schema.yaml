@@ -1,6 +1,12 @@
 version: 1
-name: ask_user_minimal_schema
+name: ask_user_ui_hints_vocabulary
+role: ui_hints_capability_source
 fallback_prompt: "Please reply to continue."
+
+description: >
+  This file no longer defines the primary interactive output protocol.
+  It preserves the stable vocabulary used for `ui_hints` and legacy compatibility
+  surfaces while the runtime migrates toward JSON-only pending output objects.
 
 ask_user:
   kind:
@@ -11,15 +17,18 @@ ask_user:
       - confirm
       - upload_files
     default: open_text
+    role: compatibility_metadata
   prompt:
     required: false
     type: string
+    role: user_facing_prompt_hint
   options:
     required_when_kind:
       - choose_one
     item:
       label: string
       value: any
+    role: choice_rendering_hint
   files:
     required_when_kind:
       - upload_files
@@ -28,19 +37,28 @@ ask_user:
       required: boolean
       hint: string
       accept: string
+    role: file_input_rendering_hint
   hint:
     required: false
     type: string
     purpose: ui_hint
 
-example:
-  ask_user:
-    kind: open_text
-    prompt: "请描述一下你的基本情况，如年龄、职业等。"
-    hint: "例如：男，38，程序员"
+example_ui_hints:
+  kind: open_text
+  prompt: "请描述一下你的基本情况，如年龄、职业等。"
+  hint: "例如：男，38，程序员"
+
+legacy_compatibility:
+  deprecated_primary_protocols:
+    - <ASK_USER_YAML>
+    - fenced ask-user block
+  note: >
+    Legacy wrappers may still exist in current implementation, but they are
+    deprecated compatibility semantics rather than the target SSOT.
 
 rules:
-  - keep_the_block_short_and_optional
-  - include_only_fields_you_can_produce_stably
+  - preserve_fallback_prompt_for_legacy_runtime_rendering
+  - keep_field_vocabulary_small_and_stable
   - parsing_failure_must_not_block_core_runtime_flow
+  - do_not_treat_this_file_as_the_primary_interactive_output_protocol
   - prefer_upload_files_for_file-selection-ux

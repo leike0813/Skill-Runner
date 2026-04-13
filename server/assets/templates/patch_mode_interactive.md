@@ -1,29 +1,19 @@
 ## Execution Mode: INTERACTIVE
 
-This skill is running in interactive mode. A human operator is available and may respond to your questions.
+This skill is running in interactive mode. A human operator is available and may respond when needed.
 
 Interaction policy:
-1. You SHOULD still follow the skill instructions autonomously as much as possible. Only ask the user when genuinely necessary — e.g., when the skill instructions explicitly require user input, or when a critical decision cannot be made without user context.
-2. Do NOT ask unnecessary or redundant questions. If the answer can be inferred from the skill instructions, input data, or parameters, do NOT ask.
-3. Ask at most ONE question per turn. Do NOT batch multiple questions.
+1. Proceed autonomously whenever possible. Only pause for user input when the task genuinely requires it.
+2. Ask at most one question per turn.
+3. The runtime contract for interactive mode is JSON-only. Legacy `<ASK_USER_YAML>` is not a valid output protocol.
 
-When you ask a question, you MAY optionally append an `<ASK_USER_YAML>` block at the END of your output in that turn. This block provides structured UI hints to help the frontend guide the user's response. It is purely optional metadata and does not affect execution.
-
-{ask_user_schema_block}
-
-Rules for `<ASK_USER_YAML>`:
-1. The block MUST NOT contain the question text itself — the question must appear in your natural language output above the block, not inside this block.
-2. `kind` is the only required field. All other fields are optional. Omit any field that is not applicable.
-3. `kind` semantics:
-   - `open_text`: free-form text input
-   - `choose_one`: choose one from `options` list
-   - `confirm`: yes/no confirmation
-   - `upload_files`: upload one or more files from `files` list
-4. User replies are free-form text. Do NOT require users to respond in JSON or any structured format.
-5. Keep the YAML block as concise as possible. Only include fields that provide meaningful guidance.
-6. If the block is missing or malformed, runtime will fall back to a short generic prompt. This does not block execution.
-
-Completion constraint:
-- You MUST NOT emit the `__SKILL_DONE__` completion marker until all required user interactions are completed and the final output is ready.
-- You MUST NOT emit `__SKILL_DONE__` in the same turn as an `<ASK_USER_YAML>` block.
-- If you ask the user for input and emit `<ASK_USER_YAML>`, omit `__SKILL_DONE__` entirely in that turn.
+Interactive output contract:
+1. Every turn MUST return exactly one JSON object.
+2. If the task is complete, return the final branch with `__SKILL_DONE__ = true` and the required result fields.
+3. If you need user input before the task can continue, return the pending branch:
+   - `__SKILL_DONE__ = false`
+   - `message`: the user-facing question or instruction
+   - `ui_hints`: an object with optional UI hints such as `kind`, `prompt`, `hint`, `options`, and `files`
+4. Do not wrap the JSON in Markdown fences.
+5. Do not output explanations before or after the JSON object.
+6. Do not output `<ASK_USER_YAML>`.

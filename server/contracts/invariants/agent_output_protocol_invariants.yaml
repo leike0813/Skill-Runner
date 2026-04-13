@@ -1,0 +1,124 @@
+version: 1
+
+auto_final_contract:
+  required_marker: __SKILL_DONE__
+  required_marker_value: true
+  output_type: json_object
+  business_validation: strip_done_marker_then_validate_output_schema
+  disallow_pending_branch: true
+
+interactive_union_contract:
+  discriminator: __SKILL_DONE__
+  mode: one_of
+  branches:
+    - name: final
+      marker_value: true
+      output_type: json_object
+      business_validation: strip_done_marker_then_validate_output_schema
+      pending_only_fields:
+        - message
+        - ui_hints
+    - name: pending
+      marker_value: false
+      output_type: json_object
+      required_fields:
+        - message
+        - ui_hints
+      field_constraints:
+        message:
+          type: string
+          min_length: 1
+        ui_hints:
+          type: object
+
+repair_loop:
+  same_attempt: true
+  max_retries_default: 3
+  on_exhaustion: fallback_after_exhaustion
+  must_not_increment_attempt_number: true
+  must_not_directly_transition_to_waiting_user: true
+
+attempt_round_model:
+  attempt_role: outer_lifecycle_execution_unit
+  internal_round_role: attempt_local_output_convergence_round
+  internal_round_changes_attempt_number: false
+  internal_round_index_origin: 0
+  default_internal_round_budget: 3
+
+repair_executor_ownership:
+  owner: orchestrator_output_convergence_executor
+  parser_role: subordinate_candidate_preprocessor
+  adapter_role: subordinate_candidate_preprocessor
+  skill_patcher_role: no_repair_decision_authority
+  interaction_service_role: legacy_fallback_projection_only
+
+repair_pipeline_order:
+  stages:
+    - deterministic_parse_repair
+    - schema_repair_rounds
+    - legacy_lifecycle_fallback
+    - legacy_result_file_fallback
+    - legacy_interactive_waiting_or_completion
+
+repair_event_requirements:
+  category: diagnostic
+  allowed_types:
+    - diagnostic.output_repair.started
+    - diagnostic.output_repair.round.started
+    - diagnostic.output_repair.round.completed
+    - diagnostic.output_repair.converged
+    - diagnostic.output_repair.exhausted
+    - diagnostic.output_repair.skipped
+  common_fields:
+    - attempt_number
+    - internal_round_index
+    - repair_stage
+    - candidate_source
+  per_type_required_fields:
+    diagnostic.output_repair.started:
+      - reason
+    diagnostic.output_repair.round.started:
+      - reason
+    diagnostic.output_repair.round.completed:
+      - reason
+    diagnostic.output_repair.converged:
+      - reason
+    diagnostic.output_repair.exhausted:
+      - reason
+      - legacy_fallback_target
+    diagnostic.output_repair.skipped:
+      - skip_reason
+      - legacy_fallback_target
+
+audit_requirements:
+  required_records:
+    - raw_agent_output
+    - extracted_json_candidate
+    - schema_validation_errors
+    - repair_round_index
+    - repair_prompt_or_summary
+    - post_repair_output
+    - convergence_status
+    - fallback_path_after_exhaustion
+
+repair_audit_requirements:
+  canonical_file: .audit/output_repair.<attempt>.jsonl
+  write_mode: append_only
+  authority: history_only
+  required_fields:
+    - attempt_number
+    - internal_round_index
+    - repair_stage
+    - candidate_source
+    - executor
+    - validation_errors
+    - repair_prompt_or_summary
+    - converged
+    - legacy_fallback_target
+
+legacy_deprecations:
+  deprecated_protocols:
+    - <ASK_USER_YAML>
+    - fenced ask-user block
+    - free-text ask-user protocol
+  ask_user_schema_role: ui_hints_capability_source

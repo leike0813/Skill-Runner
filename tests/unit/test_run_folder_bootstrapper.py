@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from server.models import RunLocalSkillSource, SkillManifest
+from server.services.orchestration.run_output_schema_service import RunOutputSchemaMaterialization
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 
 
@@ -53,9 +54,17 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
     )
 
     with patch(
-        "server.services.orchestration.run_skill_materialization_service.skill_patcher.load_output_schema",
-        return_value={"type": "object"},
-    ) as mock_load, patch(
+        "server.services.orchestration.run_skill_materialization_service.run_output_schema_service.materialize",
+        return_value=RunOutputSchemaMaterialization(
+            business_schema={"type": "object"},
+            machine_schema={"type": "object"},
+            schema_path=run_dir / ".audit" / "contracts" / "target_output_schema.json",
+            schema_relpath=".audit/contracts/target_output_schema.json",
+            prompt_summary_markdown="### Output Schema Specification\n\nGenerated summary",
+            prompt_summary_path=run_dir / ".audit" / "contracts" / "target_output_schema.md",
+            prompt_summary_relpath=".audit/contracts/target_output_schema.md",
+        ),
+    ) as mock_materialize, patch(
         "server.services.orchestration.run_skill_materialization_service.skill_patcher.patch_skill_md"
     ) as mock_patch:
         ref = run_folder_bootstrapper.materialize_skill(
@@ -68,11 +77,17 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
 
     assert ref.snapshot_dir == run_dir / ".codex" / "skills" / "demo-skill"
     assert (ref.snapshot_dir / "SKILL.md").exists()
-    mock_load.assert_called_once_with(
-        skill_path=ref.snapshot_dir,
-        output_schema_relpath="assets/output.schema.json",
+    mock_materialize.assert_called_once()
+    materialize_kwargs = mock_materialize.call_args.kwargs
+    assert materialize_kwargs["run_dir"] == run_dir
+    assert materialize_kwargs["execution_mode"] == "interactive"
+    assert materialize_kwargs["skill"].path == ref.snapshot_dir
+    mock_patch.assert_called_once_with(
+        ref.snapshot_dir,
+        [],
+        execution_mode="interactive",
+        output_schema_summary_markdown="### Output Schema Specification\n\nGenerated summary",
     )
-    mock_patch.assert_called_once()
 
 
 def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path) -> None:
@@ -97,3 +112,5 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
 
     assert manifest.path == ref.snapshot_dir
     assert (ref.snapshot_dir / "assets" / "runner.json").exists()
+    assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
+    assert (run_dir / ".audit" / "contracts" / "target_output_schema.md").exists()

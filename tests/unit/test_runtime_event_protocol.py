@@ -1051,6 +1051,62 @@ def test_translate_orchestrator_error_run_failed_maps_to_diagnostic_warning() ->
     assert specs[0]["data"]["detail"] == "orchestrator failed to materialize attempt"
 
 
+def test_translate_orchestrator_output_repair_events_do_not_map_to_fcmp() -> None:
+    specs = translate_orchestrator_event_to_fcmp_specs(
+        engine="codex",
+        type_name="diagnostic.output_repair.converged",
+        data={
+            "internal_round_index": 1,
+            "repair_stage": "schema_repair_rounds",
+            "candidate_source": "deterministic_parse",
+            "reason": "repair produced a valid payload",
+        },
+        updated_at="2026-04-13T00:00:00Z",
+        default_attempt_number=1,
+    )
+    assert specs == []
+
+
+def test_build_fcmp_events_explicitly_ignores_output_repair_orchestrator_rows(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-repair-ignore"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+    rasp_events = build_rasp_events(
+        run_id="run-repair-ignore",
+        engine="codex",
+        attempt_number=1,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="running",
+        status_updated_at="2026-04-13T00:00:00Z",
+        orchestrator_events=[
+            {
+                "ts": "2026-04-13T00:00:00Z",
+                "attempt_number": 1,
+                "seq": 1,
+                "category": "diagnostic",
+                "type": "diagnostic.output_repair.started",
+                "data": {
+                    "internal_round_index": 0,
+                    "repair_stage": "schema_repair_rounds",
+                    "candidate_source": "no_structured_candidate",
+                    "reason": "target output did not satisfy the attempt contract",
+                },
+            }
+        ],
+    )
+
+    assert all(not event.type.startswith("diagnostic.output_repair.") for event in fcmp_events)
+
+
 def test_fcmp_maps_auth_session_busy_to_diagnostic_warning(tmp_path: Path):
     run_dir = tmp_path / "run-auth-busy"
     logs_dir = run_dir / "logs"

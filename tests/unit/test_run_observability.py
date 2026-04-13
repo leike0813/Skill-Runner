@@ -261,6 +261,28 @@ async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detai
     assert detail["entries"] == []
 
 
+def test_timeline_protocol_summary_formats_output_repair_event() -> None:
+    service = RunObservabilityService()
+    summary = service._timeline_protocol_summary(
+        "orchestrator",
+        {
+            "type": "diagnostic.output_repair.round.completed",
+            "data": {
+                "internal_round_index": 2,
+                "repair_stage": "schema_repair_rounds",
+                "candidate_source": "deterministic_parse",
+                "reason": "schema still invalid",
+                "legacy_fallback_target": "legacy_lifecycle_fallback",
+            },
+        },
+    )
+
+    assert "diagnostic.output_repair.round.completed" in summary
+    assert "round=2" in summary
+    assert "source=deterministic_parse" in summary
+    assert "fallback=legacy_lifecycle_fallback" in summary
+
+
 @pytest.mark.asyncio
 async def test_get_run_detail_hides_denylisted_node_modules(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-tree"

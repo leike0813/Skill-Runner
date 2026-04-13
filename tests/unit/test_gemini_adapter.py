@@ -420,6 +420,50 @@ async def test_run_non_first_attempt_prompt_override_does_not_get_global_prefix(
         assert prompt_content == "OVERRIDE PROMPT"
 
 
+@pytest.mark.asyncio
+async def test_run_repair_round_prompt_override_skips_first_attempt_audit_and_prefix(adapter, mock_skill, tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    uploads_dir = run_dir / "uploads"
+    uploads_dir.mkdir()
+    (uploads_dir / "input_file").write_text("content", encoding="utf-8")
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
+
+    input_data = {"parameter": {"divisor": 5}}
+    options = {
+        "__attempt_number": 1,
+        "__repair_round_index": 1,
+        "__prompt_override": "RETURN ONLY JSON",
+    }
+
+    with patch(
+        "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
+        side_effect=_stub_generate_config,
+    ), patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_proc = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[b""])
+        mock_proc.stderr.read = AsyncMock(side_effect=[b""])
+        mock_proc.wait = AsyncMock()
+        mock_proc.returncode = 0
+        mock_exec.return_value = mock_proc
+
+        await adapter.run(mock_skill, input_data, run_dir, options)
+
+    payload = json.loads(request_input_path.read_text(encoding="utf-8"))
+    assert "rendered_prompt_first_attempt" not in payload
+    assert "spawn_command_original_first_attempt" not in payload
+    assert "spawn_command_effective_first_attempt" not in payload
+    assert not (audit_dir / "prompt.1.txt").exists()
+    assert not (audit_dir / "argv.1.json").exists()
+    args, _ = mock_exec.call_args
+    assert args[-1] == "RETURN ONLY JSON"
+
+
 def test_build_start_and_resume_command_use_first_attempt_effective_prompt(adapter, mock_skill, tmp_path):
     from server.models import EngineSessionHandle, EngineSessionHandleType
 

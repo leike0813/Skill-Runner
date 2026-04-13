@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from server.models import EngineSessionHandle
+from server.runtime.adapter.common.output_schema_cli import build_codex_output_schema_args
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.common.command_defaults import merge_cli_args
 
@@ -74,6 +75,7 @@ class CodexCommandBuilder:
             return [executable, *fallback_flags]
         default_flags = self._resolve_profile_flags(action="start", use_profile_defaults=profile_defaults)
         merged_flags = merge_cli_args(default_flags, [])
+        merged_flags.extend(build_codex_output_schema_args(options))
         merged_flags = self._apply_landlock_flag_fallback(merged_flags)
         return [executable, "exec", *merged_flags, prompt]
 
@@ -115,6 +117,7 @@ class CodexCommandBuilder:
             return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]
         defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=profile_defaults)
         merged = merge_cli_args(defaults, [])
+        merged.extend(build_codex_output_schema_args(options))
         merged = self._apply_landlock_flag_fallback(merged)
         exec_flags, resume_flags = self._split_exec_and_resume_flags(merged)
         return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]

@@ -11,6 +11,7 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 
 - 聊天气泡渲染已从 FCMP 解耦，改由独立的 canonical chat replay `/chat` 与 `/chat/history` 提供。
 - `/events` 与 `/events/history` 继续服务 runtime observability / protocol consumer，不再作为聊天窗口 SSOT。
+- output repair 的未来 round-level observability 只属于 orchestrator audit 层；不会新增 FCMP public event type。
 
 ## 2. FCMP Envelope
 
@@ -52,6 +53,10 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `diagnostic.warning`
 - `raw.stdout` / `raw.stderr`
 
+补充约束：
+
+- future repair governance 若需要发出 `diagnostic.output_repair.*`，这些类型只保留在 orchestrator audit，不进入 FCMP。
+
 过程事件约束（通用，非引擎专属）：
 
 - RASP 使用 `agent.*`
@@ -83,7 +88,10 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `pending_interaction_id` 仅在 `waiting_user` 转移中携带；
 - `pending_auth_session_id` 仅在 `waiting_auth` 转移中携带；
 - `waiting_user` 与 `waiting_auth` 语义严格分离，不允许复用。
+- `waiting_user` 的正式富数据来源是合法 pending JSON 分支投影；对外 `PendingInteraction` 形状可保持稳定。
+- interactive turn classification 的固定顺序是：final branch -> pending branch -> soft completion -> default waiting fallback。
 - `waiting_auth` 不能被客户端解释为“当前一定是 interactive”；它只说明 run 已进入 auth contract。
+- lifecycle fallback 若仍进入 `waiting_user`，当前只会生成默认 pending payload，不再从 `<ASK_USER_YAML>`、runtime stream 或 direct interaction-like payload 中恢复 prompt/hints。
 - 当前 UI 状态必须来自 `.state/state.json` + FCMP 增量，不得从 `result/result.json` 反推。
 - `resume_cause` / `pending_owner` / `resume_ticket_id` / `ticket_consumed` 为可选扩展字段，用于描述 waiting 态离开时的 winner 路径；
 - `meta.attempt` 表示该事件归属的已 materialize attempt，而不是未来 attempt 的预约值。
@@ -345,6 +353,7 @@ FCMP `raw_ref` 可回跳日志字节区间：
 - `parser_diagnostics.{attempt}.jsonl`
 - `protocol_metrics.{attempt}.json`
 - `orchestrator_events.{attempt}.jsonl`（编排事件事实）
+- `output_repair.{attempt}.jsonl`（phase 3B target：output convergence internal-round history）
 
 ## 7.1 Live Publish Truth Hierarchy
 
@@ -403,6 +412,7 @@ FCMP 关键对齐：
 - 写入路径（SSE 输出/审计落盘/交互存储）为硬校验；
 - 读取路径（history/旧审计）为兼容过滤；
 - 内部桥接失败记录 `diagnostic.warning(code=SCHEMA_INTERNAL_INVALID)`。
+- `diagnostic.output_repair.*` 已作为内部 orchestrator schema surface 预留，但当前实现可尚未产生这些事件。
 
 错误码：
 

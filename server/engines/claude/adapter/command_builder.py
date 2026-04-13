@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from server.models import EngineSessionHandle
+from server.runtime.adapter.common.output_schema_cli import build_claude_output_schema_args
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.common.command_defaults import merge_cli_args
 
@@ -44,6 +45,7 @@ class ClaudeCommandBuilder:
         effort_obj = options.get("model_reasoning_effort")
         if isinstance(effort_obj, str) and effort_obj.strip():
             merged.extend(["--effort", effort_obj.strip()])
+        merged.extend(build_claude_output_schema_args(options))
         return [command, *merged, prompt]
 
     def build_start(self, ctx: AdapterExecutionContext, prompt: str) -> list[str]:
@@ -87,6 +89,7 @@ class ClaudeCommandBuilder:
         effort_obj = options.get("model_reasoning_effort")
         if isinstance(effort_obj, str) and effort_obj.strip():
             merged.extend(["--effort", effort_obj.strip()])
+        merged.extend(build_claude_output_schema_args(options))
         return [command, "--resume", session_id, *merged, prompt]
 
     def build_resume(

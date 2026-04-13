@@ -670,71 +670,20 @@ class JobOrchestrator:
             fallback_interaction_id=fallback_interaction_id,
         )
 
-    def _infer_pending_interaction(
+    def _build_default_pending_interaction(
         self,
-        payload: Dict[str, Any],
         *,
         fallback_interaction_id: int,
     ) -> Optional[Dict[str, Any]]:
-        return self.interaction_service.infer_pending_interaction(
-            payload,
+        return self.interaction_service.build_default_pending_interaction(
             fallback_interaction_id=fallback_interaction_id,
         )
-
-    def _infer_pending_interaction_from_runtime_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-        fallback_interaction_id: int,
-    ) -> Optional[Dict[str, Any]]:
-        return self.interaction_service.infer_pending_interaction_from_runtime_stream(
-            adapter=adapter,
-            raw_stdout=raw_stdout,
-            raw_stderr=raw_stderr,
-            fallback_interaction_id=fallback_interaction_id,
-        )
-
-    def _strip_prompt_yaml_blocks(self, text: str) -> str:
-        return self.interaction_service.strip_prompt_yaml_blocks(text)
 
     def _normalize_interaction_prompt(self, raw_prompt: Any) -> str:
         return self.interaction_service.normalize_interaction_prompt(raw_prompt)
 
     def _normalize_interaction_kind_name(self, raw_kind: Any) -> str:
         return self.interaction_service.normalize_interaction_kind_name(raw_kind)
-
-    def _looks_like_direct_interaction_payload(self, payload: Dict[str, Any]) -> bool:
-        return self.interaction_service.looks_like_direct_interaction_payload(payload)
-
-    def _extract_pending_interaction_from_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-        fallback_interaction_id: Optional[int],
-    ) -> Optional[Dict[str, Any]]:
-        return self.interaction_service.extract_pending_interaction_from_stream(
-            adapter=adapter,
-            raw_stdout=raw_stdout,
-            raw_stderr=raw_stderr,
-            fallback_interaction_id=fallback_interaction_id,
-        )
-
-    def _contains_ask_user_signal_in_stream(
-        self,
-        *,
-        adapter: Any,
-        raw_stdout: str,
-        raw_stderr: str,
-    ) -> bool:
-        return self.interaction_service.contains_ask_user_signal_in_stream(
-            adapter=adapter,
-            raw_stdout=raw_stdout,
-            raw_stderr=raw_stderr,
-        )
 
     def _strip_done_marker_for_output_validation(
         self,

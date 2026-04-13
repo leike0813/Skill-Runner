@@ -16,17 +16,23 @@ from server.services.skill.skill_patcher import (
 )
 
 
-def _output_schema() -> dict:
-    return {
-        "type": "object",
-        "required": ["value"],
-        "properties": {"value": {"type": "string"}},
-    }
+def _output_schema_summary_markdown() -> str:
+    return (
+        "### Output Schema Specification\n\n"
+        "| Field | Type | Required | Description |\n"
+        "|-------|------|----------|-------------|\n"
+        "| `__SKILL_DONE__` | boolean (`true`) | ✅ | Completion signal. |\n"
+        "| `value` | string | ✅ | result value |\n"
+    )
 
 
 def test_build_patch_plan_fixed_only_auto_mode():
     patcher = SkillPatcher()
-    plan = patcher.build_patch_plan(artifacts=[], execution_mode="auto", output_schema=None)
+    plan = patcher.build_patch_plan(
+        artifacts=[],
+        execution_mode="auto",
+        output_schema_summary_markdown=None,
+    )
     markers = [item.marker for item in plan]
     assert markers == [
         RUNTIME_ENFORCEMENT_MARKER,
@@ -38,7 +44,11 @@ def test_build_patch_plan_fixed_only_auto_mode():
 def test_build_patch_plan_with_artifact_patch():
     patcher = SkillPatcher()
     artifacts = [ManifestArtifact(role="report", pattern="final.md")]
-    plan = patcher.build_patch_plan(artifacts=artifacts, execution_mode="auto", output_schema=None)
+    plan = patcher.build_patch_plan(
+        artifacts=artifacts,
+        execution_mode="auto",
+        output_schema_summary_markdown=None,
+    )
     markers = [item.marker for item in plan]
     assert markers == [
         RUNTIME_ENFORCEMENT_MARKER,
@@ -53,7 +63,7 @@ def test_build_patch_plan_with_output_schema_and_interactive_mode():
     plan = patcher.build_patch_plan(
         artifacts=[],
         execution_mode="interactive",
-        output_schema=_output_schema(),
+        output_schema_summary_markdown=_output_schema_summary_markdown(),
     )
     markers = [item.marker for item in plan]
     assert markers == [
@@ -70,7 +80,7 @@ def test_patch_plan_order_is_stable_for_all_modules():
     plan = patcher.build_patch_plan(
         artifacts=artifacts,
         execution_mode="interactive",
-        output_schema=_output_schema(),
+        output_schema_summary_markdown=_output_schema_summary_markdown(),
     )
     markers = [item.marker for item in plan]
     assert markers == [
@@ -94,14 +104,14 @@ def test_patch_skill_md_is_idempotent_with_pipeline(tmp_path: Path):
         skill_dir=skill_dir,
         artifacts=artifacts,
         execution_mode="interactive",
-        output_schema=_output_schema(),
+        output_schema_summary_markdown=_output_schema_summary_markdown(),
     )
     content_once = skill_md.read_text(encoding="utf-8")
     changed_2 = patcher.patch_skill_md(
         skill_dir=skill_dir,
         artifacts=artifacts,
         execution_mode="interactive",
-        output_schema=_output_schema(),
+        output_schema_summary_markdown=_output_schema_summary_markdown(),
     )
     content_twice = skill_md.read_text(encoding="utf-8")
     assert changed_1 is True
@@ -120,5 +130,5 @@ def test_build_patch_plan_missing_template_fails_fast():
             patcher.build_patch_plan(
                 artifacts=[],
                 execution_mode="auto",
-                output_schema=None,
+                output_schema_summary_markdown=None,
             )

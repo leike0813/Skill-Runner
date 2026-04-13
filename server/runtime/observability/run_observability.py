@@ -1334,15 +1334,32 @@ class RunObservabilityService:
             data_obj = row.get("data")
             if isinstance(data_obj, dict):
                 payload = data_obj
+        if kind.startswith("diagnostic.output_repair."):
+            round_index = payload.get("internal_round_index")
+            round_text = str(round_index) if isinstance(round_index, int) else "?"
+            stage_obj = payload.get("repair_stage")
+            stage = stage_obj if isinstance(stage_obj, str) and stage_obj else "schema_repair_rounds"
+            source_obj = payload.get("candidate_source")
+            source = source_obj if isinstance(source_obj, str) and source_obj else "unknown"
+            reason_obj = payload.get("reason") or payload.get("skip_reason")
+            reason = reason_obj if isinstance(reason_obj, str) and reason_obj else ""
+            fallback_obj = payload.get("legacy_fallback_target")
+            fallback = fallback_obj if isinstance(fallback_obj, str) and fallback_obj else ""
+            parts = [kind, f"round={round_text}", f"stage={stage}", f"source={source}"]
+            if reason:
+                parts.append(reason)
+            if fallback:
+                parts.append(f"fallback={fallback}")
+            return " · ".join(parts)
         message = payload.get("message")
         if isinstance(message, str) and message.strip():
             normalized = " ".join(message.split())
             return normalized[:220] + ("..." if len(normalized) > 220 else "")
         if stream == "rasp":
             source_obj = row.get("source")
-            source = source_obj if isinstance(source_obj, dict) else {}
-            engine = source.get("engine") if isinstance(source.get("engine"), str) else "unknown"
-            parser = source.get("parser") if isinstance(source.get("parser"), str) else "unknown"
+            source_map = source_obj if isinstance(source_obj, dict) else {}
+            engine = source_map.get("engine") if isinstance(source_map.get("engine"), str) else "unknown"
+            parser = source_map.get("parser") if isinstance(source_map.get("parser"), str) else "unknown"
             code = payload.get("code") if isinstance(payload.get("code"), str) else ""
             status = payload.get("status") if isinstance(payload.get("status"), str) else ""
             parts = [f"{kind}", f"{engine}/{parser}"]

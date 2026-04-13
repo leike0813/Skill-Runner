@@ -454,6 +454,20 @@ class RunAuditService:
             fp.write(json.dumps(payload, ensure_ascii=False))
             fp.write("\n")
 
+    def append_output_repair_record(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        record: dict[str, Any],
+    ) -> None:
+        audit_dir = run_dir / ".audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        record_path = audit_dir / f"output_repair.{attempt_number}.jsonl"
+        with record_path.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False))
+            fp.write("\n")
+
     def next_orchestrator_event_seq(self, event_path: Path) -> int:
         if not event_path.exists() or not event_path.is_file():
             return 1

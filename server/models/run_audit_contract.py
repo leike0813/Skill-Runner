@@ -26,6 +26,7 @@ class RunAuditContract(BaseModel):
     run_service_log_path: str | None = None
     meta_path: str
     orchestrator_events_path: str
+    output_repair_path: str
     events_path: str
     fcmp_events_path: str
     service_log_path: str | None = None

@@ -263,6 +263,64 @@ def test_validate_orchestrator_event_accepts_diagnostic_warning():
     assert validate_orchestrator_event(payload) == payload
 
 
+def test_validate_orchestrator_event_accepts_output_repair_exhausted() -> None:
+    payload = {
+        "ts": "2026-04-13T00:00:00Z",
+        "attempt_number": 1,
+        "seq": 2,
+        "category": "diagnostic",
+        "type": "diagnostic.output_repair.exhausted",
+        "data": {
+            "internal_round_index": 3,
+            "repair_stage": "schema_repair_rounds",
+            "candidate_source": "stdout_final_candidate",
+            "reason": "schema validation still failed after bounded rounds",
+            "legacy_fallback_target": "legacy_lifecycle_fallback",
+        },
+    }
+    assert validate_orchestrator_event(payload) == payload
+
+
+def test_validate_orchestrator_event_rejects_output_repair_event_with_wrong_category() -> None:
+    payload = {
+        "ts": "2026-04-13T00:00:00Z",
+        "attempt_number": 1,
+        "seq": 3,
+        "category": "interaction",
+        "type": "diagnostic.output_repair.skipped",
+        "data": {
+            "internal_round_index": 0,
+            "repair_stage": "schema_repair_rounds",
+            "candidate_source": "ask_user_evidence",
+            "skip_reason": "legacy waiting path already selected",
+            "legacy_fallback_target": "legacy_interactive_waiting_or_completion",
+        },
+    }
+    with pytest.raises(ProtocolSchemaViolation):
+        validate_orchestrator_event(payload)
+
+
+def test_validate_fcmp_event_rejects_reserved_output_repair_type() -> None:
+    payload = {
+        "protocol_version": "fcmp/1.0",
+        "run_id": "run-1",
+        "seq": 10,
+        "ts": "2026-04-13T00:00:10Z",
+        "engine": "codex",
+        "type": "diagnostic.output_repair.converged",
+        "data": {
+            "internal_round_index": 1,
+            "repair_stage": "schema_repair_rounds",
+            "candidate_source": "stdout_final_candidate",
+            "reason": "schema valid",
+        },
+        "meta": {"attempt": 1},
+        "raw_ref": None,
+    }
+    with pytest.raises(ProtocolSchemaViolation):
+        validate_fcmp_event(payload)
+
+
 def test_validate_orchestrator_event_accepts_auth_method_selection_required():
     payload = {
         "ts": "2026-03-03T00:00:00",

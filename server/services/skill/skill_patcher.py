@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable, List
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
-from server.config_registry import keys
 from server.config_registry.registry import config_registry
 from server.models import ManifestArtifact
-from server.models import SkillManifest
-from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
-from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER, generate_output_schema_patch
+from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER
 from .skill_patch_templates import (
     ARTIFACT_REDIRECTION_TEMPLATE,
     MODE_AUTO_TEMPLATE,
@@ -34,15 +30,9 @@ RUNTIME_ENFORCEMENT_MARKER = RUNTIME_ENFORCEMENT_TEMPLATE.marker
 OUTPUT_FORMAT_CONTRACT_MARKER = OUTPUT_FORMAT_CONTRACT_TEMPLATE.marker
 ASK_USER_SCHEMA_PLACEHOLDER = "{ask_user_schema_block}"
 
-_JSON_PAYLOAD_EXCEPTIONS = (
-    OSError,
-    UnicodeDecodeError,
-    json.JSONDecodeError,
-)
 _PATCH_SKILL_MD_EXCEPTIONS = (
     OSError,
     UnicodeDecodeError,
-    RuntimeError,
     TypeError,
     ValueError,
 )
@@ -168,44 +158,12 @@ class SkillPatcher:
             )
         return template.replace("{artifact_lines}", "\n".join(lines))
 
-    def load_output_schema(
-        self,
-        *,
-        skill_path: Optional[Path],
-        output_schema_relpath: Optional[str],
-    ) -> Optional[Dict[str, Any]]:
-        if not skill_path:
-            return None
-        skill = SkillManifest(
-            id=skill_path.name,
-            path=skill_path,
-            schemas={"output": output_schema_relpath} if output_schema_relpath else {},
-        )
-        resolution = resolve_schema_asset(skill, "output")
-        schema_path = resolution.path
-        if schema_path is None:
-            logger.warning(
-                "Output schema file not found: skill=%s declared=%s fallback=%s",
-                skill_path,
-                resolution.declared_relpath,
-                resolution.fallback_relpath,
-            )
-            return None
-        payload = load_resolved_json(schema_path)
-        if not isinstance(payload, dict):
-            logger.warning("Output schema root is not an object: %s", schema_path)
-            return None
-        return payload
-
-    def discover_output_schema(self, skill_dir: Path) -> Optional[Dict[str, Any]]:
-        return self.load_output_schema(skill_path=skill_dir, output_schema_relpath=None)
-
     def build_patch_plan(
         self,
         *,
         artifacts: List[ManifestArtifact],
         execution_mode: str = "auto",
-        output_schema: Optional[Dict[str, Any]] = None,
+        output_schema_summary_markdown: str | None = None,
     ) -> List[SkillPatchSection]:
         mode = self._normalize_execution_mode(execution_mode)
         plan: List[SkillPatchSection] = []
@@ -233,8 +191,8 @@ class SkillPatcher:
             )
         )
         output_schema_patch = (
-            generate_output_schema_patch(output_schema)
-            if isinstance(output_schema, dict)
+            output_schema_summary_markdown.strip()
+            if isinstance(output_schema_summary_markdown, str)
             else ""
         )
         if output_schema_patch:
@@ -259,12 +217,12 @@ class SkillPatcher:
         self,
         artifacts: List[ManifestArtifact],
         execution_mode: str = "auto",
-        output_schema: Optional[Dict[str, Any]] = None,
+        output_schema_summary_markdown: str | None = None,
     ) -> str:
         plan = self.build_patch_plan(
             artifacts=self._coerce_artifacts(artifacts),
             execution_mode=execution_mode,
-            output_schema=output_schema,
+            output_schema_summary_markdown=output_schema_summary_markdown,
         )
         return "\n\n".join(section.content.strip() for section in plan if section.content.strip())
 
@@ -283,20 +241,19 @@ class SkillPatcher:
         skill_dir: Path,
         artifacts: List[ManifestArtifact],
         execution_mode: str = "auto",
-        output_schema: Optional[Dict[str, Any]] = None,
+        output_schema_summary_markdown: str | None = None,
     ) -> bool:
         skill_md_path = skill_dir / "SKILL.md"
         if not skill_md_path.exists():
             return False
         parsed_artifacts = self._coerce_artifacts(artifacts)
-        schema_payload = output_schema if isinstance(output_schema, dict) else self.discover_output_schema(skill_dir)
         try:
             current = skill_md_path.read_text(encoding="utf-8")
             updated = current
             for section in self.build_patch_plan(
                 artifacts=parsed_artifacts,
                 execution_mode=execution_mode,
-                output_schema=schema_payload,
+                output_schema_summary_markdown=output_schema_summary_markdown,
             ):
                 updated = self._append_patch_if_missing(updated, section.content, section.marker)
             if updated == current:

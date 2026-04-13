@@ -155,6 +155,7 @@ class EngineExecutionAdapter:
         self._persist_first_attempt_prompt_audit(
             run_dir=run_dir,
             attempt_number=attempt_number,
+            options=options,
             prompt=prompt,
         )
 
@@ -200,9 +201,10 @@ class EngineExecutionAdapter:
         *,
         run_dir: Path,
         attempt_number: int,
+        options: dict[str, Any] | None,
         prompt: str,
     ) -> None:
-        if attempt_number != 1:
+        if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -255,12 +257,13 @@ class EngineExecutionAdapter:
         *,
         run_dir: Path,
         attempt_number: int,
+        options: dict[str, Any] | None,
         original_command: list[str],
         effective_command: list[str],
         normalization_applied: bool,
         normalization_reason: str,
     ) -> None:
-        if attempt_number != 1:
+        if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -578,6 +581,7 @@ class EngineExecutionAdapter:
         self._persist_first_attempt_spawn_command_audit(
             run_dir=run_dir,
             attempt_number=attempt_number,
+            options=options,
             original_command=original_command,
             effective_command=command_to_execute,
             normalization_applied=normalization_applied,
@@ -635,12 +639,22 @@ class EngineExecutionAdapter:
             return attempt_number_obj
         return 1
 
+    def _resolve_repair_round_index(self, options: dict[str, Any] | None) -> int:
+        if not isinstance(options, dict):
+            return 0
+        round_obj = options.get("__repair_round_index")
+        if isinstance(round_obj, int) and round_obj >= 0:
+            return round_obj
+        return 0
+
     def _prepend_global_first_attempt_prefix(
         self,
         *,
         ctx: AdapterExecutionContext,
         prompt: str,
     ) -> str:
+        if self._resolve_repair_round_index(ctx.options) >= 1:
+            return prompt
         profile = getattr(self, "profile", None)
         if profile is None:
             return prompt
@@ -679,6 +693,12 @@ class EngineExecutionAdapter:
                 options=options or {},
             )
         )
+
+    def render_prompt(self, ctx: AdapterExecutionContext) -> str:
+        return self._resolve_effective_prompt(ctx)
+
+    def parse_json_with_deterministic_repair(self, text: str) -> tuple[dict[str, Any] | None, str]:
+        return self._parse_json_with_deterministic_repair(text)
 
     def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
         if self.stream_parser is None:
