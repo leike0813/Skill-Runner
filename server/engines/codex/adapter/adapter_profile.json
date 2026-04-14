@@ -59,6 +59,16 @@
       "features.unified_exec=false"
     ]
   },
+  "command_features": {
+    "inject_output_schema_cli": true
+  },
+  "structured_output": {
+    "mode": "compat_translate",
+    "cli_schema_strategy": "path_schema_artifact",
+    "compat_schema_strategy": "compat_translate",
+    "prompt_contract_strategy": "compat_summary",
+    "payload_canonicalizer": "payload_union_object_canonicalizer"
+  },
   "ui_shell": {
     "command_id": "codex-tui",
     "label": "Codex TUI",
@@ -138,6 +148,25 @@
               "field": "combined_text",
               "op": "regex",
               "value": "(sign\\s+in\\s+again|log\\s+out\\s+and\\s+sign\\s+in\\s+again|authentication\\s+token\\s+is\\s+expired)"
+            }
+          ]
+        }
+      },
+      {
+        "id": "codex_access_token_reauth_required",
+        "enabled": true,
+        "priority": 892,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(Your access token could not be refreshed because you have since logged out or signed in to another account|Provided authentication token is expired|auth error code:\\s*token_expired|\\\"code\\\"\\s*:\\s*\\\"token_expired\\\")"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(sign\\s+in\\s+again|logged\\s+out|token_expired|401\\s+Unauthorized)"
             }
           ]
         }

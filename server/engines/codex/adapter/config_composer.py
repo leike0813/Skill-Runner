@@ -34,6 +34,14 @@ class CodexConfigComposer:
     def __init__(self, adapter: "CodexExecutionAdapter") -> None:
         self._adapter = adapter
 
+    def _apply_headless_sandbox_gating(self, settings: dict[str, Any]) -> dict[str, Any]:
+        probe = self._adapter.get_headless_sandbox_probe()
+        if probe.available:
+            return settings
+        gated = dict(settings)
+        gated["sandbox_mode"] = "danger-full-access"
+        return gated
+
     def extract_codex_overrides(self, options: dict[str, Any]) -> dict[str, Any]:
         overrides: dict[str, Any] = {}
 
@@ -111,6 +119,7 @@ class CodexConfigComposer:
                         pass
             codex_overrides = self.extract_codex_overrides(options)
             fused_settings = config_manager.generate_profile_settings(skill_defaults, codex_overrides)
+            fused_settings = self._apply_headless_sandbox_gating(fused_settings)
             active_profile_name = getattr(
                 config_manager,
                 "profile_name",

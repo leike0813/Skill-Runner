@@ -13,6 +13,7 @@
     "config_assets",
     "model_catalog",
     "command_defaults",
+    "structured_output",
     "ui_shell",
     "cli_management",
     "parser_auth_patterns"
@@ -185,6 +186,39 @@
         "ui_shell": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "command_features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inject_output_schema_cli": { "type": "boolean" }
+      }
+    },
+    "structured_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["noop", "canonical_passthrough", "compat_translate"]
+        },
+        "cli_schema_strategy": {
+          "type": "string",
+          "enum": ["noop", "path_schema_artifact", "inline_schema_object"]
+        },
+        "compat_schema_strategy": {
+          "type": "string",
+          "enum": ["noop", "canonical_passthrough", "compat_translate"]
+        },
+        "prompt_contract_strategy": {
+          "type": "string",
+          "enum": ["canonical_summary", "compat_summary"]
+        },
+        "payload_canonicalizer": {
+          "type": "string",
+          "enum": ["noop", "payload_union_object_canonicalizer"]
         }
       }
     },

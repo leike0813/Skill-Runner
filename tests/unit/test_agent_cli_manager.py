@@ -6,6 +6,7 @@ import pytest
 
 from server.config import config
 from server.engines.claude.adapter.sandbox_probe import load_claude_sandbox_probe
+from server.engines.codex.adapter.sandbox_probe import load_codex_sandbox_probe
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.agent_cli_manager import CommandResult
 from server.services.engine_management.runtime_profile import RuntimeProfile
@@ -52,8 +53,10 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     opencode_dir = manager.profile.agent_home / ".opencode"
     opencode_config = manager.profile.agent_home / ".config" / "opencode" / "opencode.json"
     qwen_settings = manager.profile.agent_home / ".qwen" / "settings.json"
+    codex_probe = manager.profile.agent_home / ".codex" / "sandbox_probe.json"
 
     assert codex_config.exists()
+    assert codex_probe.exists()
     assert 'cli_auth_credentials_store = "file"' in codex_config.read_text(encoding="utf-8")
     assert json.loads(gemini_settings.read_text(encoding="utf-8"))["security"]["auth"]["selectedType"] == "oauth-personal"
     iflow_payload = json.loads(iflow_settings.read_text(encoding="utf-8"))
@@ -104,6 +107,88 @@ def test_collect_claude_sandbox_status_reports_missing_dependencies(tmp_path: Pa
     assert payload["dependency_status"] == "warning"
     assert payload["warning_code"] == "CLAUDE_SANDBOX_DEPENDENCY_MISSING"
     assert payload["missing_dependencies"] == ["bubblewrap", "socat"]
+
+
+def test_collect_codex_sandbox_status_reports_disabled_by_env(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.setenv("LANDLOCK_ENABLED", "0")
+
+    payload = manager.collect_sandbox_status("codex")
+
+    assert payload["declared_enabled"] is False
+    assert payload["available"] is False
+    assert payload["status"] == "disabled"
+    assert payload["dependency_status"] == "n/a"
+    assert payload["warning_code"] == "CODEX_SANDBOX_DISABLED_BY_ENV"
+
+
+def test_collect_codex_sandbox_status_reports_missing_bubblewrap_dependency(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: None)
+
+    payload = manager.collect_sandbox_status("codex")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert payload["dependency_status"] == "warning"
+    assert payload["warning_code"] == "CODEX_SANDBOX_DEPENDENCY_MISSING"
+    assert payload["missing_dependencies"] == ["bubblewrap"]
+
+
+def test_collect_codex_sandbox_status_reports_runtime_unavailable_when_probe_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="bwrap: setting up uid map: Permission denied",
+        ),
+    )
+
+    payload = manager.collect_sandbox_status("codex")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert payload["warning_code"] == "CODEX_SANDBOX_RUNTIME_UNAVAILABLE"
+    assert "uid map" in payload["message"]
+
+
+def test_collect_codex_sandbox_status_reports_available_when_smoke_probe_succeeds(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(returncode=0, stdout="sandbox-ok", stderr=""),
+    )
+
+    payload = manager.collect_sandbox_status("codex")
+
+    assert payload["declared_enabled"] is True
+    assert payload["available"] is True
+    assert payload["status"] == "available"
+    assert payload["dependency_status"] == "ready"
+    assert payload["warning_code"] is None
 
 
 def test_collect_claude_sandbox_status_reports_available_when_smoke_probe_succeeds(
@@ -170,6 +255,29 @@ def test_ensure_layout_persists_claude_sandbox_probe_sidecar(tmp_path: Path, mon
     assert persisted is not None
     assert persisted.available is False
     assert persisted.warning_code == "CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE"
+    assert persisted.probe_kind == "bubblewrap_smoke"
+
+
+def test_ensure_layout_persists_codex_sandbox_probe_sidecar(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    monkeypatch.delenv("LANDLOCK_ENABLED", raising=False)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(
+            returncode=1,
+            stdout="",
+            stderr="bwrap: setting up uid map: Permission denied",
+        ),
+    )
+
+    manager.ensure_layout()
+
+    persisted = load_codex_sandbox_probe(manager.profile.agent_home)
+    assert persisted is not None
+    assert persisted.available is False
+    assert persisted.warning_code == "CODEX_SANDBOX_RUNTIME_UNAVAILABLE"
     assert persisted.probe_kind == "bubblewrap_smoke"
 
 

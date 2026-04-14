@@ -22,6 +22,8 @@ data/runs/<run_id>/
 │   ├── stdout.<attempt>.log
 │   ├── stderr.<attempt>.log
 │   ├── pty-output.<attempt>.log
+│   ├── overflow_index.<attempt>.jsonl
+│   ├── overflow_lines/<attempt>/<overflow_id>.ndjson
 │   ├── fs-before.<attempt>.json
 │   ├── fs-after.<attempt>.json
 │   ├── fs-diff.<attempt>.json
@@ -181,6 +183,41 @@ parser/materialization diagnostics。
 - `event_count`
 - `diagnostic_count`
 - `parser_warning_count`
+
+### 3.11 `overflow_index.<attempt>.jsonl`
+
+超长非消息 NDJSON 行的 quarantine 索引。
+
+合同定位：
+
+- attempt-scoped
+- append-only
+- history-only
+- 用于定位被旁路保存的 overflow 原始逻辑行
+
+每条记录至少包含：
+
+- `overflow_id`
+- `attempt_number`
+- `stream`
+- `line_start_byte`
+- `total_bytes`
+- `sha256`
+- `disposition`
+- `diagnostic_code`
+- `raw_relpath`
+- `head_preview`
+- `tail_preview`
+
+### 3.12 `overflow_lines/<attempt>/<overflow_id>.ndjson`
+
+被 quarantine 的超长逻辑行原始解码文本 sidecar。
+
+说明：
+
+- 仅在非消息 NDJSON 行发生 overflow 时按需创建
+- 保存 runtime ingress 看到的完整解码逻辑行文本
+- 不参与 live parser 主链，不替代 `stdout/stderr.log` 或 `io_chunks`
 
 ## 4. 输入与运行资产
 

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from server.models import EngineSessionHandle
-from server.runtime.adapter.common.output_schema_cli import build_codex_output_schema_args
-from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
 from server.runtime.adapter.common.command_defaults import merge_cli_args
+from server.runtime.adapter.contracts import AdapterExecutionContext
 
 if TYPE_CHECKING:
     from .execution_adapter import CodexExecutionAdapter
@@ -20,8 +19,6 @@ class CodexCommandBuilder:
         return str(self._adapter._resolve_codex_command())  # noqa: SLF001
 
     def _apply_landlock_flag_fallback(self, flags: list[str]) -> list[str]:
-        if os.environ.get("LANDLOCK_ENABLED") != "0":
-            return flags
         return self._adapter._apply_landlock_flag_fallback(flags)  # noqa: SLF001
 
     def _resolve_profile_flags(self, *, action: str, use_profile_defaults: bool) -> list[str]:
@@ -58,6 +55,7 @@ class CodexCommandBuilder:
         *,
         prompt: str,
         options: dict[str, object],
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -75,7 +73,14 @@ class CodexCommandBuilder:
             return [executable, *fallback_flags]
         default_flags = self._resolve_profile_flags(action="start", use_profile_defaults=profile_defaults)
         merged_flags = merge_cli_args(default_flags, [])
-        merged_flags.extend(build_codex_output_schema_args(options))
+        merged_flags.extend(
+            structured_output_pipeline.build_cli_schema_args(
+                engine_name="codex",
+                run_dir=ctx.run_dir if ctx is not None else None,
+                options=options,
+                profile=self._adapter.profile,
+            )
+        )
         merged_flags = self._apply_landlock_flag_fallback(merged_flags)
         return [executable, "exec", *merged_flags, prompt]
 
@@ -88,6 +93,7 @@ class CodexCommandBuilder:
         prompt: str,
         options: dict[str, object],
         session_handle: EngineSessionHandle,
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -117,7 +123,6 @@ class CodexCommandBuilder:
             return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]
         defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=profile_defaults)
         merged = merge_cli_args(defaults, [])
-        merged.extend(build_codex_output_schema_args(options))
         merged = self._apply_landlock_flag_fallback(merged)
         exec_flags, resume_flags = self._split_exec_and_resume_flags(merged)
         return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List
+
+import yaml  # type: ignore[import-untyped]
+
+from server.config_registry.registry import config_registry
 
 
 OUTPUT_SCHEMA_PATCH_MARKER = "### Output Schema Specification"
@@ -71,6 +76,65 @@ def generate_output_schema_patch(
             "Example output:",
             "```json",
             json.dumps(skeleton, indent=2, ensure_ascii=False),
+            "```",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_interactive_pending_contract_markdown(
+    *,
+    include_final_example: bool,
+) -> str:
+    contract = _load_ui_hints_contract()
+    kind_values = contract["kinds"]
+    options_fields = contract["options_fields"]
+    files_fields = contract["files_fields"]
+    final_example = {
+        "__SKILL_DONE__": True,
+        "result_field": "...",
+    }
+    pending_example = {
+        "__SKILL_DONE__": False,
+        "message": "请选择下一步。",
+        "ui_hints": {
+            "kind": "choose_one",
+            "hint": "请选择最符合当前需求的一项。",
+            "options": [
+                {"label": "继续", "value": "continue"},
+                {"label": "先澄清问题", "value": "clarify"},
+            ],
+        },
+    }
+    lines: List[str] = [
+        "Interactive pending branch contract:",
+        "- Return the pending branch only when user input is genuinely required before the task can continue.",
+        "- `__SKILL_DONE__`: must be `false`.",
+        "- `message`: required non-empty string shown directly to the user.",
+        "- `ui_hints`: required object for optional rendering hints.",
+        "",
+        f"Supported `ui_hints.kind` values: `{ ' | '.join(kind_values) }`.",
+        "- `ui_hints.prompt`: optional string for extra UI display text.",
+        "- `ui_hints.hint`: optional string for input guidance.",
+        f"- `ui_hints.options`: optional array for `choose_one`; each item should include `{options_fields}`.",
+        f"- `ui_hints.files`: optional array for `upload_files`; each item should include `{files_fields}`.",
+    ]
+    if include_final_example:
+        lines.extend(
+            [
+                "",
+                "Final branch example:",
+                "```json",
+                json.dumps(final_example, ensure_ascii=False, indent=2),
+                "```",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Pending branch example:",
+            "```json",
+            json.dumps(pending_example, ensure_ascii=False, indent=2),
             "```",
         ]
     )
@@ -265,3 +329,61 @@ def _array_item_count_for_skeleton(field_schema: Dict[str, Any]) -> int:
     if max_items is not None:
         return 1 if max_items >= 1 else 0
     return 1
+
+
+def _ask_user_contract_path() -> Path | None:
+    candidates = config_registry.ask_user_schema_paths()
+    return next((path for path in candidates if path.exists()), None)
+
+
+def _load_ui_hints_contract() -> dict[str, Any]:
+    fallback = {
+        "kinds": ["open_text", "choose_one", "confirm", "upload_files"],
+        "options_fields": "`label` and `value`",
+        "files_fields": "`name`, `required`, `hint`, and `accept`",
+    }
+    contract_path = _ask_user_contract_path()
+    if contract_path is None:
+        return fallback
+    try:
+        payload = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return fallback
+    if not isinstance(payload, dict):
+        return fallback
+    ask_user_obj = payload.get("ask_user")
+    if not isinstance(ask_user_obj, dict):
+        return fallback
+    kind_values = fallback["kinds"]
+    kind_obj = ask_user_obj.get("kind")
+    if isinstance(kind_obj, dict):
+        enum_obj = kind_obj.get("enum")
+        if isinstance(enum_obj, list):
+            parsed = [
+                str(item).strip()
+                for item in enum_obj
+                if isinstance(item, str) and item.strip()
+            ]
+            if parsed:
+                kind_values = parsed
+    options_fields = fallback["options_fields"]
+    options_obj = ask_user_obj.get("options")
+    if isinstance(options_obj, dict):
+        item_obj = options_obj.get("item")
+        if isinstance(item_obj, dict):
+            option_keys = [str(key) for key in item_obj.keys() if isinstance(key, str)]
+            if option_keys:
+                options_fields = ", ".join(f"`{key}`" for key in option_keys)
+    files_fields = fallback["files_fields"]
+    files_obj = ask_user_obj.get("files")
+    if isinstance(files_obj, dict):
+        item_obj = files_obj.get("item")
+        if isinstance(item_obj, dict):
+            file_keys = [str(key) for key in item_obj.keys() if isinstance(key, str)]
+            if file_keys:
+                files_fields = ", ".join(f"`{key}`" for key in file_keys)
+    return {
+        "kinds": kind_values,
+        "options_fields": options_fields,
+        "files_fields": files_fields,
+    }

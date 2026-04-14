@@ -2,13 +2,9 @@
 # These settings act as mandatory defaults/overrides.
 # They are merged on TOP of user runtime configuration to ensure security/stability.
 
+features.shell_tool = true
+sandbox_workspace_write.network_access = true
+
 [profiles.skill-runner]
 approval_policy = "never"
 sandbox_mode = "workspace-write"
-
-[features]
-shell_tool = true
-web_search_request = true
-
-[sandbox_workspace_write]
-network_access = true

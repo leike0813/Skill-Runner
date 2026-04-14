@@ -11,7 +11,10 @@ import jsonschema  # type: ignore[import-untyped]
 
 from server.models import SkillManifest
 from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
-from server.services.skill.skill_patch_output_schema import generate_output_schema_patch
+from server.services.skill.skill_patch_output_schema import (
+    generate_output_schema_patch,
+    render_interactive_pending_contract_markdown,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -247,9 +250,8 @@ class RunOutputSchemaService:
         compatibility_note = None
         if self._normalize_execution_mode(execution_mode) == "interactive":
             compatibility_note = (
-                "Interactive mode also allows a pending branch: return `__SKILL_DONE__ = false` "
-                "together with `message` and `ui_hints` when user input is needed. Do not emit "
-                "`<ASK_USER_YAML>` or other legacy wrappers."
+                "Interactive mode also allows a pending branch when user input is needed.\n\n"
+                + render_interactive_pending_contract_markdown(include_final_example=False)
             )
         return generate_output_schema_patch(
             final_schema,

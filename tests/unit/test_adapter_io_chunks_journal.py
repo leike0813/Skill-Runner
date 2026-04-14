@@ -10,6 +10,7 @@ import pytest
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.live_stream_parser_common import (
+    RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
     RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
 )
 
@@ -146,6 +147,24 @@ async def test_capture_process_output_sanitizes_oversized_ndjson_before_io_chunk
     assert "[truncated by live overflow guard]" in overflow_text
     assert len(overflow_text) < 6000
     assert json.loads(lines[2])["message"]["content"][0]["text"] == "after"
+    overflow_index_path = audit_dir / "overflow_index.1.jsonl"
+    assert overflow_index_path.exists()
+    overflow_index_rows = [
+        json.loads(line)
+        for line in overflow_index_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(overflow_index_rows) == 1
+    overflow_index = overflow_index_rows[0]
+    assert overflow_index["disposition"] == "sanitized"
+    raw_sidecar_path = run_dir / overflow_index["raw_relpath"]
+    assert raw_sidecar_path.exists()
+    raw_sidecar_text = raw_sidecar_path.read_text(encoding="utf-8")
+    assert raw_sidecar_text.count("A") >= 6000
+    assert '"tool_use_id": "toolu_1"' in raw_sidecar_text
+    assert len(raw_sidecar_text) > len(lines[1])
+    assert overflow_index["head_preview"]
+    assert overflow_index["tail_preview"]
 
 
 @pytest.mark.asyncio
@@ -229,3 +248,44 @@ async def test_capture_process_output_preserves_oversized_qwen_assistant_message
     assert max_payload_len > 4096
     payload_lines = [json.loads(line) for line in stdout_text.splitlines()]
     assert payload_lines[1]["message"]["content"][0]["text"] == assistant_text
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_quarantines_unrepairable_overflow_into_sidecar(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-io-chunks-overflow-substituted"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    adapter = EngineExecutionAdapter()
+
+    proc = await asyncio.create_subprocess_exec(
+        "python",
+        "-c",
+        "import sys; sys.stdout.write('X'*5000 + '\\n')",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    result = await adapter._capture_process_output(  # noqa: SLF001
+        proc=proc,
+        run_dir=run_dir,
+        options={"__attempt_number": 1, "__engine_name": "claude"},
+        prefix="Test",
+        live_runtime_emitter=None,
+    )
+
+    assert result.exit_code == 0
+    audit_dir = run_dir / ".audit"
+    stdout_path = audit_dir / "stdout.1.log"
+    stdout_payload = json.loads(stdout_path.read_text(encoding="utf-8").strip())
+    assert stdout_payload["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+    overflow_index_rows = [
+        json.loads(line)
+        for line in (audit_dir / "overflow_index.1.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(overflow_index_rows) == 1
+    overflow_index = overflow_index_rows[0]
+    assert overflow_index["disposition"] == "substituted"
+    raw_sidecar_path = run_dir / overflow_index["raw_relpath"]
+    assert raw_sidecar_path.exists()
+    raw_sidecar_text = raw_sidecar_path.read_text(encoding="utf-8")
+    assert raw_sidecar_text == ("X" * 5000) + "\n"
+    assert stdout_payload["raw_relpath"] == overflow_index["raw_relpath"]

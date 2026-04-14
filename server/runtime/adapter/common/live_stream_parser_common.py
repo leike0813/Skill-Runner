@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 
 from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.protocol.contracts import LiveStreamParserSession
@@ -18,6 +18,29 @@ RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED = (
 )
 SemanticOverflowExemptionKind = Literal["reasoning", "assistant_message"]
 NdjsonOverflowExemptionProbe = Callable[[str, str], SemanticOverflowExemptionKind | None]
+OVERFLOW_PREVIEW_CHAR_LIMIT = 256
+
+
+class OverflowQuarantineRecorder(Protocol):
+    def start_capture(
+        self,
+        *,
+        stream: str,
+        line_start_byte: int,
+        initial_text: str,
+    ) -> Any: ...
+
+    def append_text(self, *, handle: Any, text: str) -> None: ...
+
+    def finalize_capture(
+        self,
+        *,
+        handle: Any,
+        disposition: str,
+        diagnostic_code: str,
+        head_preview: str,
+        tail_preview: str,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -34,6 +57,9 @@ class _LineState:
     prefix_bytes: int = 0
     overflowed: bool = False
     exemption_kind: SemanticOverflowExemptionKind | None = None
+    overflow_capture_handle: Any | None = None
+    head_preview: str = ""
+    tail_preview: str = ""
 
 
 @dataclass
@@ -94,6 +120,15 @@ def _append_retained_segment(
     state.prefix_bytes += segment_bytes
 
 
+def _update_tail_preview(*, state: _LineState, segment: str) -> None:
+    if not segment:
+        return
+    combined = f"{state.tail_preview}{segment}"
+    if len(combined) > OVERFLOW_PREVIEW_CHAR_LIMIT:
+        combined = combined[-OVERFLOW_PREVIEW_CHAR_LIMIT:]
+    state.tail_preview = combined
+
+
 def _classify_overflow_exemption(
     *,
     probe: NdjsonOverflowExemptionProbe | None,
@@ -112,10 +147,18 @@ def _append_ndjson_segment_with_limit(
     segment: str,
     limit_bytes: int,
     exemption_probe: NdjsonOverflowExemptionProbe | None,
+    overflow_recorder: OverflowQuarantineRecorder | None,
+    line_start_byte: int,
 ) -> None:
-    if state.overflowed or not segment:
+    if not segment:
         return
     segment_bytes = len(segment.encode("utf-8", errors="replace"))
+    prefix_before_segment = state.prefix_text
+    if state.overflowed:
+        if state.overflow_capture_handle is not None and overflow_recorder is not None:
+            overflow_recorder.append_text(handle=state.overflow_capture_handle, text=segment)
+        _update_tail_preview(state=state, segment=segment)
+        return
     if state.exemption_kind is not None:
         _append_retained_segment(
             state=state,
@@ -137,6 +180,7 @@ def _append_ndjson_segment_with_limit(
         )
         return
     remaining = limit_bytes - state.prefix_bytes
+    kept = ""
     if remaining > 0:
         kept = _truncate_text_to_byte_limit(segment, remaining)
         if kept:
@@ -144,6 +188,16 @@ def _append_ndjson_segment_with_limit(
             state.prefix_bytes += len(kept.encode("utf-8", errors="replace"))
     if state.prefix_bytes >= limit_bytes:
         state.overflowed = True
+        raw_line_preview_source = f"{prefix_before_segment}{segment}"
+        state.head_preview = raw_line_preview_source[:OVERFLOW_PREVIEW_CHAR_LIMIT]
+        state.tail_preview = raw_line_preview_source[-OVERFLOW_PREVIEW_CHAR_LIMIT:]
+        if overflow_recorder is not None and state.overflow_capture_handle is None:
+            state.overflow_capture_handle = overflow_recorder.start_capture(
+                stream=stream,
+                line_start_byte=line_start_byte,
+                initial_text=prefix_before_segment,
+            )
+            overflow_recorder.append_text(handle=state.overflow_capture_handle, text=segment)
 
 
 def _append_closing_value(parts: list[str], *, ctx: _JsonContext) -> None:
@@ -330,20 +384,26 @@ def build_runtime_overflow_diagnostic_row(
     stream: str,
     limit_bytes: int,
     line_start_byte: int,
+    overflow_metadata: dict[str, Any] | None = None,
 ) -> str:
-    return json.dumps(
-        {
-            "type": "runtime_diagnostic",
-            "subtype": "ndjson_line_overflow_substituted",
-            "stream": stream,
-            "code": RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
-            "threshold_bytes": limit_bytes,
-            "line_start_byte": line_start_byte,
-            "sanitized": True,
-            "original_line_dropped": True,
-        },
-        ensure_ascii=False,
-    )
+    payload = {
+        "type": "runtime_diagnostic",
+        "subtype": "ndjson_line_overflow_substituted",
+        "stream": stream,
+        "code": RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
+        "threshold_bytes": limit_bytes,
+        "line_start_byte": line_start_byte,
+        "sanitized": True,
+        "original_line_dropped": True,
+    }
+    if isinstance(overflow_metadata, dict):
+        overflow_id = overflow_metadata.get("overflow_id")
+        raw_relpath = overflow_metadata.get("raw_relpath")
+        if isinstance(overflow_id, str) and overflow_id:
+            payload["overflow_id"] = overflow_id
+        if isinstance(raw_relpath, str) and raw_relpath:
+            payload["raw_relpath"] = raw_relpath
+    return json.dumps(payload, ensure_ascii=False)
 
 
 class NdjsonIngressSanitizer:
@@ -353,10 +413,12 @@ class NdjsonIngressSanitizer:
         accepted_streams: set[str],
         limit_bytes: int = LIVE_STREAM_LINE_LIMIT_BYTES,
         overflow_exemption_probe: NdjsonOverflowExemptionProbe | None = None,
+        overflow_recorder: OverflowQuarantineRecorder | None = None,
     ) -> None:
         self._accepted_streams = set(accepted_streams)
         self._limit_bytes = max(1, int(limit_bytes))
         self._overflow_exemption_probe = overflow_exemption_probe
+        self._overflow_recorder = overflow_recorder
         self._states: dict[str, _LineState] = {
             stream: _LineState() for stream in self._accepted_streams
         }
@@ -406,6 +468,8 @@ class NdjsonIngressSanitizer:
             segment=segment,
             limit_bytes=self._limit_bytes,
             exemption_probe=self._overflow_exemption_probe,
+            overflow_recorder=self._overflow_recorder,
+            line_start_byte=self._output_offsets.get(stream, 0),
         )
 
     def _finalize_line(self, *, stream: str, include_newline: bool) -> SanitizedIngressChunk | None:
@@ -424,16 +488,38 @@ class NdjsonIngressSanitizer:
                 "sanitized": True,
                 "original_line_dropped": True,
             }
+            overflow_metadata: dict[str, Any] | None = None
             output_limit = self._limit_bytes - (1 if include_newline else 0)
             repaired = repair_truncated_json_line_with_limit(
                 state.prefix_text.rstrip("\n"),
                 output_limit_bytes=output_limit,
             )
+            if state.overflow_capture_handle is not None and self._overflow_recorder is not None:
+                disposition = "sanitized" if repaired is not None else "substituted"
+                diagnostic_code = (
+                    RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED
+                    if repaired is not None
+                    else RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+                )
+                overflow_metadata = self._overflow_recorder.finalize_capture(
+                    handle=state.overflow_capture_handle,
+                    disposition=disposition,
+                    diagnostic_code=diagnostic_code,
+                    head_preview=state.head_preview,
+                    tail_preview=state.tail_preview,
+                )
+                overflow_id = overflow_metadata.get("overflow_id")
+                raw_relpath = overflow_metadata.get("raw_relpath")
+                if isinstance(overflow_id, str) and overflow_id:
+                    detail_payload["overflow_id"] = overflow_id
+                if isinstance(raw_relpath, str) and raw_relpath:
+                    detail_payload["raw_relpath"] = raw_relpath
             if repaired is None:
                 body = build_runtime_overflow_diagnostic_row(
                     stream=stream,
                     limit_bytes=self._limit_bytes,
                     line_start_byte=line_start,
+                    overflow_metadata=overflow_metadata,
                 )
                 diagnostics.append(
                     {
@@ -524,6 +610,8 @@ class NdjsonLineBuffer:
                 segment=segment,
                 limit_bytes=self._limit_bytes,
                 exemption_probe=self._overflow_exemption_probe,
+                overflow_recorder=None,
+                line_start_byte=state.start_byte,
             )
 
             if has_newline:

@@ -1,0 +1,23 @@
+{
+  "sample_id": "openai_access_token_logged_out_401",
+  "source_run_id": "4ba8508a-e3a2-4c05-a705-3ca6352dae09",
+  "engine": "codex",
+  "provider_id": "openai",
+  "execution_mode": "interactive",
+  "capture_date": "2026-04-14",
+  "scenario": "Codex access token expired after logout/account switch requiring reauthentication",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": null,
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "stdout_text",
+    "stderr_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Derived from run 4ba8508a-e3a2-4c05-a705-3ca6352dae09.",
+    "This sample should hit a Codex engine-specific access-token reauth rule, not the generic token-expired fallback."
+  ]
+}

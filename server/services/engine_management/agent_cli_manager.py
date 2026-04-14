@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
+import tomlkit
+from tomlkit.exceptions import TOMLKitError
 
 from server.config_registry import keys
 from server.config import config
@@ -21,6 +23,15 @@ from server.engines.claude.adapter.sandbox_probe import (
     ClaudeSandboxProbeResult,
     load_claude_sandbox_probe,
     write_claude_sandbox_probe,
+)
+from server.engines.codex.adapter.sandbox_probe import (
+    CODEX_SANDBOX_DEPENDENCY_MISSING,
+    CODEX_SANDBOX_DISABLED_BY_ENV,
+    CODEX_SANDBOX_PROBE_KIND,
+    CODEX_SANDBOX_RUNTIME_UNAVAILABLE,
+    CodexSandboxProbeResult,
+    load_codex_sandbox_probe,
+    write_codex_sandbox_probe,
 )
 from server.models import (
     EngineInteractiveProfile,
@@ -87,6 +98,12 @@ _PATH_RESOLVE_EXCEPTIONS = (
     ValueError,
 )
 _SEMVER_PATTERN = re.compile(r"\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b")
+_CODEX_SANDBOX_INIT_FAILURE_MARKERS = (
+    "uid_map",
+    "operation not permitted",
+    "permission denied",
+    "setting up uid map",
+)
 
 
 def _utc_now_iso() -> str:
@@ -250,6 +267,24 @@ class AgentCliManager:
 
     def collect_sandbox_status(self, engine: str) -> Dict[str, Any]:
         normalized = engine.strip().lower()
+        if normalized == "codex":
+            codex_probe = self.get_codex_sandbox_probe()
+            dependency_status = "n/a" if codex_probe.status == "disabled" else (
+                "ready" if codex_probe.available else "warning"
+            )
+            return {
+                "available": codex_probe.available,
+                "status": codex_probe.status,
+                "declared_enabled": codex_probe.declared_enabled,
+                "dependency_status": dependency_status,
+                "dependencies": dict(codex_probe.dependencies),
+                "missing_dependencies": list(codex_probe.missing_dependencies),
+                "warning_code": codex_probe.warning_code,
+                "message": codex_probe.message,
+                "checked_at": codex_probe.checked_at,
+                "probe_kind": codex_probe.probe_kind,
+            }
+
         if normalized != "claude":
             return {
                 "available": False,
@@ -265,8 +300,8 @@ class AgentCliManager:
             }
 
         declared_enabled = self._claude_sandbox_declared_enabled()
-        cached = load_claude_sandbox_probe(self.profile.agent_home)
-        if cached is None:
+        claude_probe = load_claude_sandbox_probe(self.profile.agent_home)
+        if claude_probe is None:
             message = "Claude sandbox bootstrap probe has not been recorded yet."
             return {
                 "available": declared_enabled,
@@ -282,17 +317,30 @@ class AgentCliManager:
             }
 
         return {
-            "available": cached.available,
-            "status": cached.status,
-            "declared_enabled": cached.declared_enabled,
-            "dependency_status": "ready" if cached.available else "warning",
-            "dependencies": dict(cached.dependencies),
-            "missing_dependencies": list(cached.missing_dependencies),
-            "warning_code": cached.warning_code,
-            "message": cached.message,
-            "checked_at": cached.checked_at,
-            "probe_kind": cached.probe_kind,
+            "available": claude_probe.available,
+            "status": claude_probe.status,
+            "declared_enabled": claude_probe.declared_enabled,
+            "dependency_status": "ready" if claude_probe.available else "warning",
+            "dependencies": dict(claude_probe.dependencies),
+            "missing_dependencies": list(claude_probe.missing_dependencies),
+            "warning_code": claude_probe.warning_code,
+            "message": claude_probe.message,
+            "checked_at": claude_probe.checked_at,
+            "probe_kind": claude_probe.probe_kind,
         }
+
+    def get_codex_sandbox_probe(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> CodexSandboxProbeResult:
+        if not force_refresh:
+            cached = load_codex_sandbox_probe(self.profile.agent_home)
+            if cached is not None:
+                return cached
+        probe = self._probe_codex_sandbox_status()
+        write_codex_sandbox_probe(agent_home=self.profile.agent_home, probe=probe)
+        return probe
 
     def collect_engine_status(self, engine: str) -> EngineStatus:
         return self.check_engine(engine)
@@ -748,6 +796,30 @@ class AgentCliManager:
             return False
         return bool(sandbox.get("enabled"))
 
+    def _codex_sandbox_declared_enabled(self) -> bool:
+        if os.environ.get("LANDLOCK_ENABLED") == "0":
+            return False
+        profile = self._load_engine_profile_or_none("codex")
+        if profile is None:
+            return False
+        enforced_path = profile.resolve_enforced_config_path()
+        try:
+            payload = tomlkit.parse(enforced_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, TOMLKitError, ValueError):
+            return True
+        if not isinstance(payload, dict):
+            return True
+        profiles_obj = payload.get("profiles", {})
+        if not isinstance(profiles_obj, dict):
+            return True
+        profile_cfg = profiles_obj.get("skill-runner", {})
+        if not isinstance(profile_cfg, dict):
+            return True
+        sandbox_mode = str(profile_cfg.get("sandbox_mode") or "").strip().lower()
+        if not sandbox_mode:
+            return True
+        return sandbox_mode != "danger-full-access"
+
     def _probe_claude_sandbox_status(self) -> ClaudeSandboxProbeResult:
         declared_enabled = self._claude_sandbox_declared_enabled()
         if not declared_enabled:
@@ -852,6 +924,97 @@ class AgentCliManager:
             probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
         )
 
+    def _probe_codex_sandbox_status(self) -> CodexSandboxProbeResult:
+        declared_enabled = self._codex_sandbox_declared_enabled()
+        checked_at = _utc_now_iso()
+        if not declared_enabled:
+            return CodexSandboxProbeResult(
+                declared_enabled=False,
+                available=False,
+                status="disabled",
+                warning_code=CODEX_SANDBOX_DISABLED_BY_ENV,
+                message=(
+                    "Codex sandbox is disabled by environment or enforced configuration. "
+                    "Headless runs will use --yolo and sandbox_mode=danger-full-access."
+                ),
+                dependencies={},
+                missing_dependencies=[],
+                checked_at=checked_at,
+                probe_kind=CODEX_SANDBOX_PROBE_KIND,
+            )
+
+        bubblewrap_cmd = self._resolve_command_any(("bwrap", "bubblewrap"))
+        dependency_checks = {"bubblewrap": bubblewrap_cmd is not None}
+        if bubblewrap_cmd is None:
+            return CodexSandboxProbeResult(
+                declared_enabled=True,
+                available=False,
+                status="unavailable",
+                warning_code=CODEX_SANDBOX_DEPENDENCY_MISSING,
+                message=(
+                    "Codex sandbox dependency missing: bubblewrap. "
+                    "Headless runs will use --yolo and sandbox_mode=danger-full-access."
+                ),
+                dependencies=dependency_checks,
+                missing_dependencies=["bubblewrap"],
+                checked_at=checked_at,
+                probe_kind=CODEX_SANDBOX_PROBE_KIND,
+            )
+
+        result = self._run_command(
+            [
+                bubblewrap_cmd,
+                "--ro-bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "/bin/sh",
+                "-lc",
+                "printf sandbox-ok",
+            ],
+            timeout_sec=3,
+        )
+        if result.returncode == 0:
+            return CodexSandboxProbeResult(
+                declared_enabled=True,
+                available=True,
+                status="available",
+                warning_code=None,
+                message="Codex sandbox runtime probe succeeded.",
+                dependencies=dependency_checks,
+                missing_dependencies=[],
+                checked_at=checked_at,
+                probe_kind=CODEX_SANDBOX_PROBE_KIND,
+            )
+
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip()).splitlines()
+        first_line = detail[0] if detail else f"exit={result.returncode}"
+        normalized_first_line = first_line.lower()
+        if any(marker in normalized_first_line for marker in _CODEX_SANDBOX_INIT_FAILURE_MARKERS):
+            message = (
+                "Codex sandbox runtime unavailable: "
+                f"{first_line}. Headless runs will use --yolo and sandbox_mode=danger-full-access."
+            )
+        else:
+            message = (
+                "Codex sandbox smoke test failed: "
+                f"{first_line}. Headless runs will use --yolo and sandbox_mode=danger-full-access."
+            )
+        return CodexSandboxProbeResult(
+            declared_enabled=True,
+            available=False,
+            status="unavailable",
+            warning_code=CODEX_SANDBOX_RUNTIME_UNAVAILABLE,
+            message=message,
+            dependencies=dependency_checks,
+            missing_dependencies=[],
+            checked_at=checked_at,
+            probe_kind=CODEX_SANDBOX_PROBE_KIND,
+        )
+
     def _configured_default_bootstrap_engines(self) -> tuple[str, ...]:
         raw = config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES
         if isinstance(raw, str):
@@ -869,6 +1032,9 @@ class AgentCliManager:
         return ()
 
     def _ensure_bootstrap_sidecars(self, engine: str) -> None:
+        if engine == "codex":
+            self.get_codex_sandbox_probe(force_refresh=True)
+            return
         if engine != "claude":
             return
         self._ensure_json_file(

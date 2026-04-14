@@ -33,6 +33,56 @@ class _NoopMirrorWriter:
         _ = row
 
 
+class _RecordingOverflowRecorder:
+    def __init__(self) -> None:
+        self._seq = 0
+        self.captured_text_by_id: dict[str, str] = {}
+        self.index_rows: list[dict[str, object]] = []
+
+    def start_capture(self, *, stream: str, line_start_byte: int, initial_text: str):
+        self._seq += 1
+        overflow_id = f"overflow-{self._seq}"
+        self.captured_text_by_id[overflow_id] = initial_text
+        return {
+            "overflow_id": overflow_id,
+            "stream": stream,
+            "line_start_byte": line_start_byte,
+            "raw_relpath": f".audit/overflow_lines/1/{overflow_id}.ndjson",
+        }
+
+    def append_text(self, *, handle, text: str) -> None:
+        self.captured_text_by_id[handle["overflow_id"]] = (
+            f"{self.captured_text_by_id.get(handle['overflow_id'], '')}{text}"
+        )
+
+    def finalize_capture(
+        self,
+        *,
+        handle,
+        disposition: str,
+        diagnostic_code: str,
+        head_preview: str,
+        tail_preview: str,
+    ) -> dict[str, object]:
+        row = {
+            "overflow_id": handle["overflow_id"],
+            "attempt_number": 1,
+            "stream": handle["stream"],
+            "line_start_byte": handle["line_start_byte"],
+            "total_bytes": len(
+                self.captured_text_by_id[handle["overflow_id"]].encode("utf-8", errors="replace")
+            ),
+            "sha256": "fake",
+            "disposition": disposition,
+            "diagnostic_code": diagnostic_code,
+            "raw_relpath": handle["raw_relpath"],
+            "head_preview": head_preview,
+            "tail_preview": tail_preview,
+        }
+        self.index_rows.append(row)
+        return row
+
+
 class _StubCodexAdapter:
     def __init__(self) -> None:
         self.profile = load_adapter_profile(
@@ -296,7 +346,8 @@ def test_ndjson_live_session_repairs_overflowed_line_and_resyncs() -> None:
 
 
 def test_ndjson_ingress_sanitizer_repairs_oversized_line_and_resyncs() -> None:
-    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"})
+    recorder = _RecordingOverflowRecorder()
+    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"}, overflow_recorder=recorder)
     oversized = (
         '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"'
         + ("A" * 5000)
@@ -314,15 +365,22 @@ def test_ndjson_ingress_sanitizer_repairs_oversized_line_and_resyncs() -> None:
     first_chunk = sanitized_second[0]
     second_chunk = sanitized_second[1]
     assert first_chunk.diagnostics[0]["code"] == RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED
+    assert first_chunk.diagnostics[0]["details"]["overflow_id"] == "overflow-1"
+    assert first_chunk.diagnostics[0]["details"]["raw_relpath"] == ".audit/overflow_lines/1/overflow-1.ndjson"
     assert len(first_chunk.text.encode("utf-8")) <= 4096
     repaired_payload = json.loads(first_chunk.text)
     assert repaired_payload["type"] == "user"
     assert "[truncated by live overflow guard]" in repaired_payload["message"]["content"][0]["content"]
     assert json.loads(second_chunk.text)["message"]["content"][0]["text"] == "after"
+    assert len(recorder.index_rows) == 1
+    assert recorder.index_rows[0]["disposition"] == "sanitized"
+    assert recorder.index_rows[0]["diagnostic_code"] == RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED
+    assert recorder.captured_text_by_id["overflow-1"] == oversized.splitlines(keepends=True)[0]
 
 
 def test_ndjson_ingress_sanitizer_substitutes_unrepairable_line_with_runtime_diagnostic() -> None:
-    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"})
+    recorder = _RecordingOverflowRecorder()
+    sanitizer = NdjsonIngressSanitizer(accepted_streams={"stdout"}, overflow_recorder=recorder)
     payload = ("X" * 5000) + "\n"
 
     sanitized = sanitizer.feed(stream="stdout", text=payload)
@@ -330,9 +388,16 @@ def test_ndjson_ingress_sanitizer_substitutes_unrepairable_line_with_runtime_dia
     assert len(sanitized) == 1
     chunk = sanitized[0]
     assert chunk.diagnostics[0]["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+    assert chunk.diagnostics[0]["details"]["overflow_id"] == "overflow-1"
+    assert chunk.diagnostics[0]["details"]["raw_relpath"] == ".audit/overflow_lines/1/overflow-1.ndjson"
     diagnostic_payload = json.loads(chunk.text)
     assert diagnostic_payload["type"] == "runtime_diagnostic"
     assert diagnostic_payload["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED
+    assert diagnostic_payload["overflow_id"] == "overflow-1"
+    assert diagnostic_payload["raw_relpath"] == ".audit/overflow_lines/1/overflow-1.ndjson"
+    assert len(recorder.index_rows) == 1
+    assert recorder.index_rows[0]["disposition"] == "substituted"
+    assert recorder.captured_text_by_id["overflow-1"] == payload
 
 
 def test_ndjson_live_session_preserves_oversized_exempt_reasoning_line() -> None:

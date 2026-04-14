@@ -65,6 +65,9 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
             prompt_summary_relpath=".audit/contracts/target_output_schema.md",
         ),
     ) as mock_materialize, patch(
+        "server.services.orchestration.run_skill_materialization_service.structured_output_pipeline.resolve_prompt_summary_markdown",
+        return_value="### Output Schema Specification\n\nCodex compat summary",
+    ) as mock_resolve_summary, patch(
         "server.services.orchestration.run_skill_materialization_service.skill_patcher.patch_skill_md"
     ) as mock_patch:
         ref = run_folder_bootstrapper.materialize_skill(
@@ -82,11 +85,12 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
     assert materialize_kwargs["run_dir"] == run_dir
     assert materialize_kwargs["execution_mode"] == "interactive"
     assert materialize_kwargs["skill"].path == ref.snapshot_dir
+    mock_resolve_summary.assert_called_once()
     mock_patch.assert_called_once_with(
         ref.snapshot_dir,
         [],
         execution_mode="interactive",
-        output_schema_summary_markdown="### Output Schema Specification\n\nGenerated summary",
+        output_schema_summary_markdown="### Output Schema Specification\n\nCodex compat summary",
     )
 
 

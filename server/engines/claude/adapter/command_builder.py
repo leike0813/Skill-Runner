@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from server.models import EngineSessionHandle
-from server.runtime.adapter.common.output_schema_cli import build_claude_output_schema_args
-from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
 from server.runtime.adapter.common.command_defaults import merge_cli_args
+from server.runtime.adapter.contracts import AdapterExecutionContext
 
 if TYPE_CHECKING:
     from .execution_adapter import ClaudeExecutionAdapter
@@ -26,6 +26,7 @@ class ClaudeCommandBuilder:
         *,
         prompt: str,
         options: dict[str, object],
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -45,7 +46,14 @@ class ClaudeCommandBuilder:
         effort_obj = options.get("model_reasoning_effort")
         if isinstance(effort_obj, str) and effort_obj.strip():
             merged.extend(["--effort", effort_obj.strip()])
-        merged.extend(build_claude_output_schema_args(options))
+        merged.extend(
+            structured_output_pipeline.build_cli_schema_args(
+                engine_name="claude",
+                run_dir=ctx.run_dir if ctx is not None else None,
+                options=options,
+                profile=self._adapter.profile,
+            )
+        )
         return [command, *merged, prompt]
 
     def build_start(self, ctx: AdapterExecutionContext, prompt: str) -> list[str]:
@@ -53,6 +61,7 @@ class ClaudeCommandBuilder:
         return self.build_start_with_options(
             prompt=prompt,
             options=ctx.options,
+            ctx=ctx,
             use_profile_defaults=use_profile_defaults,
         )
 
@@ -62,6 +71,7 @@ class ClaudeCommandBuilder:
         prompt: str,
         options: dict[str, object],
         session_handle: EngineSessionHandle,
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -89,7 +99,14 @@ class ClaudeCommandBuilder:
         effort_obj = options.get("model_reasoning_effort")
         if isinstance(effort_obj, str) and effort_obj.strip():
             merged.extend(["--effort", effort_obj.strip()])
-        merged.extend(build_claude_output_schema_args(options))
+        merged.extend(
+            structured_output_pipeline.build_cli_schema_args(
+                engine_name="claude",
+                run_dir=ctx.run_dir if ctx is not None else None,
+                options=options,
+                profile=self._adapter.profile,
+            )
+        )
         return [command, "--resume", session_id, *merged, prompt]
 
     def build_resume(
@@ -103,5 +120,6 @@ class ClaudeCommandBuilder:
             prompt=prompt,
             options=ctx.options,
             session_handle=session_handle,
+            ctx=ctx,
             use_profile_defaults=use_profile_defaults,
         )

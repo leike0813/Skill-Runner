@@ -50,6 +50,28 @@ def test_codex_parse_output_from_raw_text():
     assert result.repair_level == "deterministic_generic"
 
 
+def test_codex_runtime_stream_detects_logged_out_reauth_signal_high_confidence():
+    adapter = CodexExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"thread.started","thread_id":"019d8bbb-c478-7a71-a11b-a6aca8bbb85e"}\n'
+            b'{"type":"turn.started"}\n'
+            b'{"type":"error","message":"Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again."}\n'
+            b'{"type":"turn.failed","error":{"message":"Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again."}}\n'
+        ),
+        stderr_raw=(
+            b"2026-04-14T11:23:51.799030Z ERROR codex_core::models_manager::manager: failed to refresh available models: unexpected status 401 Unauthorized: Provided authentication token is expired. Please try signing in again., auth error: 401, auth error code: token_expired\n"
+        ),
+        pty_raw=b"",
+    )
+
+    auth_signal = parsed.get("auth_signal")
+    assert isinstance(auth_signal, dict)
+    assert auth_signal.get("required") is True
+    assert auth_signal.get("confidence") == "high"
+    assert auth_signal.get("matched_pattern_id") == "codex_access_token_reauth_required"
+
+
 def test_iflow_parse_output_from_code_fence():
     adapter = IFlowExecutionAdapter()
     raw = "```json\n{\"value\": 2}\n```"
@@ -103,7 +125,7 @@ def test_claude_parse_output_from_stream_result_event():
     assert result.repair_level == "none"
 
 
-def test_claude_build_start_command_uses_json_output_flags(monkeypatch):
+def test_claude_build_start_command_uses_stream_json_output_flags(monkeypatch):
     adapter = ClaudeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/claude"))
 
@@ -116,7 +138,7 @@ def test_claude_build_start_command_uses_json_output_flags(monkeypatch):
         str(Path("/usr/bin/claude")),
         "-p",
         "--output-format",
-        "json",
+        "stream-json",
         "--verbose",
         "--effort",
         "high",
@@ -276,7 +298,7 @@ def test_claude_build_resume_command_uses_resume_flag(monkeypatch):
         "session-claude-resume",
         "-p",
         "--output-format",
-        "json",
+        "stream-json",
         "--verbose",
         "second turn",
     ]

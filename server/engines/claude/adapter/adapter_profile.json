@@ -49,16 +49,26 @@
     "start": [
       "-p",
       "--output-format",
-      "json",
+      "stream-json",
       "--verbose"
     ],
     "resume": [
       "-p",
       "--output-format",
-      "json",
+      "stream-json",
       "--verbose"
     ],
     "ui_shell": []
+  },
+  "command_features": {
+    "inject_output_schema_cli": true
+  },
+  "structured_output": {
+    "mode": "canonical_passthrough",
+    "cli_schema_strategy": "inline_schema_object",
+    "compat_schema_strategy": "canonical_passthrough",
+    "prompt_contract_strategy": "canonical_summary",
+    "payload_canonicalizer": "noop"
   },
   "ui_shell": {
     "command_id": "claude-tui",

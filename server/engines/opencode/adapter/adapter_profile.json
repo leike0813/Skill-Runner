@@ -50,6 +50,13 @@
     "resume": ["--format", "json"],
     "ui_shell": []
   },
+  "structured_output": {
+    "mode": "noop",
+    "cli_schema_strategy": "noop",
+    "compat_schema_strategy": "noop",
+    "prompt_contract_strategy": "canonical_summary",
+    "payload_canonicalizer": "noop"
+  },
   "ui_shell": {
     "command_id": "opencode-tui",
     "label": "OpenCode TUI",

@@ -46,11 +46,14 @@ def test_generate_patch_content_interactive_mode_uses_json_union_contract():
     assert "# Runtime Output Overrides" in content
     assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
     assert "Execution Mode: INTERACTIVE" in content
-    assert "<ASK_USER_YAML>" in content
-    assert "Legacy `<ASK_USER_YAML>` is not a valid output protocol" in content
-    assert "__SKILL_DONE__ = false" in content
+    assert "<ASK_USER_YAML>" not in content
+    assert "`__SKILL_DONE__`: must be `false`." in content
     assert "message" in content
     assert "ui_hints" in content
+    assert "Supported `ui_hints.kind` values" in content
+    assert "Pending branch example" in content
+    assert "Final branch example" in content
+    assert "`label`, `value`" in content
     assert "Do not wrap the JSON in Markdown fences." in content
     assert "MUST NOT ask the user" not in content
 

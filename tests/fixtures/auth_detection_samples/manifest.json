@@ -84,6 +84,14 @@
       "expected_subcategory": null
     },
     {
+      "sample_id": "openai_access_token_logged_out_401",
+      "engine": "codex",
+      "provider_id": "openai",
+      "source_run_id": "4ba8508a-e3a2-4c05-a705-3ca6352dae09",
+      "expected_classification": "auth_required",
+      "expected_subcategory": null
+    },
+    {
       "sample_id": "auth_method_not_configured",
       "engine": "gemini",
       "provider_id": null,

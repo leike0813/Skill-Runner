@@ -12,6 +12,7 @@ from server.services.orchestration.manifest_artifact_inference import infer_mani
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
 from server.services.skill.skill_package_validator import SkillPackageValidator
 from server.services.skill.skill_patcher import skill_patcher
+from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
 
 
 class RunFolderBootstrapper:
@@ -37,6 +38,7 @@ class RunFolderBootstrapper:
             skill=skill,
             run_dir=run_dir,
             snapshot_dir=snapshot_dir,
+            engine_name=engine_name,
             execution_mode=execution_mode,
         )
         return RunLocalSkillRef(
@@ -100,6 +102,7 @@ class RunFolderBootstrapper:
                 skill=manifest,
                 run_dir=run_dir,
                 snapshot_dir=snapshot_dir,
+                engine_name=engine_name,
                 execution_mode=execution_mode,
             )
             materialized = True
@@ -148,6 +151,7 @@ class RunFolderBootstrapper:
         skill: SkillManifest,
         run_dir: Path,
         snapshot_dir: Path,
+        engine_name: str,
         execution_mode: str,
     ) -> None:
         if skill.path is None:
@@ -163,6 +167,7 @@ class RunFolderBootstrapper:
             skill=skill,
             run_dir=run_dir,
             snapshot_dir=snapshot_dir,
+            engine_name=engine_name,
             execution_mode=execution_mode,
         )
 
@@ -172,6 +177,7 @@ class RunFolderBootstrapper:
         skill: SkillManifest,
         run_dir: Path,
         snapshot_dir: Path,
+        engine_name: str,
         execution_mode: str,
     ) -> None:
         snapshot_skill = skill.model_copy(update={"path": snapshot_dir})
@@ -180,11 +186,17 @@ class RunFolderBootstrapper:
             execution_mode=execution_mode,
             run_dir=run_dir,
         )
+        prompt_summary_markdown = structured_output_pipeline.resolve_prompt_summary_markdown(
+            engine_name=engine_name,
+            run_dir=run_dir,
+            options={"execution_mode": execution_mode},
+            canonical_summary_markdown=output_schema_materialization.prompt_summary_markdown,
+        )
         skill_patcher.patch_skill_md(
             snapshot_dir,
             list(skill.artifacts or []),
             execution_mode=execution_mode,
-            output_schema_summary_markdown=output_schema_materialization.prompt_summary_markdown,
+            output_schema_summary_markdown=prompt_summary_markdown,
         )
 
     def _validate_zip_entry(self, clean_name: str) -> None:

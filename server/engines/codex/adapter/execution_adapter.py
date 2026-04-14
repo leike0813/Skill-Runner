@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Optional
 
+from server.engines.codex.adapter.sandbox_probe import CodexSandboxProbeResult
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
@@ -46,8 +46,12 @@ class CodexExecutionAdapter(EngineExecutionAdapter):
             raise RuntimeError("Codex CLI not found in managed prefix")
         return cmd
 
+    def get_headless_sandbox_probe(self) -> CodexSandboxProbeResult:
+        return self.agent_manager.get_codex_sandbox_probe()
+
     def _apply_landlock_flag_fallback(self, flags: list[str]) -> list[str]:
-        if os.environ.get("LANDLOCK_ENABLED") != "0":
+        probe = self.get_headless_sandbox_probe()
+        if probe.available:
             return flags
         replaced = ["--yolo" if token == "--full-auto" else token for token in flags]
         if "--yolo" in replaced:

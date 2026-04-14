@@ -146,15 +146,21 @@ def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path
     assert first.schema_path is not None
 
     payload = json.loads(first.schema_path.read_text(encoding="utf-8"))
+    assert payload["oneOf"]
     assert len(payload["oneOf"]) == 2
-    final_branch, pending_branch = payload["oneOf"]
+    final_branch = payload["oneOf"][0]
+    pending_branch = payload["oneOf"][1]
     assert final_branch["properties"]["__SKILL_DONE__"]["const"] is True
     assert pending_branch["required"] == ["__SKILL_DONE__", "message", "ui_hints"]
     assert pending_branch["properties"]["__SKILL_DONE__"]["const"] is False
     assert pending_branch["properties"]["message"]["minLength"] == 1
     assert pending_branch["properties"]["ui_hints"]["type"] == "object"
 
-    assert "interactive pending branch" in first.prompt_summary_markdown
+    assert "Interactive pending branch contract" in first.prompt_summary_markdown
+    assert "<ASK_USER_YAML>" not in first.prompt_summary_markdown
+    assert "Supported `ui_hints.kind` values" in first.prompt_summary_markdown
+    assert "Pending branch example" in first.prompt_summary_markdown
+    assert '"__SKILL_DONE__": false' in first.prompt_summary_markdown
     assert TARGET_OUTPUT_SCHEMA_RELPATH in first.prompt_summary_markdown
 
 

@@ -5,6 +5,7 @@ import base64
 from collections import deque
 import contextlib
 from dataclasses import dataclass, field
+import inspect
 from io import StringIO
 import json
 import logging
@@ -36,7 +37,9 @@ from .common.live_stream_parser_common import (
     NdjsonIngressSanitizer,
     resolve_ndjson_overflow_exemption_probe,
 )
+from .common.overflow_sidecar import OverflowSidecarRecorder
 from .common.prompt_builder_common import render_global_first_attempt_prefix
+from .common.structured_output_pipeline import structured_output_pipeline
 from .common.stream_text_decoder import IncrementalUtf8TextDecoder
 from .contracts import (
     AdapterExecutionArtifacts,
@@ -176,6 +179,11 @@ class EngineExecutionAdapter:
             turn_result = AdapterTurnResult.model_validate(payload)
         else:
             turn_result = self._turn_error(message="failed to parse engine output")
+        turn_result = self._canonicalize_structured_output_turn_result(
+            turn_result=turn_result,
+            run_dir=run_dir,
+            options=options,
+        )
         if turn_result.stderr is None and stderr:
             turn_result = turn_result.model_copy(update={"stderr": stderr})
 
@@ -401,11 +409,16 @@ class EngineExecutionAdapter:
             options = {}
         build = getattr(self.command_builder, "build_start_with_options", None)
         if callable(build):
+            build_kwargs: dict[str, Any] = {
+                "prompt": prompt,
+                "options": options,
+                "passthrough_args": passthrough_args,
+                "use_profile_defaults": use_profile_defaults,
+            }
+            if ctx is not None and "ctx" in inspect.signature(build).parameters:
+                build_kwargs["ctx"] = ctx
             return build(
-                prompt=prompt,
-                options=options,
-                passthrough_args=passthrough_args,
-                use_profile_defaults=use_profile_defaults,
+                **build_kwargs,
             )
         legacy_build = getattr(self.command_builder, "build_start", None)
         if callable(legacy_build):
@@ -441,13 +454,16 @@ class EngineExecutionAdapter:
             options = {}
         build = getattr(self.command_builder, "build_resume_with_options", None)
         if callable(build):
-            return build(
-                prompt=prompt,
-                options=options,
-                session_handle=session_handle,
-                passthrough_args=passthrough_args,
-                use_profile_defaults=use_profile_defaults,
-            )
+            build_kwargs = {
+                "prompt": prompt,
+                "options": options,
+                "session_handle": session_handle,
+                "passthrough_args": passthrough_args,
+                "use_profile_defaults": use_profile_defaults,
+            }
+            if ctx is not None and "ctx" in inspect.signature(build).parameters:
+                build_kwargs["ctx"] = ctx
+            return build(**build_kwargs)
         legacy_build = getattr(self.command_builder, "build_resume", None)
         if callable(legacy_build):
             if ctx is None:
@@ -529,15 +545,26 @@ class EngineExecutionAdapter:
         live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
         runtime_warnings: list[dict[str, str]] = []
+        execution_ctx = AdapterExecutionContext(
+            skill=skill,
+            run_dir=run_dir,
+            input_data={},
+            options=options,
+        )
         resume_handle = options.get("__resume_session_handle")
         if isinstance(resume_handle, dict):
             command = self.build_resume_command(
+                ctx=execution_ctx,
                 prompt=prompt,
                 options=options,
                 session_handle=EngineSessionHandle.model_validate(resume_handle),
             )
         else:
-            command = self.build_start_command(prompt=prompt, options=options)
+            command = self.build_start_command(
+                ctx=execution_ctx,
+                prompt=prompt,
+                options=options,
+            )
 
         env = self.build_subprocess_env(os.environ.copy())
         original_command = [str(token) for token in command]
@@ -759,6 +786,15 @@ class EngineExecutionAdapter:
         stdout_writer = BufferedAsyncTextFileWriter(path=stdout_log_path)
         stderr_writer = BufferedAsyncTextFileWriter(path=stderr_log_path)
         io_chunks_writer = BufferedAsyncTextFileWriter(path=io_chunks_path)
+        overflow_sidecar_recorder = (
+            OverflowSidecarRecorder(
+                run_dir=run_dir,
+                attempt_number=attempt_number,
+                run_id=run_id,
+            )
+            if use_ndjson_ingress_sanitizer
+            else None
+        )
         io_chunk_seq = 0
         io_chunks_write_failed = False
 
@@ -818,6 +854,7 @@ class EngineExecutionAdapter:
                 NdjsonIngressSanitizer(
                     accepted_streams={"stdout"},
                     overflow_exemption_probe=resolve_ndjson_overflow_exemption_probe(self.stream_parser),
+                    overflow_recorder=overflow_sidecar_recorder,
                 )
                 if use_ndjson_ingress_sanitizer and stream_name == "stdout"
                 else None
@@ -1023,6 +1060,11 @@ class EngineExecutionAdapter:
                             stdout_writer.close_and_wait(timeout_sec=None),
                             stderr_writer.close_and_wait(timeout_sec=None),
                             io_chunks_writer.close_and_wait(timeout_sec=None),
+                            *(
+                                [overflow_sidecar_recorder.close_and_wait(timeout_sec=None)]
+                                if overflow_sidecar_recorder is not None
+                                else []
+                            ),
                         )
                     ),
                     timeout=RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS,
@@ -1217,6 +1259,29 @@ class EngineExecutionAdapter:
             if mode in {"auto", "interactive"}:
                 return mode
         return "auto"
+
+    def _canonicalize_structured_output_turn_result(
+        self,
+        *,
+        turn_result: AdapterTurnResult,
+        run_dir: Path,
+        options: dict[str, Any],
+    ) -> AdapterTurnResult:
+        if turn_result.outcome != AdapterTurnOutcome.FINAL or not isinstance(turn_result.final_data, dict):
+            return turn_result
+        engine_name = str(options.get("__engine_name") or self.process_prefix).strip().lower()
+        if not engine_name:
+            return turn_result
+        canonical_payload = structured_output_pipeline.canonicalize_payload(
+            engine_name=engine_name,
+            run_dir=run_dir,
+            options=options,
+            payload=turn_result.final_data,
+            profile=getattr(self, "profile", None),
+        )
+        if canonical_payload == turn_result.final_data:
+            return turn_result
+        return turn_result.model_copy(update={"final_data": canonical_payload})
 
     def _parse_json_with_deterministic_repair(self, text: str) -> tuple[dict[str, Any] | None, str]:
         parsed = self._try_parse_json_object(text)

@@ -10,7 +10,10 @@ from pydantic import ValidationError
 
 from server.config_registry.registry import config_registry
 from server.models import ManifestArtifact
-from .skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER
+from .skill_patch_output_schema import (
+    OUTPUT_SCHEMA_PATCH_MARKER,
+    render_interactive_pending_contract_markdown,
+)
 from .skill_patch_templates import (
     ARTIFACT_REDIRECTION_TEMPLATE,
     MODE_AUTO_TEMPLATE,
@@ -28,7 +31,7 @@ MODE_AUTO_PATCH_MARKER = MODE_AUTO_TEMPLATE.marker
 MODE_INTERACTIVE_PATCH_MARKER = MODE_INTERACTIVE_TEMPLATE.marker
 RUNTIME_ENFORCEMENT_MARKER = RUNTIME_ENFORCEMENT_TEMPLATE.marker
 OUTPUT_FORMAT_CONTRACT_MARKER = OUTPUT_FORMAT_CONTRACT_TEMPLATE.marker
-ASK_USER_SCHEMA_PLACEHOLDER = "{ask_user_schema_block}"
+INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER = "{interactive_pending_contract_block}"
 
 _PATCH_SKILL_MD_EXCEPTIONS = (
     OSError,
@@ -69,11 +72,11 @@ class SkillPatcher:
         content = load_template_content(template)
         if (
             template.module == SkillPatchModule.MODE_INTERACTIVE
-            and ASK_USER_SCHEMA_PLACEHOLDER in content
+            and INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER in content
         ):
             content = content.replace(
-                ASK_USER_SCHEMA_PLACEHOLDER,
-                self._render_ask_user_schema_block(),
+                INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER,
+                self._render_interactive_pending_contract_block(),
             )
         return content
 
@@ -84,63 +87,15 @@ class SkillPatcher:
             raise RuntimeError("ask_user schema contract not found in canonical path")
         return matched
 
-    def _render_ask_user_schema_block(self) -> str:
-        default_prompt = "Please reply to continue."
-        kinds = ["open_text", "choose_one", "confirm"]
+    def _render_interactive_pending_contract_block(self) -> str:
         try:
             contract_path = self._ask_user_schema_contract_path()
             payload = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                fallback_obj = payload.get("fallback_prompt")
-                if isinstance(fallback_obj, str) and fallback_obj.strip():
-                    default_prompt = fallback_obj.strip()
-                ask_user_obj = payload.get("ask_user")
-                if isinstance(ask_user_obj, dict):
-                    kind_obj = ask_user_obj.get("kind")
-                    if isinstance(kind_obj, dict):
-                        enum_obj = kind_obj.get("enum")
-                        if isinstance(enum_obj, list):
-                            parsed = [
-                                str(item).strip()
-                                for item in enum_obj
-                                if isinstance(item, str) and item.strip()
-                            ]
-                            if parsed:
-                                kinds = parsed
+            if not isinstance(payload, dict):
+                raise RuntimeError("ask_user schema contract payload must be an object")
         except (OSError, UnicodeDecodeError, yaml.YAMLError, RuntimeError):
             logger.warning("Failed to load ask_user schema contract for template rendering", exc_info=True)
-        kind_joined = " | ".join(kinds)
-        return (
-            "Canonical minimal ASK_USER schema:\n"
-            "```\n"
-            "<ASK_USER_YAML>\n"
-            "ask_user:\n"
-            f"  kind: <one of: {kind_joined}>\n"
-            "  prompt: \"<optional short prompt>\"\n"
-            "  hint: \"<optional UI hint>\"\n"
-            "  options:              # required when kind=choose_one\n"
-            "    - label: \"<display text>\"\n"
-            "      value: \"<machine value>\"\n"
-            "  files:                # required when kind=upload_files\n"
-            "    - name: \"<file name>\"\n"
-            "      required: true\n"
-            "      hint: \"<optional path hint>\"\n"
-            "      accept: \".json\"\n"
-            "</ASK_USER_YAML>\n"
-            "```\n\n"
-            "Example:\n"
-            "```\n"
-            "<ASK_USER_YAML>\n"
-            "ask_user:\n"
-            "  kind: open_text\n"
-            "  prompt: \"请描述一下你的基本情况，如年龄、职业等。\"\n"
-            "  hint: \"例如：男，38，程序员\"\n"
-            "</ASK_USER_YAML>\n"
-            "```\n\n"
-            "Fallback behavior:\n"
-            f"- If the block is missing or invalid, runtime uses a generic prompt: `{default_prompt}`.\n"
-            "- UI hint is optional metadata. Parse failure never blocks core runtime flow."
-        )
+        return render_interactive_pending_contract_markdown(include_final_example=True)
 
     def _render_artifact_patch(self, artifacts: List[ManifestArtifact]) -> str:
         if not artifacts:

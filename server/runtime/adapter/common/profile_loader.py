@@ -33,6 +33,11 @@ UiShellSandboxProbeStrategy = Literal[
 ]
 UiShellAuthHintStrategy = Literal["none", "gemini_api_key_disables_sandbox"]
 UiShellRuntimeOverrideStrategy = Literal["none", "gemini_ui_shell", "claude_ui_shell"]
+StructuredOutputMode = Literal["noop", "canonical_passthrough", "compat_translate"]
+StructuredOutputCliSchemaStrategy = Literal["noop", "path_schema_artifact", "inline_schema_object"]
+StructuredOutputCompatSchemaStrategy = Literal["noop", "canonical_passthrough", "compat_translate"]
+StructuredOutputPromptContractStrategy = Literal["canonical_summary", "compat_summary"]
+StructuredOutputPayloadCanonicalizer = Literal["noop", "payload_union_object_canonicalizer"]
 ImportValidatorName = Literal[
     "json_object",
     "codex_auth_json",
@@ -108,6 +113,20 @@ class CommandDefaultsProfile:
     start: tuple[str, ...]
     resume: tuple[str, ...]
     ui_shell: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CommandFeaturesProfile:
+    inject_output_schema_cli: bool
+
+
+@dataclass(frozen=True)
+class StructuredOutputProfile:
+    mode: StructuredOutputMode
+    cli_schema_strategy: StructuredOutputCliSchemaStrategy
+    compat_schema_strategy: StructuredOutputCompatSchemaStrategy
+    prompt_contract_strategy: StructuredOutputPromptContractStrategy
+    payload_canonicalizer: StructuredOutputPayloadCanonicalizer
 
 
 @dataclass(frozen=True)
@@ -211,6 +230,8 @@ class AdapterProfile:
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
     command_defaults: CommandDefaultsProfile
+    command_features: CommandFeaturesProfile
+    structured_output: StructuredOutputProfile
     ui_shell: UiShellProfile
     cli_management: CliManagementProfile
     parser_auth_patterns: ParserAuthPatternsProfile
@@ -371,6 +392,8 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
     command_defaults_raw = payload["command_defaults"]
+    command_features_raw = payload.get("command_features", {})
+    structured_output_raw = payload.get("structured_output", {})
     ui_shell_raw = payload["ui_shell"]
     cli_management_raw = payload["cli_management"]
     parser_auth_patterns_raw = payload["parser_auth_patterns"]
@@ -577,6 +600,31 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             start=tuple(str(item) for item in command_defaults_raw["start"]),
             resume=tuple(str(item) for item in command_defaults_raw["resume"]),
             ui_shell=tuple(str(item) for item in command_defaults_raw["ui_shell"]),
+        ),
+        command_features=CommandFeaturesProfile(
+            inject_output_schema_cli=bool(command_features_raw.get("inject_output_schema_cli", False)),
+        ),
+        structured_output=StructuredOutputProfile(
+            mode=cast(
+                StructuredOutputMode,
+                str(structured_output_raw.get("mode", "noop")),
+            ),
+            cli_schema_strategy=cast(
+                StructuredOutputCliSchemaStrategy,
+                str(structured_output_raw.get("cli_schema_strategy", "noop")),
+            ),
+            compat_schema_strategy=cast(
+                StructuredOutputCompatSchemaStrategy,
+                str(structured_output_raw.get("compat_schema_strategy", "noop")),
+            ),
+            prompt_contract_strategy=cast(
+                StructuredOutputPromptContractStrategy,
+                str(structured_output_raw.get("prompt_contract_strategy", "canonical_summary")),
+            ),
+            payload_canonicalizer=cast(
+                StructuredOutputPayloadCanonicalizer,
+                str(structured_output_raw.get("payload_canonicalizer", "noop")),
+            ),
         ),
         ui_shell=UiShellProfile(
             command_id=str(ui_shell_raw["command_id"]),

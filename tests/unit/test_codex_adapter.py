@@ -1,9 +1,30 @@
 import json
+import os
 from unittest.mock import MagicMock, AsyncMock, patch
 from pathlib import Path
 import pytest
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
+from server.engines.codex.adapter.sandbox_probe import CodexSandboxProbeResult
 from server.models import AdapterTurnOutcome, EngineSessionHandleType, SkillManifest
+
+
+@pytest.fixture(autouse=True)
+def _stable_codex_sandbox_probe(monkeypatch) -> None:
+    def _fake_probe(self: CodexExecutionAdapter) -> CodexSandboxProbeResult:
+        disabled = os.environ.get("LANDLOCK_ENABLED") == "0"
+        return CodexSandboxProbeResult(
+            declared_enabled=not disabled,
+            available=not disabled,
+            status="disabled" if disabled else "available",
+            warning_code="CODEX_SANDBOX_DISABLED_BY_ENV" if disabled else None,
+            message="sandbox unavailable" if disabled else "sandbox available",
+            dependencies={},
+            missing_dependencies=[],
+            checked_at="2026-04-15T00:00:00Z",
+            probe_kind="bubblewrap_smoke",
+        )
+
+    monkeypatch.setattr(CodexExecutionAdapter, "get_headless_sandbox_probe", _fake_probe)
 
 
 @pytest.mark.asyncio
@@ -183,6 +204,44 @@ def test_construct_config_allows_harness_profile_override(tmp_path):
     assert config_manager.update_profile.call_count == 1
 
 
+def test_construct_config_downgrades_sandbox_when_probe_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    config_manager = MagicMock()
+    config_path = tmp_path / ".codex" / "config.toml"
+    config_manager.config_path = config_path
+    config_manager.generate_profile_settings.return_value = {
+        "model": "gpt-5.2-codex",
+        "approval_policy": "never",
+        "sandbox_mode": "workspace-write",
+    }
+    adapter = CodexExecutionAdapter(config_manager=config_manager)
+    monkeypatch.setattr(
+        adapter,
+        "get_headless_sandbox_probe",
+        lambda: CodexSandboxProbeResult(
+            declared_enabled=True,
+            available=False,
+            status="unavailable",
+            warning_code="CODEX_SANDBOX_RUNTIME_UNAVAILABLE",
+            message="bwrap: setting up uid map: Permission denied",
+            dependencies={"bubblewrap": True},
+            missing_dependencies=[],
+            checked_at="2026-04-15T00:00:00Z",
+            probe_kind="bubblewrap_smoke",
+        ),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(id="test-skill", path=tmp_path)
+
+    adapter._construct_config(skill, run_dir, options={})
+
+    passed_settings = config_manager.update_profile.call_args[0][0]
+    assert passed_settings["sandbox_mode"] == "danger-full-access"
+
+
 def test_construct_config_prefers_runner_declared_skill_config(tmp_path):
     config_manager = MagicMock()
     config_path = tmp_path / ".codex" / "config.toml"
@@ -261,6 +320,19 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    contracts_dir = run_dir / ".audit" / "contracts"
+    contracts_dir.mkdir(parents=True)
+    (contracts_dir / "target_output_schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            }
+        ),
+        encoding="utf-8",
+    )
     skill = SkillManifest(id="test-skill", path=tmp_path)
 
     mock_proc = MagicMock()
@@ -284,7 +356,8 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
                         "handle_type": "session_id",
                         "handle_value": "th_resume",
                         "created_at_turn": 1,
-                    }
+                    },
+                    "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
                 },
             )
         args, _ = mock_exec.call_args
@@ -293,6 +366,7 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
         assert args[1] == "exec"
         assert "--full-auto" in args or "--yolo" in args
         assert "resume" in args
+        assert "--output-schema" not in args
         assert thread_idx < prompt_idx
 
 
@@ -380,8 +454,38 @@ async def test_execute_persists_first_attempt_spawn_command_with_output_schema(t
     run_dir.mkdir()
     audit_dir = run_dir / ".audit"
     audit_dir.mkdir()
+    contracts_dir = audit_dir / "contracts"
+    contracts_dir.mkdir()
     request_input_path = audit_dir / "request_input.json"
     request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
+    (contracts_dir / "target_output_schema.json").write_text(
+        json.dumps(
+            {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "__SKILL_DONE__": {"const": True},
+                            "value": {"type": "string"},
+                        },
+                        "required": ["__SKILL_DONE__", "value"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "__SKILL_DONE__": {"const": False},
+                            "message": {"type": "string"},
+                            "ui_hints": {"type": "object"},
+                        },
+                        "required": ["__SKILL_DONE__", "message", "ui_hints"],
+                        "additionalProperties": True,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     skill = SkillManifest(id="test-skill", path=tmp_path)
 
     mock_proc = MagicMock()
@@ -410,4 +514,5 @@ async def test_execute_persists_first_attempt_spawn_command_with_output_schema(t
     assert payload["spawn_command_original_first_attempt"] == list(args)
     assert payload["spawn_command_effective_first_attempt"] == list(args)
     assert "--output-schema" in args
-    assert args[args.index("--output-schema") + 1] == ".audit/contracts/target_output_schema.json"
+    assert args[args.index("--output-schema") + 1] == ".audit/contracts/target_output_schema.codex_compatible.json"
+    assert (contracts_dir / "target_output_schema.codex_compatible.json").exists()
