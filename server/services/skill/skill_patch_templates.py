@@ -10,6 +10,7 @@ class SkillPatchModule(str, Enum):
     RUNTIME_ENFORCEMENT = "runtime_enforcement"
     ARTIFACT_REDIRECTION = "artifact_redirection"
     OUTPUT_FORMAT_CONTRACT = "output_format_contract"
+    OUTPUT_CONTRACT_DETAILS = "output_contract_details"
     MODE_AUTO = "mode_auto"
     MODE_INTERACTIVE = "mode_interactive"
 
@@ -36,6 +37,16 @@ OUTPUT_FORMAT_CONTRACT_TEMPLATE = SkillPatchTemplate(
     filename="patch_output_format_contract.md",
     marker="## Output Format Contract",
 )
+OUTPUT_CONTRACT_DETAILS_TEMPLATE = SkillPatchTemplate(
+    module=SkillPatchModule.OUTPUT_CONTRACT_DETAILS,
+    filename="patch_output_contract_details.md",
+    marker="### Output Contract Details",
+)
+OUTPUT_CONTRACT_INTERACTIVE_PENDING_TEMPLATE = SkillPatchTemplate(
+    module=SkillPatchModule.OUTPUT_CONTRACT_DETAILS,
+    filename="patch_output_contract_interactive_pending.md",
+    marker="Interactive pending branch contract:",
+)
 MODE_AUTO_TEMPLATE = SkillPatchTemplate(
     module=SkillPatchModule.MODE_AUTO,
     filename="patch_mode_auto.md",
@@ -57,6 +68,7 @@ def template_map() -> Dict[SkillPatchModule, SkillPatchTemplate]:
         RUNTIME_ENFORCEMENT_TEMPLATE.module: RUNTIME_ENFORCEMENT_TEMPLATE,
         ARTIFACT_REDIRECTION_TEMPLATE.module: ARTIFACT_REDIRECTION_TEMPLATE,
         OUTPUT_FORMAT_CONTRACT_TEMPLATE.module: OUTPUT_FORMAT_CONTRACT_TEMPLATE,
+        OUTPUT_CONTRACT_DETAILS_TEMPLATE.module: OUTPUT_CONTRACT_DETAILS_TEMPLATE,
         MODE_AUTO_TEMPLATE.module: MODE_AUTO_TEMPLATE,
         MODE_INTERACTIVE_TEMPLATE.module: MODE_INTERACTIVE_TEMPLATE,
     }

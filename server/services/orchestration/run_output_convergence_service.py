@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from server.models import ExecutionMode, OrchestratorEventType, SkillManifest
+from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
 from server.services.orchestration.run_result_file_fallback import resolve_result_file_fallback
@@ -111,7 +112,11 @@ class RunOutputConvergenceService:
             if (execution_mode or "").strip().lower() == ExecutionMode.INTERACTIVE.value
             else "auto_final"
         )
-        prompt_summary = run_output_schema_service.load_prompt_summary(run_dir=run_dir)
+        prompt_contract_markdown = structured_output_pipeline.resolve_prompt_contract_markdown(
+            engine_name=engine_name,
+            run_dir=run_dir,
+            options=options,
+        )
         legacy_fallback_target = "legacy_lifecycle_fallback"
         handle = await self._resolve_session_handle(
             request_id=request_id,
@@ -192,7 +197,7 @@ class RunOutputConvergenceService:
                     internal_round_index=0,
                     candidate_source=candidate.source,
                     validation_errors=resolved.schema_errors if resolved is not None else [],
-                    prompt_summary=prompt_summary,
+                    prompt_summary=prompt_contract_markdown,
                     converged=False,
                     legacy_fallback_target=legacy_fallback_target,
                     raw_candidate_present=candidate.raw_candidate_present,
@@ -298,7 +303,7 @@ class RunOutputConvergenceService:
                 execution_mode=execution_mode,
                 candidate=last_candidate,
                 schema_errors=last_errors,
-                prompt_summary=prompt_summary,
+                prompt_summary=prompt_contract_markdown,
             )
             append_orchestrator_event(
                 run_dir=run_dir,
@@ -452,7 +457,7 @@ class RunOutputConvergenceService:
                 internal_round_index=MAX_REPAIR_ROUNDS,
                 candidate_source=last_candidate.source,
                 validation_errors=last_errors,
-                prompt_summary=prompt_summary,
+                prompt_summary=prompt_contract_markdown,
                 converged=False,
                 legacy_fallback_target=legacy_fallback_target,
                 raw_candidate_present=last_candidate.raw_candidate_present,
@@ -737,13 +742,12 @@ class RunOutputConvergenceService:
             branch_line,
             "Do not output explanations.",
             "Do not output Markdown fences.",
-            "Do not output `<ASK_USER_YAML>`.",
         ]
         if prompt_summary.strip():
             lines.extend(
                 [
                     "",
-                    "Target output contract summary:",
+                    "Target output contract details:",
                     prompt_summary.strip(),
                 ]
             )

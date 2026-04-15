@@ -45,6 +45,7 @@ class RuntimeStreamRawRef(TypedDict):
 class RuntimeAssistantMessage(TypedDict):
     message_id: NotRequired[str]
     text: str
+    details: NotRequired[dict[str, Any]]
     raw_ref: NotRequired[RuntimeStreamRawRef | None]
 
 

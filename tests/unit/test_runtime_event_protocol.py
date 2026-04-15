@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from server.models import RuntimeEventCategory, RuntimeEventSource
+from server.runtime.protocol.factories import make_rasp_event
 from server.runtime.protocol import event_protocol as runtime_event_protocol
 from server.runtime.protocol.event_protocol import (
     build_fcmp_events,
@@ -593,6 +595,91 @@ def test_fcmp_emits_state_changed_for_waiting_user(tmp_path: Path):
     user_required = next(event for event in fcmp_events if event.type == "user.input.required")
     assert user_required.data.get("prompt") == "next step"
     assert user_required.data.get("prompt") != "Provide next user turn"
+
+
+def test_fcmp_assistant_final_projects_pending_display_text() -> None:
+    rasp_event = make_rasp_event(
+        run_id="run-pending-display",
+        seq=1,
+        source=RuntimeEventSource(engine="codex", parser="test", confidence=1.0),
+        category=RuntimeEventCategory.AGENT,
+        type_name="agent.message.final",
+        data={
+            "message_id": "m-pending",
+            "text": json.dumps(
+                {
+                    "__SKILL_DONE__": False,
+                    "message": "Please choose the dataset split.",
+                    "ui_hints": {
+                        "kind": "choose_one",
+                        "prompt": "Select the dataset split",
+                        "options": [
+                            {"label": "Train", "value": "train"},
+                            {"label": "Validation", "value": "val"},
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+        attempt_number=1,
+    )
+
+    fcmp_events = build_fcmp_events(
+        [rasp_event],
+        status="waiting_user",
+        pending_interaction={
+            "interaction_id": 7,
+            "kind": "choose_one",
+            "prompt": "Please choose the dataset split.",
+            "ui_hints": {
+                "kind": "choose_one",
+                "prompt": "Select the dataset split",
+                "options": [
+                    {"label": "Train", "value": "train"},
+                    {"label": "Validation", "value": "val"},
+                ],
+            },
+        },
+    )
+
+    final_event = next(event for event in fcmp_events if event.type == "assistant.message.final")
+    assert final_event.data["display_text"] == "Please choose the dataset split."
+    assert final_event.data["display_format"] == "plain_text"
+    assert final_event.data["display_origin"] == "pending_branch"
+
+
+def test_fcmp_assistant_final_projects_final_branch_markdown() -> None:
+    rasp_event = make_rasp_event(
+        run_id="run-final-display",
+        seq=1,
+        source=RuntimeEventSource(engine="codex", parser="test", confidence=1.0),
+        category=RuntimeEventCategory.AGENT,
+        type_name="agent.message.final",
+        data={
+            "message_id": "m-final",
+            "text": json.dumps(
+                {
+                    "__SKILL_DONE__": True,
+                    "summary": "Digest complete",
+                    "artifacts": {
+                        "digest_markdown": "artifacts/digest.md",
+                        "references_json": "artifacts/references.json",
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+        attempt_number=1,
+    )
+
+    fcmp_events = build_fcmp_events([rasp_event], status="succeeded")
+
+    final_event = next(event for event in fcmp_events if event.type == "assistant.message.final")
+    assert final_event.data["display_format"] == "markdown"
+    assert final_event.data["display_origin"] == "final_branch"
+    assert "`summary`" in final_event.data["display_text"]
+    assert "__SKILL_DONE__" not in final_event.data["display_text"]
 
 
 def test_fcmp_emits_auth_required_and_waiting_auth_transition(tmp_path: Path):

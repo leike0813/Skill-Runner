@@ -5,14 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, List
 
-import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
-from server.config_registry.registry import config_registry
 from server.models import ManifestArtifact
 from .skill_patch_output_schema import (
-    OUTPUT_SCHEMA_PATCH_MARKER,
-    render_interactive_pending_contract_markdown,
+    OUTPUT_CONTRACT_DETAILS_MARKER,
 )
 from .skill_patch_templates import (
     ARTIFACT_REDIRECTION_TEMPLATE,
@@ -31,7 +28,6 @@ MODE_AUTO_PATCH_MARKER = MODE_AUTO_TEMPLATE.marker
 MODE_INTERACTIVE_PATCH_MARKER = MODE_INTERACTIVE_TEMPLATE.marker
 RUNTIME_ENFORCEMENT_MARKER = RUNTIME_ENFORCEMENT_TEMPLATE.marker
 OUTPUT_FORMAT_CONTRACT_MARKER = OUTPUT_FORMAT_CONTRACT_TEMPLATE.marker
-INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER = "{interactive_pending_contract_block}"
 
 _PATCH_SKILL_MD_EXCEPTIONS = (
     OSError,
@@ -69,35 +65,14 @@ class SkillPatcher:
         return parsed
 
     def _load_template(self, template: SkillPatchTemplate) -> str:
-        content = load_template_content(template)
-        if (
-            template.module == SkillPatchModule.MODE_INTERACTIVE
-            and INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER in content
-        ):
-            content = content.replace(
-                INTERACTIVE_PENDING_CONTRACT_PLACEHOLDER,
-                self._render_interactive_pending_contract_block(),
-            )
-        return content
+        return load_template_content(template)
 
-    def _ask_user_schema_contract_path(self) -> Path:
-        candidates = config_registry.ask_user_schema_paths()
-        matched = next((path for path in candidates if path.exists()), None)
-        if matched is None:
-            raise RuntimeError("ask_user schema contract not found in canonical path")
-        return matched
-
-    def _render_interactive_pending_contract_block(self) -> str:
-        try:
-            contract_path = self._ask_user_schema_contract_path()
-            payload = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict):
-                raise RuntimeError("ask_user schema contract payload must be an object")
-        except (OSError, UnicodeDecodeError, yaml.YAMLError, RuntimeError):
-            logger.warning("Failed to load ask_user schema contract for template rendering", exc_info=True)
-        return render_interactive_pending_contract_markdown(include_final_example=True)
-
-    def _render_artifact_patch(self, artifacts: List[ManifestArtifact]) -> str:
+    def _render_artifact_patch(
+        self,
+        artifacts: List[ManifestArtifact],
+        *,
+        run_dir: Path | None = None,
+    ) -> str:
         if not artifacts:
             return ""
         template = self._load_template(ARTIFACT_REDIRECTION_TEMPLATE)
@@ -105,11 +80,14 @@ class SkillPatcher:
             raise RuntimeError(
                 "patch_artifact_redirection.md must contain placeholder {artifact_lines}"
             )
+        artifact_root = (
+            f"{run_dir.as_posix()}/artifacts/" if isinstance(run_dir, Path) else "<cwd>/artifacts/"
+        )
         lines: List[str] = []
         for artifact in artifacts:
             lines.append(
                 f"- {artifact.role} ({artifact.pattern}) -> prefer writing the final deliverable under "
-                "`{{ run_dir }}/artifacts/` (nested folders allowed)"
+                f"`{artifact_root}` (nested folders allowed)"
             )
         return template.replace("{artifact_lines}", "\n".join(lines))
 
@@ -117,8 +95,9 @@ class SkillPatcher:
         self,
         *,
         artifacts: List[ManifestArtifact],
+        run_dir: Path | None = None,
         execution_mode: str = "auto",
-        output_schema_summary_markdown: str | None = None,
+        output_contract_details_markdown: str | None = None,
     ) -> List[SkillPatchSection]:
         mode = self._normalize_execution_mode(execution_mode)
         plan: List[SkillPatchSection] = []
@@ -129,7 +108,7 @@ class SkillPatcher:
                 content=self._load_template(RUNTIME_ENFORCEMENT_TEMPLATE),
             )
         )
-        artifact_patch = self._render_artifact_patch(artifacts)
+        artifact_patch = self._render_artifact_patch(artifacts, run_dir=run_dir)
         if artifact_patch:
             plan.append(
                 SkillPatchSection(
@@ -145,17 +124,17 @@ class SkillPatcher:
                 content=self._load_template(OUTPUT_FORMAT_CONTRACT_TEMPLATE),
             )
         )
-        output_schema_patch = (
-            output_schema_summary_markdown.strip()
-            if isinstance(output_schema_summary_markdown, str)
+        output_contract_details = (
+            output_contract_details_markdown.strip()
+            if isinstance(output_contract_details_markdown, str)
             else ""
         )
-        if output_schema_patch:
+        if output_contract_details:
             plan.append(
                 SkillPatchSection(
-                    module="output_schema_specification",
-                    marker=OUTPUT_SCHEMA_PATCH_MARKER,
-                    content=output_schema_patch,
+                    module="output_contract_details",
+                    marker=OUTPUT_CONTRACT_DETAILS_MARKER,
+                    content=output_contract_details,
                 )
             )
         mode_template = MODE_INTERACTIVE_TEMPLATE if mode == "interactive" else MODE_AUTO_TEMPLATE
@@ -171,13 +150,15 @@ class SkillPatcher:
     def generate_patch_content(
         self,
         artifacts: List[ManifestArtifact],
+        run_dir: Path | None = None,
         execution_mode: str = "auto",
-        output_schema_summary_markdown: str | None = None,
+        output_contract_details_markdown: str | None = None,
     ) -> str:
         plan = self.build_patch_plan(
             artifacts=self._coerce_artifacts(artifacts),
+            run_dir=run_dir,
             execution_mode=execution_mode,
-            output_schema_summary_markdown=output_schema_summary_markdown,
+            output_contract_details_markdown=output_contract_details_markdown,
         )
         return "\n\n".join(section.content.strip() for section in plan if section.content.strip())
 
@@ -195,8 +176,9 @@ class SkillPatcher:
         self,
         skill_dir: Path,
         artifacts: List[ManifestArtifact],
+        run_dir: Path | None = None,
         execution_mode: str = "auto",
-        output_schema_summary_markdown: str | None = None,
+        output_contract_details_markdown: str | None = None,
     ) -> bool:
         skill_md_path = skill_dir / "SKILL.md"
         if not skill_md_path.exists():
@@ -207,8 +189,9 @@ class SkillPatcher:
             updated = current
             for section in self.build_patch_plan(
                 artifacts=parsed_artifacts,
+                run_dir=run_dir,
                 execution_mode=execution_mode,
-                output_schema_summary_markdown=output_schema_summary_markdown,
+                output_contract_details_markdown=output_contract_details_markdown,
             ):
                 updated = self._append_patch_if_missing(updated, section.content, section.marker)
             if updated == current:

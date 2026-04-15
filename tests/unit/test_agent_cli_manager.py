@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +39,28 @@ def _build_windows_profile(tmp_path: Path) -> RuntimeProfile:
         uv_cache_dir=cache_root / "uv_cache",
         uv_project_environment=cache_root / "uv_venv",
     )
+
+
+def _install_fake_managed_claude(profile: RuntimeProfile, *, helper_mode: int = 0o644) -> Path:
+    bin_dir = profile.npm_prefix / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    claude_bin = bin_dir / "claude"
+    claude_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    claude_bin.chmod(0o755)
+
+    package_root = (
+        profile.npm_prefix
+        / "lib"
+        / "node_modules"
+        / "@anthropic-ai"
+        / "claude-code"
+    )
+    for relpath in ("vendor/seccomp/x64/apply-seccomp", "vendor/seccomp/arm64/apply-seccomp"):
+        helper_path = package_root / relpath
+        helper_path.parent.mkdir(parents=True, exist_ok=True)
+        helper_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        helper_path.chmod(helper_mode)
+    return package_root
 
 
 def test_ensure_layout_creates_default_config_files(tmp_path):
@@ -214,6 +237,29 @@ def test_collect_claude_sandbox_status_reports_available_when_smoke_probe_succee
     assert payload["missing_dependencies"] == []
 
 
+def test_collect_claude_sandbox_status_repairs_seccomp_helpers_before_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    _install_fake_managed_claude(manager.profile, helper_mode=0o644)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+    monkeypatch.setattr(
+        manager,
+        "_run_command",
+        lambda argv, timeout_sec=5: CommandResult(returncode=0, stdout="sandbox-ok", stderr=""),
+    )
+    manager.ensure_layout()
+
+    payload = manager.collect_sandbox_status("claude")
+
+    helper_paths = manager._claude_seccomp_helper_paths()  # noqa: SLF001
+    assert payload["available"] is True
+    assert payload["warning_code"] is None
+    assert payload["dependencies"]["claude_seccomp_helper"] is True
+    assert all(os.access(path, os.X_OK) for path in helper_paths)
+
+
 def test_collect_claude_sandbox_status_reports_runtime_unavailable_when_probe_fails(
     tmp_path: Path,
     monkeypatch,
@@ -238,6 +284,32 @@ def test_collect_claude_sandbox_status_reports_runtime_unavailable_when_probe_fa
     assert payload["status"] == "unavailable"
     assert payload["warning_code"] == "CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE"
     assert "Failed RTM_NEWADDR" in payload["message"]
+
+
+def test_collect_claude_sandbox_status_reports_runtime_unavailable_when_seccomp_helper_cannot_be_repaired(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    _install_fake_managed_claude(manager.profile, helper_mode=0o644)
+    monkeypatch.setattr(manager, "_resolve_command_any", lambda names: f"/usr/bin/{next(iter(names))}")
+
+    original_chmod = os.chmod
+
+    def _fake_chmod(path: str | os.PathLike[str], mode: int) -> None:
+        if str(path).endswith("apply-seccomp"):
+            raise PermissionError("chmod blocked")
+        original_chmod(path, mode)
+
+    monkeypatch.setattr("server.services.engine_management.agent_cli_manager.os.chmod", _fake_chmod)
+    manager.ensure_layout()
+
+    payload = manager.collect_sandbox_status("claude")
+
+    assert payload["available"] is False
+    assert payload["status"] == "unavailable"
+    assert payload["warning_code"] == "CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE"
+    assert "chmod blocked" in payload["message"]
 
 
 def test_ensure_layout_persists_claude_sandbox_probe_sidecar(tmp_path: Path, monkeypatch) -> None:
@@ -548,6 +620,29 @@ def test_install_package_prefers_windows_npm_cmd(tmp_path: Path, monkeypatch) ->
     assert seen_names[0] == "npm.cmd"
     assert captured_cmd[0].lower().endswith("npm.cmd")
     assert result.returncode == 0
+
+
+def test_install_package_repairs_claude_seccomp_helper_permissions_after_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    manager.ensure_layout()
+    package_root = _install_fake_managed_claude(manager.profile, helper_mode=0o644)
+    helper_paths = sorted(package_root.glob("vendor/seccomp/*/apply-seccomp"))
+    assert helper_paths
+    assert all(not os.access(path, os.X_OK) for path in helper_paths)
+
+    monkeypatch.setattr("shutil.which", lambda *args, **kwargs: "/usr/bin/npm")
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda argv, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    )
+
+    result = manager.install_package("@anthropic-ai/claude-code")
+
+    assert result.returncode == 0
+    assert all(os.access(path, os.X_OK) for path in helper_paths)
 
 
 def test_resolve_npm_command_prefers_explicit_env_override_on_windows(tmp_path: Path) -> None:

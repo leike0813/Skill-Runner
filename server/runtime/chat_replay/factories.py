@@ -174,7 +174,8 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
             )
         )
     elif type_name == "assistant.message.final":
-        text = normalize_interaction_text(data.get("text"))
+        display_text = normalize_interaction_text(data.get("display_text"))
+        text = display_text or normalize_interaction_text(data.get("text"))
         if text:
             specs.append(
                 (

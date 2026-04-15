@@ -201,7 +201,7 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
 
     messages = parsed.get("assistant_messages")
     assert isinstance(messages, list)
-    assert [item["text"] for item in messages] == ["starting", '{"ok": true}']
+    assert [item["text"] for item in messages] == ["starting"]
 
     turn_markers = parsed.get("turn_markers")
     assert isinstance(turn_markers, list)
@@ -236,6 +236,54 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
     complete_marker = turn_markers[1]
     assert start_marker["raw_ref"]["stream"] == "stdout"
     assert complete_marker["raw_ref"]["stream"] == "stdout"
+
+
+def test_claude_runtime_stream_result_echo_does_not_create_default_assistant_message():
+    adapter = ClaudeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"system","subtype":"init","session_id":"claude-session-result-echo"}\n'
+            b'{"type":"assistant","message":{"content":[{"type":"text","text":"primary body"}]}}\n'
+            b'{"type":"result","subtype":"success","session_id":"claude-session-result-echo","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+        ),
+        stderr_raw=b"",
+    )
+
+    messages = parsed.get("assistant_messages")
+    assert isinstance(messages, list)
+    assert [item["text"] for item in messages] == ["primary body"]
+
+
+def test_claude_runtime_stream_uses_result_text_as_fallback_only_without_body_or_structured_output():
+    adapter = ClaudeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"system","subtype":"init","session_id":"claude-session-result-fallback"}\n'
+            b'{"type":"result","subtype":"success","session_id":"claude-session-result-fallback","result":"Please provide the missing file path."}\n'
+        ),
+        stderr_raw=b"",
+    )
+
+    messages = parsed.get("assistant_messages")
+    assert isinstance(messages, list)
+    assert len(messages) == 1
+    assert messages[0]["text"] == "Please provide the missing file path."
+    assert messages[0]["details"]["source"] == "claude_result_fallback"
+
+
+def test_claude_runtime_stream_structured_output_without_body_does_not_emit_result_fallback_message():
+    adapter = ClaudeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"system","subtype":"init","session_id":"claude-session-structured-only"}\n'
+            b'{"type":"result","subtype":"success","session_id":"claude-session-structured-only","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+        ),
+        stderr_raw=b"",
+    )
+
+    messages = parsed.get("assistant_messages")
+    assert isinstance(messages, list)
+    assert messages == []
 
 
 def test_claude_runtime_stream_emits_sandbox_diagnostics_without_losing_success():

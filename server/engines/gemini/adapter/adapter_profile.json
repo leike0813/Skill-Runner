@@ -6,12 +6,13 @@
   },
   "prompt_builder": {
     "engine_key": "gemini",
-    "default_template_path": "../../../assets/templates/gemini_default.j2",
-    "fallback_inline": "Please call the skill named \"{{ skill.id }}\".",
+    "skill_invoke_line_template": "/{{ skill.id }} invoke",
+    "body_default_template_path": "../../../assets/templates/gemini_default.j2",
+    "body_fallback_inline": "Execute the skill using the above inputs and parameters.",
     "merge_input_if_no_parameter_schema": true,
     "params_json_source": "input_data",
-    "main_prompt_source": "none",
-    "main_prompt_default_template": "Execute skill {skill_id}",
+    "body_prompt_source": "none",
+    "body_prompt_fallback_template": "Execute skill {skill_id}",
     "include_input_file_name": true,
     "include_skill_dir": true
   },

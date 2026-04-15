@@ -37,13 +37,14 @@
 
     <div id="final-summary-card" class="prompt-card hidden" role="status" aria-live="polite">
         <div style="font-weight: 700; margin-bottom: 6px;">{{ t("client.observe_final_summary", default="Final Summary") }}</div>
-        <div id="final-summary-text"></div>
+        <div id="final-summary-status"></div>
     </div>
 
     <div id="prompt-card" class="prompt-card hidden">
         <div style="font-weight: 700; margin-bottom: 6px;">{{ t("client.observe_pending_input", default="Pending Input Request") }}</div>
         <div id="prompt-card-text"></div>
         <div id="prompt-card-hint" class="prompt-list hidden"></div>
+        <div id="prompt-card-files" class="prompt-list hidden"></div>
         <div class="prompt-meta">
             <span>{{ t("client.observe_interaction_id", default="interaction_id:") }} <code id="prompt-card-id">-</code></span>
             <span>{{ t("client.observe_kind", default="kind:") }} <code id="prompt-card-kind">-</code></span>
@@ -943,119 +944,21 @@
         text-decoration: underline;
     }
 
-    /* Final summary Markdown styles */
-    #final-summary-text h1,
-    #final-summary-text h2,
-    #final-summary-text h3,
-    #final-summary-text h4,
-    #final-summary-text h5,
-    #final-summary-text h6 {
-        margin: 12px 0 6px;
+    #final-summary-status {
         font-weight: 600;
-        line-height: 1.25;
-        font-size: 1em;
-    }
-
-    #final-summary-text p {
-        margin: 6px 0;
-        line-height: 1.5;
-    }
-
-    #final-summary-text code {
-        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        font-size: 0.9em;
-        background: #f6f8fa;
-        padding: 2px 4px;
-        border-radius: 3px;
-    }
-
-    #final-summary-text pre {
-        background: #f6f8fa;
-        padding: 8px;
-        border-radius: 4px;
-        overflow: auto;
-        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        font-size: 12px;
-        margin: 6px 0;
-    }
-
-    #final-summary-text pre code {
-        background: transparent;
-        padding: 0;
-    }
-
-    #final-summary-text table {
-        border-collapse: collapse;
-        width: 100%;
-        margin: 8px 0;
-        font-size: 12px;
-    }
-
-    #final-summary-text th,
-    #final-summary-text td {
-        border: 1px solid #d0d7de;
-        padding: 6px 8px;
-        text-align: left;
-    }
-
-    #final-summary-text th {
-        background: #f6f8fa;
-        font-weight: 600;
-    }
-
-    #final-summary-text tr:nth-child(even) {
-        background: #f6f8fa;
-    }
-
-    #final-summary-text ul,
-    #final-summary-text ol {
-        padding-left: 20px;
-        margin: 6px 0;
-    }
-
-    #final-summary-text li {
-        margin: 3px 0;
-    }
-
-    #final-summary-text blockquote {
-        border-left: 3px solid #d0d7de;
-        padding-left: 12px;
-        margin: 8px 0;
-        color: #656d76;
-        font-size: 12px;
-    }
-
-    #final-summary-text a {
-        color: #0969da;
-        text-decoration: none;
-    }
-
-    #final-summary-text a:hover {
-        text-decoration: underline;
-    }
-
-    #final-summary-text hr {
-        border: 0;
-        border-top: 1px solid #d0d7de;
-        margin: 12px 0;
-    }
-
-    #final-summary-text strong {
-        font-weight: 600;
-    }
-
-    #final-summary-text em {
-        font-style: italic;
+        color: var(--neutral-900);
     }
 </style>
 
 <script src="/static/js/file_explorer.js"></script>
 <script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
 <!-- KaTeX for LaTeX formula rendering (local vendor assets) -->
+<link rel="stylesheet" href="/static/css/chat_markdown.css?v=20260415a">
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
 <script src="/static/vendor/katex/katex.min.js"></script>
 <script src="/static/vendor/markdown-it/markdown-it.min.js"></script>
 <script src="/static/vendor/markdown-it-texmath/texmath.min.js"></script>
+<script src="/static/js/chat_markdown.js?v=20260415a"></script>
 <script>
 (() => {
     function createCompatibleThinkingChatModel(initialMode) {
@@ -1108,15 +1011,9 @@
         authUrlPrefix: {{ t("client.observe_auth_url_prefix", default="auth_url:") | tojson }},
         userCodePrefix: {{ t("client.observe_user_code_prefix", default="user_code:") | tojson }},
         lastErrorPrefix: {{ t("client.observe_last_error_prefix", default="last_error:") | tojson }},
-        unknownError: {{ t("client.observe_unknown_error", default="Unknown error") | tojson }},
-        canceledError: {{ t("client.observe_canceled_error", default="Canceled by user") | tojson }},
         taskFailedPrefix: {{ t("client.observe_task_failed", default="Task failed.") | tojson }},
         taskCanceledPrefix: {{ t("client.observe_task_canceled", default="Task canceled.") | tojson }},
         taskCompletedPrefix: {{ t("client.observe_task_completed", default="Task completed.") | tojson }},
-        taskCompletedStructuredHint: {{ t("client.observe_task_completed_structured", default="Structured result generated.") | tojson }},
-        resultErrorLabel: {{ t("client.observe_result_error_label", default="error_message") | tojson }},
-        artifactsLabel: {{ t("client.observe_artifacts_label", default="artifacts") | tojson }},
-        resultPreviewLabel: {{ t("client.observe_result_preview_label", default="result_preview") | tojson }},
         fileTreeLoading: {{ t("client.observe_file_tree_loading", default="Loading...") | tojson }},
         fileTreeSelectHint: {{ t("client.observe_file_tree_select_hint", default="Select a file from the left panel to preview.") | tojson }},
         fileTooLarge: {{ t("client.file_too_large", default="File too large to preview") | tojson }},
@@ -1165,10 +1062,11 @@
     const replyErrorEl = document.getElementById("reply-error");
     const thinkingCardEl = document.getElementById("thinking-card");
     const finalSummaryCardEl = document.getElementById("final-summary-card");
-    const finalSummaryTextEl = document.getElementById("final-summary-text");
+    const finalSummaryStatusEl = document.getElementById("final-summary-status");
     const promptCardEl = document.getElementById("prompt-card");
     const promptTextEl = document.getElementById("prompt-card-text");
     const promptHintEl = document.getElementById("prompt-card-hint");
+    const promptFilesEl = document.getElementById("prompt-card-files");
     const promptIdEl = document.getElementById("prompt-card-id");
     const promptKindEl = document.getElementById("prompt-card-kind");
     const promptRequiredEl = document.getElementById("prompt-card-required");
@@ -1210,9 +1108,6 @@
     let reconnectTimer = null;
     let reconnectAttempts = 0;
     let currentStatus = "loading";
-    let finalSummaryLoaded = false;
-    let finalSummaryAttempts = 0;
-    let finalSummaryRetryTimer = null;
     let historyLoaded = false;
     let fileTreeLoaded = false;
     let fileTreeExpanded = false;
@@ -1246,46 +1141,25 @@
         return typeof value === "string" ? value : "";
     }
 
-    // Markdown renderer initialization
-    let mdParser = null;
-    if (window.markdownit) {
-        mdParser = window.markdownit({
-            html: false,        // Disable HTML for XSS protection
-            xhtmlOut: false,
-            breaks: true,       // Enable line breaks within paragraphs
-            langPrefix: 'language-',
-            linkify: false,     // Do not auto-convert URLs to links
-            typographer: false,
-            quotes: '""\'\'',
-            highlight: null     // No syntax highlighting for now
-        });
-        // Enable LaTeX formula support with katex and texmath
-        if (window.texmath && window.katex) {
-            mdParser.use(window.texmath, {
-                engine: window.katex,
-                delimiters: 'dollars',  // Support $inline$ and $$display$$
-                katexOptions: {
-                    throwOnError: false,
-                    output: 'htmlAndMath',
-                    displayMode: false
-                }
-            });
-        }
-    } else {
-        console.warn('markdown-it not loaded, falling back to plain text rendering');
-    }
+    const chatMarkdownRenderer = window.SkillRunnerChatMarkdown
+        && typeof window.SkillRunnerChatMarkdown.createRenderer === "function"
+        ? window.SkillRunnerChatMarkdown.createRenderer()
+        : null;
 
     function renderMarkdown(text) {
-        if (!mdParser || typeof text !== 'string') {
+        if (!chatMarkdownRenderer) {
             return safeText(text);
         }
-        try {
-            // markdown-it adds trailing newline, remove it
-            return mdParser.render(text).trimEnd();
-        } catch (e) {
-            console.warn('Markdown render error, falling back to plain text:', e);
-            return safeText(text);
+        return chatMarkdownRenderer.render(text);
+    }
+
+    function renderMarkdownInto(element, text) {
+        if (!(element instanceof HTMLElement)) return;
+        if (chatMarkdownRenderer) {
+            chatMarkdownRenderer.renderInto(element, text, { className: "chat-markdown" });
+            return;
         }
+        element.textContent = safeText(text);
     }
 
     function isNearBottom(targetEl, thresholdPx = 24) {
@@ -1347,10 +1221,12 @@
     }
 
     function deriveAskUserView(payload) {
-        const askUser = payload && typeof payload.ask_user === "object" ? payload.ask_user : null;
-        const prompt = safeText((askUser && askUser.prompt) || payload.prompt).trim();
-        const kind = safeText((askUser && askUser.kind) || payload.kind).trim() || "open_text";
-        const optionsRaw = askUser && Array.isArray(askUser.options) ? askUser.options : payload.options;
+        const uiHints = payload && payload.ui_hints && typeof payload.ui_hints === "object"
+            ? payload.ui_hints
+            : {};
+        const prompt = safeText(uiHints.prompt).trim();
+        const kind = safeText(uiHints.kind || payload.kind).trim() || "open_text";
+        const optionsRaw = Array.isArray(uiHints.options) ? uiHints.options : [];
         let options = normalizeChoiceOptions(optionsRaw);
         if (kind === "confirm" && options.length === 0) {
             options = [
@@ -1358,25 +1234,14 @@
                 { label: "否", value: "否" },
             ];
         }
-        const askHint = askUser
-            ? (
-                safeText(askUser.hint).trim()
-                || (
-                    askUser.ui_hints && typeof askUser.ui_hints === "object"
-                        ? safeText(askUser.ui_hints.hint).trim()
-                        : ""
-                )
-            )
-            : "";
-        const directHint = payload && payload.ui_hints && typeof payload.ui_hints === "object"
-            ? safeText(payload.ui_hints.hint).trim()
-            : safeText(payload && payload.hint).trim();
-        const hint = askHint || directHint;
+        const hint = safeText(uiHints.hint).trim();
+        const files = normalizeUploadFileSpecs(uiHints.files);
         return {
             prompt: prompt || DEFAULT_INTERACTION_PROMPT,
             kind,
             options,
             hint,
+            files,
         };
     }
 
@@ -2002,7 +1867,7 @@
                     item.appendChild(roleEl);
                     const body = document.createElement("div");
                     body.className = "chat-plain-body";
-                    body.innerHTML = renderMarkdown(normalizedText);
+                    renderMarkdownInto(body, normalizedText);
                     item.appendChild(body);
                     chatEl.appendChild(item);
                     continue;
@@ -2016,7 +1881,7 @@
                 roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
                 bubble.appendChild(roleEl);
                 const content = document.createElement("div");
-                content.innerHTML = renderMarkdown(normalizedText);
+                renderMarkdownInto(content, normalizedText);
                 bubble.appendChild(content);
                 row.appendChild(bubble);
                 chatEl.appendChild(row);
@@ -2055,7 +1920,10 @@
                     if (entry.collapsed) {
                         const latestLine = document.createElement("div");
                         latestLine.className = "chat-plain-process-latest";
-                        latestLine.innerHTML = renderMarkdown(`${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`);
+                        renderMarkdownInto(
+                            latestLine,
+                            `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`,
+                        );
                         item.appendChild(latestLine);
                     } else {
                         const list = document.createElement("div");
@@ -2069,7 +1937,7 @@
                             child.appendChild(meta);
                             const textEl = document.createElement("div");
                             textEl.className = "chat-plain-process-item-body";
-                            textEl.innerHTML = renderMarkdown(safeText(itemEntry.text || itemEntry.summary));
+                            renderMarkdownInto(textEl, safeText(itemEntry.text || itemEntry.summary));
                             child.appendChild(textEl);
                             list.appendChild(child);
                         }
@@ -2113,7 +1981,10 @@
                 if (entry.collapsed) {
                     const latestLine = document.createElement("div");
                     latestLine.className = "thinking-latest";
-                    latestLine.innerHTML = renderMarkdown(`${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`);
+                    renderMarkdownInto(
+                        latestLine,
+                        `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`,
+                    );
                     bubble.appendChild(latestLine);
                 } else {
                     const list = document.createElement("div");
@@ -2127,7 +1998,7 @@
                         itemEl.appendChild(meta);
                         const textEl = document.createElement("div");
                         textEl.className = "thinking-item-text";
-                        textEl.innerHTML = renderMarkdown(safeText(item.text || item.summary));
+                        renderMarkdownInto(textEl, safeText(item.text || item.summary));
                         itemEl.appendChild(textEl);
                         list.appendChild(itemEl);
                     }
@@ -2175,7 +2046,7 @@
         roleEl.textContent = role === "user" ? I18N.roleUser : role === "assistant" ? I18N.roleAssistant : I18N.roleSystem;
         bubble.appendChild(roleEl);
         const content = document.createElement("div");
-        content.innerHTML = renderMarkdown(normalizedText);
+        renderMarkdownInto(content, normalizedText);
         bubble.appendChild(content);
         row.appendChild(bubble);
         chatEl.appendChild(row);
@@ -2188,6 +2059,8 @@
         promptTextEl.textContent = "";
         promptHintEl.textContent = "";
         promptHintEl.classList.add("hidden");
+        promptFilesEl.textContent = "";
+        promptFilesEl.classList.add("hidden");
         promptIdEl.textContent = "-";
         promptKindEl.textContent = "-";
         promptRequiredEl.textContent = "";
@@ -2223,14 +2096,22 @@
     }
 
     function clearFinalSummaryCard() {
-        if (!finalSummaryCardEl || !finalSummaryTextEl) return;
+        if (!finalSummaryCardEl || !finalSummaryStatusEl) return;
         finalSummaryCardEl.classList.add("hidden");
-        finalSummaryTextEl.textContent = "";
-        finalSummaryLoaded = false;
-        if (finalSummaryRetryTimer) {
-            clearTimeout(finalSummaryRetryTimer);
-            finalSummaryRetryTimer = null;
-        }
+        finalSummaryStatusEl.textContent = "";
+    }
+
+    function buildFinalSummaryStatus(status) {
+        const normalized = safeText(status).trim().toLowerCase();
+        if (normalized === "failed") return I18N.taskFailedPrefix;
+        if (normalized === "canceled") return I18N.taskCanceledPrefix;
+        return I18N.taskCompletedPrefix;
+    }
+
+    function renderFinalSummaryCard(status) {
+        if (!finalSummaryCardEl || !finalSummaryStatusEl) return;
+        finalSummaryStatusEl.textContent = buildFinalSummaryStatus(status);
+        finalSummaryCardEl.classList.remove("hidden");
     }
 
     function setActionButtonsDisabled(container, disabled) {
@@ -2318,6 +2199,7 @@
     function renderPromptCard(payload) {
         const view = deriveAskUserView(payload);
         const choiceOptions = view.options;
+        const fileSpecs = view.files;
         const signature = stableSerialize({
             interaction_id: Number(payload.interaction_id || 0),
             kind: view.kind,
@@ -2325,6 +2207,7 @@
             options: choiceOptions,
             required_fields: normalizeList(payload.required_fields),
             hint: view.hint,
+            files: fileSpecs,
         });
         if (signature && signature === lastPromptRenderSignature && !promptCardEl.classList.contains("hidden")) {
             return;
@@ -2386,6 +2269,21 @@
             replyTextEl.placeholder = hint || I18N.replyPlaceholder;
             setReplyComposerVisible(true);
             setReplyEnabled(interactionId > 0);
+        }
+
+        if (fileSpecs.length) {
+            const lines = fileSpecs.map((item) => {
+                const parts = [item.name];
+                if (item.required) parts.push("required");
+                if (item.accept) parts.push(`accept=${item.accept}`);
+                if (item.hint) parts.push(item.hint);
+                return `- ${parts.join(" · ")}`;
+            });
+            promptFilesEl.innerHTML = renderMarkdown(lines.join("\n"));
+            promptFilesEl.classList.remove("hidden");
+        } else {
+            promptFilesEl.textContent = "";
+            promptFilesEl.classList.add("hidden");
         }
 
         const requiredFields = normalizeList(payload.required_fields);
@@ -2617,36 +2515,6 @@
         }
     }
 
-    function parseResultStatusFromPreview(preview) {
-        const raw = safeText(preview).trim();
-        if (!raw || !raw.startsWith("{")) return "";
-        try {
-            const payload = JSON.parse(raw);
-            const status = safeText(payload?.status).trim().toLowerCase();
-            return status;
-        } catch (_err) {
-            return "";
-        }
-    }
-
-    function buildFinalSummaryText(payload, resultStatus, preview, artifacts) {
-        const normalizedStatus = safeText(resultStatus).trim().toLowerCase();
-        if (normalizedStatus === "failed") {
-            const message = safeText(payload.result_error_message).trim() || I18N.unknownError;
-            return `${I18N.taskFailedPrefix}\n${I18N.resultErrorLabel}: ${message}`;
-        }
-        if (normalizedStatus === "canceled") {
-            const message = safeText(payload.result_error_message).trim() || I18N.canceledError;
-            return `${I18N.taskCanceledPrefix}\n${I18N.resultErrorLabel}: ${message}`;
-        }
-        const hasResult = payload.has_result === true;
-        const artifactLine = artifacts.length
-            ? `\n${I18N.artifactsLabel}: ${artifacts.slice(0, 8).join(", ")}`
-            : "";
-        const previewLine = preview ? `\n${I18N.resultPreviewLabel}: ${preview}` : "";
-        return `${I18N.taskCompletedPrefix}${hasResult ? `\n${I18N.taskCompletedStructuredHint}` : ""}${artifactLine}${previewLine}`;
-    }
-
     function applyPendingPrompt(payload) {
         const view = deriveAskUserView(payload);
         const prompt = view.prompt;
@@ -2657,64 +2525,6 @@
         if (!renderedPromptKeys.has(key)) {
             renderedPromptKeys.add(key);
         }
-    }
-
-    async function maybeAppendFinalSummary() {
-        if (finalSummaryLoaded) return;
-        if (!isTerminal(currentStatus)) return;
-        finalSummaryAttempts += 1;
-        try {
-            const res = await fetch(apiUrl(`/api/runs/${requestId}/final-summary`));
-            if (!res.ok) {
-                scheduleFinalSummaryRetry();
-                return;
-            }
-            const payload = await res.json();
-            if (!payload) {
-                scheduleFinalSummaryRetry();
-                return;
-            }
-            let resultStatus = safeText(payload.result_status).trim().toLowerCase();
-            if (!resultStatus) {
-                resultStatus = parseResultStatusFromPreview(payload.result_preview);
-            }
-            const hasResult = payload.has_result === true;
-            const hasArtifacts = payload.has_artifacts === true;
-            if (!hasResult && !hasArtifacts) {
-                scheduleFinalSummaryRetry();
-                return;
-            }
-            const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
-            const preview = safeText(payload.result_preview).trim();
-            if (finalSummaryCardEl && finalSummaryTextEl) {
-                finalSummaryTextEl.innerHTML = renderMarkdown(buildFinalSummaryText(
-                    payload,
-                    resultStatus,
-                    preview,
-                    artifacts,
-                ));
-                finalSummaryCardEl.classList.remove("hidden");
-            }
-            finalSummaryLoaded = true;
-            if (finalSummaryRetryTimer) {
-                clearTimeout(finalSummaryRetryTimer);
-                finalSummaryRetryTimer = null;
-            }
-        } catch (_err) {
-            scheduleFinalSummaryRetry();
-        }
-    }
-
-    function scheduleFinalSummaryRetry() {
-        if (finalSummaryLoaded) return;
-        if (!isTerminal(currentStatus)) return;
-        if (finalSummaryAttempts >= 6) return;
-        if (finalSummaryRetryTimer) return;
-        const delayMs = Math.min(2000, 400 * finalSummaryAttempts + 400);
-        finalSummaryRetryTimer = setTimeout(async () => {
-            finalSummaryRetryTimer = null;
-            await maybeAppendFinalSummary();
-        }, delayMs);
     }
 
     async function loadFileTree() {
@@ -2820,11 +2630,8 @@
         applyPendingPrompt({
             interaction_id: Number(pending.interaction_id || 0),
             kind: safeText(pending.kind || "open_text"),
-            prompt: safeText(pending.prompt),
-            options: Array.isArray(pending.options) ? pending.options : [],
             required_fields: Array.isArray(pending.required_fields) ? pending.required_fields : [],
             ui_hints: pending.ui_hints && typeof pending.ui_hints === "object" ? pending.ui_hints : {},
-            ask_user: pending.ask_user && typeof pending.ask_user === "object" ? pending.ask_user : null,
         });
     }
 
@@ -2881,11 +2688,11 @@
                 }
             }
             if (isTerminal(currentStatus)) {
+                renderFinalSummaryCard(currentStatus);
                 clearWaitingUserWatchdog();
                 setReplyEnabled(false);
                 clearPromptCard();
                 await catchUpHistory();
-                await maybeAppendFinalSummary();
                 await maybeLoadFileTreeOnTerminal();
             }
             return true;
@@ -2992,6 +2799,11 @@
             }
             if (typeof payload.cursor === "number") {
                 updateCursor(payload.cursor);
+            }
+            if (isTerminal(currentStatus)) {
+                renderFinalSummaryCard(currentStatus);
+            } else {
+                clearFinalSummaryCard();
             }
             if (currentStatus === "waiting_user" || currentStatus === "waiting_auth" || isTerminal(currentStatus)) {
                 catchUpHistory().catch(() => {});

@@ -6,12 +6,13 @@
   },
   "prompt_builder": {
     "engine_key": "claude",
-    "default_template_path": "../../../assets/templates/claude_default.j2",
-    "fallback_inline": "Please execute the skill named \"{{ skill.id }}\". If Claude sandbox is unavailable in this environment, execute Bash normally without sandbox-first retries. Otherwise prefer Bash inside the sandbox first, and only retry once without sandbox for sandbox runtime failures such as missing bwrap/bubblewrap/socat, Failed RTM_NEWADDR, or creating new namespace failed. Do not use unsandboxed fallback for ordinary policy denials such as disallowed network access, writes outside permitted paths, or access to sensitive/system locations. Return only the final structured result.",
+    "skill_invoke_line_template": "/{{ skill.id }}",
+    "body_default_template_path": "../../../assets/templates/claude_default.j2",
+    "body_fallback_inline": "# Sandbox Policy\n{% if claude_sandbox_available is defined and not claude_sandbox_available %}\n- Claude sandbox is unavailable in this environment. Execute Bash normally without attempting sandbox-first retries.\n- Reason: {{ claude_sandbox_message or \"bootstrap sandbox probe reported unavailable.\" }}\n{% else %}\n- Prefer Bash inside the sandbox first.\n- If Bash fails because the sandbox runtime itself is unavailable or broken, you may retry that command once without sandbox.\n- Treat these as sandbox runtime failures: missing `bwrap`/`bubblewrap`/`socat`, `Failed RTM_NEWADDR`, `creating new namespace failed`, and equivalent sandbox startup failures.\n- Do not use unsandboxed fallback for ordinary policy denials such as disallowed network access, writes outside permitted paths, or access to sensitive/system locations.\n{% endif %}\n\nReturn only the final structured result.",
     "merge_input_if_no_parameter_schema": true,
     "params_json_source": "combined_input_parameter",
-    "main_prompt_source": "none",
-    "main_prompt_default_template": "Execute skill {skill_id}",
+    "body_prompt_source": "none",
+    "body_prompt_fallback_template": "Execute skill {skill_id}",
     "include_input_file_name": true,
     "include_skill_dir": true
   },

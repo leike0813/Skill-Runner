@@ -80,6 +80,9 @@ def test_validate_fcmp_event_accepts_local_seq_meta() -> None:
         "data": {
             "message_id": "m-1",
             "text": "hello",
+            "display_text": "hello",
+            "display_format": "plain_text",
+            "display_origin": "raw_text",
         },
         "meta": {"attempt": 2, "local_seq": 1},
         "raw_ref": None,
@@ -152,6 +155,9 @@ def test_validate_fcmp_event_accepts_optional_correlation() -> None:
         "data": {
             "message_id": "m-9",
             "text": "hello",
+            "display_text": "hello",
+            "display_format": "plain_text",
+            "display_origin": "raw_text",
         },
         "meta": {"attempt": 1, "local_seq": 2},
         "correlation": {"publish_id": "pub-9"},

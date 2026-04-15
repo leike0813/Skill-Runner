@@ -6,11 +6,8 @@ from pathlib import Path
 from server.models import SkillManifest
 from server.services.orchestration.run_output_schema_service import (
     REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH,
-    REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_SUMMARY_PATH,
     RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH,
-    RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
     TARGET_OUTPUT_SCHEMA_RELPATH,
-    TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
     run_output_schema_service,
 )
 
@@ -97,13 +94,9 @@ def test_materialize_auto_schema_artifacts_and_request_input_fields(tmp_path: Pa
     )
 
     assert materialization.schema_relpath == TARGET_OUTPUT_SCHEMA_RELPATH
-    assert materialization.prompt_summary_relpath == TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH
     assert materialization.schema_path == run_dir / TARGET_OUTPUT_SCHEMA_RELPATH
-    assert materialization.prompt_summary_path == run_dir / TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH
     assert materialization.schema_path is not None
-    assert materialization.prompt_summary_path is not None
     assert materialization.schema_path.exists()
-    assert materialization.prompt_summary_path.exists()
 
     payload = json.loads(materialization.schema_path.read_text(encoding="utf-8"))
     assert payload["required"] == ["__SKILL_DONE__", "value", "report_path"]
@@ -113,16 +106,13 @@ def test_materialize_auto_schema_artifacts_and_request_input_fields(tmp_path: Pa
 
     request_payload = json.loads((run_dir / ".audit" / "request_input.json").read_text(encoding="utf-8"))
     assert request_payload[REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH] == TARGET_OUTPUT_SCHEMA_RELPATH
-    assert (
-        request_payload[REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_SUMMARY_PATH]
-        == TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH
-    )
 
     run_options = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
     assert run_options == {
         RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH: TARGET_OUTPUT_SCHEMA_RELPATH,
-        RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH: TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
     }
+    assert "### Output Contract Details" in materialization.prompt_contract_markdown
+    assert TARGET_OUTPUT_SCHEMA_RELPATH in materialization.prompt_contract_markdown
 
 
 def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path(tmp_path: Path) -> None:
@@ -142,7 +132,6 @@ def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path
     )
 
     assert first.schema_relpath == second.schema_relpath == TARGET_OUTPUT_SCHEMA_RELPATH
-    assert first.prompt_summary_relpath == second.prompt_summary_relpath == TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH
     assert first.schema_path is not None
 
     payload = json.loads(first.schema_path.read_text(encoding="utf-8"))
@@ -156,12 +145,16 @@ def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path
     assert pending_branch["properties"]["message"]["minLength"] == 1
     assert pending_branch["properties"]["ui_hints"]["type"] == "object"
 
-    assert "Interactive pending branch contract" in first.prompt_summary_markdown
-    assert "<ASK_USER_YAML>" not in first.prompt_summary_markdown
-    assert "Supported `ui_hints.kind` values" in first.prompt_summary_markdown
-    assert "Pending branch example" in first.prompt_summary_markdown
-    assert '"__SKILL_DONE__": false' in first.prompt_summary_markdown
-    assert TARGET_OUTPUT_SCHEMA_RELPATH in first.prompt_summary_markdown
+    assert "#### Final Branch Contract" in first.prompt_contract_markdown
+    assert "#### Pending Branch Contract" in first.prompt_contract_markdown
+    assert "<ASK_USER_YAML>" not in first.prompt_contract_markdown
+    assert "Supported `ui_hints.kind` values" in first.prompt_contract_markdown
+    assert "Pending branch example" in first.prompt_contract_markdown
+    assert '"__SKILL_DONE__": false' in first.prompt_contract_markdown
+    assert TARGET_OUTPUT_SCHEMA_RELPATH in first.prompt_contract_markdown
+    assert first.prompt_contract_markdown.index("#### Final Branch Contract") < first.prompt_contract_markdown.index(
+        "#### Pending Branch Contract"
+    )
 
 
 def test_materialize_missing_output_schema_skips_artifacts(tmp_path: Path) -> None:
@@ -177,7 +170,6 @@ def test_materialize_missing_output_schema_skips_artifacts(tmp_path: Path) -> No
 
     assert materialization.machine_schema is None
     assert materialization.schema_path is None
-    assert materialization.prompt_summary_markdown == ""
+    assert materialization.prompt_contract_markdown == ""
     assert not (run_dir / TARGET_OUTPUT_SCHEMA_RELPATH).exists()
-    assert not (run_dir / TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH).exists()
     assert run_output_schema_service.build_run_option_fields(run_dir=run_dir) == {}

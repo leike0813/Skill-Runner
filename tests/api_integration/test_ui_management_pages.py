@@ -77,6 +77,13 @@ async def test_ui_pages_render_with_management_api_sources(monkeypatch):
     assert run_detail.status_code == 200
     assert "/v1/management/runs/${requestId}/chat?cursor=${cursor}" in run_detail.text
     assert "Canonical Chat" in run_detail.text
+    assert "/static/vendor/markdown-it/markdown-it.min.js" in run_detail.text
+    assert "/static/js/chat_markdown.js?v=20260415a" in run_detail.text
+    assert "/static/css/chat_markdown.css?v=20260415a" in run_detail.text
+    assert "SkillRunnerChatMarkdown.createRenderer()" in run_detail.text
+    assert 'id="event-inspector-drawer"' in run_detail.text
+    assert "openEventInspector(row, streamName, { itemKey: rowKey });" in run_detail.text
+    assert 'openEventInspector(event, "timeline", { itemKey: rowKey });' in run_detail.text
     assert 'id="stderr-log"' in run_detail.text
     assert "raw_ref" in run_detail.text
     assert "FCMP" in run_detail.text

@@ -229,7 +229,7 @@ parser/materialization diagnostics。
 
 首个 attempt（`attempt=1`）会在该 JSON 对象内追加：
 
-- `rendered_prompt_first_attempt`: 首次实际调用引擎时的最终渲染 prompt 文本（含 `__prompt_override` 覆盖结果）。
+- `rendered_prompt_first_attempt`: 首次实际调用引擎时的最终 assembled skill prompt 文本（含 `__prompt_override` 覆盖结果），不再包含旧的全局 first-attempt prefix。
 
 若该文件缺失、内容不是 JSON 对象，或回写失败，则降级写入：
 

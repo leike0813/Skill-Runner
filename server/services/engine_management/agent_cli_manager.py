@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 from copy import deepcopy
@@ -103,6 +104,10 @@ _CODEX_SANDBOX_INIT_FAILURE_MARKERS = (
     "operation not permitted",
     "permission denied",
     "setting up uid map",
+)
+_CLAUDE_SECCOMP_RELATIVE_PATHS = (
+    Path("vendor/seccomp/x64/apply-seccomp"),
+    Path("vendor/seccomp/arm64/apply-seccomp"),
 )
 
 
@@ -462,6 +467,7 @@ class AgentCliManager:
         env = self.profile.build_subprocess_env()
         npm_cmd = self._resolve_npm_command(env)
         started_at = time.perf_counter()
+        claude_package = self._engine_profile("claude").cli_management.package
         logger.info(
             "event=agent_cli.command.start action=install_package package=%s command=%s mode=%s platform=%s",
             package,
@@ -485,6 +491,18 @@ class AgentCliManager:
                 result.returncode,
                 duration_ms,
             )
+            if result.returncode == 0 and package == claude_package:
+                repaired, errors = self._repair_claude_seccomp_helpers()
+                if repaired:
+                    logger.info(
+                        "event=agent_cli.command.result action=repair_claude_seccomp_helpers outcome=ok repaired=%s",
+                        [str(path) for path in repaired],
+                    )
+                if errors:
+                    logger.warning(
+                        "event=agent_cli.command.result action=repair_claude_seccomp_helpers outcome=failed errors=%s",
+                        errors,
+                    )
             return CommandResult(
                 returncode=result.returncode,
                 stdout=result.stdout or "",
@@ -796,6 +814,42 @@ class AgentCliManager:
             return False
         return bool(sandbox.get("enabled"))
 
+    def _claude_managed_package_root(self) -> Path:
+        return (
+            self.profile.npm_prefix
+            / "lib"
+            / "node_modules"
+            / "@anthropic-ai"
+            / "claude-code"
+        )
+
+    def _claude_seccomp_helper_paths(self) -> tuple[Path, ...]:
+        package_root = self._claude_managed_package_root()
+        return tuple(package_root / relpath for relpath in _CLAUDE_SECCOMP_RELATIVE_PATHS)
+
+    def _repair_claude_seccomp_helpers(self) -> tuple[list[Path], list[str]]:
+        repaired: list[Path] = []
+        errors: list[str] = []
+        for path in self._claude_seccomp_helper_paths():
+            if not path.exists():
+                continue
+            if os.access(path, os.X_OK):
+                continue
+            try:
+                current_mode = stat.S_IMODE(path.stat().st_mode)
+                os.chmod(
+                    path,
+                    current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH,
+                )
+            except OSError as exc:
+                errors.append(f"{path}: {exc}")
+                continue
+            if os.access(path, os.X_OK):
+                repaired.append(path)
+            else:
+                errors.append(f"{path}: still not executable after chmod")
+        return repaired, errors
+
     def _codex_sandbox_declared_enabled(self) -> bool:
         if os.environ.get("LANDLOCK_ENABLED") == "0":
             return False
@@ -835,13 +889,31 @@ class AgentCliManager:
                 probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
             )
 
+        seccomp_helper_paths = self._claude_seccomp_helper_paths()
+        existing_seccomp_helpers = [path for path in seccomp_helper_paths if path.exists()]
+        claude_cli_installed = (
+            self.resolve_managed_engine_command("claude") is not None
+            or bool(existing_seccomp_helpers)
+        )
+        repaired_helpers: list[Path] = []
+        repair_errors: list[str] = []
+        if claude_cli_installed:
+            repaired_helpers, repair_errors = self._repair_claude_seccomp_helpers()
+            existing_seccomp_helpers = [path for path in seccomp_helper_paths if path.exists()]
+        seccomp_helpers_ready = (not claude_cli_installed) or (
+            bool(existing_seccomp_helpers)
+            and all(os.access(path, os.X_OK) for path in existing_seccomp_helpers)
+        )
         dependency_checks = {
             "bubblewrap": self._resolve_command_any(("bwrap", "bubblewrap"))
             is not None,
             "socat": self._resolve_command_any(("socat",)) is not None,
+            "claude_seccomp_helper": seccomp_helpers_ready,
         }
         missing_dependencies = [
-            name for name, present in dependency_checks.items() if not present
+            name
+            for name, present in dependency_checks.items()
+            if not present and name != "claude_seccomp_helper"
         ]
         checked_at = _utc_now_iso()
         if missing_dependencies:
@@ -857,6 +929,33 @@ class AgentCliManager:
                 ),
                 dependencies=dependency_checks,
                 missing_dependencies=missing_dependencies,
+                checked_at=checked_at,
+                probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
+            )
+
+        if not seccomp_helpers_ready:
+            if not existing_seccomp_helpers:
+                helper_detail = "missing vendor/seccomp/apply-seccomp helper"
+            elif repair_errors:
+                helper_detail = repair_errors[0]
+            else:
+                helper_detail = f"{existing_seccomp_helpers[0]} is not executable"
+            if repaired_helpers:
+                helper_detail = (
+                    f"{helper_detail}; attempted self-heal for "
+                    + ", ".join(str(path) for path in repaired_helpers)
+                )
+            return ClaudeSandboxProbeResult(
+                declared_enabled=True,
+                available=False,
+                status="unavailable",
+                warning_code=CLAUDE_SANDBOX_RUNTIME_UNAVAILABLE,
+                message=(
+                    "Claude sandbox runtime unavailable: "
+                    f"{helper_detail}. Headless runs will disable Claude sandbox."
+                ),
+                dependencies=dependency_checks,
+                missing_dependencies=[],
                 checked_at=checked_at,
                 probe_kind=CLAUDE_SANDBOX_PROBE_KIND,
             )

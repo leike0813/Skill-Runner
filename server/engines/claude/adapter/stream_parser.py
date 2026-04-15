@@ -81,11 +81,25 @@ class ClaudeStreamParser:
                     if isinstance(text_obj, str) and text_obj.strip():
                         return "assistant_message"
             return None
-        if payload_type == "result":
-            text_obj = payload.get("result")
-            if isinstance(text_obj, str) and text_obj.strip():
-                return "assistant_message"
         return None
+
+    @staticmethod
+    def _result_has_structured_output(payload: dict[str, Any]) -> bool:
+        return "structured_output" in payload and payload.get("structured_output") is not None
+
+    @classmethod
+    def _should_emit_result_text_fallback(
+        cls,
+        *,
+        payload: dict[str, Any],
+        assistant_text_seen: bool,
+    ) -> bool:
+        if assistant_text_seen:
+            return False
+        if cls._result_has_structured_output(payload):
+            return False
+        text_obj = payload.get("result")
+        return isinstance(text_obj, str) and bool(text_obj.strip())
 
     @staticmethod
     def _raw_ref(row: dict[str, Any]) -> RuntimeStreamRawRef:
@@ -378,9 +392,10 @@ class ClaudeStreamParser:
         turn_start_raw_ref: RuntimeStreamRawRef | None = None
         turn_complete_raw_ref: RuntimeStreamRawRef | None = None
         consumed_ranges: dict[str, list[tuple[int, int]]] = {"stdout": [], "stderr": [], "pty": []}
+        assistant_text_seen = False
 
         def _collect(rows: list[dict[str, Any]]) -> None:
-            nonlocal session_id, turn_started, turn_completed, turn_complete_data, run_handle, turn_start_raw_ref, turn_complete_raw_ref
+            nonlocal session_id, turn_started, turn_completed, turn_complete_data, run_handle, turn_start_raw_ref, turn_complete_raw_ref, assistant_text_seen
             for row in rows:
                 payload = row.get("payload")
                 if not isinstance(payload, dict):
@@ -425,6 +440,7 @@ class ClaudeStreamParser:
                             elif block_type == "text":
                                 text = block.get("text")
                                 if isinstance(text, str) and text.strip():
+                                    assistant_text_seen = True
                                     self._mark_consumed(consumed_ranges, row_raw_ref)
                                     assistant_messages.append(
                                         {
@@ -471,12 +487,17 @@ class ClaudeStreamParser:
                     if isinstance(subtype_obj, str) and subtype_obj.strip():
                         turn_complete_data["result_subtype"] = subtype_obj.strip()
                     text = payload.get("result")
-                    if isinstance(text, str) and text.strip():
+                    if self._should_emit_result_text_fallback(
+                        payload=payload,
+                        assistant_text_seen=assistant_text_seen,
+                    ) and isinstance(text, str):
+                        assistant_text_seen = True
                         self._mark_consumed(consumed_ranges, row_raw_ref)
                         assistant_messages.append(
                             {
                                 "text": text,
                                 "raw_ref": row_raw_ref,
+                                "details": {"source": "claude_result_fallback"},
                             }
                         )
                     self._mark_consumed(consumed_ranges, row_raw_ref)
@@ -562,6 +583,7 @@ class _ClaudeLiveSession(NdjsonLiveStreamParserSession):
         self._run_handle_emitted = False
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
+        self._assistant_text_seen = False
         self._tool_use_by_id: dict[str, dict[str, Any]] = {}
 
     def handle_live_row(
@@ -634,6 +656,7 @@ class _ClaudeLiveSession(NdjsonLiveStreamParserSession):
                     elif block_type == "text":
                         text = block.get("text")
                         if isinstance(text, str) and text.strip():
+                            self._assistant_text_seen = True
                             emission: LiveParserEmission = {
                                 "kind": "assistant_message",
                                 "text": text,
@@ -703,10 +726,15 @@ class _ClaudeLiveSession(NdjsonLiveStreamParserSession):
         if payload_type == "result" and not self._turn_complete_emitted:
             self._turn_complete_emitted = True
             text = payload.get("result")
-            if isinstance(text, str) and text.strip():
+            if self._parser._should_emit_result_text_fallback(  # noqa: SLF001
+                payload=payload,
+                assistant_text_seen=self._assistant_text_seen,
+            ) and isinstance(text, str):
+                self._assistant_text_seen = True
                 result_message_emission: LiveParserEmission = {
                     "kind": "assistant_message",
                     "text": text,
+                    "details": {"source": "claude_result_fallback"},
                     "raw_ref": raw_ref,
                 }
                 if payload_session_id:

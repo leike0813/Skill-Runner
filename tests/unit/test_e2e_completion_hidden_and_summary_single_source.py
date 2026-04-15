@@ -10,7 +10,10 @@ def test_completion_event_does_not_render_chat_bubble() -> None:
     assert '/api/runs/${requestId}/chat/history' in content
     assert 'stream.addEventListener("chat_event"' in content
     assert 'appendChatBubble("agent", "任务已完成。"' not in content
-    assert "await maybeAppendFinalSummary();" in content
+    assert "maybeAppendFinalSummary" not in content
+    assert 'id="final-summary-card"' in content
+    assert "renderFinalSummaryCard(currentStatus);" in content
+    assert 'id="final-summary-status"' in content
 
 
 def test_agent_messages_are_not_filtered_by_legacy_done_message_guard() -> None:

@@ -66,8 +66,6 @@ def _write_canonical_interactive_schema(run_dir: Path) -> str:
 def test_noop_engine_passthrough_keeps_canonical_artifacts_and_payload(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     relpath = _write_canonical_interactive_schema(run_dir)
-    summary_relpath = ".audit/contracts/target_output_schema.md"
-    (run_dir / summary_relpath).write_text("canonical summary", encoding="utf-8")
 
     artifacts = structured_output_pipeline.resolve_artifacts(
         engine_name="gemini",
@@ -75,13 +73,13 @@ def test_noop_engine_passthrough_keeps_canonical_artifacts_and_payload(tmp_path:
         options={
             "execution_mode": "interactive",
             "__target_output_schema_relpath": relpath,
-            "__target_output_schema_summary_relpath": summary_relpath,
         },
     )
 
     assert artifacts.effective_schema_relpath == relpath
-    assert artifacts.effective_summary_relpath == summary_relpath
-    assert artifacts.effective_summary_markdown == "canonical summary"
+    assert "### Output Contract Details" in artifacts.effective_prompt_contract_markdown
+    assert "#### Final Branch Contract" in artifacts.effective_prompt_contract_markdown
+    assert "#### Pending Branch Contract" in artifacts.effective_prompt_contract_markdown
 
     payload = {"__SKILL_DONE__": True, "value": "ok"}
     assert (
@@ -106,7 +104,6 @@ def test_codex_compat_translation_materializes_engine_specific_artifacts(tmp_pat
     )
 
     assert artifacts.effective_schema_relpath == ".audit/contracts/target_output_schema.codex_compatible.json"
-    assert artifacts.effective_summary_relpath == ".audit/contracts/target_output_schema.codex_compatible.md"
     compat_schema = json.loads(artifacts.effective_schema_path.read_text(encoding="utf-8"))
 
     assert compat_schema["type"] == "object"
@@ -121,10 +118,18 @@ def test_codex_compat_translation_materializes_engine_specific_artifacts(tmp_pat
     assert ui_hints_schema["type"] == "object"
     assert ui_hints_schema["additionalProperties"] is False
 
-    summary = artifacts.effective_summary_markdown
+    summary = artifacts.effective_prompt_contract_markdown
     assert "Codex structured output compatibility contract" in summary
+    assert "#### Engine Compatibility Notes" in summary
     assert "Inactive branch fields must be explicit `null` values." in summary
     assert "Pending branch example" in summary
+    assert summary.index("#### Final Branch Contract") < summary.index("#### Pending Branch Contract")
+    assert '"value": "..."' in summary
+    assert '"report_path": "artifacts/..."' in summary
+    assert '"message": null' in summary
+    assert '"value": null' in summary
+    assert '"report_path": null' in summary
+    assert "\n\n\n#### Final Branch Example" not in summary
 
 
 def test_codex_payload_canonicalizer_projects_compat_final_shape_back_to_canonical(tmp_path: Path) -> None:

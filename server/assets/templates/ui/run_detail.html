@@ -217,6 +217,107 @@
             overflow-wrap: anywhere;
             word-break: break-word;
         }
+        .chat-event-entry {
+            cursor: pointer;
+            transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+        }
+        .chat-item.chat-event-entry:hover {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+        }
+        .chat-item.user.chat-event-entry:hover {
+            background: #dff4e8;
+            border-color: #bbdcc9;
+        }
+        .chat-item.system.chat-event-entry:hover {
+            background: #e5e7eb;
+            border-color: #d1d5db;
+        }
+        .chat-item.thinking.chat-event-entry:hover {
+            background: #dbeafe;
+            border-color: #93c5fd;
+        }
+        .chat-plain-entry.chat-event-entry:hover {
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+        .chat-plain-entry.user.chat-event-entry:hover {
+            background: #eef9f2;
+        }
+        .chat-plain-entry.system.chat-event-entry:hover {
+            background: #f3f4f6;
+        }
+        .chat-event-entry:focus-visible {
+            outline: 2px solid #0f766e;
+            outline-offset: 2px;
+        }
+        .chat-entry-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .event-inspector-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.28);
+            z-index: 70;
+        }
+        .event-inspector-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: min(480px, 92vw);
+            height: 100vh;
+            background: #ffffff;
+            border-left: 1px solid #d1d5db;
+            box-shadow: -12px 0 32px rgba(15, 23, 42, 0.18);
+            z-index: 71;
+            display: flex;
+            flex-direction: column;
+        }
+        .event-inspector-drawer.hidden,
+        .event-inspector-backdrop.hidden {
+            display: none;
+        }
+        .event-inspector-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 18px 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .event-inspector-body {
+            padding: 14px 18px 18px;
+            overflow: auto;
+            display: grid;
+            gap: 12px;
+        }
+        .event-inspector-section {
+            display: grid;
+            gap: 6px;
+        }
+        .event-inspector-section h4 {
+            margin: 0;
+            font-size: 13px;
+            color: #111827;
+        }
+        .event-inspector-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px 12px;
+            font-size: 12px;
+            color: #374151;
+        }
+        .event-inspector-meta code {
+            font-size: 11px;
+        }
+        .event-inspector-json {
+            max-height: 52vh;
+            overflow: auto;
+        }
         .stderr-window {
             max-height: 220px;
             overflow: auto;
@@ -325,11 +426,6 @@
             background: #f1f5f9;
             color: #334155;
             border: 1px solid #e2e8f0;
-        }
-        .protocol-bubble-detail {
-            padding: 8px;
-            border-top: 1px solid #e5e7eb;
-            background: #f8fafc;
         }
         .protocol-detail-title {
             font-size: 12px;
@@ -498,18 +594,6 @@
             line-height: 1.45;
             word-break: break-word;
         }
-        .timeline-detail {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #e2e8f0;
-        }
-        .timeline-detail-json {
-            margin: 6px 0 0;
-            font-size: 11px;
-            white-space: pre-wrap;
-            word-break: break-word;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        }
         .timeline-actions {
             display: flex;
             justify-content: flex-end;
@@ -617,6 +701,32 @@
         </div>
     </div>
 
+    <div id="event-inspector-backdrop" class="event-inspector-backdrop hidden"></div>
+    <aside id="event-inspector-drawer" class="event-inspector-drawer hidden" aria-hidden="true">
+        <div class="event-inspector-header">
+            <div>
+                <h3 style="margin:0 0 4px;">{{ t("ui.run_detail.event_inspector_title", default="Event Inspector") }}</h3>
+                <div class="meta" id="event-inspector-subtitle" style="margin:0;">{{ t("ui.run_detail.event_inspector_subtitle", default="Raw event envelope") }}</div>
+            </div>
+            <button id="event-inspector-close-btn" type="button">{{ t("ui.run_detail.event_inspector_close", default="Close") }}</button>
+        </div>
+        <div class="event-inspector-body">
+            <div class="event-inspector-section">
+                <h4>{{ t("ui.run_detail.event_inspector_meta", default="Meta") }}</h4>
+                <div id="event-inspector-meta" class="event-inspector-meta"></div>
+            </div>
+            <div class="event-inspector-section">
+                <h4>{{ t("ui.run_detail.event_inspector_correlation", default="Correlation") }}</h4>
+                <div id="event-inspector-correlation" class="meta"></div>
+                <div id="event-inspector-actions" class="chat-entry-actions"></div>
+            </div>
+            <div class="event-inspector-section">
+                <h4>{{ t("ui.run_detail.event_inspector_json", default="Event Envelope") }}</h4>
+                <pre id="event-inspector-json" class="protocol-detail-json event-inspector-json"></pre>
+            </div>
+        </div>
+    </aside>
+
     <div class="card">
         <div class="meta" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <strong>{{ t("ui.run_detail.attempt", default="Attempt:") }}</strong>
@@ -704,6 +814,12 @@
 {% block extra_scripts %}
 <script src="/static/js/file_explorer.js"></script>
 <script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
+<link rel="stylesheet" href="/static/css/chat_markdown.css?v=20260415a">
+<script src="/static/vendor/markdown-it/markdown-it.min.js"></script>
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/markdown-it-texmath/texmath.min.js"></script>
+<script src="/static/js/chat_markdown.js?v=20260415a"></script>
 <script>
 (function () {
     function createCompatibleThinkingChatModel(initialMode) {
@@ -744,7 +860,6 @@
         rawRefLabel: {{ t("ui.run_detail.raw_ref_label", default="raw_ref") | tojson }},
         viewRawToggle: {{ t("ui.run_detail.view_raw_toggle", default="View raw") | tojson }},
         protocolEmpty: {{ t("ui.run_detail.protocol_empty", default="No events") | tojson }},
-        protocolDetailTitle: {{ t("ui.run_detail.protocol_detail_title", default="Event details") | tojson }},
         protocolTagToolOutput: {{ t("ui.run_detail.protocol_tag_tool_output", default="tool-output") | tojson }},
         protocolTagLifecycle: {{ t("ui.run_detail.protocol_tag_lifecycle", default="lifecycle") | tojson }},
         protocolTagInteraction: {{ t("ui.run_detail.protocol_tag_interaction", default="interaction") | tojson }},
@@ -779,11 +894,17 @@
         timelineLoading: {{ t("ui.run_detail.timeline_loading", default="Loading timeline...") | tojson }},
         timelineEmpty: {{ t("ui.run_detail.timeline_empty", default="No timeline events") | tojson }},
         timelineLoadMore: {{ t("ui.run_detail.timeline_load_more", default="Load earlier") | tojson }},
-        timelineDetailTitle: {{ t("ui.run_detail.timeline_detail_title", default="Details") | tojson }},
         timelineReadFailed: {{ t("ui.run_detail.timeline_read_failed", default="Timeline refresh failed") | tojson }},
         rebuildProtocolRunning: {{ t("ui.run_detail.rebuild_protocol_running", default="Rebuilding protocol...") | tojson }},
         rebuildProtocolFailed: {{ t("ui.run_detail.rebuild_protocol_failed", default="Protocol rebuild failed") | tojson }},
         rebuildProtocolDone: {{ t("ui.run_detail.rebuild_protocol_done", default="Protocol rebuild finished") | tojson }},
+        eventInspectorViewEvent: {{ t("ui.run_detail.event_inspector_view_event", default="View event") | tojson }},
+        eventInspectorEmptyCorrelation: {{ t("ui.run_detail.event_inspector_empty_correlation", default="No correlation metadata") | tojson }},
+        eventInspectorSourceChat: {{ t("ui.run_detail.event_inspector_source_chat", default="Chat history") | tojson }},
+        eventInspectorSourceFcmp: {{ t("ui.run_detail.event_inspector_source_fcmp", default="FCMP stream") | tojson }},
+        eventInspectorSourceRasp: {{ t("ui.run_detail.event_inspector_source_rasp", default="RASP stream") | tojson }},
+        eventInspectorSourceOrchestrator: {{ t("ui.run_detail.event_inspector_source_orchestrator", default="Orchestrator stream") | tojson }},
+        eventInspectorSourceTimeline: {{ t("ui.run_detail.event_inspector_source_timeline", default="Run timeline") | tojson }},
     };
     const requestId = {{ detail.request_id | tojson }};
     const statusEl = document.getElementById("run-status");
@@ -806,6 +927,14 @@
     const timelineLoadMoreBtn = document.getElementById("timeline-load-more-btn");
     const timelineCountEl = document.getElementById("timeline-count");
     const rawRefPreviewEl = document.getElementById("raw-ref-preview");
+    const eventInspectorBackdropEl = document.getElementById("event-inspector-backdrop");
+    const eventInspectorDrawerEl = document.getElementById("event-inspector-drawer");
+    const eventInspectorCloseBtn = document.getElementById("event-inspector-close-btn");
+    const eventInspectorSubtitleEl = document.getElementById("event-inspector-subtitle");
+    const eventInspectorMetaEl = document.getElementById("event-inspector-meta");
+    const eventInspectorCorrelationEl = document.getElementById("event-inspector-correlation");
+    const eventInspectorActionsEl = document.getElementById("event-inspector-actions");
+    const eventInspectorJsonEl = document.getElementById("event-inspector-json");
     const runFileTreePanelEl = document.getElementById("run-file-tree-panel");
     const runFilePreviewEl = document.getElementById("run-file-preview");
     const fcmpAuditEl = document.getElementById("fcmp-audit-log");
@@ -830,7 +959,6 @@
     const auditCursor = { fcmp: 0, rasp: 0, orchestrator: 0 };
     const protocolRows = { fcmp: [], rasp: [], orchestrator: [] };
     const protocolRawMode = { fcmp: false, rasp: false, orchestrator: false };
-    const protocolExpandedRowKey = { fcmp: null, rasp: null, orchestrator: null };
     const protocolAutoFollow = { fcmp: true, rasp: true, orchestrator: true };
     const protocolRequestInFlight = { fcmp: false, rasp: false, orchestrator: false };
     let timelineRequestInFlight = false;
@@ -858,9 +986,9 @@
     let timelineCursor = 0;
     let timelineCeiling = 0;
     let timelineRenderLimit = 100;
-    let timelineExpandedKey = null;
     const timelineRows = [];
     const timelineBySeq = new Map();
+    let activeInspectorSelection = null;
     let runFileExplorer = null;
     let runFileTreeRefreshInFlight = false;
     let lastTerminalErrorMessage = {{ (
@@ -873,6 +1001,38 @@
 
     function safeText(value) {
         return typeof value === "string" ? value : "";
+    }
+
+    const chatMarkdownRenderer = window.SkillRunnerChatMarkdown
+        && typeof window.SkillRunnerChatMarkdown.createRenderer === "function"
+        ? window.SkillRunnerChatMarkdown.createRenderer()
+        : null;
+
+    function escapeHtml(text) {
+        return safeText(text)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function renderMarkdown(text) {
+        const normalized = safeText(text);
+        if (!normalized) return "";
+        if (chatMarkdownRenderer) {
+            return chatMarkdownRenderer.render(normalized);
+        }
+        return `<p>${escapeHtml(normalized).replace(/\n/g, "<br>")}</p>`;
+    }
+
+    function renderMarkdownInto(element, text) {
+        if (!(element instanceof HTMLElement)) return;
+        if (chatMarkdownRenderer) {
+            chatMarkdownRenderer.renderInto(element, text, { className: "chat-markdown" });
+            return;
+        }
+        element.textContent = safeText(text);
     }
 
     function updateStderrIndicator() {
@@ -1162,6 +1322,14 @@
         }
     }
 
+    function isActiveInspectorSelection(sourceKind, itemKey) {
+        return Boolean(
+            activeInspectorSelection
+            && activeInspectorSelection.sourceKind === sourceKind
+            && activeInspectorSelection.itemKey === itemKey
+        );
+    }
+
     function renderTimeline() {
         if (!timelineEventsEl) return;
         if (!timelineRows.length) {
@@ -1209,10 +1377,10 @@
                     rowEl.appendChild(cell);
                     continue;
                 }
-                const expanded = timelineExpandedKey === rowKey;
+                const selected = isActiveInspectorSelection("timeline", rowKey);
                 const bubble = document.createElement("button");
                 bubble.type = "button";
-                bubble.className = `timeline-bubble${expanded ? " open" : ""}`;
+                bubble.className = `timeline-bubble${selected ? " open" : ""}`;
                 const meta = document.createElement("div");
                 meta.className = "timeline-bubble-meta";
                 const seq = Number(event.timeline_seq);
@@ -1224,45 +1392,8 @@
                 bubble.appendChild(meta);
                 bubble.appendChild(summary);
                 bubble.addEventListener("click", () => {
-                    timelineExpandedKey = expanded ? null : rowKey;
-                    renderTimeline();
+                    openEventInspector(event, "timeline", { itemKey: rowKey });
                 });
-
-                if (expanded) {
-                    const detail = document.createElement("div");
-                    detail.className = "timeline-detail";
-                    const detailTitle = document.createElement("div");
-                    detailTitle.className = "protocol-detail-title";
-                    detailTitle.textContent = I18N.timelineDetailTitle;
-                    detail.appendChild(detailTitle);
-                    const attempt = Number(event.attempt);
-                    const attemptText = Number.isFinite(attempt) && attempt > 0 ? String(Math.floor(attempt)) : "-";
-                    const detailMeta = document.createElement("div");
-                    detailMeta.className = "protocol-detail-kv";
-                    detailMeta.textContent = `attempt=${attemptText} | source=${safeText(event.source_stream)}`;
-                    detail.appendChild(detailMeta);
-                    const rawRef = extractRawRef(event);
-                    if (rawRef) {
-                        const refLine = document.createElement("div");
-                        refLine.className = "meta";
-                        const btn = document.createElement("button");
-                        btn.className = "link-btn";
-                        btn.type = "button";
-                        btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-                        btn.addEventListener("click", (domEvent) => {
-                            domEvent.preventDefault();
-                            domEvent.stopPropagation();
-                            previewRawRef(rawRef);
-                        });
-                        refLine.appendChild(btn);
-                        detail.appendChild(refLine);
-                    }
-                    const detailJson = document.createElement("pre");
-                    detailJson.className = "timeline-detail-json";
-                    detailJson.textContent = JSON.stringify(event.details || {}, null, 2);
-                    detail.appendChild(detailJson);
-                    bubble.appendChild(detail);
-                }
 
                 cell.appendChild(bubble);
                 rowEl.appendChild(cell);
@@ -1429,32 +1560,6 @@
         }
     }
 
-    function buildProtocolDetailKv(row) {
-        const details = [];
-        const type = protocolType(row);
-        details.push(`type: ${type}`);
-        details.push(`category: ${protocolCategory(row)}`);
-        if (typeof row?.ts === "string" && row.ts) {
-            details.push(`ts: ${row.ts}`);
-        }
-        const source = protocolSource(row);
-        if (typeof source.engine === "string" && source.engine) {
-            details.push(`source.engine: ${source.engine}`);
-        }
-        if (typeof source.parser === "string" && source.parser) {
-            details.push(`source.parser: ${source.parser}`);
-        }
-        const data = protocolData(row);
-        for (const key of ["status", "code", "from", "to", "interaction_id", "attempt_number"]) {
-            const value = data[key] ?? row?.[key];
-            if (value === null || value === undefined) continue;
-            if (typeof value === "string" && !value.trim()) continue;
-            details.push(`${key}: ${String(value)}`);
-            if (details.length >= 10) break;
-        }
-        return details;
-    }
-
     function renderProtocolRows(streamName, targetEl) {
         const rows = Array.isArray(protocolRows[streamName]) ? protocolRows[streamName] : [];
         const shouldStickToBottom = protocolAutoFollow[streamName] || isNearBottom(targetEl);
@@ -1479,10 +1584,10 @@
             const bubble = document.createElement("div");
             bubble.className = "protocol-bubble";
             const rowKey = protocolRowKey(row, idx);
-            const expanded = protocolExpandedRowKey[streamName] === rowKey;
+            const selected = isActiveInspectorSelection(streamName, rowKey);
             const header = document.createElement("button");
             header.type = "button";
-            header.className = `protocol-bubble-header${expanded ? " open" : ""}`;
+            header.className = `protocol-bubble-header${selected ? " open" : ""}`;
             const meta = document.createElement("div");
             meta.className = "protocol-bubble-meta";
             const seq = Number(row && row.seq);
@@ -1512,43 +1617,9 @@
                 header.appendChild(tags);
             }
             header.addEventListener("click", () => {
-                protocolExpandedRowKey[streamName] = expanded ? null : rowKey;
-                renderProtocolRows(streamName, targetEl);
+                openEventInspector(row, streamName, { itemKey: rowKey });
             });
             bubble.appendChild(header);
-            if (expanded) {
-                const detail = document.createElement("div");
-                detail.className = "protocol-bubble-detail";
-                const detailTitle = document.createElement("div");
-                detailTitle.className = "protocol-detail-title";
-                detailTitle.textContent = I18N.protocolDetailTitle;
-                detail.appendChild(detailTitle);
-                const kv = document.createElement("div");
-                kv.className = "protocol-detail-kv";
-                kv.textContent = buildProtocolDetailKv(row).join(" | ");
-                detail.appendChild(kv);
-                const rawRef = extractProtocolRawRef(row);
-                if (rawRef) {
-                    const refLine = document.createElement("div");
-                    refLine.className = "meta";
-                    const btn = document.createElement("button");
-                    btn.className = "link-btn";
-                    btn.type = "button";
-                    btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-                    btn.addEventListener("click", (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        previewRawRef(rawRef);
-                    });
-                    refLine.appendChild(btn);
-                    detail.appendChild(refLine);
-                }
-                const jsonPre = document.createElement("pre");
-                jsonPre.className = "protocol-detail-json";
-                jsonPre.textContent = JSON.stringify(row, null, 2);
-                detail.appendChild(jsonPre);
-                bubble.appendChild(detail);
-            }
             fragment.appendChild(bubble);
         }
         targetEl.appendChild(fragment);
@@ -1649,9 +1720,230 @@
         rawRefPreviewEl.textContent = `${payload.stream}[${payload.byte_from}, ${payload.byte_to}]\n\n${payload.chunk || ""}`;
     }
 
+    function createRawRefButton(rawRef, extraHandler = null) {
+        if (!rawRef) return null;
+        const btn = document.createElement("button");
+        btn.className = "link-btn";
+        btn.type = "button";
+        btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof extraHandler === "function") {
+                extraHandler();
+            }
+            previewRawRef(rawRef);
+        });
+        return btn;
+    }
+
+    function eventInspectorSourceLabel(sourceKind) {
+        switch (sourceKind) {
+            case "fcmp":
+                return I18N.eventInspectorSourceFcmp;
+            case "rasp":
+                return I18N.eventInspectorSourceRasp;
+            case "orchestrator":
+                return I18N.eventInspectorSourceOrchestrator;
+            case "timeline":
+                return I18N.eventInspectorSourceTimeline;
+            case "chat":
+            default:
+                return I18N.eventInspectorSourceChat;
+        }
+    }
+
+    function extractEventInspectorCorrelation(payload) {
+        if (!payload || typeof payload !== "object") return null;
+        if (payload.correlation && typeof payload.correlation === "object") {
+            return payload.correlation;
+        }
+        if (payload.details && typeof payload.details === "object" && payload.details.correlation && typeof payload.details.correlation === "object") {
+            return payload.details.correlation;
+        }
+        return null;
+    }
+
+    function eventInspectorAttempt(payload, sourceKind) {
+        if (sourceKind === "chat") {
+            return eventAttempt(payload);
+        }
+        const attempt = Number(payload && (payload.attempt || payload.attempt_number || payload?.data?.attempt_number));
+        return Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : currentAttempt;
+    }
+
+    function eventInspectorSeq(payload) {
+        const seq = Number(payload && (payload.seq || payload.timeline_seq));
+        return Number.isFinite(seq) && seq > 0 ? String(Math.floor(seq)) : "-";
+    }
+
+    function eventInspectorType(payload, sourceKind) {
+        if (sourceKind === "chat") {
+            return safeText(payload && payload.kind) || "-";
+        }
+        if (sourceKind === "timeline") {
+            return safeText(payload && payload.kind) || "-";
+        }
+        return protocolType(payload);
+    }
+
+    function eventInspectorCreatedAt(payload, sourceKind) {
+        if (sourceKind === "chat") {
+            return formatDateTime(safeText(payload && payload.created_at));
+        }
+        return formatDateTime(safeText(payload && payload.ts));
+    }
+
+    function eventInspectorRawRef(payload, sourceKind) {
+        if (sourceKind === "chat" || sourceKind === "timeline") {
+            return extractRawRef(payload);
+        }
+        return extractProtocolRawRef(payload);
+    }
+
+    function refreshEventInspectorSelectionState() {
+        renderProtocolRows("fcmp", fcmpAuditEl);
+        renderProtocolRows("rasp", raspAuditEl);
+        renderProtocolRows("orchestrator", orchestratorAuditEl);
+        if (!timelineCollapsed) {
+            renderTimeline();
+        }
+    }
+
+    function closeEventInspector() {
+        const hadSelection = activeInspectorSelection !== null;
+        activeInspectorSelection = null;
+        if (eventInspectorDrawerEl) {
+            eventInspectorDrawerEl.classList.add("hidden");
+            eventInspectorDrawerEl.setAttribute("aria-hidden", "true");
+        }
+        if (eventInspectorBackdropEl) {
+            eventInspectorBackdropEl.classList.add("hidden");
+        }
+        if (hadSelection) {
+            refreshEventInspectorSelectionState();
+        }
+    }
+
+    function openEventInspector(payload, sourceKind, options = {}) {
+        if (!payload || typeof payload !== "object") return;
+        const previousSelection = activeInspectorSelection;
+        activeInspectorSelection = {
+            sourceKind,
+            itemKey: safeText(options.itemKey),
+        };
+        if (eventInspectorSubtitleEl) {
+            eventInspectorSubtitleEl.textContent = eventInspectorSourceLabel(sourceKind);
+        }
+        if (eventInspectorMetaEl) {
+            const meta = [
+                ["source", eventInspectorSourceLabel(sourceKind)],
+                ["type", eventInspectorType(payload, sourceKind)],
+                ["seq", eventInspectorSeq(payload)],
+                ["attempt", String(eventInspectorAttempt(payload, sourceKind))],
+                ["created_at", eventInspectorCreatedAt(payload, sourceKind)],
+            ];
+            eventInspectorMetaEl.textContent = "";
+            for (const [key, value] of meta) {
+                const item = document.createElement("div");
+                item.innerHTML = `<strong>${escapeHtml(key)}:</strong> <code>${escapeHtml(value || "-")}</code>`;
+                eventInspectorMetaEl.appendChild(item);
+            }
+        }
+        if (eventInspectorCorrelationEl) {
+            const correlation = extractEventInspectorCorrelation(payload);
+            if (correlation && Object.keys(correlation).length) {
+                const summary = [];
+                for (const key of ["message_id", "replaces_message_id", "fcmp_seq", "process_type", "classification"]) {
+                    const value = correlation[key];
+                    if (typeof value === "string" && value) {
+                        summary.push(`${key}=${value}`);
+                    } else if (typeof value === "number" && Number.isFinite(value)) {
+                        summary.push(`${key}=${String(value)}`);
+                    }
+                }
+                eventInspectorCorrelationEl.textContent = summary.length
+                    ? summary.join(" · ")
+                    : JSON.stringify(correlation, null, 2);
+            } else {
+                eventInspectorCorrelationEl.textContent = I18N.eventInspectorEmptyCorrelation;
+            }
+        }
+        if (eventInspectorActionsEl) {
+            eventInspectorActionsEl.textContent = "";
+            const rawRefBtn = createRawRefButton(eventInspectorRawRef(payload, sourceKind));
+            if (rawRefBtn) {
+                eventInspectorActionsEl.appendChild(rawRefBtn);
+            }
+        }
+        if (eventInspectorJsonEl) {
+            eventInspectorJsonEl.textContent = JSON.stringify(payload, null, 2);
+        }
+        if (eventInspectorBackdropEl) {
+            eventInspectorBackdropEl.classList.remove("hidden");
+        }
+        if (eventInspectorDrawerEl) {
+            eventInspectorDrawerEl.classList.remove("hidden");
+            eventInspectorDrawerEl.setAttribute("aria-hidden", "false");
+        }
+        const sourceNeedsSelectionRefresh = sourceKind === "fcmp" || sourceKind === "rasp" || sourceKind === "orchestrator" || sourceKind === "timeline";
+        const previousNeedsSelectionRefresh = Boolean(
+            previousSelection
+            && (
+                previousSelection.sourceKind === "fcmp"
+                || previousSelection.sourceKind === "rasp"
+                || previousSelection.sourceKind === "orchestrator"
+                || previousSelection.sourceKind === "timeline"
+            )
+        );
+        if (sourceNeedsSelectionRefresh || previousNeedsSelectionRefresh) {
+            refreshEventInspectorSelectionState();
+        }
+    }
+
+    function attachEventInspectorTrigger(target, eventPayload) {
+        if (!(target instanceof HTMLElement) || !eventPayload || typeof eventPayload !== "object") return;
+        target.classList.add("chat-event-entry");
+        target.setAttribute("role", "button");
+        target.setAttribute("tabindex", "0");
+        const open = (domEvent) => {
+            if (domEvent && domEvent.target instanceof HTMLElement) {
+                if (domEvent.target.closest("button, a")) {
+                    return;
+                }
+            }
+            openEventInspector(eventPayload, "chat");
+        };
+        target.addEventListener("click", open);
+        target.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openEventInspector(eventPayload, "chat");
+            }
+        });
+    }
+
+    function createEventInspectorButton(eventPayload) {
+        if (!eventPayload || typeof eventPayload !== "object") return null;
+        const btn = document.createElement("button");
+        btn.className = "link-btn";
+        btn.type = "button";
+        btn.textContent = I18N.eventInspectorViewEvent;
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openEventInspector(eventPayload, "chat");
+        });
+        return btn;
+    }
+
     function eventAttempt(event) {
-        const attemptObj = event && event.meta && event.meta.attempt;
-        const attempt = Number(attemptObj || event?.data?.attempt_number || 0);
+        const attemptObj = event && (
+            event.attempt
+            || (event.meta && event.meta.attempt)
+            || (event.data && event.data.attempt_number)
+        );
+        const attempt = Number(attemptObj || 0);
         return Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : currentAttempt;
     }
 
@@ -1712,56 +2004,64 @@
                 if (mode === "plain") {
                     const item = document.createElement("div");
                     item.className = `chat-plain-entry${role === "system" ? " system" : role === "user" ? " user" : ""}`;
+                    attachEventInspectorTrigger(item, event);
                     const title = document.createElement("span");
                     title.className = "chat-plain-role";
                     title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
                     item.appendChild(title);
                     const body = document.createElement("div");
                     body.className = "chat-plain-body";
-                    body.textContent = text || "";
+                    renderMarkdownInto(body, text || "");
                     item.appendChild(body);
                     const meta = document.createElement("div");
                     meta.className = "chat-plain-meta";
                     meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
                     item.appendChild(meta);
+                    const actions = document.createElement("div");
+                    actions.className = "chat-entry-actions";
                     if (rawRef) {
                         const refMeta = document.createElement("div");
                         refMeta.className = "chat-plain-meta";
-                        const btn = document.createElement("button");
-                        btn.className = "link-btn";
-                        btn.type = "button";
-                        btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-                        btn.addEventListener("click", () => previewRawRef(rawRef));
-                        refMeta.appendChild(btn);
-                        item.appendChild(refMeta);
+                        const btn = createRawRefButton(rawRef);
+                        if (btn) {
+                            refMeta.appendChild(btn);
+                            actions.appendChild(refMeta);
+                        }
+                    }
+                    if (actions.childNodes.length) {
+                        item.appendChild(actions);
                     }
                     stdoutEl.appendChild(item);
                     continue;
                 }
                 const item = document.createElement("div");
                 item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
+                attachEventInspectorTrigger(item, event);
                 const header = document.createElement("div");
                 const title = document.createElement("strong");
                 title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
                 header.appendChild(title);
                 item.appendChild(header);
-                const pre = document.createElement("pre");
-                pre.textContent = text || "";
-                item.appendChild(pre);
+                const content = document.createElement("div");
+                renderMarkdownInto(content, text || "");
+                item.appendChild(content);
                 const meta = document.createElement("div");
                 meta.className = "meta";
                 meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
                 item.appendChild(meta);
+                const actions = document.createElement("div");
+                actions.className = "chat-entry-actions";
                 if (rawRef) {
                     const refMeta = document.createElement("div");
                     refMeta.className = "meta";
-                    const btn = document.createElement("button");
-                    btn.className = "link-btn";
-                    btn.type = "button";
-                    btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-                    btn.addEventListener("click", () => previewRawRef(rawRef));
-                    refMeta.appendChild(btn);
-                    item.appendChild(refMeta);
+                    const btn = createRawRefButton(rawRef);
+                    if (btn) {
+                        refMeta.appendChild(btn);
+                        actions.appendChild(refMeta);
+                    }
+                }
+                if (actions.childNodes.length) {
+                    item.appendChild(actions);
                 }
                 stdoutEl.appendChild(item);
                 continue;
@@ -1799,7 +2099,10 @@
                     if (entry.collapsed) {
                         const latestLine = document.createElement("div");
                         latestLine.className = "chat-plain-process-latest";
-                        latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                        renderMarkdownInto(
+                            latestLine,
+                            `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`,
+                        );
                         item.appendChild(latestLine);
                     } else {
                         const list = document.createElement("div");
@@ -1813,8 +2116,21 @@
                             child.appendChild(meta);
                             const body = document.createElement("div");
                             body.className = "chat-plain-process-item-body";
-                            body.textContent = safeText(thinkingItem.text || thinkingItem.summary);
+                            renderMarkdownInto(body, safeText(thinkingItem.text || thinkingItem.summary));
                             child.appendChild(body);
+                            const actions = document.createElement("div");
+                            actions.className = "chat-entry-actions";
+                            const eventBtn = createEventInspectorButton(thinkingItem.sourceEvent);
+                            if (eventBtn) {
+                                actions.appendChild(eventBtn);
+                            }
+                            const rawRefBtn = createRawRefButton(thinkingItem.rawRef);
+                            if (rawRefBtn) {
+                                actions.appendChild(rawRefBtn);
+                            }
+                            if (actions.childNodes.length) {
+                                child.appendChild(actions);
+                            }
                             list.appendChild(child);
                         }
                         item.appendChild(list);
@@ -1867,7 +2183,10 @@
                 if (entry.collapsed) {
                     const latestLine = document.createElement("div");
                     latestLine.className = "chat-thinking-latest";
-                    latestLine.textContent = `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`;
+                    renderMarkdownInto(
+                        latestLine,
+                        `${processTypeLabel(latest.processType)}: ${safeText(latest.text || latest.summary)}`,
+                    );
                     item.appendChild(latestLine);
                 } else {
                     const list = document.createElement("div");
@@ -1881,23 +2200,20 @@
                         child.appendChild(meta);
                         const body = document.createElement("div");
                         body.className = "chat-thinking-item-body";
-                        body.textContent = safeText(thinkingItem.text || thinkingItem.summary);
+                        renderMarkdownInto(body, safeText(thinkingItem.text || thinkingItem.summary));
                         child.appendChild(body);
-                        const rawRef = thinkingItem && typeof thinkingItem.rawRef === "object" ? thinkingItem.rawRef : null;
-                        if (rawRef) {
-                            const refLine = document.createElement("div");
-                            refLine.className = "meta";
-                            const btn = document.createElement("button");
-                            btn.className = "link-btn";
-                            btn.type = "button";
-                            btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-                            btn.addEventListener("click", (event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                previewRawRef(rawRef);
-                            });
-                            refLine.appendChild(btn);
-                            child.appendChild(refLine);
+                        const actions = document.createElement("div");
+                        actions.className = "chat-entry-actions";
+                        const eventBtn = createEventInspectorButton(thinkingItem.sourceEvent);
+                        if (eventBtn) {
+                            actions.appendChild(eventBtn);
+                        }
+                        const rawRefBtn = createRawRefButton(thinkingItem && typeof thinkingItem.rawRef === "object" ? thinkingItem.rawRef : null);
+                        if (rawRefBtn) {
+                            actions.appendChild(rawRefBtn);
+                        }
+                        if (actions.childNodes.length) {
+                            child.appendChild(actions);
                         }
                         list.appendChild(child);
                     }
@@ -1930,30 +2246,31 @@
         }
         const item = document.createElement("div");
         item.className = `chat-item${role === "system" ? " system" : role === "user" ? " user" : ""}`;
+        attachEventInspectorTrigger(item, event);
         const header = document.createElement("div");
         const title = document.createElement("strong");
         title.textContent = role === "assistant" ? I18N.roleAgent : role === "user" ? I18N.roleUser : I18N.roleSystem;
         header.appendChild(title);
         item.appendChild(header);
 
-        const pre = document.createElement("pre");
-        pre.textContent = text || "";
-        item.appendChild(pre);
+        const content = document.createElement("div");
+        renderMarkdownInto(content, text || "");
+        item.appendChild(content);
         const meta = document.createElement("div");
         meta.className = "meta";
         meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
         item.appendChild(meta);
 
+        const actions = document.createElement("div");
+        actions.className = "chat-entry-actions";
         if (rawRef) {
-            const refMeta = document.createElement("div");
-            refMeta.className = "meta";
-            const btn = document.createElement("button");
-            btn.className = "link-btn";
-            btn.type = "button";
-            btn.textContent = `${I18N.rawRefLabel} a${rawRef.attempt_number} ${rawRef.stream}[${rawRef.byte_from}, ${rawRef.byte_to}]`;
-            btn.addEventListener("click", () => previewRawRef(rawRef));
-            refMeta.appendChild(btn);
-            item.appendChild(refMeta);
+            const btn = createRawRefButton(rawRef);
+            if (btn) {
+                actions.appendChild(btn);
+            }
+        }
+        if (actions.childNodes.length) {
+            item.appendChild(actions);
         }
         stdoutEl.appendChild(item);
         stdoutEl.scrollTop = stdoutEl.scrollHeight;
@@ -2339,7 +2656,6 @@
         try {
         targetEl.textContent = "";
         protocolRows[streamName] = [];
-        protocolExpandedRowKey[streamName] = null;
         auditCursor[streamName] = 0;
         const payload = await fetchProtocolHistory(streamName, currentAttempt);
         if (!payload) return;
@@ -2595,6 +2911,17 @@
     if (chatModeBubbleBtn) {
         chatModeBubbleBtn.addEventListener("click", () => setChatDisplayMode("bubble"));
     }
+    if (eventInspectorCloseBtn) {
+        eventInspectorCloseBtn.addEventListener("click", closeEventInspector);
+    }
+    if (eventInspectorBackdropEl) {
+        eventInspectorBackdropEl.addEventListener("click", closeEventInspector);
+    }
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            closeEventInspector();
+        }
+    });
     syncChatModeButtons();
     setStderrCollapsed(true);
     setTimelineCollapsed(true);

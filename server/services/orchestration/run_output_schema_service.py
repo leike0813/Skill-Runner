@@ -12,19 +12,16 @@ import jsonschema  # type: ignore[import-untyped]
 from server.models import SkillManifest
 from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 from server.services.skill.skill_patch_output_schema import (
-    generate_output_schema_patch,
-    render_interactive_pending_contract_markdown,
+    build_interactive_pending_contract_note,
+    build_output_contract_details_markdown,
 )
 
 
 logger = logging.getLogger(__name__)
 
 TARGET_OUTPUT_SCHEMA_RELPATH = ".audit/contracts/target_output_schema.json"
-TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH = ".audit/contracts/target_output_schema.md"
 RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH = "__target_output_schema_relpath"
-RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH = "__target_output_schema_summary_relpath"
 REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH = "target_output_schema_path_first_attempt"
-REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_SUMMARY_PATH = "target_output_schema_summary_path_first_attempt"
 
 
 @dataclass(frozen=True)
@@ -33,9 +30,7 @@ class RunOutputSchemaMaterialization:
     machine_schema: dict[str, Any] | None
     schema_path: Path | None
     schema_relpath: str | None
-    prompt_summary_markdown: str
-    prompt_summary_path: Path | None
-    prompt_summary_relpath: str | None
+    prompt_contract_markdown: str
 
 
 class RunOutputSchemaService:
@@ -55,9 +50,7 @@ class RunOutputSchemaService:
                 machine_schema=None,
                 schema_path=None,
                 schema_relpath=None,
-                prompt_summary_markdown="",
-                prompt_summary_path=None,
-                prompt_summary_relpath=None,
+                prompt_contract_markdown="",
             )
 
         final_schema = self._build_final_wrapper_schema(business_schema)
@@ -66,23 +59,20 @@ class RunOutputSchemaService:
             if self._normalize_execution_mode(execution_mode) == "interactive"
             else final_schema
         )
-        schema_path, summary_path = self._artifact_paths(run_dir)
+        schema_path = self._artifact_path(run_dir)
         schema_path.parent.mkdir(parents=True, exist_ok=True)
         schema_relpath = schema_path.relative_to(run_dir).as_posix()
-        summary_relpath = summary_path.relative_to(run_dir).as_posix()
-        prompt_summary_markdown = self._build_prompt_summary_markdown(
+        prompt_contract_markdown = self.build_prompt_contract_markdown(
             final_schema=final_schema,
             schema_relpath=schema_relpath,
             execution_mode=execution_mode,
         )
 
         self._write_json_atomic(schema_path, machine_schema)
-        self._write_text_atomic(summary_path, prompt_summary_markdown)
         self._append_request_input_audit_fields(
             run_dir=run_dir,
             fields={
                 REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH: schema_relpath,
-                REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_SUMMARY_PATH: summary_relpath,
             },
         )
 
@@ -91,24 +81,18 @@ class RunOutputSchemaService:
             machine_schema=machine_schema,
             schema_path=schema_path,
             schema_relpath=schema_relpath,
-            prompt_summary_markdown=prompt_summary_markdown,
-            prompt_summary_path=summary_path,
-            prompt_summary_relpath=summary_relpath,
+            prompt_contract_markdown=prompt_contract_markdown,
         )
 
     def build_run_option_fields(self, *, run_dir: Path) -> dict[str, str]:
-        schema_path, summary_path = self._artifact_paths(run_dir)
+        schema_path = self._artifact_path(run_dir)
         fields: dict[str, str] = {}
         if schema_path.exists():
             fields[RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH] = schema_path.relative_to(run_dir).as_posix()
-        if summary_path.exists():
-            fields[RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH] = (
-                summary_path.relative_to(run_dir).as_posix()
-            )
         return fields
 
     def load_machine_schema(self, *, run_dir: Path) -> dict[str, Any] | None:
-        schema_path, _summary_path = self._artifact_paths(run_dir)
+        schema_path = self._artifact_path(run_dir)
         if not schema_path.exists():
             return None
         try:
@@ -118,21 +102,29 @@ class RunOutputSchemaService:
             return None
         return payload if isinstance(payload, dict) else None
 
-    def load_prompt_summary(self, *, run_dir: Path) -> str:
-        _schema_path, summary_path = self._artifact_paths(run_dir)
-        if not summary_path.exists():
-            return ""
-        try:
-            return summary_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            logger.warning("Failed to load target output schema summary: %s", summary_path, exc_info=True)
-            return ""
-
     def build_final_wrapper_schema(self, business_schema: dict[str, Any]) -> dict[str, Any]:
         return self._build_final_wrapper_schema(business_schema)
 
     def build_interactive_union_schema(self, final_schema: dict[str, Any]) -> dict[str, Any]:
         return self._build_interactive_union_schema(final_schema)
+
+    def build_prompt_contract_markdown(
+        self,
+        *,
+        final_schema: dict[str, Any],
+        schema_relpath: str,
+        execution_mode: str,
+    ) -> str:
+        pending_branch_note = None
+        if self._normalize_execution_mode(execution_mode) == "interactive":
+            pending_branch_note = build_interactive_pending_contract_note(
+                include_final_example=False
+            )
+        return build_output_contract_details_markdown(
+            final_schema,
+            schema_artifact_relpath=schema_relpath,
+            pending_branch_note=pending_branch_note,
+        )
 
     def resolve_target_schema(
         self,
@@ -240,25 +232,6 @@ class RunOutputSchemaService:
             ],
         }
 
-    def _build_prompt_summary_markdown(
-        self,
-        *,
-        final_schema: dict[str, Any],
-        schema_relpath: str,
-        execution_mode: str,
-    ) -> str:
-        compatibility_note = None
-        if self._normalize_execution_mode(execution_mode) == "interactive":
-            compatibility_note = (
-                "Interactive mode also allows a pending branch when user input is needed.\n\n"
-                + render_interactive_pending_contract_markdown(include_final_example=False)
-            )
-        return generate_output_schema_patch(
-            final_schema,
-            schema_artifact_relpath=schema_relpath,
-            compatibility_note=compatibility_note,
-        )
-
     def _append_request_input_audit_fields(
         self,
         *,
@@ -283,11 +256,8 @@ class RunOutputSchemaService:
                 exc_info=True,
             )
 
-    def _artifact_paths(self, run_dir: Path) -> tuple[Path, Path]:
-        return (
-            run_dir / TARGET_OUTPUT_SCHEMA_RELPATH,
-            run_dir / TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
-        )
+    def _artifact_path(self, run_dir: Path) -> Path:
+        return run_dir / TARGET_OUTPUT_SCHEMA_RELPATH
 
     def _normalize_execution_mode(self, execution_mode: str) -> str:
         mode = (execution_mode or "auto").strip().lower()

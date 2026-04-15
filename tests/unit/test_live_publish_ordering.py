@@ -347,6 +347,56 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
     ]
 
 
+def test_chat_replay_publish_is_fcmp_derived_and_happens_after_fcmp_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "run-chat-fcmp-guard"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    publisher = FcmpEventPublisher(mirror_writer=_NoopMirrorWriter())
+    call_order: list[tuple[str, str, int | None]] = []
+
+    def _fake_fcmp_publish(*, run_id: str, row: dict, terminal: bool):
+        _ = terminal
+        published = dict(row)
+        published["seq"] = 41
+        call_order.append(("fcmp", str(published.get("type") or ""), int(published["seq"])))
+        return published
+
+    def _fake_chat_publish(*, run_dir: Path, row: dict) -> None:
+        call_order.append(("chat", str(row.get("type") or ""), int(row.get("seq") or 0)))
+        assert run_dir.name == run_id
+        assert row.get("seq") == 41
+
+    monkeypatch.setattr("server.runtime.protocol.live_publish.fcmp_live_journal.publish", _fake_fcmp_publish)
+    monkeypatch.setattr(
+        "server.runtime.protocol.live_publish.chat_replay_publisher.publish_from_fcmp",
+        _fake_chat_publish,
+    )
+
+    published = publisher.publish(
+        run_dir=run_dir,
+        event=_fcmp_row(
+            run_id=run_id,
+            type_name="assistant.message.intermediate",
+            data={
+                "message_id": "m-1",
+                "summary": "hello",
+                "classification": "intermediate",
+                "details": {"source": "live_semantic"},
+                "text": "hello",
+            },
+        ),
+    )
+
+    assert published["seq"] == 41
+    assert call_order == [
+        ("fcmp", "assistant.message.intermediate", 41),
+        ("chat", "assistant.message.intermediate", 41),
+    ]
+
+
 def test_orchestrator_auth_busy_maps_to_diagnostic_instead_of_challenge(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

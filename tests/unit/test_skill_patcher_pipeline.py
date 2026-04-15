@@ -5,7 +5,7 @@ import pytest
 
 from server.models import ManifestArtifact
 from server.services.skill import skill_patcher as patcher_module
-from server.services.skill.skill_patch_output_schema import OUTPUT_SCHEMA_PATCH_MARKER
+from server.services.skill.skill_patch_output_schema import OUTPUT_CONTRACT_DETAILS_MARKER
 from server.services.skill.skill_patcher import (
     MODE_AUTO_PATCH_MARKER,
     MODE_INTERACTIVE_PATCH_MARKER,
@@ -16,9 +16,9 @@ from server.services.skill.skill_patcher import (
 )
 
 
-def _output_schema_summary_markdown() -> str:
+def _output_contract_details_markdown() -> str:
     return (
-        "### Output Schema Specification\n\n"
+        "### Output Contract Details\n\n"
         "| Field | Type | Required | Description |\n"
         "|-------|------|----------|-------------|\n"
         "| `__SKILL_DONE__` | boolean (`true`) | ✅ | Completion signal. |\n"
@@ -30,8 +30,9 @@ def test_build_patch_plan_fixed_only_auto_mode():
     patcher = SkillPatcher()
     plan = patcher.build_patch_plan(
         artifacts=[],
+        run_dir=Path("/tmp/demo-run"),
         execution_mode="auto",
-        output_schema_summary_markdown=None,
+        output_contract_details_markdown=None,
     )
     markers = [item.marker for item in plan]
     assert markers == [
@@ -46,8 +47,9 @@ def test_build_patch_plan_with_artifact_patch():
     artifacts = [ManifestArtifact(role="report", pattern="final.md")]
     plan = patcher.build_patch_plan(
         artifacts=artifacts,
+        run_dir=Path("/tmp/demo-run"),
         execution_mode="auto",
-        output_schema_summary_markdown=None,
+        output_contract_details_markdown=None,
     )
     markers = [item.marker for item in plan]
     assert markers == [
@@ -56,20 +58,22 @@ def test_build_patch_plan_with_artifact_patch():
         OUTPUT_FORMAT_CONTRACT_MARKER,
         MODE_AUTO_PATCH_MARKER,
     ]
+    assert "`/tmp/demo-run/artifacts/`" in plan[1].content
 
 
 def test_build_patch_plan_with_output_schema_and_interactive_mode():
     patcher = SkillPatcher()
     plan = patcher.build_patch_plan(
         artifacts=[],
+        run_dir=Path("/tmp/demo-run"),
         execution_mode="interactive",
-        output_schema_summary_markdown=_output_schema_summary_markdown(),
+        output_contract_details_markdown=_output_contract_details_markdown(),
     )
     markers = [item.marker for item in plan]
     assert markers == [
         RUNTIME_ENFORCEMENT_MARKER,
         OUTPUT_FORMAT_CONTRACT_MARKER,
-        OUTPUT_SCHEMA_PATCH_MARKER,
+        OUTPUT_CONTRACT_DETAILS_MARKER,
         MODE_INTERACTIVE_PATCH_MARKER,
     ]
 
@@ -79,15 +83,16 @@ def test_patch_plan_order_is_stable_for_all_modules():
     artifacts = [ManifestArtifact(role="result", pattern="out.json")]
     plan = patcher.build_patch_plan(
         artifacts=artifacts,
+        run_dir=Path("/tmp/demo-run"),
         execution_mode="interactive",
-        output_schema_summary_markdown=_output_schema_summary_markdown(),
+        output_contract_details_markdown=_output_contract_details_markdown(),
     )
     markers = [item.marker for item in plan]
     assert markers == [
         RUNTIME_ENFORCEMENT_MARKER,
         ARTIFACT_PATCH_MARKER,
         OUTPUT_FORMAT_CONTRACT_MARKER,
-        OUTPUT_SCHEMA_PATCH_MARKER,
+        OUTPUT_CONTRACT_DETAILS_MARKER,
         MODE_INTERACTIVE_PATCH_MARKER,
     ]
 
@@ -103,15 +108,17 @@ def test_patch_skill_md_is_idempotent_with_pipeline(tmp_path: Path):
     changed_1 = patcher.patch_skill_md(
         skill_dir=skill_dir,
         artifacts=artifacts,
+        run_dir=tmp_path / "run",
         execution_mode="interactive",
-        output_schema_summary_markdown=_output_schema_summary_markdown(),
+        output_contract_details_markdown=_output_contract_details_markdown(),
     )
     content_once = skill_md.read_text(encoding="utf-8")
     changed_2 = patcher.patch_skill_md(
         skill_dir=skill_dir,
         artifacts=artifacts,
+        run_dir=tmp_path / "run",
         execution_mode="interactive",
-        output_schema_summary_markdown=_output_schema_summary_markdown(),
+        output_contract_details_markdown=_output_contract_details_markdown(),
     )
     content_twice = skill_md.read_text(encoding="utf-8")
     assert changed_1 is True
@@ -129,6 +136,7 @@ def test_build_patch_plan_missing_template_fails_fast():
         with pytest.raises(RuntimeError, match="Skill patch template is missing"):
             patcher.build_patch_plan(
                 artifacts=[],
+                run_dir=Path("/tmp/demo-run"),
                 execution_mode="auto",
-                output_schema_summary_markdown=None,
+                output_contract_details_markdown=None,
             )

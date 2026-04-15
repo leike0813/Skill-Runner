@@ -14,11 +14,15 @@ from server.config_registry.registry import config_registry
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.orchestration.run_output_schema_service import (
     RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH,
-    RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
     TARGET_OUTPUT_SCHEMA_RELPATH,
-    TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
 )
-from server.services.skill.skill_patch_output_schema import generate_output_schema_patch
+from server.services.skill.skill_patch_output_schema import (
+    build_schema_example_payload,
+    build_codex_compatibility_note,
+    build_codex_pending_branch_note,
+    build_interactive_pending_contract_note,
+    build_output_contract_details_markdown,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -28,13 +32,10 @@ logger = logging.getLogger(__name__)
 class StructuredOutputArtifacts:
     canonical_schema_path: Path | None
     canonical_schema_relpath: str | None
-    canonical_summary_path: Path | None
-    canonical_summary_relpath: str | None
+    canonical_prompt_contract_markdown: str
     effective_schema_path: Path | None
     effective_schema_relpath: str | None
-    effective_summary_path: Path | None
-    effective_summary_relpath: str | None
-    effective_summary_markdown: str
+    effective_prompt_contract_markdown: str
 
 
 class StructuredOutputPipeline:
@@ -45,7 +46,7 @@ class StructuredOutputPipeline:
         run_dir: Path,
         options: Mapping[str, object],
         profile: AdapterProfile | None = None,
-        canonical_summary_markdown: str | None = None,
+        canonical_prompt_contract_markdown: str | None = None,
     ) -> StructuredOutputArtifacts:
         normalized_engine = self._normalize_engine_name(engine_name)
         adapter_profile = profile or self._load_profile(normalized_engine)
@@ -53,20 +54,19 @@ class StructuredOutputPipeline:
             run_dir=run_dir,
             options=options,
         )
-        canonical_summary_path, canonical_summary_relpath = self._resolve_canonical_summary_path(
-            run_dir=run_dir,
-            options=options,
-        )
-        summary_markdown = (
-            canonical_summary_markdown
-            if isinstance(canonical_summary_markdown, str) and canonical_summary_markdown.strip()
-            else self._read_text(canonical_summary_path)
+        prompt_contract_markdown = (
+            canonical_prompt_contract_markdown.strip()
+            if isinstance(canonical_prompt_contract_markdown, str)
+            and canonical_prompt_contract_markdown.strip()
+            else self._build_prompt_contract_from_schema(
+                schema_path=canonical_schema_path,
+                schema_relpath=canonical_schema_relpath,
+                execution_mode=self._resolve_execution_mode(options),
+            )
         )
         effective_schema_path = canonical_schema_path
         effective_schema_relpath = canonical_schema_relpath
-        effective_summary_path = canonical_summary_path
-        effective_summary_relpath = canonical_summary_relpath
-        effective_summary_markdown = summary_markdown
+        effective_prompt_contract_markdown = prompt_contract_markdown
 
         if (
             adapter_profile.structured_output.compat_schema_strategy == "compat_translate"
@@ -82,20 +82,15 @@ class StructuredOutputPipeline:
             effective_schema_path = compat.effective_schema_path
             effective_schema_relpath = compat.effective_schema_relpath
             if adapter_profile.structured_output.prompt_contract_strategy == "compat_summary":
-                effective_summary_path = compat.effective_summary_path
-                effective_summary_relpath = compat.effective_summary_relpath
-                effective_summary_markdown = compat.effective_summary_markdown
+                effective_prompt_contract_markdown = compat.effective_prompt_contract_markdown
 
         return StructuredOutputArtifacts(
             canonical_schema_path=canonical_schema_path,
             canonical_schema_relpath=canonical_schema_relpath,
-            canonical_summary_path=canonical_summary_path,
-            canonical_summary_relpath=canonical_summary_relpath,
+            canonical_prompt_contract_markdown=prompt_contract_markdown,
             effective_schema_path=effective_schema_path,
             effective_schema_relpath=effective_schema_relpath,
-            effective_summary_path=effective_summary_path,
-            effective_summary_relpath=effective_summary_relpath,
-            effective_summary_markdown=effective_summary_markdown,
+            effective_prompt_contract_markdown=effective_prompt_contract_markdown,
         )
 
     def build_cli_schema_args(
@@ -128,23 +123,23 @@ class StructuredOutputPipeline:
             return ["--json-schema", json.dumps(payload, ensure_ascii=False, separators=(",", ":"))]
         return []
 
-    def resolve_prompt_summary_markdown(
+    def resolve_prompt_contract_markdown(
         self,
         *,
         engine_name: str,
         run_dir: Path,
         options: Mapping[str, object],
         profile: AdapterProfile | None = None,
-        canonical_summary_markdown: str | None = None,
+        canonical_prompt_contract_markdown: str | None = None,
     ) -> str:
         artifacts = self.resolve_artifacts(
             engine_name=engine_name,
             run_dir=run_dir,
             options=options,
             profile=profile,
-            canonical_summary_markdown=canonical_summary_markdown,
+            canonical_prompt_contract_markdown=canonical_prompt_contract_markdown,
         )
-        return artifacts.effective_summary_markdown
+        return artifacts.effective_prompt_contract_markdown
 
     def canonicalize_payload(
         self,
@@ -215,21 +210,6 @@ class StructuredOutputPipeline:
             return None, None
         return run_dir / relpath, relpath
 
-    def _resolve_canonical_summary_path(
-        self,
-        *,
-        run_dir: Path,
-        options: Mapping[str, object],
-    ) -> tuple[Path | None, str | None]:
-        relpath = self._resolve_relpath(
-            options.get(RUN_OPTION_TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH),
-            default_relpath=TARGET_OUTPUT_SCHEMA_SUMMARY_RELPATH,
-            run_dir=run_dir,
-        )
-        if relpath is None:
-            return None, None
-        return run_dir / relpath, relpath
-
     def _resolve_relpath(
         self,
         raw_value: object,
@@ -242,14 +222,27 @@ class StructuredOutputPipeline:
         default_path = run_dir / default_relpath
         return default_relpath if default_path.exists() else None
 
-    def _read_text(self, path: Path | None) -> str:
-        if path is None or not path.exists():
+    def _build_prompt_contract_from_schema(
+        self,
+        *,
+        schema_path: Path | None,
+        schema_relpath: str | None,
+        execution_mode: str,
+    ) -> str:
+        if schema_path is None or not isinstance(schema_relpath, str):
             return ""
-        try:
-            return path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            logger.warning("Failed to read structured output artifact: %s", path, exc_info=True)
+        schema = self._load_json_object(schema_path)
+        if not isinstance(schema, dict):
             return ""
+        final_branch, pending_branch = self._extract_canonical_branches(schema)
+        pending_branch_note = None
+        if execution_mode == "interactive" and pending_branch is not None:
+            pending_branch_note = self._build_interactive_prompt_contract_note()
+        return build_output_contract_details_markdown(
+            final_branch,
+            schema_artifact_relpath=schema_relpath,
+            pending_branch_note=pending_branch_note,
+        )
 
     def _load_json_object(self, path: Path | None) -> dict[str, Any] | None:
         if path is None or not path.exists():
@@ -274,13 +267,10 @@ class StructuredOutputPipeline:
             return StructuredOutputArtifacts(
                 canonical_schema_path=canonical_schema_path,
                 canonical_schema_relpath=canonical_schema_relpath,
-                canonical_summary_path=None,
-                canonical_summary_relpath=None,
+                canonical_prompt_contract_markdown="",
                 effective_schema_path=canonical_schema_path,
                 effective_schema_relpath=canonical_schema_relpath,
-                effective_summary_path=None,
-                effective_summary_relpath=None,
-                effective_summary_markdown="",
+                effective_prompt_contract_markdown="",
             )
 
         compat_schema = self._build_codex_compat_schema(
@@ -288,27 +278,22 @@ class StructuredOutputPipeline:
             execution_mode=execution_mode,
         )
         compat_schema_relpath = ".audit/contracts/target_output_schema.codex_compatible.json"
-        compat_summary_relpath = ".audit/contracts/target_output_schema.codex_compatible.md"
         compat_schema_path = run_dir / compat_schema_relpath
-        compat_summary_path = run_dir / compat_summary_relpath
         compat_schema_path.parent.mkdir(parents=True, exist_ok=True)
-        compat_summary_markdown = self._build_codex_compat_summary_markdown(
+        compat_prompt_contract_markdown = self._build_codex_compat_prompt_contract_markdown(
             compat_schema=compat_schema,
+            canonical_schema=canonical_schema,
             compat_schema_relpath=compat_schema_relpath,
             execution_mode=execution_mode,
         )
         self._write_json_atomic(compat_schema_path, compat_schema)
-        self._write_text_atomic(compat_summary_path, compat_summary_markdown)
         return StructuredOutputArtifacts(
             canonical_schema_path=canonical_schema_path,
             canonical_schema_relpath=canonical_schema_relpath,
-            canonical_summary_path=None,
-            canonical_summary_relpath=None,
+            canonical_prompt_contract_markdown="",
             effective_schema_path=compat_schema_path,
             effective_schema_relpath=compat_schema_relpath,
-            effective_summary_path=compat_summary_path,
-            effective_summary_relpath=compat_summary_relpath,
-            effective_summary_markdown=compat_summary_markdown,
+            effective_prompt_contract_markdown=compat_prompt_contract_markdown,
         )
 
     def _build_codex_compat_schema(
@@ -594,55 +579,67 @@ class StructuredOutputPipeline:
             ]
         }
 
-    def _build_codex_compat_summary_markdown(
+    def _build_codex_compat_prompt_contract_markdown(
         self,
         *,
         compat_schema: dict[str, Any],
+        canonical_schema: dict[str, Any],
         compat_schema_relpath: str,
         execution_mode: str,
     ) -> str:
-        compatibility_note = (
-            "Codex structured output compatibility contract:\n"
-            "- This engine uses a compatibility schema derived from the canonical runner contract.\n"
-            "- Return exactly one JSON object that matches the machine schema artifact below.\n"
-            "- All listed fields are required for Codex compatibility.\n"
-            "- Inactive branch fields must be explicit `null` values.\n"
+        canonical_final_branch, _pending_branch = self._extract_canonical_branches(canonical_schema)
+        final_result_fields = [
+            field_name
+            for field_name in compat_schema.get("properties", {})
+            if isinstance(field_name, str) and field_name not in {"__SKILL_DONE__", "message", "ui_hints"}
+        ]
+        pending_branch_note = (
+            build_codex_pending_branch_note(final_result_fields=final_result_fields)
+            if execution_mode == "interactive"
+            else None
         )
-        if execution_mode == "interactive":
-            compatibility_note += (
-                "- If `__SKILL_DONE__` is `true`, business result fields must be populated and `message` / `ui_hints` must be `null`.\n"
-                "- If `__SKILL_DONE__` is `false`, `message` and `ui_hints` must be populated and business result fields must be `null`.\n"
-                "- Do not omit inactive branch fields; emit `null` instead.\n\n"
-                "Final branch example:\n"
-                "```json\n"
-                "{\n"
-                '  "__SKILL_DONE__": true,\n'
-                '  "message": null,\n'
-                '  "ui_hints": null\n'
-                "}\n"
-                "```\n\n"
-                "Pending branch example:\n"
-                "```json\n"
-                "{\n"
-                '  "__SKILL_DONE__": false,\n'
-                '  "message": "Please choose the next step.",\n'
-                '  "ui_hints": {\n'
-                '    "kind": "choose_one",\n'
-                '    "prompt": null,\n'
-                '    "hint": "Pick one option.",\n'
-                '    "options": [\n'
-                '      {"label": "Continue", "value": "continue"}\n'
-                "    ],\n"
-                '    "files": null\n'
-                "  }\n"
-                "}\n"
-                "```"
-            )
-        return generate_output_schema_patch(
+        example_payload = self._build_codex_final_example_payload(
+            compat_schema=compat_schema,
+            canonical_final_branch=canonical_final_branch,
+            execution_mode=execution_mode,
+        )
+        return build_output_contract_details_markdown(
             compat_schema,
             schema_artifact_relpath=compat_schema_relpath,
-            compatibility_note=compatibility_note,
+            pending_branch_note=pending_branch_note,
+            compatibility_note=build_codex_compatibility_note(execution_mode=execution_mode),
+            example_payload=example_payload,
         )
+
+    def _build_interactive_prompt_contract_note(self) -> str:
+        return build_interactive_pending_contract_note(include_final_example=False)
+
+    def _build_codex_final_example_payload(
+        self,
+        *,
+        compat_schema: dict[str, Any],
+        canonical_final_branch: dict[str, Any],
+        execution_mode: str,
+    ) -> dict[str, Any]:
+        example = build_schema_example_payload(canonical_final_branch)
+        compat_properties_obj = compat_schema.get("properties")
+        compat_properties = compat_properties_obj if isinstance(compat_properties_obj, dict) else {}
+        for field_name in compat_properties:
+            if not isinstance(field_name, str):
+                continue
+            if field_name in example:
+                continue
+            if field_name == "message":
+                example[field_name] = None
+                continue
+            if field_name == "ui_hints":
+                example[field_name] = None
+                continue
+            example[field_name] = None
+        if execution_mode == "interactive":
+            example["message"] = None
+            example["ui_hints"] = None
+        return example
 
     def _load_ui_hints_contract(self) -> dict[str, Any]:
         fallback = {
@@ -763,11 +760,6 @@ class StructuredOutputPipeline:
     def _write_json_atomic(self, path: Path, payload: dict[str, Any]) -> None:
         temp_path = path.with_name(f"{path.name}.tmp")
         temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp_path.replace(path)
-
-    def _write_text_atomic(self, path: Path, content: str) -> None:
-        temp_path = path.with_name(f"{path.name}.tmp")
-        temp_path.write_text(content, encoding="utf-8")
         temp_path.replace(path)
 
 

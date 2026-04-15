@@ -16,6 +16,7 @@ def test_load_adapter_profile_success() -> None:
     profile = load_adapter_profile("codex", profile_path)
     assert profile.engine == "codex"
     assert profile.prompt_builder.engine_key == "codex"
+    assert profile.prompt_builder.skill_invoke_line_template == "${{ skill.id }}"
     assert profile.session_codec.strategy == "first_json_line"
     assert profile.command_defaults.start[:2] == ("--skip-git-repo-check", "--json")
     assert profile.ui_shell.command_id == "codex-tui"
@@ -57,12 +58,13 @@ def test_load_adapter_profile_defaults_missing_command_features_to_disabled(tmp_
                 },
                 "prompt_builder": {
                     "engine_key": "codex",
-                    "default_template_path": None,
-                    "fallback_inline": "fallback",
+                    "skill_invoke_line_template": "${{ skill.id }}",
+                    "body_default_template_path": None,
+                    "body_fallback_inline": "fallback",
                     "merge_input_if_no_parameter_schema": True,
                     "params_json_source": "combined_input_parameter",
-                    "main_prompt_source": "none",
-                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "body_prompt_source": "none",
+                    "body_prompt_fallback_template": "Execute skill {skill_id}",
                     "include_input_file_name": False,
                     "include_skill_dir": False,
                 },
@@ -193,12 +195,13 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                 },
                 "prompt_builder": {
                     "engine_key": "gemini",
-                    "default_template_path": "../../../assets/templates/gemini_default.j2",
-                    "fallback_inline": "fallback",
+                    "skill_invoke_line_template": "/{{ skill.id }} invoke",
+                    "body_default_template_path": "../../../assets/templates/gemini_default.j2",
+                    "body_fallback_inline": "fallback",
                     "merge_input_if_no_parameter_schema": True,
                     "params_json_source": "input_data",
-                    "main_prompt_source": "none",
-                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "body_prompt_source": "none",
+                    "body_prompt_fallback_template": "Execute skill {skill_id}",
                     "include_input_file_name": False,
                     "include_skill_dir": False
                 },
@@ -381,12 +384,13 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                 },
                 "prompt_builder": {
                     "engine_key": "codex",
-                    "default_template_path": None,
-                    "fallback_inline": "fallback",
+                    "skill_invoke_line_template": "${{ skill.id }}",
+                    "body_default_template_path": None,
+                    "body_fallback_inline": "fallback",
                     "merge_input_if_no_parameter_schema": True,
                     "params_json_source": "combined_input_parameter",
-                    "main_prompt_source": "none",
-                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "body_prompt_source": "none",
+                    "body_prompt_fallback_template": "Execute skill {skill_id}",
                     "include_input_file_name": False,
                     "include_skill_dir": False
                 },
@@ -509,12 +513,13 @@ def test_load_adapter_profile_fails_when_credential_target_is_absolute(tmp_path:
                 },
                 "prompt_builder": {
                     "engine_key": "codex",
-                    "default_template_path": None,
-                    "fallback_inline": "fallback",
+                    "skill_invoke_line_template": "${{ skill.id }}",
+                    "body_default_template_path": None,
+                    "body_fallback_inline": "fallback",
                     "merge_input_if_no_parameter_schema": True,
                     "params_json_source": "combined_input_parameter",
-                    "main_prompt_source": "none",
-                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "body_prompt_source": "none",
+                    "body_prompt_fallback_template": "Execute skill {skill_id}",
                     "include_input_file_name": False,
                     "include_skill_dir": False
                 },

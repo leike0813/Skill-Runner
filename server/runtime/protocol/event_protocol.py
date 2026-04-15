@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple
 
 from server.runtime.adapter.types import RuntimeStreamParseResult, RuntimeStreamRawRow
+from server.runtime.chat_replay.structured_output_display import derive_assistant_final_display
 from server.runtime.common.ask_user_text import normalize_interaction_text
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
 from server.models import (
@@ -1708,6 +1709,12 @@ def build_fcmp_events(
         text_obj = final_payload.get("text")
         if not isinstance(text_obj, str) or not text_obj.strip():
             continue
+        final_payload.update(
+            derive_assistant_final_display(
+                text=text_obj,
+                pending_interaction=pending_payload,
+            )
+        )
         push(FcmpEventType.ASSISTANT_MESSAGE_FINAL.value, final_payload, raw_ref=raw_ref)
 
     terminal_state_trigger_map = {

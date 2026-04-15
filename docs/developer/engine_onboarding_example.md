@@ -47,12 +47,13 @@ server/engines/demo/
   "engine": "demo",
   "prompt_builder": {
     "engine_key": "demo",
-    "default_template_path": "../../../assets/templates/demo_default.j2",
-    "fallback_inline": "{{ input_prompt }}",
+    "skill_invoke_line_template": "invoke {{ skill.id }}",
+    "body_default_template_path": "../../../assets/templates/demo_default.j2",
+    "body_fallback_inline": "{{ input_prompt }}",
     "merge_input_if_no_parameter_schema": false,
     "params_json_source": "none",
-    "main_prompt_source": "parameter.prompt",
-    "main_prompt_default_template": "Execute skill {skill_id}",
+    "body_prompt_source": "parameter.prompt",
+    "body_prompt_fallback_template": "Execute skill {skill_id}",
     "include_input_file_name": false,
     "include_skill_dir": false
   },

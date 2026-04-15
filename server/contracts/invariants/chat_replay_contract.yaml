@@ -52,5 +52,6 @@ derivation_rules:
       terminal_only: true
 invariants:
   - no_local_render
+  - assistant_final_prefers_display_text
   - live_history_consistent
   - persisted_truth_is_chat_replay_jsonl

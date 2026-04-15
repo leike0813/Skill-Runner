@@ -128,6 +128,28 @@ def test_assistant_final_derivation_keeps_raw_ref_in_correlation() -> None:
     assert rows[0]["correlation"]["replaces_message_id"] == "m-10"
 
 
+def test_assistant_final_derivation_prefers_display_text() -> None:
+    rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 12,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:04:00Z",
+            "type": "assistant.message.final",
+            "data": {
+                "message_id": "m-12",
+                "text": '{"__SKILL_DONE__":false,"message":"raw pending"}',
+                "display_text": "Choose the next action.",
+                "display_format": "plain_text",
+                "display_origin": "pending_branch",
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["text"] == "Choose the next action."
+
+
 def test_assistant_process_derivation_maps_reasoning_tool_and_command() -> None:
     reasoning_rows = derive_chat_replay_rows_from_fcmp(
         {

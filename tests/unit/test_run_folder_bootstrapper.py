@@ -60,13 +60,11 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
             machine_schema={"type": "object"},
             schema_path=run_dir / ".audit" / "contracts" / "target_output_schema.json",
             schema_relpath=".audit/contracts/target_output_schema.json",
-            prompt_summary_markdown="### Output Schema Specification\n\nGenerated summary",
-            prompt_summary_path=run_dir / ".audit" / "contracts" / "target_output_schema.md",
-            prompt_summary_relpath=".audit/contracts/target_output_schema.md",
+            prompt_contract_markdown="### Output Contract Details\n\nGenerated summary",
         ),
     ) as mock_materialize, patch(
-        "server.services.orchestration.run_skill_materialization_service.structured_output_pipeline.resolve_prompt_summary_markdown",
-        return_value="### Output Schema Specification\n\nCodex compat summary",
+        "server.services.orchestration.run_skill_materialization_service.structured_output_pipeline.resolve_prompt_contract_markdown",
+        return_value="### Output Contract Details\n\nCodex compat summary",
     ) as mock_resolve_summary, patch(
         "server.services.orchestration.run_skill_materialization_service.skill_patcher.patch_skill_md"
     ) as mock_patch:
@@ -80,6 +78,8 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
 
     assert ref.snapshot_dir == run_dir / ".codex" / "skills" / "demo-skill"
     assert (ref.snapshot_dir / "SKILL.md").exists()
+    assert (run_dir / "AGENTS.md").exists()
+    assert not (run_dir / ".codex" / "AGENTS.md").exists()
     mock_materialize.assert_called_once()
     materialize_kwargs = mock_materialize.call_args.kwargs
     assert materialize_kwargs["run_dir"] == run_dir
@@ -89,8 +89,9 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
     mock_patch.assert_called_once_with(
         ref.snapshot_dir,
         [],
+        run_dir=run_dir,
         execution_mode="interactive",
-        output_schema_summary_markdown="### Output Schema Specification\n\nCodex compat summary",
+        output_contract_details_markdown="### Output Contract Details\n\nCodex compat summary",
     )
 
 
@@ -117,4 +118,5 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
     assert manifest.path == ref.snapshot_dir
     assert (ref.snapshot_dir / "assets" / "runner.json").exists()
     assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
-    assert (run_dir / ".audit" / "contracts" / "target_output_schema.md").exists()
+    assert not (run_dir / ".audit" / "contracts" / "target_output_schema.md").exists()
+    assert (run_dir / "AGENTS.md").exists()

@@ -353,9 +353,10 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "renderProtocolRows(streamName, targetEl);" in content
     assert "protocolAutoFollow" in content
     assert "isNearBottom(targetEl)" in content
-    assert "protocolExpandedRowKey" in content
-    assert "protocol-bubble-detail" in content
+    assert "protocolExpandedRowKey" not in content
+    assert "protocol-bubble-detail" not in content
     assert "extractProtocolRawRef(row)" in content
+    assert "openEventInspector(row, streamName, { itemKey: rowKey });" in content
     assert 'if (type === "parsed.json") {' in content
     assert 'query.set("limit", "200")' in content
     assert "if (!timelineCollapsed) {" in content
@@ -365,6 +366,9 @@ def test_run_detail_template_catches_up_history_for_waiting_and_terminal_states(
     assert "const reloadedPayload = await fetchTimelineHistory(0, timelineRenderLimit);" in content
     assert "replaceTimelineFromPayload(payload);" in content
     assert "reconcileTimelineRowsWithCeiling();" in content
+    assert "timelineExpandedKey" not in content
+    assert "timeline-detail" not in content
+    assert 'openEventInspector(event, "timeline", { itemKey: rowKey });' in content
     assert 'id="rebuild-protocol-btn"' in content
     assert "/v1/management/runs/${requestId}/protocol/rebuild" in content
     assert "I18N.rebuildProtocolRunning" in content
@@ -1553,11 +1557,21 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert 'id="raw-ref-preview"' in detail_res.text
     assert "/v1/management/runs/${requestId}/chat" in detail_res.text
     assert "/v1/management/runs/${requestId}/chat/history" in detail_res.text
+    assert "/static/css/chat_markdown.css?v=20260415a" in detail_res.text
+    assert "/static/js/chat_markdown.js?v=20260415a" in detail_res.text
+    assert "/static/vendor/markdown-it/markdown-it.min.js" in detail_res.text
+    assert "/static/vendor/katex/katex.min.js" in detail_res.text
+    assert "/static/vendor/markdown-it-texmath/texmath.min.js" in detail_res.text
     assert "/v1/management/runs/${requestId}/protocol/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/timeline/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "SkillRunnerFileExplorer" in detail_res.text
     assert "chat_thinking_core.js?v=20260405a" in detail_res.text
+    assert "SkillRunnerChatMarkdown.createRenderer()" in detail_res.text
+    assert 'id="event-inspector-drawer"' in detail_res.text
+    assert 'id="event-inspector-json"' in detail_res.text
+    assert "openEventInspector(eventPayload, \"chat\")" in detail_res.text
+    assert "createEventInspectorButton(thinkingItem.sourceEvent)" in detail_res.text
     assert "createCompatibleThinkingChatModel(initialMode)" in detail_res.text
     assert "createCompatibleThinkingChatModel(chatDisplayMode)" in detail_res.text
     assert "chatModel.consume(event)" in detail_res.text
@@ -1574,7 +1588,10 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "chat-thinking-arrow" in detail_res.text
     assert "chat-thinking-meta" in detail_res.text
     assert "thinkingItem.rawRef" in detail_res.text
+    assert "attachEventInspectorTrigger(item, event)" in detail_res.text
     assert "item.setAttribute(\"role\", \"button\")" in detail_res.text
+    assert ".chat-item.chat-event-entry:hover" in detail_res.text
+    assert ".chat-plain-entry.chat-event-entry:hover" in detail_res.text
     assert "renderChatModel({ preserveScroll: true })" in detail_res.text
     assert "resetConversationRenderState();" in detail_res.text
     assert "initRunFileExplorer()" in detail_res.text

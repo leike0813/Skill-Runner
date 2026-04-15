@@ -10,7 +10,7 @@ from server.services.skill.skill_patcher import SkillPatcher
 
 def _sample_output_schema_markdown() -> str:
     return (
-        "### Output Schema Specification\n\n"
+        "### Output Contract Details\n\n"
         "Run-scoped machine schema artifact: `.audit/contracts/target_output_schema.json`.\n\n"
         "| Field | Type | Required | Description |\n"
         "|-------|------|----------|-------------|\n"
@@ -22,39 +22,46 @@ def _sample_output_schema_markdown() -> str:
 def test_generate_patch_content_auto_mode_forbids_questions_and_has_artifact_redirect():
     patcher = SkillPatcher()
     artifacts = [ManifestArtifact(role="report", pattern="final.md")]
+    run_dir = Path("/tmp/demo-run")
     content = patcher.generate_patch_content(
         artifacts,
+        run_dir=run_dir,
         execution_mode="auto",
-        output_schema_summary_markdown=_sample_output_schema_markdown(),
+        output_contract_details_markdown=_sample_output_schema_markdown(),
     )
     assert "Runtime Enforcement (Injected by Skill Runner" in content
     assert "# Runtime Output Overrides" in content
     assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
+    assert f"`{run_dir.as_posix()}/artifacts/`" in content
     assert "nested folders allowed" in content
     assert "## Output Format Contract" in content
-    assert "### Output Schema Specification" in content
+    assert "### Output Contract Details" in content
     assert "__SKILL_DONE__" in content
     assert ".audit/contracts/target_output_schema.json" in content
     assert "Execution Mode: AUTO (Non-Interactive)" in content
-    assert "MUST NOT ask the user" in content
+    assert "ask the user for clarification, confirmation, or any form of decision" in content
 
 
 def test_generate_patch_content_interactive_mode_uses_json_union_contract():
     patcher = SkillPatcher()
     artifacts = [ManifestArtifact(role="report", pattern="final.md")]
-    content = patcher.generate_patch_content(artifacts, execution_mode="interactive")
+    run_dir = Path("/tmp/demo-run")
+    content = patcher.generate_patch_content(
+        artifacts,
+        run_dir=run_dir,
+        execution_mode="interactive",
+        output_contract_details_markdown=_sample_output_schema_markdown(),
+    )
     assert "# Runtime Output Overrides" in content
     assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
+    assert f"`{run_dir.as_posix()}/artifacts/`" in content
     assert "Execution Mode: INTERACTIVE" in content
-    assert "<ASK_USER_YAML>" not in content
-    assert "`__SKILL_DONE__`: must be `false`." in content
-    assert "message" in content
-    assert "ui_hints" in content
-    assert "Supported `ui_hints.kind` values" in content
-    assert "Pending branch example" in content
-    assert "Final branch example" in content
-    assert "`label`, `value`" in content
-    assert "Do not wrap the JSON in Markdown fences." in content
+    assert "Only pause for user input when the task genuinely requires it." in content
+    assert "Do not mix the final and pending branches in the same turn." in content
+    assert "Supported `ui_hints.kind` values" not in content
+    assert "Pending branch example" not in content
+    assert "### Output Contract Details" in content
+    assert "#### Pending Branch Contract" not in content
     assert "MUST NOT ask the user" not in content
 
 
@@ -69,15 +76,17 @@ def test_patch_skill_md_is_idempotent(tmp_path: Path):
     patcher.patch_skill_md(
         skill_dir,
         artifacts,
+        run_dir=tmp_path / "run",
         execution_mode="interactive",
-        output_schema_summary_markdown=_sample_output_schema_markdown(),
+        output_contract_details_markdown=_sample_output_schema_markdown(),
     )
     once_content = skill_md.read_text(encoding="utf-8")
     patcher.patch_skill_md(
         skill_dir,
         artifacts,
+        run_dir=tmp_path / "run",
         execution_mode="interactive",
-        output_schema_summary_markdown=_sample_output_schema_markdown(),
+        output_contract_details_markdown=_sample_output_schema_markdown(),
     )
     twice_content = skill_md.read_text(encoding="utf-8")
 
@@ -85,7 +94,7 @@ def test_patch_skill_md_is_idempotent(tmp_path: Path):
     assert once_content.count("Runtime Enforcement (Injected by Skill Runner") == 1
     assert once_content.count("# Runtime Output Overrides") == 1
     assert once_content.count("## Output Format Contract") == 1
-    assert once_content.count("### Output Schema Specification") == 1
+    assert once_content.count("### Output Contract Details") == 1
     assert once_content.count("## Execution Mode: INTERACTIVE") == 1
 
 
@@ -99,12 +108,13 @@ def test_patch_skill_md_without_output_schema_skips_dynamic_schema_section(tmp_p
     patcher.patch_skill_md(
         skill_dir,
         [],
+        run_dir=tmp_path / "run",
         execution_mode="auto",
-        output_schema_summary_markdown=None,
+        output_contract_details_markdown=None,
     )
     content = skill_md.read_text(encoding="utf-8")
     assert "## Output Format Contract" in content
-    assert "### Output Schema Specification" not in content
+    assert "### Output Contract Details" not in content
 
 
 def test_patch_skill_md_missing_template_fails_fast(tmp_path: Path):

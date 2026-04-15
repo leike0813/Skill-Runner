@@ -347,7 +347,8 @@ _parse_output(raw_stdout) → AdapterTurnResult
 ================================================================================
 ### 解析阶段（Parse）
 - 目标 machine truth 是 run-scoped materialized JSON Schema artifact（例如 `.audit/contracts/target_output_schema.json`）。
-- prompt-facing schema summary 仅是该 machine artifact 的派生视图，不是另一套协议。
+- agent-facing 文本合同只通过运行时 `SKILL.md` 注入；不再额外落盘 prompt-facing `.md` summary artifact。
+- repair prompt 与 `SKILL.md` 注入复用同一动态 contract builder，避免第二套 wording 漂移。
 - 优先读取 `run_dir/result/result.json`（若存在）。
 - 否则从 stdout 中提取 JSON：去除 code fence 包裹、提取第一个合法 JSON 对象。
 - 解析结果封装为 `AdapterTurnResult`（`server/runtime/adapter/types.py`）。

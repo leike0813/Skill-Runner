@@ -49,28 +49,30 @@
       "additionalProperties": false,
       "required": [
         "engine_key",
+        "skill_invoke_line_template",
         "merge_input_if_no_parameter_schema",
-        "fallback_inline",
+        "body_fallback_inline",
         "params_json_source",
-        "main_prompt_source",
-        "main_prompt_default_template",
+        "body_prompt_source",
+        "body_prompt_fallback_template",
         "include_input_file_name",
         "include_skill_dir"
       ],
       "properties": {
         "engine_key": { "type": "string" },
-        "default_template_path": { "type": ["string", "null"] },
-        "fallback_inline": { "type": "string" },
+        "skill_invoke_line_template": { "type": "string" },
+        "body_default_template_path": { "type": ["string", "null"] },
+        "body_fallback_inline": { "type": "string" },
         "merge_input_if_no_parameter_schema": { "type": "boolean" },
         "params_json_source": {
           "type": "string",
           "enum": ["none", "input_data", "combined_input_parameter"]
         },
-        "main_prompt_source": {
+        "body_prompt_source": {
           "type": "string",
           "enum": ["none", "parameter.prompt"]
         },
-        "main_prompt_default_template": { "type": "string" },
+        "body_prompt_fallback_template": { "type": "string" },
         "include_input_file_name": { "type": "boolean" },
         "include_skill_dir": { "type": "boolean" }
       }

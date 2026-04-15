@@ -54,12 +54,13 @@ ImportValidatorName = Literal[
 @dataclass(frozen=True)
 class PromptBuilderProfile:
     engine_key: str
-    default_template_path: str | None
-    fallback_inline: str
+    skill_invoke_line_template: str
+    body_default_template_path: str | None
+    body_fallback_inline: str
     merge_input_if_no_parameter_schema: bool
     params_json_source: PromptParamsJsonSource
-    main_prompt_source: PromptSource
-    main_prompt_default_template: str
+    body_prompt_source: PromptSource
+    body_prompt_fallback_template: str
     include_input_file_name: bool
     include_skill_dir: bool
 
@@ -246,8 +247,8 @@ class AdapterProfile:
             candidate = (self.profile_path.parent / candidate).resolve()
         return candidate
 
-    def resolve_template_path(self) -> Path | None:
-        return self._resolve_profile_relative_path(self.prompt_builder.default_template_path)
+    def resolve_body_template_path(self) -> Path | None:
+        return self._resolve_profile_relative_path(self.prompt_builder.body_default_template_path)
 
     def resolve_bootstrap_path(self) -> Path:
         resolved = self._resolve_profile_relative_path(self.config_assets.bootstrap_path)
@@ -537,12 +538,13 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
         ),
         prompt_builder=PromptBuilderProfile(
             engine_key=str(prompt_raw["engine_key"]),
-            default_template_path=prompt_raw.get("default_template_path"),
-            fallback_inline=str(prompt_raw["fallback_inline"]),
+            skill_invoke_line_template=str(prompt_raw["skill_invoke_line_template"]),
+            body_default_template_path=prompt_raw.get("body_default_template_path"),
+            body_fallback_inline=str(prompt_raw["body_fallback_inline"]),
             merge_input_if_no_parameter_schema=bool(prompt_raw["merge_input_if_no_parameter_schema"]),
             params_json_source=prompt_raw["params_json_source"],
-            main_prompt_source=prompt_raw["main_prompt_source"],
-            main_prompt_default_template=str(prompt_raw["main_prompt_default_template"]),
+            body_prompt_source=prompt_raw["body_prompt_source"],
+            body_prompt_fallback_template=str(prompt_raw["body_prompt_fallback_template"]),
             include_input_file_name=bool(prompt_raw["include_input_file_name"]),
             include_skill_dir=bool(prompt_raw["include_skill_dir"]),
         ),
@@ -780,6 +782,13 @@ def load_adapter_profile(engine: str, profile_path: Path) -> AdapterProfile:
     if engine.strip().lower() not in keys.ENGINE_KEYS:
         raise RuntimeError(f"Unsupported adapter engine: {engine}")
     return _load_adapter_profile_cached(engine, str(profile_path.resolve()))
+
+
+def adapter_profile_path_for_engine(engine: str) -> Path:
+    normalized = engine.strip().lower()
+    if normalized not in keys.ENGINE_KEYS:
+        raise RuntimeError(f"Unsupported adapter engine: {engine}")
+    return config_registry.root / "server" / "engines" / normalized / "adapter" / "adapter_profile.json"
 
 
 def validate_adapter_profiles(profile_paths: dict[str, Path]) -> dict[str, AdapterProfile]:

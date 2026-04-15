@@ -20,6 +20,7 @@ from server.models import (
     RuntimeEventSource,
 )
 from server.runtime.chat_replay.publisher import chat_replay_publisher
+from server.runtime.chat_replay.structured_output_display import derive_assistant_final_display
 from server.runtime.common.async_audit_writer import BufferedAsyncTextFileWriter, audit_writer_registry
 from server.runtime.adapter.types import LiveParserEmission, RuntimeStreamRawRef
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
@@ -560,6 +561,9 @@ class _BufferedLiveParserSession:
             message_id_obj = item.get("message_id")
             if isinstance(message_id_obj, str) and message_id_obj.strip():
                 assistant_emission["message_id"] = message_id_obj
+            details_obj = item.get("details")
+            if isinstance(details_obj, dict) and details_obj:
+                assistant_emission["details"] = details_obj
             raw_ref = item.get("raw_ref")
             if isinstance(raw_ref, dict):
                 assistant_emission["raw_ref"] = cast(RuntimeStreamRawRef, raw_ref)
@@ -848,6 +852,9 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 if not isinstance(text, str) or not text.strip():
                     continue
                 self._message_count += 1
+                details_obj = emission.get("details")
+                details = dict(details_obj) if isinstance(details_obj, dict) else {}
+                details.setdefault("source", "live_semantic")
                 message_id_obj = emission.get("message_id")
                 message_id = resolve_message_id(
                     message_id=message_id_obj if isinstance(message_id_obj, str) else None,
@@ -859,7 +866,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     message_id=message_id,
                     text=text,
                     raw_ref=raw_ref_obj if isinstance(raw_ref_obj, dict) else None,
-                    details={"source": "live_semantic"},
+                    details=details,
                 )
                 rasp = make_rasp_event(
                     run_id=self._run_id,
@@ -1163,6 +1170,14 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             )
         promoted_payload = FinalPromotionCoordinator.promoted_payload(candidate)
         final_payload = FinalPromotionCoordinator.final_payload(candidate)
+        text_obj = final_payload.get("text")
+        if isinstance(text_obj, str) and text_obj.strip():
+            final_payload.update(
+                derive_assistant_final_display(
+                    text=text_obj,
+                    pending_interaction=None,
+                )
+            )
         correlation: dict[str, Any] = {"publish_id": uuid.uuid4().hex}
         if self._session_id:
             correlation["session_id"] = self._session_id

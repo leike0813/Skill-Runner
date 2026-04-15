@@ -18,7 +18,9 @@ def test_run_observe_template_has_prompt_card_and_shortcut_hint():
     assert 'id="auth-card"' in content
     assert 'id="prompt-card-actions"' in content
     assert 'id="auth-card-actions"' in content
+    assert 'id="prompt-card-files"' in content
     assert 'id="final-summary-card"' in content
+    assert 'id="final-summary-status"' in content
     assert "Ctrl+Enter / Cmd+Enter to send" in content
     assert "replyTextEl.addEventListener(\"keydown\"" in content
 
@@ -42,12 +44,15 @@ def test_run_observe_template_removes_technical_panels():
 def test_run_observe_template_consumes_backend_ask_user_hints():
     content = _read_template()
     assert "deriveAskUserView" in content
-    assert "safeText(askUser.hint).trim()" in content
+    assert "safeText(uiHints.prompt).trim()" in content
+    assert "safeText(uiHints.hint).trim()" in content
+    assert "normalizeUploadFileSpecs(uiHints.files)" in content
     assert "renderPromptCard" in content
     assert "extractAskUserBlocks" not in content
     assert "parseAskUserYaml" not in content
     assert "applyPendingPrompt({" in content
     assert 'id="prompt-card-hint"' in content
+    assert 'id="prompt-card-files"' in content
     assert "ui_hints" in content
     assert "replyTextEl.placeholder = hint || I18N.replyPlaceholder;" in content
 
@@ -134,20 +139,23 @@ def test_run_observe_template_hides_prompt_card_body_when_hint_missing():
     assert "promptTextEl.classList.remove(\"hidden\")" in content
 
 
-def test_run_observe_template_appends_final_artifact_summary():
+def test_run_observe_template_keeps_status_only_final_summary_card():
     content = _read_template()
-    assert "/api/runs/${requestId}/final-summary" in content
-    assert "payload.result_status" in content
-    assert "buildFinalSummaryText(" in content
-    assert "if (normalizedStatus === \"failed\")" in content
-    assert "I18N.taskFailedPrefix" in content
-    assert "if (normalizedStatus === \"canceled\")" in content
-    assert "I18N.taskCanceledPrefix" in content
-    assert "finalSummaryTextEl.textContent" in content
-    assert "finalSummaryCardEl.classList.remove(\"hidden\")" in content
-    assert "const hasResult = payload.has_result === true;" in content
-    assert "scheduleFinalSummaryRetry" in content
+    assert "/api/runs/${requestId}/final-summary" not in content
+    assert "buildFinalSummaryText(" not in content
+    assert "maybeAppendFinalSummary" not in content
+    assert "scheduleFinalSummaryRetry" not in content
+    assert "taskCompletedStructuredHint" not in content
+    assert "resultErrorLabel" not in content
+    assert "artifactsLabel" not in content
+    assert "resultPreviewLabel" not in content
+    assert "unknownError" not in content
+    assert "canceledError" not in content
     assert "clearFinalSummaryCard()" in content
+    assert "renderFinalSummaryCard(currentStatus);" in content
+    assert "buildFinalSummaryStatus(status)" in content
+    assert "finalSummaryStatusEl.textContent = buildFinalSummaryStatus(status);" in content
+    assert "finalSummaryCardEl.classList.remove(\"hidden\")" in content
 
 
 def test_run_observe_template_defaults_to_plain_mode_for_assistant_messages():
@@ -187,11 +195,11 @@ def test_run_observe_template_supports_assistant_process_thinking_bubble() -> No
 def test_run_observe_template_keeps_stream_open_until_terminal_chat_event():
     content = _read_template()
     assert 'if (isTerminal(currentStatus)) {' in content
+    assert "renderFinalSummaryCard(currentStatus);" in content
     assert "clearWaitingUserWatchdog();" in content
     assert "setReplyEnabled(false);" in content
     assert "clearPromptCard();" in content
     assert "await catchUpHistory();" in content
-    assert "await maybeAppendFinalSummary();" in content
     assert "await maybeLoadFileTreeOnTerminal();" in content
 
 
@@ -259,6 +267,11 @@ def test_run_observe_template_supports_markdown_and_json_preview_modes() -> None
     content = _read_template()
     assert "SkillRunnerFileExplorer" in content
     assert "mountFileExplorer" in content
+    assert "/static/js/chat_markdown.js?v=20260415a" in content
+    assert "/static/css/chat_markdown.css?v=20260415a" in content
+    assert "SkillRunnerChatMarkdown.createRenderer()" in content
+    assert "/static/vendor/katex/katex.min.js" in content
+    assert "/static/vendor/markdown-it-texmath/texmath.min.js" in content
     assert "filePreviewLoading" in content
     assert "fileFormatMarkdown" in content
     assert "fileFormatJson" in content

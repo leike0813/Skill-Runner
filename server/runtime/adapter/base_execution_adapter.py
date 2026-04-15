@@ -38,7 +38,6 @@ from .common.live_stream_parser_common import (
     resolve_ndjson_overflow_exemption_probe,
 )
 from .common.overflow_sidecar import OverflowSidecarRecorder
-from .common.prompt_builder_common import render_global_first_attempt_prefix
 from .common.structured_output_pipeline import structured_output_pipeline
 from .common.stream_text_decoder import IncrementalUtf8TextDecoder
 from .contracts import (
@@ -674,26 +673,6 @@ class EngineExecutionAdapter:
             return round_obj
         return 0
 
-    def _prepend_global_first_attempt_prefix(
-        self,
-        *,
-        ctx: AdapterExecutionContext,
-        prompt: str,
-    ) -> str:
-        if self._resolve_repair_round_index(ctx.options) >= 1:
-            return prompt
-        profile = getattr(self, "profile", None)
-        if profile is None:
-            return prompt
-        prefix = render_global_first_attempt_prefix(ctx=ctx, profile=profile)
-        if not prefix.strip():
-            return prompt
-        body = prompt.lstrip("\n")
-        prefix_text = prefix.rstrip()
-        if not body:
-            return prefix_text
-        return f"{prefix_text}\n\n{body}"
-
     def _resolve_effective_prompt(self, ctx: AdapterExecutionContext) -> str:
         if self.prompt_builder is None:
             raise RuntimeError("execution adapter prompt builder is not initialized")
@@ -701,9 +680,7 @@ class EngineExecutionAdapter:
         prompt_override = ctx.options.get("__prompt_override")
         if isinstance(prompt_override, str) and prompt_override.strip():
             prompt = prompt_override
-        if self._resolve_attempt_number(ctx.options) != 1:
-            return prompt
-        return self._prepend_global_first_attempt_prefix(ctx=ctx, prompt=prompt)
+        return prompt
 
     def _build_prompt(
         self,

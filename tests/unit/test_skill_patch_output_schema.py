@@ -1,14 +1,17 @@
 import json
+from unittest.mock import patch
 
 from jsonschema import validate
 
+from server.services.skill import skill_patch_output_schema as output_schema_module
 from server.services.skill.skill_patch_output_schema import (
-    OUTPUT_SCHEMA_PATCH_MARKER,
-    generate_output_schema_patch,
+    OUTPUT_CONTRACT_DETAILS_MARKER,
+    build_interactive_pending_contract_note,
+    build_output_contract_details_markdown,
 )
 
 
-def test_generate_output_schema_patch_simple_object():
+def test_build_output_contract_details_markdown_simple_object():
     schema = {
         "type": "object",
         "required": ["value"],
@@ -17,14 +20,14 @@ def test_generate_output_schema_patch_simple_object():
         },
         "additionalProperties": False,
     }
-    patch = generate_output_schema_patch(schema)
-    assert OUTPUT_SCHEMA_PATCH_MARKER in patch
+    patch = build_output_contract_details_markdown(schema)
+    assert OUTPUT_CONTRACT_DETAILS_MARKER in patch
     assert "| `__SKILL_DONE__` | boolean (`true`) | ✅ |" in patch
     assert "| `value` | string | ✅ | result value |" in patch
     assert "No additional properties are allowed." in patch
 
 
-def test_generate_output_schema_patch_handles_anyof_object_or_null():
+def test_build_output_contract_details_markdown_handles_anyof_object_or_null():
     schema = {
         "type": "object",
         "required": ["error"],
@@ -44,12 +47,12 @@ def test_generate_output_schema_patch_handles_anyof_object_or_null():
             }
         },
     }
-    patch = generate_output_schema_patch(schema)
+    patch = build_output_contract_details_markdown(schema)
     assert "null or object" in patch
     assert "If error: `{type: string, message: string}`. If success: `null`" in patch
 
 
-def test_generate_output_schema_patch_handles_array_object_description():
+def test_build_output_contract_details_markdown_handles_array_object_description():
     schema = {
         "type": "object",
         "required": ["items"],
@@ -66,12 +69,12 @@ def test_generate_output_schema_patch_handles_array_object_description():
             }
         },
     }
-    patch = generate_output_schema_patch(schema)
+    patch = build_output_contract_details_markdown(schema)
     assert "array of object" in patch
     assert "Each item: `{tag: string, note: string}`" in patch
 
 
-def test_generate_output_schema_patch_artifact_field_description_and_skeleton():
+def test_build_output_contract_details_markdown_artifact_field_description_and_skeleton():
     schema = {
         "type": "object",
         "properties": {
@@ -81,13 +84,13 @@ def test_generate_output_schema_patch_artifact_field_description_and_skeleton():
             }
         },
     }
-    patch = generate_output_schema_patch(schema)
+    patch = build_output_contract_details_markdown(schema)
     assert "Artifact output path." in patch
     assert "bundle-relative path" in patch
     assert "artifacts/..." in patch
 
 
-def test_generate_output_schema_patch_array_item_count_constraints_and_valid_skeleton():
+def test_build_output_contract_details_markdown_array_item_count_constraints_and_valid_skeleton():
     schema = {
         "type": "object",
         "required": ["tags"],
@@ -100,13 +103,51 @@ def test_generate_output_schema_patch_array_item_count_constraints_and_valid_ske
             }
         },
     }
-    patch = generate_output_schema_patch(schema)
+    patch = build_output_contract_details_markdown(schema)
     assert "array of string (min 2, max 3)" in patch
     assert "Item count: 2..3." in patch
 
     skeleton = _extract_json_skeleton(patch)
     validate(instance=skeleton, schema=schema)
     assert len(skeleton["tags"]) == 2
+
+
+def test_build_output_contract_details_markdown_uses_static_template_loader():
+    schema = {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+            "value": {"type": "string", "description": "result value"},
+        },
+    }
+    with patch.object(
+        output_schema_module,
+        "load_template_content",
+        side_effect=RuntimeError("template missing"),
+    ):
+        try:
+            build_output_contract_details_markdown(schema)
+        except RuntimeError as exc:
+            assert "template missing" in str(exc)
+        else:
+            raise AssertionError("expected template loader failure")
+
+
+def test_build_output_contract_details_markdown_places_final_before_pending():
+    schema = {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+            "value": {"type": "string", "description": "result value"},
+        },
+    }
+    patch = build_output_contract_details_markdown(
+        schema,
+        pending_branch_note=build_interactive_pending_contract_note(include_final_example=False),
+    )
+    assert "#### Final Branch Contract" in patch
+    assert "#### Pending Branch Contract" in patch
+    assert patch.index("#### Final Branch Contract") < patch.index("#### Pending Branch Contract")
 
 
 def _extract_json_skeleton(patch: str) -> dict:

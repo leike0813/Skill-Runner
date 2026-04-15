@@ -17,6 +17,7 @@ from server.runtime.adapter.common.live_stream_parser_common import (
     parse_repaired_ndjson_dict,
     repair_truncated_json_line,
 )
+from server.runtime.chat_replay.live_journal import chat_replay_live_journal
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.protocol.live_publish import (
@@ -682,6 +683,7 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear("run-live-claude-semantic")
     rasp_live_journal.clear("run-live-claude-semantic")
+    chat_replay_live_journal.clear("run-live-claude-semantic")
 
     adapter = ClaudeExecutionAdapter()
     emitter = LiveRuntimeEmitterImpl(
@@ -736,10 +738,22 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     )
 
     running_fcmp = fcmp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
-    running_fcmp_types = [row.get("type") for row in running_fcmp["events"]]
+    running_fcmp_events = running_fcmp["events"]
+    running_fcmp_types = [row.get("type") for row in running_fcmp_events]
     assert "assistant.command_execution" in running_fcmp_types
     assert "assistant.message.intermediate" in running_fcmp_types
     assert "assistant.message.final" in running_fcmp_types
+    assert running_fcmp_types.count("assistant.message.intermediate") == 1
+    assert running_fcmp_types.count("assistant.message.final") == 1
+    intermediate_row = next(
+        row for row in running_fcmp_events if row.get("type") == "assistant.message.intermediate"
+    )
+    final_row = next(
+        row for row in running_fcmp_events if row.get("type") == "assistant.message.final"
+    )
+    assert intermediate_row.get("data", {}).get("text") == "hello live"
+    assert final_row.get("data", {}).get("message_id") == intermediate_row.get("data", {}).get("message_id")
+    assert final_row.get("data", {}).get("text") == "hello live"
     reasoning_fcmp = [
         row for row in running_fcmp["events"]
         if row.get("type") == "assistant.reasoning"
@@ -751,6 +765,152 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     final_rasp = rasp_live_journal.replay(run_id="run-live-claude-semantic", after_seq=0)
     assert not any(row.get("event", {}).get("type") == "raw.stdout" for row in final_rasp["events"])
     assert any(row.get("event", {}).get("type") == "lifecycle.run_handle" for row in final_rasp["events"])
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_projects_pending_display_for_claude_final_and_chat_replay(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run-live-claude-pending-display"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-pending-display")
+    rasp_live_journal.clear("run-live-claude-pending-display")
+    chat_replay_live_journal.clear("run-live-claude-pending-display")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-pending-display",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    pending_text = (
+        '{\n'
+        '  "__SKILL_DONE__": false,\n'
+        '  "message": "请选择下一步。",\n'
+        '  "ui_hints": {\n'
+        '    "kind": "choose_one",\n'
+        '    "prompt": "请选择目标",\n'
+        '    "options": [\n'
+        '      {"label": "继续", "value": "continue"}\n'
+        "    ]\n"
+        "  }\n"
+        "}"
+    )
+    escaped_pending_text = json.dumps(pending_text, ensure_ascii=False)
+    payload = (
+        '{"type":"system","subtype":"init","session_id":"session-claude-pending"}\n'
+        f'{{"type":"assistant","message":{{"content":[{{"type":"text","text":{escaped_pending_text}}}]}}}}\n'
+        f'{{"type":"result","subtype":"success","session_id":"session-claude-pending","result":{escaped_pending_text},"structured_output":{{"__SKILL_DONE__":false,"message":"请选择下一步。","ui_hints":{{"kind":"choose_one","prompt":"请选择目标","options":[{{"label":"继续","value":"continue"}}]}}}}}}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+
+    fcmp_payload = fcmp_live_journal.replay(run_id="run-live-claude-pending-display", after_seq=0)
+    final_row = next(
+        row for row in fcmp_payload["events"] if row.get("type") == "assistant.message.final"
+    )
+    assert final_row["data"]["text"] == pending_text
+    assert final_row["data"]["display_text"] == "请选择下一步。"
+    assert final_row["data"]["display_format"] == "plain_text"
+    assert final_row["data"]["display_origin"] == "pending_branch"
+    assert final_row["data"]["structured_payload"]["__SKILL_DONE__"] is False
+
+    chat_payload = chat_replay_live_journal.replay(
+        run_id="run-live-claude-pending-display",
+        after_seq=0,
+    )
+    chat_final = next(row for row in chat_payload["events"] if row.get("kind") == "assistant_final")
+    assert chat_final["text"] == "请选择下一步。"
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_uses_claude_result_text_only_as_fallback_message(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-claude-result-fallback"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-result-fallback")
+    rasp_live_journal.clear("run-live-claude-result-fallback")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-result-fallback",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    payload = (
+        '{"type":"system","subtype":"init","session_id":"session-claude-fallback"}\n'
+        '{"type":"result","subtype":"success","session_id":"session-claude-fallback","result":"Please choose one option."}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+
+    fcmp_payload = fcmp_live_journal.replay(run_id="run-live-claude-result-fallback", after_seq=0)
+    intermediate_rows = [
+        row for row in fcmp_payload["events"] if row.get("type") == "assistant.message.intermediate"
+    ]
+    final_rows = [
+        row for row in fcmp_payload["events"] if row.get("type") == "assistant.message.final"
+    ]
+    assert len(intermediate_rows) == 1
+    assert len(final_rows) == 1
+    assert intermediate_rows[0]["data"]["details"]["source"] == "claude_result_fallback"
+    assert final_rows[0]["data"]["details"]["source"] == "claude_result_fallback"
+    assert final_rows[0]["data"]["text"] == "Please choose one option."
+
+
+@pytest.mark.asyncio
+async def test_live_runtime_emitter_does_not_emit_claude_result_text_when_structured_output_exists(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-live-claude-structured-only"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear("run-live-claude-structured-only")
+    rasp_live_journal.clear("run-live-claude-structured-only")
+
+    adapter = ClaudeExecutionAdapter()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id="run-live-claude-structured-only",
+        run_dir=run_dir,
+        engine="claude",
+        attempt_number=1,
+        stream_parser=adapter.stream_parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+    )
+
+    payload = (
+        '{"type":"system","subtype":"init","session_id":"session-claude-structured-only"}\n'
+        '{"type":"result","subtype":"success","session_id":"session-claude-structured-only","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+
+    fcmp_payload = fcmp_live_journal.replay(run_id="run-live-claude-structured-only", after_seq=0)
+    fcmp_types = [row.get("type") for row in fcmp_payload["events"]]
+    assert "assistant.message.intermediate" not in fcmp_types
+    assert "assistant.message.final" not in fcmp_types
+    rasp_payload = rasp_live_journal.replay(run_id="run-live-claude-structured-only", after_seq=0)
+    rasp_types = [row.get("event", {}).get("type") for row in rasp_payload["events"]]
+    assert "agent.turn_complete" in rasp_types
 
 
 @pytest.mark.asyncio

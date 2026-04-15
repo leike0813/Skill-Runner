@@ -7,6 +7,14 @@ import zipfile
 from pathlib import Path
 
 from server.models import RunLocalSkillRef, RunLocalSkillSource, SkillManifest
+from server.runtime.adapter.common.profile_loader import (
+    adapter_profile_path_for_engine,
+    load_adapter_profile,
+)
+from server.runtime.adapter.common.prompt_builder_common import (
+    render_run_execution_instructions,
+    resolve_run_instruction_filename,
+)
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
@@ -186,18 +194,40 @@ class RunFolderBootstrapper:
             execution_mode=execution_mode,
             run_dir=run_dir,
         )
-        prompt_summary_markdown = structured_output_pipeline.resolve_prompt_summary_markdown(
+        prompt_contract_markdown = structured_output_pipeline.resolve_prompt_contract_markdown(
             engine_name=engine_name,
             run_dir=run_dir,
             options={"execution_mode": execution_mode},
-            canonical_summary_markdown=output_schema_materialization.prompt_summary_markdown,
+            canonical_prompt_contract_markdown=output_schema_materialization.prompt_contract_markdown,
         )
         skill_patcher.patch_skill_md(
             snapshot_dir,
             list(skill.artifacts or []),
+            run_dir=run_dir,
             execution_mode=execution_mode,
-            output_schema_summary_markdown=prompt_summary_markdown,
+            output_contract_details_markdown=prompt_contract_markdown,
         )
+        self._materialize_run_execution_instructions(
+            run_dir=run_dir,
+            engine_name=engine_name,
+            skill=snapshot_skill,
+        )
+
+    def _materialize_run_execution_instructions(
+        self,
+        *,
+        run_dir: Path,
+        engine_name: str,
+        skill: SkillManifest,
+    ) -> None:
+        profile = load_adapter_profile(engine_name, adapter_profile_path_for_engine(engine_name))
+        rendered = render_run_execution_instructions(
+            run_dir=run_dir,
+            profile=profile,
+            skill=skill,
+        )
+        target_path = run_dir / resolve_run_instruction_filename(engine_name)
+        target_path.write_text(f"{rendered}\n", encoding="utf-8")
 
     def _validate_zip_entry(self, clean_name: str) -> None:
         entry = Path(clean_name)

@@ -205,12 +205,11 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
         args, _ = mock_exec.call_args
         prompt_content = args[-1]
 
-        # Verify Context injection
+        # Verify invocation line and context injection
+        assert prompt_content.startswith("/test-skill invoke\n")
         # input.input_file should be absolute path
         abs_path = str((uploads_dir / "input_file").absolute())
         assert f"input_file: {abs_path}" in prompt_content
-        assert "prefer calling that tool instead of directly using `read`" in prompt_content
-        assert "./.gemini/skills" in prompt_content
 
         # parameter.divisor should be 5
         assert "divisor: 5" in prompt_content
@@ -303,8 +302,7 @@ async def test_run_persists_first_attempt_prompt_to_request_input(adapter, mock_
         spawn_command = list(args)
         payload = json.loads(request_input_path.read_text(encoding="utf-8"))
         assert payload["rendered_prompt_first_attempt"] == prompt_content
-        assert prompt_content.startswith("If the environment provides a `skill` tool")
-        assert "./.gemini/skills" in prompt_content
+        assert prompt_content.startswith("/test-skill invoke\n")
         assert payload["spawn_command_original_first_attempt"] == spawn_command
         assert payload["spawn_command_effective_first_attempt"] == spawn_command
         assert payload["spawn_command_normalization_applied_first_attempt"] is False
@@ -357,7 +355,7 @@ async def test_run_does_not_persist_prompt_after_first_attempt(adapter, mock_ski
 
 
 @pytest.mark.asyncio
-async def test_run_first_attempt_prompt_override_still_gets_global_prefix(adapter, mock_skill, tmp_path):
+async def test_run_first_attempt_prompt_override_replaces_assembled_prompt(adapter, mock_skill, tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     uploads_dir = run_dir / "uploads"
@@ -384,9 +382,7 @@ async def test_run_first_attempt_prompt_override_still_gets_global_prefix(adapte
 
         args, _ = mock_exec.call_args
         prompt_content = args[-1]
-        assert prompt_content.startswith("If the environment provides a `skill` tool")
-        assert prompt_content.endswith("OVERRIDE PROMPT")
-        assert "\n\nOVERRIDE PROMPT" in prompt_content
+        assert prompt_content == "OVERRIDE PROMPT"
 
 
 @pytest.mark.asyncio
@@ -483,8 +479,7 @@ def test_build_start_and_resume_command_use_first_attempt_effective_prompt(adapt
         {"parameter": {"divisor": 5}},
         {"__attempt_number": 1},
     )
-    assert ctx.startswith("If the environment provides a `skill` tool")
-    assert "./.gemini/skills" in ctx
+    assert ctx.startswith("/test-skill invoke\n")
 
     render_ctx = adapter.build_start_command(
         AdapterExecutionContext(
@@ -494,7 +489,7 @@ def test_build_start_and_resume_command_use_first_attempt_effective_prompt(adapt
             options={"__attempt_number": 1},
         )
     )
-    assert render_ctx[-1].startswith("If the environment provides a `skill` tool")
+    assert render_ctx[-1].startswith("/test-skill invoke\n")
 
     resume_command = adapter.build_resume_command(
         AdapterExecutionContext(
@@ -510,7 +505,7 @@ def test_build_start_and_resume_command_use_first_attempt_effective_prompt(adapt
             created_at_turn=1,
         ),
     )
-    assert resume_command[-1].startswith("If the environment provides a `skill` tool")
+    assert resume_command[-1].startswith("/test-skill invoke\n")
 
 
 @pytest.mark.asyncio

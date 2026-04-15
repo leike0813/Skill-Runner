@@ -102,6 +102,21 @@ Skill Runner exposes **two parallel SSE endpoints** per run. Understanding when 
 **Recommendation for most frontends**: Use `/chat` for the main conversation panel.
 Optionally subscribe to `/events` in parallel for an advanced observability/debugger panel.
 
+### 2.2.1 Structured Output Display Rule
+
+Structured-output display is backend-driven:
+
+- `assistant.message.final.data.text` remains the raw/compat final payload for protocol compatibility.
+- `assistant.message.final.data.display_text` is the backend-projected frontend display text.
+- `assistant.message.final.data.display_format` describes how that projected text should be rendered.
+- `/chat` and `/chat/history` are derived from the projected display text, so normal chat UIs do **not** need to parse structured JSON themselves.
+
+Frontend rule of thumb:
+
+- conversation panel: consume `/chat`
+- pending prompt card: consume `/interaction/pending`
+- do not parse `__SKILL_DONE__`, `message`, or `ui_hints` out of chat text on the client
+
 ### 2.3 SSE Connection Pattern
 
 Both channels follow the same SSE contract:
@@ -205,12 +220,18 @@ Key fields:
 - **`meta.local_seq`**: Sequence number within the current attempt.
 - **`raw_ref`**: If present, links to a byte range in stdout/stderr logs for evidence jump.
 
+For structured-output runs, `assistant.message.final.data` may also carry:
+
+- **`display_text`**: backend-projected chat text
+- **`display_format`**: `plain_text` or `markdown`
+- **`display_origin`**: projection source such as `pending_branch`, `final_branch`, or `repair_fallback`
+
 ### 3.2 Event Types
 
 | Event Type | Semantics | Frontend Action |
 |------------|-----------|-----------------|
 | `conversation.state.changed` | State machine transition | Update status indicator |
-| `assistant.message.final` | Engine produced output | Display as assistant bubble |
+| `assistant.message.final` | Engine produced output | Display as assistant bubble using backend-projected display text |
 | `user.input.required` | Waiting for user reply | Show input prompt, enable reply |
 | `interaction.reply.accepted` | Reply was accepted | Show confirmation, disable input |
 | `interaction.auto_decide.timeout` | Auto-reply timeout fired | Show system notification |
@@ -247,6 +268,16 @@ When the frontend receives `user.input.required`:
 3. Submit reply via `POST /interaction/reply` with `{ "content": "user text" }`.
 4. Wait for `interaction.reply.accepted` event to confirm.
 5. Disable input until next `user.input.required`.
+
+Structured-output split for interactive runs:
+
+- chat bubble: use `/chat`, which already contains the backend-projected pending `message`
+- pending card title/body: use `pending.ui_hints.prompt`
+- pending card hint text: use `pending.ui_hints.hint`
+- pending card actions/upload hints: use `pending.ui_hints.options` / `pending.ui_hints.files`
+- do **not** repeat the pending `message` inside the prompt card
+
+If `ui_hints.prompt` is missing or the run falls back to default waiting behavior, the prompt card should degrade to a stable default open-text prompt rather than reusing chat text.
 
 > **Important**: Only `user.input.required` is the canonical signal for enabling reply input.
 > Do not infer reply availability from state names alone.

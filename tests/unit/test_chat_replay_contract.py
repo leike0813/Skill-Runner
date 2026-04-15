@@ -20,4 +20,5 @@ def test_chat_replay_contract_defines_roles_kinds_and_invariants() -> None:
     assert "assistant_message" in payload["kinds"]
     assert "assistant_final" in payload["kinds"]
     assert "no_local_render" in payload["invariants"]
+    assert "assistant_final_prefers_display_text" in payload["invariants"]
     assert "live_history_consistent" in payload["invariants"]

@@ -13,8 +13,9 @@ from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 
-GLOBAL_FIRST_ATTEMPT_PREFIX_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[3] / "assets" / "templates" / "global_first_attempt_prefix.j2"
+
+RUN_EXECUTION_INSTRUCTIONS_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[3] / "assets" / "templates" / "run_execution_instructions.md.j2"
 )
 
 
@@ -62,12 +63,12 @@ def build_prompt_contexts(
     return input_ctx, parameter_ctx
 
 
-def resolve_template_text(
+def resolve_body_template_text(
     *,
     skill: SkillManifest,
     engine_key: str,
-    default_template_path: Path | None,
-    fallback_inline: str,
+    body_default_template_path: Path | None,
+    body_fallback_inline: str,
 ) -> str:
     prompts_obj = skill.entrypoint.get("prompts") if skill.entrypoint else None
     if isinstance(prompts_obj, dict):
@@ -79,10 +80,10 @@ def resolve_template_text(
         if isinstance(common_prompt, str):
             return common_prompt
 
-    if default_template_path is not None and default_template_path.exists():
-        return default_template_path.read_text(encoding="utf-8")
+    if body_default_template_path is not None and body_default_template_path.exists():
+        return body_default_template_path.read_text(encoding="utf-8")
 
-    return fallback_inline
+    return body_fallback_inline
 
 
 def render_template(template_text: str, **context: Any) -> str:
@@ -114,10 +115,27 @@ def build_engine_prompt_context(profile: AdapterProfile) -> dict[str, str]:
     }
 
 
+def build_prompt_base_context(
+    *,
+    run_dir: Path,
+    profile: AdapterProfile,
+    skill: SkillManifest | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "run_dir": str(run_dir),
+        **build_engine_prompt_context(profile),
+    }
+    if skill is not None:
+        context["skill"] = skill
+        context["skill_id"] = skill.id
+    return context
+
+
 def build_prompt_render_context(
     *,
     ctx: AdapterExecutionContext,
     profile: AdapterProfile,
+    extra_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     skill = ctx.skill
     run_dir = ctx.run_dir
@@ -138,12 +156,9 @@ def build_prompt_render_context(
         params_json = to_params_json({"input": input_ctx, "parameter": parameter_ctx})
 
     context: dict[str, Any] = {
-        "skill": skill,
-        "skill_id": skill.id,
+        **build_prompt_base_context(run_dir=run_dir, profile=profile, skill=skill),
         "input": input_ctx,
         "parameter": parameter_ctx,
-        "run_dir": str(run_dir),
-        **build_engine_prompt_context(profile),
     }
     if params_json is not None:
         context["params_json"] = params_json
@@ -158,25 +173,65 @@ def build_prompt_render_context(
         )
         context["skill_dir"] = str(skill_dir)
 
-    if prompt_profile.main_prompt_source == "parameter.prompt":
-        default_prompt = prompt_profile.main_prompt_default_template.format(skill_id=skill.id)
+    if prompt_profile.body_prompt_source == "parameter.prompt":
+        default_prompt = prompt_profile.body_prompt_fallback_template.format(skill_id=skill.id)
         context["input_prompt"] = parameter_ctx.get("prompt", default_prompt)
+    if isinstance(extra_context, dict) and extra_context:
+        context.update(extra_context)
     return context
 
 
-def render_global_first_attempt_prefix(
+def render_skill_invoke_line(
     *,
     ctx: AdapterExecutionContext,
     profile: AdapterProfile,
+    extra_context: dict[str, Any] | None = None,
 ) -> str:
-    template_path = GLOBAL_FIRST_ATTEMPT_PREFIX_TEMPLATE_PATH
+    context = build_prompt_base_context(run_dir=ctx.run_dir, profile=profile, skill=ctx.skill)
+    if isinstance(extra_context, dict) and extra_context:
+        context.update(extra_context)
+    rendered = render_template(profile.prompt_builder.skill_invoke_line_template, **context).strip()
+    if not rendered:
+        raise RuntimeError(f"Prompt invoke line rendered empty for engine '{profile.engine}'")
+    return rendered
+
+
+def assemble_prompt(*, invoke_line: str, body_prompt: str) -> str:
+    invoke = invoke_line.strip()
+    if not invoke:
+        raise RuntimeError("Prompt invoke line must not be empty")
+    body = body_prompt.lstrip("\n")
+    if not body.strip():
+        return invoke
+    return f"{invoke}\n{body}"
+
+
+def render_run_execution_instructions(
+    *,
+    run_dir: Path,
+    profile: AdapterProfile,
+    skill: SkillManifest | None = None,
+) -> str:
+    template_path = RUN_EXECUTION_INSTRUCTIONS_TEMPLATE_PATH
     if not template_path.exists():
-        return ""
+        raise RuntimeError(f"Run execution instructions template missing: {template_path}")
     template_text = template_path.read_text(encoding="utf-8")
-    if not template_text.strip():
-        return ""
-    context = build_prompt_render_context(ctx=ctx, profile=profile)
-    return render_template(template_text, **context)
+    rendered = render_template(
+        template_text,
+        **build_prompt_base_context(run_dir=run_dir, profile=profile, skill=skill),
+    ).strip()
+    if not rendered:
+        raise RuntimeError(f"Run execution instructions template rendered empty: {template_path}")
+    return rendered
+
+
+def resolve_run_instruction_filename(engine_name: str) -> str:
+    normalized = (engine_name or "").strip().lower()
+    if normalized == "claude":
+        return "CLAUDE.md"
+    if normalized == "gemini":
+        return "GEMINI.md"
+    return "AGENTS.md"
 
 
 class ProfiledPromptBuilder:
@@ -184,14 +239,29 @@ class ProfiledPromptBuilder:
         self._adapter = adapter
         self._profile = profile
 
+    def build_extra_context(self, ctx: AdapterExecutionContext) -> dict[str, Any]:
+        _ = ctx
+        return {}
+
     def render(self, ctx: AdapterExecutionContext) -> str:
         skill = ctx.skill
         prompt_profile = self._profile.prompt_builder
-        template_text = resolve_template_text(
+        extra_context = self.build_extra_context(ctx)
+        template_text = resolve_body_template_text(
             skill=skill,
             engine_key=prompt_profile.engine_key,
-            default_template_path=self._profile.resolve_template_path(),
-            fallback_inline=prompt_profile.fallback_inline,
+            body_default_template_path=self._profile.resolve_body_template_path(),
+            body_fallback_inline=prompt_profile.body_fallback_inline,
         )
-        context = build_prompt_render_context(ctx=ctx, profile=self._profile)
-        return render_template(template_text, **context)
+        context = build_prompt_render_context(
+            ctx=ctx,
+            profile=self._profile,
+            extra_context=extra_context,
+        )
+        body_prompt = render_template(template_text, **context)
+        invoke_line = render_skill_invoke_line(
+            ctx=ctx,
+            profile=self._profile,
+            extra_context=extra_context,
+        )
+        return assemble_prompt(invoke_line=invoke_line, body_prompt=body_prompt)

@@ -7,19 +7,26 @@ from typing import Any, Dict, List
 import yaml  # type: ignore[import-untyped]
 
 from server.config_registry.registry import config_registry
+from server.services.skill.skill_patch_templates import (
+    OUTPUT_CONTRACT_DETAILS_TEMPLATE,
+    OUTPUT_CONTRACT_INTERACTIVE_PENDING_TEMPLATE,
+    load_template_content,
+)
 
 
-OUTPUT_SCHEMA_PATCH_MARKER = "### Output Schema Specification"
+OUTPUT_CONTRACT_DETAILS_MARKER = OUTPUT_CONTRACT_DETAILS_TEMPLATE.marker
 _DONE_MARKER_ROW = (
     "| `__SKILL_DONE__` | boolean (`true`) | ✅ | Completion signal. Must be the first field. |"
 )
 
 
-def generate_output_schema_patch(
+def build_output_contract_details_markdown(
     schema: Dict[str, Any],
     *,
     schema_artifact_relpath: str | None = None,
+    pending_branch_note: str | None = None,
     compatibility_note: str | None = None,
+    example_payload: Dict[str, Any] | None = None,
 ) -> str:
     if not schema or not isinstance(schema, dict):
         return ""
@@ -41,48 +48,41 @@ def generate_output_schema_patch(
         desc = _describe_field(field_schema_dict)
         rows.append(f"| `{field_name}` | {type_str} | {req_mark} | {desc} |")
 
-    skeleton = _build_skeleton(properties)
-    lines = [OUTPUT_SCHEMA_PATCH_MARKER, ""]
+    schema_artifact_block = ""
     if isinstance(schema_artifact_relpath, str) and schema_artifact_relpath.strip():
-        lines.extend(
-            [
-                f"Run-scoped machine schema artifact: `{schema_artifact_relpath.strip()}`.",
-                "",
-            ]
+        schema_artifact_block = (
+            f"Run-scoped machine schema artifact: `{schema_artifact_relpath.strip()}`.\n\n"
         )
+    compatibility_note_block = ""
     if isinstance(compatibility_note, str) and compatibility_note.strip():
-        lines.extend(
-            [
-                compatibility_note.strip(),
-                "",
-            ]
+        compatibility_note_block = f"{compatibility_note.strip()}\n\n"
+    pending_branch_block = ""
+    if isinstance(pending_branch_note, str) and pending_branch_note.strip():
+        pending_branch_block = (
+            "#### Pending Branch Contract\n\n"
+            f"{pending_branch_note.strip()}\n\n"
         )
-    lines.extend(
-        [
-            "Your output JSON must conform to the following schema:",
-            "",
-            "| Field | Type | Required | Description |",
-            "|-------|------|----------|-------------|",
-            *rows,
-        ]
+    additional_properties_block = (
+        "\n\nNo additional properties are allowed." if additional_props is False else ""
     )
-    if additional_props is False:
-        lines.append("")
-        lines.append("No additional properties are allowed.")
-
-    lines.extend(
-        [
-            "",
-            "Example output:",
-            "```json",
-            json.dumps(skeleton, indent=2, ensure_ascii=False),
-            "```",
-        ]
+    return _render_template(
+        OUTPUT_CONTRACT_DETAILS_TEMPLATE,
+        {
+            "schema_artifact_block": schema_artifact_block,
+            "pending_branch_block": pending_branch_block,
+            "compatibility_note_block": compatibility_note_block,
+            "field_rows": "\n".join(rows),
+            "additional_properties_block": additional_properties_block,
+            "example_json": json.dumps(
+                example_payload if isinstance(example_payload, dict) else build_schema_example_payload(schema),
+                indent=2,
+                ensure_ascii=False,
+            ),
+        },
     )
-    return "\n".join(lines)
 
 
-def render_interactive_pending_contract_markdown(
+def build_interactive_pending_contract_note(
     *,
     include_final_example: bool,
 ) -> str:
@@ -106,39 +106,85 @@ def render_interactive_pending_contract_markdown(
             ],
         },
     }
-    lines: List[str] = [
-        "Interactive pending branch contract:",
+    final_example_block = ""
+    if include_final_example:
+        final_example_block = (
+            "\nFinal branch example:\n"
+            "```json\n"
+            f"{json.dumps(final_example, ensure_ascii=False, indent=2)}\n"
+            "```\n"
+        )
+    return _render_template(
+        OUTPUT_CONTRACT_INTERACTIVE_PENDING_TEMPLATE,
+        {
+            "kind_values": f"`{' | '.join(kind_values)}`",
+            "options_fields": options_fields,
+            "files_fields": files_fields,
+            "final_example_block": final_example_block,
+            "pending_example_json": json.dumps(pending_example, ensure_ascii=False, indent=2),
+        },
+    )
+
+
+def build_codex_compatibility_note(
+    *,
+    execution_mode: str,
+) -> str:
+    lines = [
+        "#### Engine Compatibility Notes",
+        "",
+        "Codex structured output compatibility contract:",
+        "- This engine uses a compatibility schema derived from the canonical runner contract.",
+        "- Return exactly one JSON object that matches the machine schema artifact below.",
+        "- All listed fields are required for Codex compatibility.",
+        "- Inactive branch fields must be explicit `null` values.",
+    ]
+    if execution_mode == "interactive":
+        lines.extend(
+            [
+                "- If `__SKILL_DONE__` is `true`, business result fields must be populated and `message` / `ui_hints` must be `null`.",
+                "- If `__SKILL_DONE__` is `false`, `message` and `ui_hints` must be populated and business result fields must be `null`.",
+                "- Do not omit inactive branch fields; emit `null` instead.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_codex_pending_branch_note(*, final_result_fields: List[str]) -> str:
+    pending_example: Dict[str, Any] = {
+        "__SKILL_DONE__": False,
+        "message": "Please choose the next step.",
+        "ui_hints": {
+            "kind": "choose_one",
+            "prompt": None,
+            "hint": "Pick one option.",
+            "options": [{"label": "Continue", "value": "continue"}],
+            "files": None,
+        },
+    }
+    for field_name in final_result_fields:
+        pending_example[field_name] = None
+    lines = [
         "- Return the pending branch only when user input is genuinely required before the task can continue.",
         "- `__SKILL_DONE__`: must be `false`.",
         "- `message`: required non-empty string shown directly to the user.",
         "- `ui_hints`: required object for optional rendering hints.",
+        "- Inactive business-result fields must be emitted as explicit `null` values.",
+        "- Inactive optional `ui_hints` subfields should also be emitted as explicit `null` values when present in the compat schema.",
         "",
-        f"Supported `ui_hints.kind` values: `{ ' | '.join(kind_values) }`.",
-        "- `ui_hints.prompt`: optional string for extra UI display text.",
-        "- `ui_hints.hint`: optional string for input guidance.",
-        f"- `ui_hints.options`: optional array for `choose_one`; each item should include `{options_fields}`.",
-        f"- `ui_hints.files`: optional array for `upload_files`; each item should include `{files_fields}`.",
+        "Pending branch example:",
+        "```json",
+        json.dumps(pending_example, indent=2, ensure_ascii=False),
+        "```",
     ]
-    if include_final_example:
-        lines.extend(
-            [
-                "",
-                "Final branch example:",
-                "```json",
-                json.dumps(final_example, ensure_ascii=False, indent=2),
-                "```",
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "Pending branch example:",
-            "```json",
-            json.dumps(pending_example, ensure_ascii=False, indent=2),
-            "```",
-        ]
-    )
     return "\n".join(lines)
+
+
+def build_schema_example_payload(schema: Dict[str, Any]) -> Dict[str, Any]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+    return _build_skeleton(properties)
 
 
 def _describe_type(field_schema: Dict[str, Any]) -> str:
@@ -387,3 +433,10 @@ def _load_ui_hints_contract() -> dict[str, Any]:
         "options_fields": options_fields,
         "files_fields": files_fields,
     }
+
+
+def _render_template(template: Any, values: Dict[str, str]) -> str:
+    content = load_template_content(template)
+    for key, value in values.items():
+        content = content.replace(f"{{{key}}}", value)
+    return content

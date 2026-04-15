@@ -23,3 +23,5 @@ def test_template_pending_cards_are_separate_from_chat_replay():
     content = _template()
     assert "applyPendingPrompt({" in content
     assert "appendChatBubble(\"user\"" not in content
+    assert "safeText(uiHints.prompt).trim()" in content
+    assert "safeText(uiHints.hint).trim()" in content

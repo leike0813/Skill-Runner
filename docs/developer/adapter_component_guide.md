@@ -35,7 +35,7 @@
 
 | 节 | 用途 |
 |---|---|
-| `prompt_builder` | 提示词模板路径、渲染策略 |
+| `prompt_builder` | skill 调用首行模板、body prompt 来源与渲染策略 |
 | `session_codec` | 会话句柄提取策略（regex/json/text） |
 | `attempt_workspace` | run folder 目录布局 |
 | `config_assets` | bootstrap/default/enforced/settings_schema/skill_defaults 路径 |

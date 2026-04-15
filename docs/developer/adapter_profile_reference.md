@@ -31,12 +31,13 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `engine_key` | `str` | 引擎标识，通常与顶层 `engine` 一致 |
-| `default_template_path` | `str \| null` | Jinja2 模板文件路径（相对路径） |
-| `fallback_inline` | `str` | 模板文件缺失时的内联 fallback |
+| `skill_invoke_line_template` | `str` | skill 调用首行模板，永远位于最终 prompt 第 1 行 |
+| `body_default_template_path` | `str \| null` | body prompt 的 Jinja2 模板文件路径（相对路径） |
+| `body_fallback_inline` | `str` | body 模板缺失时的内联 fallback |
 | `merge_input_if_no_parameter_schema` | `bool` | 无参数 schema 时是否将 input 合并到 prompt |
-| `params_json_source` | `"none" \| "input_file" \| "inline"` | 参数 JSON 来源 |
-| `main_prompt_source` | `"parameter.prompt" \| "input_prompt"` | 主提示词来源 |
-| `main_prompt_default_template` | `str` | 主提示词的默认模板文本 |
+| `params_json_source` | `"none" \| "input_data" \| "combined_input_parameter"` | 参数 JSON 来源 |
+| `body_prompt_source` | `"parameter.prompt" \| "none"` | body prompt 的动态来源 |
+| `body_prompt_fallback_template` | `str` | `body_prompt_source` 需要默认值时使用的模板文本 |
 | `include_input_file_name` | `bool` | 模板上下文中是否注入输入文件名 |
 | `include_skill_dir` | `bool` | 模板上下文中是否注入技能目录路径 |
 

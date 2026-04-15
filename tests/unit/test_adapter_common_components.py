@@ -15,12 +15,15 @@ from server.models import SkillManifest
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.common.prompt_builder_common import (
     _normalize_prompt_file_path,
+    assemble_prompt,
     build_prompt_render_context,
     build_prompt_contexts,
     normalize_prompt_file_input_context,
-    render_global_first_attempt_prefix,
+    resolve_run_instruction_filename,
+    render_run_execution_instructions,
+    render_skill_invoke_line,
     render_template,
-    resolve_template_text,
+    resolve_body_template_text,
 )
 from server.runtime.adapter.common.session_codec_common import (
     extract_by_regex,
@@ -52,17 +55,17 @@ def test_prompt_builder_common_resolves_template_and_context(tmp_path: Path) -> 
     assert isinstance(input_ctx, dict)
     assert isinstance(parameter_ctx, dict)
 
-    template_text = resolve_template_text(
+    template_text = resolve_body_template_text(
         skill=skill,
         engine_key="codex",
-        default_template_path=template_path,
-        fallback_inline="fallback",
+        body_default_template_path=template_path,
+        body_fallback_inline="fallback",
     )
     rendered = render_template(template_text, skill=skill, skill_id=skill.id, run_dir=str(tmp_path))
     assert rendered.startswith("demo::")
 
 
-def test_resolve_template_text_prefers_engine_prompt_over_common(tmp_path: Path) -> None:
+def test_resolve_body_template_text_prefers_engine_prompt_over_common(tmp_path: Path) -> None:
     skill = SkillManifest(
         id="demo",
         entrypoint={
@@ -73,27 +76,27 @@ def test_resolve_template_text_prefers_engine_prompt_over_common(tmp_path: Path)
         },
     )
 
-    resolved = resolve_template_text(
+    resolved = resolve_body_template_text(
         skill=skill,
         engine_key="codex",
-        default_template_path=None,
-        fallback_inline="fallback",
+        body_default_template_path=None,
+        body_fallback_inline="fallback",
     )
 
     assert resolved == "codex prompt"
 
 
-def test_resolve_template_text_falls_back_to_common_prompt(tmp_path: Path) -> None:
+def test_resolve_body_template_text_falls_back_to_common_prompt(tmp_path: Path) -> None:
     skill = SkillManifest(
         id="demo",
         entrypoint={"prompts": {"common": "common prompt"}},
     )
 
-    resolved = resolve_template_text(
+    resolved = resolve_body_template_text(
         skill=skill,
         engine_key="gemini",
-        default_template_path=None,
-        fallback_inline="fallback",
+        body_default_template_path=None,
+        body_fallback_inline="fallback",
     )
 
     assert resolved == "common prompt"
@@ -249,7 +252,7 @@ def test_claude_default_prompt_template_is_used_and_includes_skill_dir(tmp_path:
     )
 
     rendered = adapter.prompt_builder.render(ctx)  # type: ignore[union-attr]
-    assert 'Please call the skill named "demo-claude-skill".' in rendered
+    assert rendered.startswith("/demo-claude-skill\n")
     assert "Prefer Bash inside the sandbox first." in rendered
     assert "you may retry that command once without sandbox." in rendered
     assert "Do not use unsandboxed fallback for ordinary policy denials" in rendered
@@ -287,7 +290,7 @@ def test_claude_prompt_builder_uses_common_prompt_when_engine_prompt_missing(tmp
     )
 
     rendered = adapter.prompt_builder.render(ctx)  # type: ignore[union-attr]
-    assert rendered == f"COMMON demo-common-skill {run_dir}"
+    assert rendered == f"/demo-common-skill\nCOMMON demo-common-skill {run_dir}"
 
 
 def test_claude_default_prompt_template_avoids_sandbox_first_when_probe_unavailable(tmp_path: Path) -> None:
@@ -336,12 +339,13 @@ def test_claude_default_prompt_template_avoids_sandbox_first_when_probe_unavaila
     )
 
     rendered = adapter.prompt_builder.render(ctx)  # type: ignore[union-attr]
+    assert rendered.startswith("/demo-claude-skill\n")
     assert "Claude sandbox is unavailable in this environment." in rendered
     assert "Execute Bash normally without attempting sandbox-first retries." in rendered
     assert "Prefer Bash inside the sandbox first." not in rendered
 
 
-def test_prompt_render_context_exposes_engine_relative_dirs(tmp_path: Path) -> None:
+def test_prompt_render_context_exposes_engine_relative_dirs_and_run_instructions(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text("# Demo", encoding="utf-8")
@@ -374,16 +378,64 @@ def test_prompt_render_context_exposes_engine_relative_dirs(tmp_path: Path) -> N
     assert claude_context["engine_id"] == "claude"
     assert claude_context["engine_workspace_dir"] == "./.claude"
     assert claude_context["engine_skills_dir"] == "./.claude/skills"
-    assert "./.claude/skills" in render_global_first_attempt_prefix(ctx=ctx, profile=claude_adapter.profile)
+    assert render_skill_invoke_line(ctx=ctx, profile=claude_adapter.profile) == "/demo-global-prefix"
+    assert "./.claude/skills" in render_run_execution_instructions(
+        run_dir=run_dir,
+        profile=claude_adapter.profile,
+        skill=skill,
+    )
 
     gemini_adapter = GeminiExecutionAdapter()
     gemini_context = build_prompt_render_context(ctx=ctx, profile=gemini_adapter.profile)
     assert gemini_context["engine_id"] == "gemini"
     assert gemini_context["engine_workspace_dir"] == "./.gemini"
     assert gemini_context["engine_skills_dir"] == "./.gemini/skills"
+    assert render_skill_invoke_line(ctx=ctx, profile=gemini_adapter.profile) == "/demo-global-prefix invoke"
 
     codex_adapter = CodexExecutionAdapter()
     codex_context = build_prompt_render_context(ctx=ctx, profile=codex_adapter.profile)
     assert codex_context["engine_id"] == "codex"
     assert codex_context["engine_workspace_dir"] == "./.codex"
     assert codex_context["engine_skills_dir"] == "./.codex/skills"
+    assert render_skill_invoke_line(ctx=ctx, profile=codex_adapter.profile) == "$demo-global-prefix"
+
+
+def test_assemble_prompt_puts_invocation_line_first() -> None:
+    prompt = assemble_prompt(
+        invoke_line="/demo invoke",
+        body_prompt="\n\n# Inputs\n- path: demo.txt\n",
+    )
+
+    assert prompt == "/demo invoke\n# Inputs\n- path: demo.txt\n"
+
+
+def test_assemble_prompt_returns_only_invocation_line_when_body_is_blank() -> None:
+    assert assemble_prompt(invoke_line="invoke demo", body_prompt="\n\n   \n") == "invoke demo"
+
+
+def test_resolve_run_instruction_filename_by_engine() -> None:
+    assert resolve_run_instruction_filename("claude") == "CLAUDE.md"
+    assert resolve_run_instruction_filename("gemini") == "GEMINI.md"
+    assert resolve_run_instruction_filename("codex") == "AGENTS.md"
+
+
+def test_render_run_execution_instructions_exposes_workspace_and_global_policy(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill = SkillManifest(id="demo-skill", path=skill_dir)
+    run_dir = tmp_path / "run"
+
+    claude_adapter = ClaudeExecutionAdapter()
+    rendered = render_run_execution_instructions(
+        run_dir=run_dir,
+        profile=claude_adapter.profile,
+        skill=skill,
+    )
+
+    assert "# Run Execution Instructions" in rendered
+    assert f"Current run root: `{run_dir}`" in rendered
+    assert "`./.claude`" in rendered
+    assert "`./.claude/skills`" in rendered
+    assert "prefer calling that tool instead of directly using `read`" in rendered
+    assert "runtime-patched `SKILL.md` remains the authoritative source" in rendered
+    assert "Proceed autonomously" not in rendered

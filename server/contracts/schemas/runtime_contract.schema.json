@@ -2398,6 +2398,29 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "display_text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "display_format": {
+                    "type": "string",
+                    "enum": [
+                      "plain_text",
+                      "markdown"
+                    ]
+                  },
+                  "display_origin": {
+                    "type": "string",
+                    "enum": [
+                      "pending_branch",
+                      "final_branch",
+                      "repair_fallback",
+                      "raw_text"
+                    ]
+                  },
+                  "structured_payload": {
+                    "type": "object"
+                  },
                   "replaces_message_id": {
                     "type": "string",
                     "minLength": 1

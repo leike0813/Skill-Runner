@@ -25,14 +25,19 @@ def _write_profile(
         json.dumps(
             {
                 "engine": engine,
+                "provider_contract": {
+                    "multi_provider": engine in {"gemini", "opencode"},
+                    "canonical_provider_id": None if engine in {"gemini", "opencode"} else "openai",
+                },
                 "prompt_builder": {
                     "engine_key": engine,
-                    "default_template_path": None,
-                    "fallback_inline": "fallback",
+                    "skill_invoke_line_template": "${{ skill.id }}",
+                    "body_default_template_path": None,
+                    "body_fallback_inline": "fallback",
                     "merge_input_if_no_parameter_schema": True,
                     "params_json_source": "none",
-                    "main_prompt_source": "none",
-                    "main_prompt_default_template": "Execute skill {skill_id}",
+                    "body_prompt_source": "none",
+                    "body_prompt_fallback_template": "Execute skill {skill_id}",
                     "include_input_file_name": False,
                     "include_skill_dir": False,
                 },
@@ -57,6 +62,13 @@ def _write_profile(
                     "start": ["--json"],
                     "resume": ["resume", "--json"],
                     "ui_shell": ["ui", "--json"],
+                },
+                "structured_output": {
+                    "mode": "noop",
+                    "cli_schema_strategy": "noop",
+                    "compat_schema_strategy": "noop",
+                    "prompt_contract_strategy": "canonical_summary",
+                    "payload_canonicalizer": "noop",
                 },
                 "ui_shell": {
                     "command_id": f"{engine}_ui_shell",
