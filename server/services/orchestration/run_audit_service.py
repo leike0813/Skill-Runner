@@ -10,12 +10,16 @@ from typing import Any
 from server.models import InteractiveErrorCode, OrchestratorEventType, RunStatus
 from server.runtime.protocol.factories import (
     make_diagnostic_warning_payload,
+    make_fcmp_event,
     make_orchestrator_event,
 )
+from server.runtime.protocol.event_protocol import translate_orchestrator_event_to_fcmp_specs
+from server.runtime.protocol.live_publish import fcmp_event_publisher
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
     validate_orchestrator_event,
 )
+from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 
 from .run_filesystem_snapshot_service import RunFilesystemSnapshotService
 
@@ -431,6 +435,7 @@ class RunAuditService:
         category: str,
         type_name: str,
         data: dict[str, Any],
+        engine_name: str | None = None,
     ) -> None:
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -453,6 +458,51 @@ class RunAuditService:
         with event_path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False))
             fp.write("\n")
+        resolved_engine = self._resolve_orchestrator_event_engine(
+            run_dir=run_dir,
+            data=data,
+            engine_name=engine_name,
+        )
+        for spec in translate_orchestrator_event_to_fcmp_specs(
+            engine=resolved_engine,
+            type_name=type_name,
+            data=data,
+            updated_at=datetime.utcnow().isoformat(),
+            default_attempt_number=attempt_number,
+        ):
+            event = make_fcmp_event(
+                run_id=run_dir.name,
+                seq=1,
+                engine=resolved_engine,
+                type_name=str(spec["type_name"]),
+                data=dict(spec["data"]),
+                attempt_number=attempt_number,
+                ts=datetime.utcnow(),
+            )
+            fcmp_event_publisher.publish(run_dir=run_dir, event=event)
+
+    def _resolve_orchestrator_event_engine(
+        self,
+        *,
+        run_dir: Path,
+        data: dict[str, Any],
+        engine_name: str | None,
+    ) -> str:
+        if isinstance(engine_name, str) and engine_name.strip():
+            return engine_name.strip()
+        engine_obj = data.get("engine")
+        if isinstance(engine_obj, str) and engine_obj.strip():
+            return engine_obj.strip()
+        live_payload = fcmp_live_journal.replay(run_id=run_dir.name, after_seq=0)
+        live_events = live_payload.get("events")
+        if isinstance(live_events, list):
+            for row in reversed(live_events):
+                if not isinstance(row, dict):
+                    continue
+                row_engine = row.get("engine")
+                if isinstance(row_engine, str) and row_engine.strip():
+                    return row_engine.strip()
+        return "unknown"
 
     def append_output_repair_record(
         self,

@@ -288,8 +288,8 @@ async def test_reply_interaction_accepts_and_transitions_to_queued(monkeypatch, 
     monkeypatch.setattr(jobs_router.concurrency_manager, "admit_or_reject", AsyncMock(return_value=True))
     appended_events: list[dict[str, object]] = []
     monkeypatch.setattr(
-        jobs_router.job_orchestrator,
-        "_append_orchestrator_event",
+        jobs_router.job_orchestrator.audit_service,
+        "append_orchestrator_event",
         lambda **kwargs: appended_events.append(dict(kwargs)),
     )
     request_record = await store.get_request(request_id)
@@ -390,8 +390,8 @@ async def test_reply_interaction_appends_response_preview_for_open_text(monkeypa
     monkeypatch.setattr(jobs_router.concurrency_manager, "admit_or_reject", AsyncMock(return_value=True))
     appended_events: list[dict[str, object]] = []
     monkeypatch.setattr(
-        jobs_router.job_orchestrator,
-        "_append_orchestrator_event",
+        jobs_router.job_orchestrator.audit_service,
+        "append_orchestrator_event",
         lambda **kwargs: appended_events.append(dict(kwargs)),
     )
     request_record = await store.get_request(request_id)

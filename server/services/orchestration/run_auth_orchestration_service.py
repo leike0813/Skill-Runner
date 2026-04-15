@@ -1456,7 +1456,7 @@ class RunAuthOrchestrationService:
         except ImportError:
             return None
         return (
-            append_orchestrator_event or job_orchestrator._append_orchestrator_event,
+            append_orchestrator_event or job_orchestrator.audit_service.append_orchestrator_event,
             update_status or job_orchestrator._update_status,
             resume_run_job or job_orchestrator.run_job,
         )

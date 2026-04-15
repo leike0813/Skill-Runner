@@ -43,7 +43,7 @@ QueuedResumeRedriver = Callable[..., Awaitable[bool]]
 
 
 class JobBundlePort(Protocol):
-    def _build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
+    def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
         ...
 
     async def cancel_run(

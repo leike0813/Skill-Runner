@@ -258,7 +258,7 @@ async def test_orchestrator_waiting_user_event_keeps_prompt_before_state_in_live
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
 
     orchestrator = JobOrchestrator()
-    orchestrator._append_orchestrator_event(
+    orchestrator.audit_service.append_orchestrator_event(
         run_dir=run_dir,
         attempt_number=1,
         category="interaction",
@@ -302,7 +302,7 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
     orchestrator = JobOrchestrator()
 
-    orchestrator._append_orchestrator_event(
+    orchestrator.audit_service.append_orchestrator_event(
         run_dir=run_dir,
         attempt_number=1,
         category="interaction",
@@ -319,7 +319,7 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
         engine_name="codex",
     )
 
-    orchestrator._append_orchestrator_event(
+    orchestrator.audit_service.append_orchestrator_event(
         run_dir=run_dir,
         attempt_number=1,
         category="interaction",
@@ -408,7 +408,7 @@ def test_orchestrator_auth_busy_maps_to_diagnostic_instead_of_challenge(
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
     orchestrator = JobOrchestrator()
 
-    orchestrator._append_orchestrator_event(
+    orchestrator.audit_service.append_orchestrator_event(
         run_dir=run_dir,
         attempt_number=1,
         category="interaction",

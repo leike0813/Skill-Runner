@@ -482,7 +482,7 @@ async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tm
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "server.routers.jobs.job_orchestrator._append_orchestrator_event",
+        "server.routers.jobs.job_orchestrator.audit_service.append_orchestrator_event",
         RunAuditService().append_orchestrator_event,
     )
     monkeypatch.setattr(

@@ -19,7 +19,7 @@ def test_bundle_manifest_includes_run_files(tmp_path):
     (run_dir / "workspace" / "node_modules" / "pkg" / "index.js").write_text("ignored")
 
     orchestrator = JobOrchestrator()
-    bundle_rel = orchestrator._build_run_bundle(run_dir, debug=True)
+    bundle_rel = orchestrator.build_run_bundle(run_dir, debug=True)
 
     bundle_path = run_dir / bundle_rel
     assert bundle_path.exists()
@@ -54,7 +54,7 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
     (run_dir / "uploads" / "input.txt").write_text("upload")
 
     orchestrator = JobOrchestrator()
-    bundle_rel = orchestrator._build_run_bundle(run_dir, debug=False)
+    bundle_rel = orchestrator.build_run_bundle(run_dir, debug=False)
 
     bundle_path = run_dir / bundle_rel
     assert bundle_path.exists()
@@ -68,7 +68,7 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
         assert "uploads/input.txt" not in entries
 
 
-def test_build_run_bundle_public_api_keeps_compatibility(tmp_path):
+def test_build_run_bundle_public_api_writes_bundle(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "artifacts").mkdir(parents=True)
     (run_dir / "result").mkdir(parents=True)
@@ -79,7 +79,4 @@ def test_build_run_bundle_public_api_keeps_compatibility(tmp_path):
 
     orchestrator = JobOrchestrator()
     public_rel = orchestrator.build_run_bundle(run_dir, debug=False)
-    compat_rel = orchestrator._build_run_bundle(run_dir, debug=False)
-
-    assert public_rel == compat_rel
     assert (run_dir / public_rel).exists()

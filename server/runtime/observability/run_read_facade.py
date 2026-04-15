@@ -34,11 +34,6 @@ class _UnconfiguredJobControl:
         _ = debug
         raise RuntimeError("Run read facade job control port is not configured")
 
-    def _build_run_bundle(self, run_dir: Path, debug: bool = False):
-        _ = run_dir
-        _ = debug
-        raise RuntimeError("Run read facade job control port is not configured")
-
     async def cancel_run(self, **kwargs):
         _ = kwargs
         raise RuntimeError("Run read facade job control port is not configured")

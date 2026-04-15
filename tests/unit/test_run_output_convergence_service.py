@@ -10,8 +10,13 @@ import pytest
 from server.models import EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from server.runtime.adapter.types import EngineRunResult
 from server.runtime.auth_detection.types import AuthDetectionResult
-from server.services.orchestration.job_orchestrator import JobOrchestrator
 from server.services.orchestration.run_audit_service import RunAuditService
+from server.services.orchestration.run_attempt_outcome_service import (
+    resolve_structured_output_candidate,
+)
+from server.services.orchestration.run_interaction_lifecycle_service import (
+    RunInteractionLifecycleService,
+)
 from server.services.orchestration.run_output_convergence_service import (
     WARNING_OUTPUT_SCHEMA_REPAIR_SKIPPED_NO_SESSION_HANDLE,
     run_output_convergence_service,
@@ -139,8 +144,8 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     adapter = _FakeRepairAdapter(
         ['```json\n{"__SKILL_DONE__": true, "value": "fixed"}\n```']
     )
-    orchestrator = JobOrchestrator()
     audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
     initial_result = EngineRunResult(exit_code=0, raw_stdout="not-json", raw_stderr="", artifacts_created=[])
 
     result = await run_output_convergence_service.converge(
@@ -166,9 +171,9 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
         initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"not-json", stderr_raw=b""),
         auth_detection_result=_auth_result(),
         auth_detection_high=False,
-        resolve_structured_output_candidate=orchestrator._resolve_structured_output_candidate,
-        strip_done_marker_for_output_validation=orchestrator._strip_done_marker_for_output_validation,
-        extract_pending_interaction=orchestrator._extract_pending_interaction,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
         append_output_repair_record=audit_service.append_output_repair_record,
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
@@ -195,8 +200,8 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
     skill = _build_skill(tmp_path)
     run_output_schema_service.materialize(skill=skill, execution_mode="auto", run_dir=run_dir)
     adapter = _FakeRepairAdapter([])
-    orchestrator = JobOrchestrator()
     audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
     initial_result = EngineRunResult(exit_code=0, raw_stdout="still not json", raw_stderr="", artifacts_created=[])
 
     result = await run_output_convergence_service.converge(
@@ -215,9 +220,9 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
         initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"still not json", stderr_raw=b""),
         auth_detection_result=_auth_result(),
         auth_detection_high=False,
-        resolve_structured_output_candidate=orchestrator._resolve_structured_output_candidate,
-        strip_done_marker_for_output_validation=orchestrator._strip_done_marker_for_output_validation,
-        extract_pending_interaction=orchestrator._extract_pending_interaction,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
         append_output_repair_record=audit_service.append_output_repair_record,
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
@@ -243,8 +248,8 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
     adapter = _FakeRepairAdapter(
         ['```json\n{"__SKILL_DONE__": false, "message": "Need your choice", "ui_hints": {"kind": "choose_one", "options": [{"label": "A", "value": "a"}]}}\n```']
     )
-    orchestrator = JobOrchestrator()
     audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
     initial_result = EngineRunResult(exit_code=0, raw_stdout="<ASK_USER_YAML>legacy</ASK_USER_YAML>", raw_stderr="", artifacts_created=[])
 
     result = await run_output_convergence_service.converge(
@@ -273,9 +278,9 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
         ),
         auth_detection_result=_auth_result(),
         auth_detection_high=False,
-        resolve_structured_output_candidate=orchestrator._resolve_structured_output_candidate,
-        strip_done_marker_for_output_validation=orchestrator._strip_done_marker_for_output_validation,
-        extract_pending_interaction=orchestrator._extract_pending_interaction,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
         append_output_repair_record=audit_service.append_output_repair_record,
         live_runtime_emitter_factory=lambda: SimpleNamespace(),

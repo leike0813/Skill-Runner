@@ -176,7 +176,7 @@ class RunInteractionService:
                         selection=request.selection,
                         background_tasks=background_tasks,
                         run_store_backend=run_store_backend,
-                        append_orchestrator_event=job_orchestrator._append_orchestrator_event,
+                        append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
                         update_status=job_orchestrator._update_status,
                         resume_run_job=job_orchestrator.run_job,
                     )
@@ -189,7 +189,7 @@ class RunInteractionService:
                     auth_session_id=request.auth_session_id,
                     background_tasks=background_tasks,
                     run_store_backend=run_store_backend,
-                    append_orchestrator_event=job_orchestrator._append_orchestrator_event,
+                    append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
                     update_status=job_orchestrator._update_status,
                     resume_run_job=job_orchestrator.run_job,
                 )
@@ -428,7 +428,7 @@ class RunInteractionService:
                 run_store_backend=run_store_backend,
             )
             accepted_at = datetime.now().astimezone().isoformat()
-            job_orchestrator._append_orchestrator_event(
+            job_orchestrator.audit_service.append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=source_attempt + 1,
                 category="interaction",
@@ -509,7 +509,7 @@ class RunInteractionService:
                 files=files,
                 background_tasks=background_tasks,
                 run_store_backend=run_store_backend,
-                append_orchestrator_event=job_orchestrator._append_orchestrator_event,
+                append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
                 update_status=job_orchestrator._update_status,
                 resume_run_job=job_orchestrator.run_job,
             )
@@ -550,7 +550,7 @@ class RunInteractionService:
             )
             response = await run_auth_orchestration_service.get_auth_session_status(
                 request_id=request_id,
-                append_orchestrator_event=job_orchestrator._append_orchestrator_event,
+                append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
                 update_status=job_orchestrator._update_status,
                 resume_run_job=job_orchestrator.run_job,
                 run_store_backend=run_store_backend,

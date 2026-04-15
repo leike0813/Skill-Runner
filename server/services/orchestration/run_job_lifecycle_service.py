@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from server.models import (
     DispatchPhase,
@@ -24,13 +23,7 @@ from server.models import (
 )
 from server.runtime.logging.run_context import bind_run_logging_context
 from server.runtime.logging.structured_trace import log_event
-from server.runtime.auth_detection.signal import (
-    auth_detection_result_from_auth_signal,
-    is_high_confidence_auth_signal,
-)
 from server.runtime.auth_detection.types import AuthDetectionResult
-from server.runtime.protocol.factories import make_diagnostic_warning_payload
-from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
 from server.runtime.session.statechart import timeout_requires_auto_decision
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_audit_contract_service import run_audit_contract_service
@@ -50,6 +43,21 @@ from server.services.orchestration.run_output_convergence_service import (
     run_output_convergence_service,
 )
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
+from server.services.orchestration.run_attempt_execution_service import (
+    RunAttemptExecutionResult,
+)
+from server.services.orchestration.run_attempt_outcome_service import (
+    RunAttemptOutcomeInputs,
+    RunAttemptResolvedOutcome,
+)
+from server.services.orchestration.run_attempt_preparation_service import (
+    RunAttemptContext,
+    resolve_interactive_auto_reply,
+    resolve_attempt_number,
+)
+from server.services.orchestration.run_attempt_projection_finalizer import (
+    RunAttemptFinalizeInput,
+)
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
@@ -198,22 +206,6 @@ def _provider_unresolved_detail(
     )
 
 
-def _adapter_accepts_live_runtime_emitter(adapter: Any) -> bool:
-    run_callable = getattr(adapter, "run", None)
-    if run_callable is None:
-        return False
-    try:
-        signature = inspect.signature(run_callable)
-    except (TypeError, ValueError):
-        return False
-    for parameter in signature.parameters.values():
-        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
-            return True
-        if parameter.name == "live_runtime_emitter":
-            return True
-    return False
-
-
 def _summarize_terminal_error_message(message: Any) -> str | None:
     if not isinstance(message, str):
         return None
@@ -319,16 +311,181 @@ class RunJobOutcome:
     warnings: List[str] = field(default_factory=list)
 
 
+async def _noop_run_handle_consumer(_handle_id: str) -> dict[str, Any]:
+    return {"status": "skipped"}
+
+
+def _default_execution_result() -> RunAttemptExecutionResult:
+    return RunAttemptExecutionResult(
+        engine_result=None,
+        process_exit_code=None,
+        process_failure_reason=None,
+        process_raw_stdout="",
+        process_raw_stderr="",
+        runtime_execution_warnings=[],
+        adapter_stream_parser=None,
+        auth_signal_snapshot=None,
+        run_handle_consumer=_noop_run_handle_consumer,
+        live_runtime_emitter_factory=lambda: None,
+    )
+
+
+def _build_fallback_attempt_context(
+    *,
+    request: RunJobRequest,
+    run_dir: Path,
+    request_record: dict[str, Any] | None,
+    request_id: str | None,
+    execution_mode: str,
+    conversation_mode: str,
+    session_capable: bool,
+    is_interactive: bool,
+    interactive_auto_reply: bool,
+    can_wait_for_user: bool,
+    can_persist_waiting_user: bool,
+    interactive_profile: EngineInteractiveProfile | None,
+    attempt_number: int,
+    adapter: Any | None,
+    run_options: dict[str, Any] | None,
+) -> RunAttemptContext:
+    return RunAttemptContext(
+        request=request,
+        run_dir=run_dir,
+        request_record=request_record if isinstance(request_record, dict) else None,
+        request_id=request_id if isinstance(request_id, str) else None,
+        execution_mode=execution_mode,
+        conversation_mode=conversation_mode,
+        session_capable=session_capable,
+        is_interactive=is_interactive,
+        interactive_auto_reply=interactive_auto_reply,
+        can_wait_for_user=can_wait_for_user,
+        can_persist_waiting_user=can_persist_waiting_user,
+        interactive_profile=interactive_profile,
+        attempt_number=attempt_number,
+        skill=cast(Any, request.skill_override or object()),
+        adapter=adapter,
+        input_data={"input": {}, "parameter": {}},
+        run_options=dict(run_options or {}),
+        custom_provider_model=None,
+    )
+
+
+def _build_terminal_outcome(
+    *,
+    final_status: RunStatus,
+    normalized_error: dict[str, Any] | None,
+    warnings: list[str],
+    final_error_code: str | None,
+    terminal_error_summary: str | None,
+    effective_session_timeout_sec: int | None,
+    auth_detection_result: AuthDetectionResult,
+    auth_session_meta: dict[str, Any] | None,
+    process_exit_code: int | None,
+    process_failure_reason: str | None,
+    process_raw_stdout: str,
+    process_raw_stderr: str,
+) -> RunAttemptResolvedOutcome:
+    return RunAttemptResolvedOutcome(
+        final_status=final_status,
+        normalized_error=normalized_error,
+        warnings=list(warnings),
+        output_data={},
+        artifacts=[],
+        repair_level="none",
+        pending_interaction=None,
+        pending_auth=None,
+        pending_auth_method_selection=None,
+        auth_session_meta=(
+            dict(auth_session_meta) if isinstance(auth_session_meta, dict) else None
+        ),
+        turn_payload_for_completion={},
+        process_exit_code=process_exit_code,
+        process_failure_reason=process_failure_reason,
+        process_raw_stdout=process_raw_stdout,
+        process_raw_stderr=process_raw_stderr,
+        auth_detection_result=auth_detection_result,
+        auth_signal_snapshot=None,
+        runtime_parse_result=None,
+        terminal_error_summary=terminal_error_summary,
+        final_error_code=final_error_code,
+        effective_session_timeout_sec=effective_session_timeout_sec,
+        auto_resume_requested=False,
+    )
+
+
+def _build_finalize_input(
+    *,
+    request: RunJobRequest,
+    context: RunAttemptContext | None,
+    execution: RunAttemptExecutionResult,
+    outcome: RunAttemptResolvedOutcome,
+    run_dir: Path,
+    request_record: dict[str, Any] | None,
+    request_id: str | None,
+    execution_mode: str,
+    conversation_mode: str,
+    session_capable: bool,
+    is_interactive: bool,
+    interactive_auto_reply: bool,
+    can_wait_for_user: bool,
+    can_persist_waiting_user: bool,
+    interactive_profile: EngineInteractiveProfile | None,
+    attempt_number: int,
+    adapter: Any | None,
+    run_options: dict[str, Any] | None,
+    run_id: str,
+    cache_key: str | None,
+    attempt_started_at: datetime,
+    fs_before_snapshot: dict[str, dict[str, Any]],
+    run_store_backend: Any,
+    run_projection_backend: Any,
+    audit_service: Any,
+    build_run_bundle: Any,
+    options: dict[str, Any],
+) -> RunAttemptFinalizeInput:
+    resolved_context = context or _build_fallback_attempt_context(
+        request=request,
+        run_dir=run_dir,
+        request_record=request_record,
+        request_id=request_id,
+        execution_mode=execution_mode,
+        conversation_mode=conversation_mode,
+        session_capable=session_capable,
+        is_interactive=is_interactive,
+        interactive_auto_reply=interactive_auto_reply,
+        can_wait_for_user=can_wait_for_user,
+        can_persist_waiting_user=can_persist_waiting_user,
+        interactive_profile=interactive_profile,
+        attempt_number=attempt_number,
+        adapter=adapter,
+        run_options=run_options,
+    )
+    return RunAttemptFinalizeInput(
+        context=resolved_context,
+        execution=execution,
+        outcome=outcome,
+        request_record=request_record,
+        run_id=run_id,
+        request_id=request_id,
+        cache_key=cache_key,
+        attempt_started_at=attempt_started_at,
+        fs_before_snapshot=fs_before_snapshot,
+        run_store_backend=run_store_backend,
+        run_projection_service=run_projection_backend,
+        audit_service=audit_service,
+        build_run_bundle=build_run_bundle,
+        summarize_terminal_error_message=_summarize_terminal_error_message,
+        execution_mode=execution_mode,
+        options=options,
+        adapter=adapter,
+    )
+
+
 class _RunJobLifecyclePipeline:
+    @staticmethod
     async def run_job(
-        self: Any,
-        run_id: str,
-        skill_id: str,
-        engine_name: str,
-        options: Dict[str, Any],
-        cache_key: Optional[str] = None,
-        skill_override: Optional[SkillManifest] = None,
-        temp_request_id: Optional[str] = None,
+        orchestrator: Any,
+        request: RunJobRequest,
     ) -> RunJobOutcome:
         """
         Background task to execute the skill.
@@ -344,14 +501,19 @@ class _RunJobLifecyclePipeline:
             - Writes '.audit/stdout.{attempt}.log', '.audit/stderr.{attempt}.log'.
             - Writes 'result/result.json'.
         """
+        run_id = request.run_id
+        skill_id = request.skill_id
+        engine_name = request.engine_name
+        options = request.options
+        cache_key = request.cache_key
         slot_acquired = False
         release_slot_on_exit = True
         run_dir: Path | None = None
         run_log_mirror_stack: contextlib.ExitStack | None = None
-        run_store = self._run_store_backend()
-        workspace_manager = self._workspace_backend()
-        concurrency_manager = self._concurrency_backend()
-        run_folder_trust_manager = self._trust_manager_backend()
+        run_store = orchestrator._run_store_backend()
+        workspace_manager = orchestrator._workspace_backend()
+        concurrency_manager = orchestrator._concurrency_backend()
+        run_folder_trust_manager = orchestrator._trust_manager_backend()
         await concurrency_manager.acquire_slot()
         slot_acquired = True
         log_event(
@@ -391,7 +553,7 @@ class _RunJobLifecyclePipeline:
                     effective_runtime_options.get(
                         "execution_mode",
                         (request_record or {}).get("runtime_options", {}).get(
-                        "execution_mode", ExecutionMode.AUTO.value
+                            "execution_mode", ExecutionMode.AUTO.value
                         ),
                     ),
                 )
@@ -401,14 +563,14 @@ class _RunJobLifecyclePipeline:
             )
             session_capable = conversation_mode == "session"
             is_interactive = execution_mode == ExecutionMode.INTERACTIVE.value
-            interactive_auto_reply = self._resolve_interactive_auto_reply(
+            interactive_auto_reply = resolve_interactive_auto_reply(
                 options=options,
                 request_record=request_record or {},
             )
             can_wait_for_user = is_interactive and session_capable
             interactive_profile: Optional[EngineInteractiveProfile] = None
             if can_wait_for_user and request_id:
-                interactive_profile = await self._resolve_interactive_profile(
+                interactive_profile = await orchestrator._resolve_interactive_profile(
                     request_id=request_id,
                     engine_name=engine_name,
                     options=options,
@@ -418,13 +580,15 @@ class _RunJobLifecyclePipeline:
             if isinstance(attempt_override_obj, int) and attempt_override_obj > 0:
                 attempt_number = attempt_override_obj
             else:
-                attempt_number = await self._resolve_attempt_number(
+                attempt_number = await resolve_attempt_number(
+                    run_store_backend=run_store,
                     request_id=request_id,
                     is_interactive=is_interactive,
                 )
             resume_ticket_id = (
                 str(options.get("__resume_ticket_id"))
-                if isinstance(options.get("__resume_ticket_id"), str) and str(options.get("__resume_ticket_id")).strip()
+                if isinstance(options.get("__resume_ticket_id"), str)
+                and str(options.get("__resume_ticket_id")).strip()
                 else None
             )
             if request_id and resume_ticket_id is not None:
@@ -514,7 +678,7 @@ class _RunJobLifecyclePipeline:
                 execution_mode=execution_mode,
             )
             attempt_started_at = datetime.utcnow()
-            fs_before_snapshot = self._capture_filesystem_snapshot(run_dir)
+            fs_before_snapshot = orchestrator.snapshot_service.capture_filesystem_snapshot(run_dir)
             process_exit_code: Optional[int] = None
             process_failure_reason: Optional[str] = None
             process_raw_stdout = ""
@@ -532,9 +696,9 @@ class _RunJobLifecyclePipeline:
             done_signal_found_in_payload = False
             auth_session_meta: Dict[str, Any] | None = None
             if await run_store.is_cancel_requested(run_id):
-                canceled_error = self._build_canceled_error()
-                result_path = self._write_canceled_result(run_dir, canceled_error)
-                self._update_status(
+                canceled_error = orchestrator._build_canceled_error()
+                result_path = orchestrator._write_canceled_result(run_dir, canceled_error)
+                orchestrator._update_status(
                     run_dir,
                     RunStatus.CANCELED,
                     error=canceled_error,
@@ -558,11 +722,13 @@ class _RunJobLifecyclePipeline:
             final_validation_warnings: list[str] = []
             final_error_code: Optional[str] = None
             terminal_error_summary: Optional[str] = None
-            trust_registered = False
             adapter: Any | None = None
+            context: RunAttemptContext | None = None
+            execution: RunAttemptExecutionResult = _default_execution_result()
+            current_outcome: RunAttemptResolvedOutcome | None = None
 
             # 1. Update status to RUNNING
-            self._update_status(
+            orchestrator._update_status(
                 run_dir=run_dir,
                 status=RunStatus.RUNNING,
                 effective_session_timeout_sec=(
@@ -583,7 +749,7 @@ class _RunJobLifecyclePipeline:
                     ),
                     run_store_backend=run_store,
                 )
-            self._append_orchestrator_event(
+            orchestrator.audit_service.append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=attempt_number,
                 category="lifecycle",
@@ -591,96 +757,52 @@ class _RunJobLifecyclePipeline:
                 data={"status": RunStatus.RUNNING.value},
                 engine_name=engine_name,
             )
-            self._update_latest_run_id(run_id)
+            orchestrator._update_latest_run_id(run_id)
 
             try:
-                # 2. Get Skill
-                skill = skill_override
-                if skill is None:
-                    skill = run_folder_bootstrapper.load_from_snapshot(
-                        run_dir=run_dir,
-                        skill_id=skill_id,
-                        engine_name=engine_name,
-                    )
-                if skill is None:
-                    skill = skill_registry.get_skill(skill_id)
-                if skill is None and is_interactive:
-                    skill = self._load_skill_from_run_dir(
-                        run_dir=run_dir,
-                        skill_id=skill_id,
-                        engine_name=engine_name,
-                    )
-                if not skill:
-                    raise ValueError(f"Skill {skill_id} not found during execution")
-                if not all(
-                    resolve_schema_asset(skill, key).path is not None
-                    for key in ("input", "parameter", "output")
-                ):
-                    raise ValueError("Schema missing: input/parameter/output must be defined")
-
-                # 3. Get Adapter
-                adapter = self.adapters.get(engine_name)
-                if not adapter:
-                    raise ValueError(f"Engine {engine_name} not supported")
-
-                # 4. Load Input
-                input_data = {
-                    "input": dict((request_record or {}).get("input") or {}),
-                    "parameter": dict((request_record or {}).get("parameter") or {}),
-                }
-
-                # 4.1 Validate Input & Parameters
-                real_params = input_data.get("parameter", {})
-                input_errors = []
-
-                # 1. Validate 'parameter' (Values)
-                if resolve_schema_asset(skill, "parameter").path is not None:
-                    # Validator expects the data to match the schema
-                    # strict validation of the parameter payload
-                    input_errors.extend(schema_validator.validate_schema(skill, real_params, "parameter"))
-
-                # 2. Validate mixed 'input' (file + inline)
-                if resolve_schema_asset(skill, "input").path is not None:
-                    input_errors.extend(
-                        schema_validator.validate_input_for_execution(skill, run_dir, input_data)
-                    )
-
-                if input_errors:
-                    raise ValueError(f"Input validation failed: {str(input_errors)}")
+                preparation = await orchestrator.run_attempt_preparation_service.prepare(
+                    orchestrator=orchestrator,
+                    request=request,
+                    run_dir=run_dir,
+                    request_record=request_record,
+                    request_id=request_id,
+                    execution_mode=execution_mode,
+                    conversation_mode=conversation_mode,
+                    session_capable=session_capable,
+                    is_interactive=is_interactive,
+                    interactive_auto_reply=interactive_auto_reply,
+                    can_wait_for_user=can_wait_for_user,
+                    can_persist_waiting_user=can_persist_waiting_user,
+                    interactive_profile=interactive_profile,
+                    attempt_number=attempt_number,
+                    resolve_custom_provider_model=_resolve_claude_custom_model,
+                    run_store_backend=run_store,
+                    interaction_service=orchestrator.interaction_service,
+                    audit_service=orchestrator.audit_service,
+                    resolve_attempt_number=lambda **kwargs: resolve_attempt_number(
+                        run_store_backend=run_store,
+                        **kwargs,
+                    ),
+                    build_reply_prompt=orchestrator._build_reply_prompt,
+                )
+                context = preparation
+                skill = preparation.skill
+                adapter = preparation.adapter
+                input_data = preparation.input_data
+                run_options = dict(preparation.run_options)
 
                 if await run_store.is_cancel_requested(run_id):
                     raise RunCanceled()
 
-                run_folder_git_initializer.ensure_git_repo(run_dir)
-                run_folder_trust_manager.register_run_folder(engine_name, run_dir)
-                trust_registered = True
-                run_options = dict(options)
-                run_options["__run_id"] = run_id
-                run_options["__attempt_number"] = attempt_number
-                if request_id:
-                    run_options["__request_id"] = request_id
-                run_options["__engine_name"] = engine_name
-                run_options.update(run_output_schema_service.build_run_option_fields(run_dir=run_dir))
-                if is_interactive and request_id and interactive_profile:
-                    await self._inject_interactive_resume_context(
-                        request_id=request_id,
-                        profile=interactive_profile,
-                        options=run_options,
-                        run_dir=run_dir,
-                    )
-
-                custom_provider_model = _resolve_claude_custom_model(
-                    engine_name=engine_name,
-                    options=options,
-                    request_record=request_record,
-                )
+                custom_provider_model = preparation.custom_provider_model
                 if (
                     custom_provider_model is not None
                     and request_id
                     and session_capable
                     and engine_custom_provider_service.resolve_model(engine_name, custom_provider_model) is None
                 ):
-                    await self.auth_orchestration_service.create_custom_provider_pending_auth(
+                    bootstrap_pending_auth = (
+                        await orchestrator.auth_orchestration_service.create_custom_provider_pending_auth(
                         request_id=request_id,
                         run_id=run_id,
                         run_dir=run_dir,
@@ -688,7 +810,37 @@ class _RunJobLifecyclePipeline:
                         requested_model=custom_provider_model,
                         source_attempt=attempt_number,
                         run_store_backend=run_store,
-                        append_orchestrator_event=self._append_orchestrator_event,
+                        append_orchestrator_event=orchestrator.audit_service.append_orchestrator_event,
+                    )
+                    ).model_dump(mode="json")
+                    final_status = RunStatus.WAITING_AUTH
+                    current_outcome = RunAttemptResolvedOutcome(
+                        final_status=RunStatus.WAITING_AUTH,
+                        normalized_error=None,
+                        warnings=[],
+                        output_data={},
+                        artifacts=[],
+                        repair_level="none",
+                        pending_interaction=None,
+                        pending_auth=dict(bootstrap_pending_auth),
+                        pending_auth_method_selection=None,
+                        auth_session_meta=None,
+                        turn_payload_for_completion={},
+                        process_exit_code=process_exit_code,
+                        process_failure_reason=process_failure_reason,
+                        process_raw_stdout=process_raw_stdout,
+                        process_raw_stderr=process_raw_stderr,
+                        auth_detection_result=auth_detection_result,
+                        auth_signal_snapshot=None,
+                        runtime_parse_result=runtime_parse_result,
+                        terminal_error_summary=None,
+                        final_error_code=None,
+                        effective_session_timeout_sec=(
+                            interactive_profile.session_timeout_sec
+                            if interactive_profile is not None
+                            else None
+                        ),
+                        auto_resume_requested=False,
                     )
                     logger.info(
                         "run_attempt_waiting_auth_custom_provider_bootstrap run_id=%s request_id=%s attempt=%s model=%s",
@@ -699,8 +851,6 @@ class _RunJobLifecyclePipeline:
                     )
                     return RunJobOutcome(run_id=run_id, final_status=RunStatus.WAITING_AUTH)
 
-                # 5. Execute
-                adapter_stream_parser = getattr(adapter, "stream_parser", adapter)
                 async def _consume_run_handle(handle_id: str) -> dict[str, Any]:
                     return await _persist_run_handle_immediate(
                         run_store_backend=run_store,
@@ -709,52 +859,14 @@ class _RunJobLifecyclePipeline:
                         attempt_number=attempt_number,
                         handle_id=handle_id,
                     )
-                live_runtime_emitter = LiveRuntimeEmitterImpl(
-                    run_id=run_id,
-                    run_dir=run_dir,
-                    engine=engine_name,
-                    attempt_number=attempt_number,
-                    stream_parser=adapter_stream_parser,
+                execution = await orchestrator.run_attempt_execution_service.execute(
+                    context=preparation,
+                    trust_manager_backend=run_folder_trust_manager,
                     run_handle_consumer=_consume_run_handle,
                 )
-                try:
-                    logger.info(
-                        "run_attempt_execute_begin run_id=%s request_id=%s attempt=%s engine=%s",
-                        run_id,
-                        request_id,
-                        attempt_number,
-                        engine_name,
-                    )
-                    if _adapter_accepts_live_runtime_emitter(adapter):
-                        result = await adapter.run(
-                            skill,
-                            input_data,
-                            run_dir,
-                            run_options,
-                            live_runtime_emitter=live_runtime_emitter,
-                        )
-                    else:
-                        result = await adapter.run(
-                            skill,
-                            input_data,
-                            run_dir,
-                            run_options,
-                        )
-                finally:
-                    if trust_registered:
-                        try:
-                            run_folder_trust_manager.remove_run_folder(engine_name, run_dir)
-                        except (OSError, RuntimeError, ValueError):
-                            # Best-effort cleanup: trust-entry removal must not mask run result.
-                            logger.warning(
-                                "Failed to cleanup run folder trust for engine=%s run_id=%s",
-                                engine_name,
-                                run_id,
-                                exc_info=True,
-                            )
-                        trust_registered = False
-                process_exit_code = result.exit_code
-                process_failure_reason = result.failure_reason
+                result = execution.engine_result
+                process_exit_code = execution.process_exit_code
+                process_failure_reason = execution.process_failure_reason
                 logger.info(
                     "run_attempt_execute_end run_id=%s request_id=%s attempt=%s exit_code=%s failure_reason=%s",
                     run_id,
@@ -763,155 +875,94 @@ class _RunJobLifecyclePipeline:
                     process_exit_code,
                     process_failure_reason,
                 )
-                process_raw_stdout = result.raw_stdout or ""
-                process_raw_stderr = result.raw_stderr or ""
-                runtime_execution_warnings = (
-                    list(result.runtime_warnings)
-                    if isinstance(getattr(result, "runtime_warnings", None), list)
-                    else []
-                )
-                runtime_option_warning_payloads = options.get("__runtime_option_warnings")
-                if isinstance(runtime_option_warning_payloads, list):
-                    for warning_payload in runtime_option_warning_payloads:
-                        if isinstance(warning_payload, dict):
-                            runtime_execution_warnings.append(dict(warning_payload))
-                runtime_parse_result = self._parse_runtime_stream_for_auth_detection(
-                    adapter=adapter,
-                    raw_stdout=process_raw_stdout,
-                    raw_stderr=process_raw_stderr,
-                )
-                auth_signal_snapshot = getattr(result, "auth_signal_snapshot", None)
-                auth_detection_result = auth_detection_result_from_auth_signal(
-                    engine=engine_name,
-                    auth_signal=auth_signal_snapshot,
-                )
-                auth_detection_high = is_high_confidence_auth_signal(auth_signal_snapshot)
-                if process_failure_reason == "AUTH_REQUIRED" and not auth_detection_high:
-                    process_failure_reason = None
+                process_raw_stdout = execution.process_raw_stdout
+                process_raw_stderr = execution.process_raw_stderr
                 if await run_store.is_cancel_requested(run_id):
                     raise RunCanceled()
-
-                # 6. Verify Result and Normalize
-                warnings: list[str] = []
-                seen_runtime_warning_codes: set[str] = set()
-                output_data: Dict[str, Any] = {}
-                schema_output_errors: list[str] = []
-                terminal_validation_errors: list[str] = []
-                pending_interaction: Optional[Dict[str, Any]] = None
-                pending_interaction_candidate: Optional[Dict[str, Any]] = None
-                pending_auth_method_selection: Optional[Dict[str, Any]] = None
-                pending_auth: Optional[Dict[str, Any]] = None
-                repair_level = result.repair_level or "none"
-                has_structured_output = False
-                structured_output_source: str | None = None
-
-                def _append_validation_warning(code: str, *, detail: str | None = None) -> None:
-                    if code not in warnings:
-                        warnings.append(code)
-                    if code in seen_runtime_warning_codes:
-                        return
-                    seen_runtime_warning_codes.add(code)
-                    self._append_orchestrator_event(
-                        run_dir=run_dir,
-                        attempt_number=attempt_number,
-                        category="diagnostic",
-                        type_name=OrchestratorEventType.DIAGNOSTIC_WARNING.value,
-                        data=make_diagnostic_warning_payload(
-                            code=code,
-                            detail=detail,
-                        ),
-                        engine_name=engine_name,
-                    )
-
-                for warning in runtime_execution_warnings:
-                    if not isinstance(warning, dict):
-                        continue
-                    code_obj = warning.get("code")
-                    if not isinstance(code_obj, str) or not code_obj.strip():
-                        continue
-                    warning_code = code_obj.strip()
-                    warning_detail_obj = warning.get("detail")
-                    warning_detail = (
-                        warning_detail_obj.strip()
-                        if isinstance(warning_detail_obj, str) and warning_detail_obj.strip()
-                        else None
-                    )
-                    _append_validation_warning(warning_code, detail=warning_detail)
-                convergence = await run_output_convergence_service.converge(
-                    adapter=adapter,
-                    skill=skill,
-                    input_data=input_data,
-                    run_dir=run_dir,
-                    request_id=request_id,
-                    run_store_backend=run_store,
-                    run_id=run_id,
-                    engine_name=engine_name,
-                    execution_mode=execution_mode,
-                    attempt_number=attempt_number,
-                    options=run_options,
-                    initial_result=result,
-                    initial_runtime_parse_result=runtime_parse_result,
-                    auth_detection_result=auth_detection_result,
-                    auth_detection_high=auth_detection_high,
-                    resolve_structured_output_candidate=self._resolve_structured_output_candidate,
-                    strip_done_marker_for_output_validation=self._strip_done_marker_for_output_validation,
-                    extract_pending_interaction=self._extract_pending_interaction,
-                    append_orchestrator_event=self._append_orchestrator_event,
-                    append_output_repair_record=self.audit_service.append_output_repair_record,
-                    live_runtime_emitter_factory=lambda: LiveRuntimeEmitterImpl(
+                outcome: RunAttemptResolvedOutcome = await orchestrator.run_attempt_outcome_service.resolve(
+                    inputs=RunAttemptOutcomeInputs(
+                        context=preparation,
+                        execution=execution,
                         run_id=run_id,
-                        run_dir=run_dir,
-                        engine=engine_name,
-                        attempt_number=attempt_number,
-                        stream_parser=adapter_stream_parser,
-                        run_handle_consumer=_consume_run_handle,
-                    ),
+                        request_id=request_id,
+                        request_record=request_record,
+                        options=options,
+                        skill_id=skill_id,
+                        run_store_backend=run_store,
+                        run_output_convergence_service=run_output_convergence_service,
+                        auth_orchestration_service=orchestrator.auth_orchestration_service,
+                        audit_service=orchestrator.audit_service,
+                        schema_validator_backend=schema_validator,
+                        append_orchestrator_event=orchestrator.audit_service.append_orchestrator_event,
+                        update_status=orchestrator._update_status,
+                        resolve_provider_id=_resolve_provider_id,
+                        provider_unresolved_detail=_provider_unresolved_detail,
+                        summarize_terminal_error_message=_summarize_terminal_error_message,
+                        resolve_hard_timeout_seconds=orchestrator._resolve_hard_timeout_seconds,
+                        live_runtime_emitter_factory=execution.live_runtime_emitter_factory,
+                        collect_run_artifacts=collect_run_artifacts,
+                        resolve_output_artifact_paths=resolve_output_artifact_paths,
+                        interaction_service=orchestrator.interaction_service,
+                    )
                 )
-                result = convergence.engine_result or result
-                runtime_parse_result = convergence.runtime_parse_result
-                if convergence.process_exit_code is not None:
-                    process_exit_code = convergence.process_exit_code
-                if convergence.process_failure_reason is not None:
-                    process_failure_reason = convergence.process_failure_reason
-                process_raw_stdout = getattr(result, "raw_stdout", "") or process_raw_stdout
-                process_raw_stderr = getattr(result, "raw_stderr", "") or process_raw_stderr
-                repair_level = convergence.repair_level or repair_level
-                output_data = dict(convergence.output_data)
-                has_structured_output = convergence.has_structured_output
-                structured_output_source = convergence.structured_output_source
-                done_signal_found = convergence.done_signal_found
-                schema_output_errors = list(convergence.schema_output_errors)
-                pending_interaction_candidate = convergence.pending_interaction_candidate
-                turn_payload_for_completion = dict(convergence.turn_payload_for_completion)
-                for convergence_warning in convergence.validation_warnings:
-                    _append_validation_warning(convergence_warning)
+                final_status = outcome.final_status
+                current_outcome = outcome
+                normalized_error = outcome.normalized_error
+                normalized_error_message = (
+                    str(normalized_error.get("message"))
+                    if isinstance(normalized_error, dict) and normalized_error.get("message") is not None
+                    else None
+                )
+                final_validation_warnings = list(outcome.warnings)
+                final_error_code = outcome.final_error_code
+                terminal_error_summary = outcome.terminal_error_summary
+                output_data = dict(outcome.output_data)
+                artifacts = list(outcome.artifacts)
+                repair_level = outcome.repair_level
+                pending_interaction = (
+                    dict(outcome.pending_interaction)
+                    if isinstance(outcome.pending_interaction, dict)
+                    else None
+                )
+                pending_auth = (
+                    dict(outcome.pending_auth) if isinstance(outcome.pending_auth, dict) else None
+                )
+                pending_auth_method_selection = (
+                    dict(outcome.pending_auth_method_selection)
+                    if isinstance(outcome.pending_auth_method_selection, dict)
+                    else None
+                )
+                auth_session_meta = (
+                    dict(outcome.auth_session_meta)
+                    if isinstance(outcome.auth_session_meta, dict)
+                    else None
+                )
+                turn_payload_for_completion = dict(outcome.turn_payload_for_completion)
+                process_exit_code = outcome.process_exit_code
+                process_failure_reason = outcome.process_failure_reason
+                process_raw_stdout = outcome.process_raw_stdout
+                process_raw_stderr = outcome.process_raw_stderr
+                auth_detection_result = outcome.auth_detection_result
+                runtime_parse_result = outcome.runtime_parse_result
+
                 if (
-                    not schema_output_errors
-                    and has_structured_output
-                    and convergence.convergence_state == "not_needed"
-                    and repair_level == "deterministic_generic"
-                ):
-                    _append_validation_warning("OUTPUT_REPAIRED_GENERIC")
-                if (
-                    pending_interaction_candidate is not None
+                    final_status == RunStatus.QUEUED
+                    and outcome.auto_resume_requested
+                    and pending_interaction is not None
                     and request_id
-                    and run_id
-                    and not session_capable
-                    and interactive_auto_reply
                 ):
-                    pending_interaction_candidate.setdefault("source_attempt", attempt_number)
                     await maybe_await(
                         run_store.set_pending_interaction(
                             request_id,
-                            pending_interaction_candidate,
+                            pending_interaction,
                         )
                     )
                     await maybe_await(
                         run_store.append_interaction_history(
                             request_id=request_id,
-                            interaction_id=int(pending_interaction_candidate["interaction_id"]),
+                            interaction_id=int(pending_interaction["interaction_id"]),
                             event_type="ask_user",
-                            payload=pending_interaction_candidate,
+                            payload=pending_interaction,
                             source_attempt=attempt_number,
                         )
                     )
@@ -929,303 +980,15 @@ class _RunJobLifecyclePipeline:
                     )
                     await run_store.update_run_status(run_id, RunStatus.QUEUED)
                     asyncio.create_task(
-                        self._resume_with_auto_decision(
+                        orchestrator._resume_with_auto_decision(
                             request_record=request_record or {},
                             run_id=run_id,
                             request_id=request_id,
-                            pending_interaction=pending_interaction_candidate,
+                            pending_interaction=pending_interaction,
                         )
                     )
-                    final_status = RunStatus.QUEUED
-                    final_validation_warnings = list(warnings)
                     return RunJobOutcome(run_id=run_id, final_status=RunStatus.QUEUED)
 
-                done_marker_found_in_stream = self.audit_service.contains_done_marker_in_stream(
-                    adapter=adapter,
-                    raw_stdout=process_raw_stdout,
-                    raw_stderr=process_raw_stderr,
-                )
-                legacy_pending_interaction = self._build_default_pending_interaction(
-                    fallback_interaction_id=attempt_number,
-                )
-
-                # 6.1 Normalization (N0)
-                # Create standard envelope
-                artifacts = collect_run_artifacts(run_dir)
-                artifact_errors: list[str] = []
-                if done_signal_found or (has_structured_output and pending_interaction_candidate is None):
-                    resolution_result = resolve_output_artifact_paths(
-                        skill=skill,
-                        run_dir=run_dir,
-                        output_data=output_data,
-                    )
-                    output_data = resolution_result.output_data
-                    artifacts = resolution_result.artifacts
-                    if (
-                        isinstance(turn_payload_for_completion, dict)
-                        and turn_payload_for_completion
-                    ):
-                        turn_payload_for_completion = dict(output_data)
-                    for warning_code in resolution_result.warnings:
-                        _append_validation_warning(warning_code)
-                    schema_output_errors = schema_validator.validate_output(skill, output_data)
-                    if resolution_result.missing_required_fields:
-                        artifact_errors.append(
-                            "Missing required artifacts: "
-                            + ", ".join(resolution_result.missing_required_fields)
-                        )
-                if auth_detection_high and session_capable and request_id:
-                    canonical_provider_id = _resolve_provider_id(
-                        engine_name=engine_name,
-                        options=options,
-                        request_record=request_record,
-                    )
-                    created_pending_auth = await self.auth_orchestration_service.create_pending_auth(
-                        run_id=run_id,
-                        run_dir=run_dir,
-                        request_id=request_id,
-                        skill_id=skill_id,
-                        engine_name=engine_name,
-                        options=options,
-                        attempt_number=attempt_number,
-                        auth_detection=auth_detection_result,
-                        canonical_provider_id=canonical_provider_id,
-                        run_store_backend=run_store,
-                        append_orchestrator_event=self._append_orchestrator_event,
-                        update_status=self._update_status,
-                    )
-                    if created_pending_auth is not None:
-                        created_pending_payload = created_pending_auth.model_dump(mode="json")
-                        if "auth_session_id" in created_pending_payload:
-                            pending_auth = created_pending_payload
-                            auth_session_meta = {
-                                "session_id": created_pending_payload.get("auth_session_id"),
-                                "engine": created_pending_payload.get("engine"),
-                                "provider_id": created_pending_payload.get("provider_id"),
-                                "challenge_kind": created_pending_payload.get("challenge_kind"),
-                                "status": "waiting",
-                                "source_attempt": attempt_number,
-                                "resume_attempt": None,
-                                "last_error": created_pending_payload.get("last_error"),
-                                "redacted_submission": {"kind": None, "present": False},
-                            }
-                        else:
-                            pending_auth_method_selection = created_pending_payload
-                        forced_failure_reason = None
-                    else:
-                        if model_registry.is_multi_provider_engine(engine_name) and canonical_provider_id is None:
-                            warning_code = (
-                                "OPENCODE_PROVIDER_UNRESOLVED_FROM_MODEL"
-                                if engine_name.strip().lower() == "opencode"
-                                else "PROVIDER_ID_UNRESOLVED"
-                            )
-                            warnings.append(warning_code)
-                            self._append_orchestrator_event(
-                                run_dir=run_dir,
-                                attempt_number=attempt_number,
-                                category="diagnostic",
-                                type_name=OrchestratorEventType.DIAGNOSTIC_WARNING.value,
-                                data=make_diagnostic_warning_payload(
-                                    code=warning_code,
-                                    detail=_provider_unresolved_detail(
-                                        engine_name=engine_name,
-                                        options=options,
-                                        request_record=request_record,
-                                    ),
-                                ),
-                                engine_name=engine_name,
-                            )
-                        forced_failure_reason = "AUTH_REQUIRED"
-                elif auth_detection_high:
-                    forced_failure_reason = "AUTH_REQUIRED"
-                elif process_failure_reason in {
-                    "AUTH_REQUIRED",
-                    "TIMEOUT",
-                    InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-                }:
-                    forced_failure_reason = process_failure_reason
-                else:
-                    forced_failure_reason = None
-
-                if (
-                    pending_auth is None
-                    and pending_auth_method_selection is None
-                    and custom_provider_model is not None
-                    and request_id
-                    and session_capable
-                    and (forced_failure_reason is not None or result.exit_code != 0)
-                ):
-                    pending_auth = (
-                        await self.auth_orchestration_service.create_custom_provider_pending_auth(
-                            request_id=request_id,
-                            run_id=run_id,
-                            run_dir=run_dir,
-                            engine_name=engine_name,
-                            requested_model=custom_provider_model,
-                            source_attempt=attempt_number,
-                            run_store_backend=run_store,
-                            append_orchestrator_event=self._append_orchestrator_event,
-                        )
-                    ).model_dump(mode="json")
-                    forced_failure_reason = None
-
-                normalized_status = "success"
-                if pending_auth is not None or pending_auth_method_selection is not None:
-                    normalized_status = RunStatus.WAITING_AUTH.value
-                elif forced_failure_reason or result.exit_code != 0:
-                    normalized_status = "failed"
-                elif is_interactive:
-                    final_branch_resolved = bool(done_signal_found)
-                    pending_branch_resolved = (
-                        not final_branch_resolved
-                        and pending_interaction_candidate is not None
-                    )
-                    soft_completion = (
-                        (not final_branch_resolved)
-                        and (not pending_branch_resolved)
-                        and has_structured_output
-                        and not schema_output_errors
-                    )
-                    if final_branch_resolved:
-                        terminal_validation_errors = [*schema_output_errors, *artifact_errors]
-                        if terminal_validation_errors:
-                            normalized_status = "failed"
-                    elif pending_branch_resolved:
-                        if can_persist_waiting_user:
-                            normalized_status = RunStatus.WAITING_USER.value
-                            pending_interaction = pending_interaction_candidate
-                        else:
-                            forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
-                            normalized_status = "failed"
-                    elif soft_completion:
-                        terminal_validation_errors = [*artifact_errors]
-                        if terminal_validation_errors:
-                            normalized_status = "failed"
-                        else:
-                            _append_validation_warning("INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER")
-                            if schema_validator.is_output_schema_too_permissive(skill):
-                                _append_validation_warning(
-                                    "INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE"
-                                )
-                    elif has_structured_output and schema_output_errors:
-                        _append_validation_warning("INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID")
-                        if done_marker_found_in_stream:
-                            normalized_status = "failed"
-                        else:
-                            max_attempt = skill.max_attempt
-                            if max_attempt is not None and attempt_number >= max_attempt:
-                                forced_failure_reason = (
-                                    InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
-                                )
-                                normalized_status = "failed"
-                            elif can_persist_waiting_user:
-                                normalized_status = RunStatus.WAITING_USER.value
-                                pending_interaction = pending_interaction_candidate or legacy_pending_interaction
-                            else:
-                                forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
-                                normalized_status = "failed"
-                    else:
-                        max_attempt = skill.max_attempt
-                        if max_attempt is not None and attempt_number >= max_attempt:
-                            forced_failure_reason = (
-                                InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
-                            )
-                            normalized_status = "failed"
-                        elif can_persist_waiting_user:
-                            normalized_status = RunStatus.WAITING_USER.value
-                            pending_interaction = pending_interaction_candidate or legacy_pending_interaction
-                        else:
-                            forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
-                            normalized_status = "failed"
-                else:
-                    terminal_validation_errors = [*schema_output_errors, *artifact_errors]
-                    if terminal_validation_errors:
-                        normalized_status = "failed"
-
-                if (
-                    normalized_status == RunStatus.WAITING_USER.value
-                    and pending_interaction is not None
-                    and is_interactive
-                    and request_id
-                    and interactive_profile
-                ):
-                    wait_status = await self._persist_waiting_interaction(
-                        run_id=run_id,
-                        run_dir=run_dir,
-                        request_id=request_id,
-                        attempt_number=attempt_number,
-                        profile=interactive_profile,
-                        interactive_auto_reply=interactive_auto_reply,
-                        pending_interaction=pending_interaction,
-                    )
-                    if wait_status is not None:
-                        forced_failure_reason = wait_status
-                        normalized_status = "failed"
-                        pending_interaction = None
-
-                has_output_error = bool(terminal_validation_errors)
-                normalized_error: dict[str, Any] | None = None
-                if normalized_status == RunStatus.WAITING_USER.value:
-                    normalized_error = None
-                elif normalized_status == RunStatus.WAITING_AUTH.value:
-                    normalized_error = None
-                elif normalized_status != "success":
-                    error_code: Optional[str] = None
-                    if forced_failure_reason == "AUTH_REQUIRED":
-                        error_code = "AUTH_REQUIRED"
-                        error_message = "AUTH_REQUIRED: engine authentication is required or expired"
-                    elif forced_failure_reason == "TIMEOUT":
-                        error_code = "TIMEOUT"
-                        effective_timeout = self._resolve_hard_timeout_seconds(options)
-                        error_message = (
-                            f"TIMEOUT: engine execution exceeded hard timeout "
-                            f"({effective_timeout}s)"
-                        )
-                    elif forced_failure_reason in {
-                        InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-                        InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value,
-                    }:
-                        error_code = forced_failure_reason
-                        error_message = str(forced_failure_reason)
-                    elif forced_failure_reason == "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED":
-                        error_code = forced_failure_reason
-                        error_message = (
-                            "Client conversation_mode=non_session cannot enter waiting_user; "
-                            "interactive flow must auto-resolve without waiting."
-                        )
-                    elif has_output_error:
-                        error_message = "; ".join(terminal_validation_errors)
-                    else:
-                        error_message = f"Exit code {result.exit_code}"
-                    normalized_error = {
-                        "code": error_code,
-                        "message": error_message,
-                        "stderr": result.raw_stderr,
-                    }
-                final_validation_warnings = list(warnings)
-                final_error_code = (
-                    str(normalized_error.get("code"))
-                    if isinstance(normalized_error, dict) and normalized_error.get("code")
-                    else None
-                )
-                terminal_error_summary = _summarize_terminal_error_message(
-                    normalized_error.get("message") if isinstance(normalized_error, dict) else None
-                )
-
-                # Allow adapter to communicate error via output if present
-                if result.exit_code != 0 and result.raw_stderr:
-                    pass  # already handled in error
-
-                # 7. Finalize status and bundles
-                if normalized_status == "success":
-                    final_status = RunStatus.SUCCEEDED
-                elif normalized_status == RunStatus.WAITING_USER.value:
-                    final_status = RunStatus.WAITING_USER
-                elif normalized_status == RunStatus.WAITING_AUTH.value:
-                    final_status = RunStatus.WAITING_AUTH
-                else:
-                    final_status = RunStatus.FAILED
-                normalized_error_message = normalized_error["message"] if normalized_error else None
                 if (
                     final_status == RunStatus.WAITING_USER
                     and interactive_profile is not None
@@ -1235,224 +998,97 @@ class _RunJobLifecyclePipeline:
                     if timeout_requires_auto_decision(interactive_auto_reply):
                         delay_sec = max(1, int(interactive_profile.session_timeout_sec))
                         asyncio.create_task(
-                            self._auto_decide_after_timeout(
+                            orchestrator._auto_decide_after_timeout(
                                 request_id=request_id,
                                 run_id=run_id,
                                 delay_sec=delay_sec,
                             )
                         )
-                effective_session_timeout_sec = (
-                    interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                await orchestrator.run_attempt_projection_finalizer.finalize(
+                    inputs=RunAttemptFinalizeInput(
+                        context=preparation,
+                        execution=execution,
+                        outcome=outcome,
+                        request_record=request_record,
+                        run_id=run_id,
+                        request_id=request_id,
+                        cache_key=cache_key,
+                        attempt_started_at=attempt_started_at,
+                        fs_before_snapshot=fs_before_snapshot,
+                        run_store_backend=run_store,
+                        run_projection_service=run_projection_service,
+                        audit_service=orchestrator.audit_service,
+                        build_run_bundle=orchestrator.build_run_bundle,
+                        summarize_terminal_error_message=_summarize_terminal_error_message,
+                        execution_mode=execution_mode,
+                        options=options,
+                        adapter=adapter,
+                    )
                 )
-                projection_request_id = request_id or f"run:{run_id}"
-                if final_status == RunStatus.WAITING_USER and pending_interaction is not None:
-                    logger.info(
-                        "run_attempt_waiting_user run_id=%s request_id=%s attempt=%s interaction_id=%s",
-                        run_id,
-                        projection_request_id,
-                        attempt_number,
-                        pending_interaction.get("interaction_id"),
-                    )
-                    await run_projection_service.write_non_terminal_projection(
-                        run_dir=run_dir,
-                        request_id=projection_request_id,
-                        run_id=run_id,
-                        status=RunStatus.WAITING_USER,
-                        request_record=request_record,
-                        current_attempt=attempt_number,
-                        pending_owner=PendingOwner.WAITING_USER,
-                        pending_interaction=pending_interaction,
-                        source_attempt=attempt_number,
-                        effective_session_timeout_sec=effective_session_timeout_sec,
-                        warnings=warnings,
-                        error=None,
-                        run_store_backend=run_store,
-                    )
-                    await run_store.update_run_status(run_id, final_status)
-                    log_event(
-                        logger,
-                        event="run.lifecycle.waiting_user",
-                        phase="run_lifecycle",
-                        outcome="ok",
-                        request_id=request_id,
-                        run_id=run_id,
-                        attempt=attempt_number,
-                        engine=engine_name,
-                        interaction_id=pending_interaction.get("interaction_id"),
-                    )
-                elif final_status == RunStatus.WAITING_AUTH:
-                    logger.info(
-                        "run_attempt_waiting_auth run_id=%s request_id=%s attempt=%s",
-                        run_id,
-                        projection_request_id,
-                        attempt_number,
-                    )
-                    pending_owner = None
-                    if pending_auth_method_selection is not None:
-                        pending_owner = PendingOwner.WAITING_AUTH_METHOD_SELECTION
-                    elif pending_auth is not None:
-                        pending_owner = PendingOwner.WAITING_AUTH_CHALLENGE
-                    await run_projection_service.write_non_terminal_projection(
-                        run_dir=run_dir,
-                        request_id=projection_request_id,
-                        run_id=run_id,
-                        status=RunStatus.WAITING_AUTH,
-                        request_record=request_record,
-                        current_attempt=attempt_number,
-                        pending_owner=pending_owner,
-                        pending_auth_method_selection=pending_auth_method_selection,
-                        pending_auth=pending_auth,
-                        source_attempt=attempt_number,
-                        effective_session_timeout_sec=effective_session_timeout_sec,
-                        warnings=warnings,
-                        error=None,
-                        run_store_backend=run_store,
-                    )
-                    await run_store.update_run_status(run_id, final_status)
-                    log_event(
-                        logger,
-                        event="run.lifecycle.waiting_auth",
-                        phase="run_lifecycle",
-                        outcome="ok",
-                        request_id=request_id,
-                        run_id=run_id,
-                        attempt=attempt_number,
-                        engine=engine_name,
-                    )
-                else:
-                    logger.info(
-                        "run_attempt_terminal run_id=%s request_id=%s attempt=%s status=%s",
-                        run_id,
-                        projection_request_id,
-                        attempt_number,
-                        final_status.value,
-                    )
-                    await run_projection_service.write_terminal_projection(
-                        run_dir=run_dir,
-                        request_id=projection_request_id,
-                        run_id=run_id,
-                        status=final_status,
-                        request_record=request_record,
-                        current_attempt=attempt_number,
-                        effective_session_timeout_sec=effective_session_timeout_sec,
-                        warnings=warnings,
-                        error=normalized_error,
-                        terminal_result={
-                            "data": output_data if final_status == RunStatus.SUCCEEDED else None,
-                            "artifacts": artifacts,
-                            "repair_level": repair_level,
-                            "validation_warnings": warnings,
-                            "error": normalized_error,
-                        },
-                        run_store_backend=run_store,
-                    )
-                    result_path = run_dir / "result" / "result.json"
-                    await run_store.update_run_status(run_id, final_status, str(result_path))
-                    log_event(
-                        logger,
-                        event=(
-                            "run.lifecycle.succeeded"
-                            if final_status == RunStatus.SUCCEEDED
-                            else "run.lifecycle.failed"
-                        ),
-                        phase="run_lifecycle",
-                        outcome="ok" if final_status == RunStatus.SUCCEEDED else "error",
-                        level=logging.INFO if final_status == RunStatus.SUCCEEDED else logging.ERROR,
-                        request_id=request_id,
-                        run_id=run_id,
-                        attempt=attempt_number,
-                        engine=engine_name,
-                        error_code=final_error_code,
-                    )
-                    self._build_run_bundle(run_dir, debug=False)
-                    self._build_run_bundle(run_dir, debug=True)
-                if final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}:
-                    terminal_payload: Dict[str, Any] = {"status": final_status.value}
-                    if final_status in {RunStatus.FAILED, RunStatus.CANCELED}:
-                        if isinstance(final_error_code, str) and final_error_code:
-                            terminal_payload["code"] = final_error_code
-                        if isinstance(terminal_error_summary, str) and terminal_error_summary:
-                            terminal_payload["message"] = terminal_error_summary
-                    self._append_orchestrator_event(
-                        run_dir=run_dir,
-                        attempt_number=attempt_number,
-                        category="lifecycle",
-                        type_name=OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
-                        data=terminal_payload,
-                        engine_name=engine_name,
-                    )
-                if cache_key and final_status == RunStatus.SUCCEEDED:
-                    skill_source = (
-                        str((request_record or {}).get("skill_source") or "installed")
-                        if isinstance(request_record, dict)
-                        else "installed"
-                    )
-                    if skill_source == "temp_upload":
-                        await run_store.record_temp_cache_entry(cache_key, run_id)
-                    else:
-                        await run_store.record_cache_entry(cache_key, run_id)
 
             except RunCanceled:
                 final_status = RunStatus.CANCELED
-                canceled_error = self._build_canceled_error()
+                canceled_error = orchestrator._build_canceled_error()
                 normalized_error_message = canceled_error["message"]
                 final_error_code = str(canceled_error.get("code"))
                 final_validation_warnings = []
-                result_path = run_dir / "result" / "result.json" if run_dir else None
+                current_outcome = _build_terminal_outcome(
+                    final_status=RunStatus.CANCELED,
+                    normalized_error=canceled_error,
+                    warnings=[],
+                    final_error_code=final_error_code,
+                    terminal_error_summary=_summarize_terminal_error_message(
+                        canceled_error.get("message")
+                    ),
+                    effective_session_timeout_sec=(
+                        interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                    ),
+                    auth_detection_result=auth_detection_result,
+                    auth_session_meta=auth_session_meta,
+                    process_exit_code=process_exit_code,
+                    process_failure_reason=process_failure_reason,
+                    process_raw_stdout=process_raw_stdout,
+                    process_raw_stderr=process_raw_stderr,
+                )
                 if run_dir:
-                    await run_projection_service.write_terminal_projection(
-                        run_dir=run_dir,
-                        request_id=request_id or f"run:{run_id}",
-                        run_id=run_id,
-                        status=RunStatus.CANCELED,
-                        request_record=request_record,
-                        current_attempt=attempt_number,
-                        effective_session_timeout_sec=(
-                            interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                    await orchestrator.run_attempt_projection_finalizer.finalize(
+                        inputs=_build_finalize_input(
+                            request=request,
+                            context=context,
+                            execution=execution,
+                            outcome=current_outcome,
+                            run_dir=run_dir,
+                            request_record=request_record,
+                            request_id=request_id,
+                            execution_mode=execution_mode,
+                            conversation_mode=conversation_mode,
+                            session_capable=session_capable,
+                            is_interactive=is_interactive,
+                            interactive_auto_reply=interactive_auto_reply,
+                            can_wait_for_user=can_wait_for_user,
+                            can_persist_waiting_user=can_persist_waiting_user,
+                            interactive_profile=interactive_profile,
+                            attempt_number=attempt_number,
+                            adapter=adapter,
+                            run_options=context.run_options if context is not None else options,
+                            run_id=run_id,
+                            cache_key=cache_key,
+                            attempt_started_at=attempt_started_at,
+                            fs_before_snapshot=fs_before_snapshot,
+                            run_store_backend=run_store,
+                            run_projection_backend=run_projection_service,
+                            audit_service=orchestrator.audit_service,
+                            build_run_bundle=orchestrator.build_run_bundle,
+                            options=options,
                         ),
-                        error=canceled_error,
-                        warnings=[],
-                        terminal_result={
-                            "data": None,
-                            "artifacts": [],
-                            "repair_level": "none",
-                            "validation_warnings": [],
-                            "error": canceled_error,
-                        },
-                        run_store_backend=run_store,
+                        terminal_event_type_name=OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value,
+                        failure_error_type="RunCanceled",
                     )
-                await run_store.update_run_status(
-                    run_id,
-                    RunStatus.CANCELED,
-                    str(result_path) if result_path is not None else None,
-                )
-                if run_dir:
-                    self._append_orchestrator_event(
-                        run_dir=run_dir,
-                        attempt_number=attempt_number,
-                        category="lifecycle",
-                        type_name=OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value,
-                        data={"status": RunStatus.CANCELED.value},
-                        engine_name=engine_name,
-                    )
-                log_event(
-                    logger,
-                    event="run.lifecycle.failed",
-                    phase="run_lifecycle",
-                    outcome="error",
-                    level=logging.WARNING,
-                    request_id=request_id,
-                    run_id=run_id,
-                    attempt=attempt_number,
-                    engine=engine_name,
-                    error_code=final_error_code,
-                    error_type="RunCanceled",
-                )
             except (AttributeError, RuntimeError, OSError, TypeError, ValueError, LookupError) as e:
                 # Orchestration boundary: normalize unknown runtime exceptions into terminal error payload.
                 logger.exception("Job failed")
                 final_status = RunStatus.FAILED
-                normalized_error = self._error_from_exception(e)
+                normalized_error = orchestrator._error_from_exception(e)
                 normalized_error_message = str(normalized_error.get("message", str(e)))
                 final_error_code = (
                     str(normalized_error.get("code"))
@@ -1460,118 +1096,92 @@ class _RunJobLifecyclePipeline:
                     else None
                 )
                 final_validation_warnings = []
-                result_path = run_dir / "result" / "result.json" if run_dir else None
-                if run_dir:
-                    await run_projection_service.write_terminal_projection(
-                        run_dir=run_dir,
-                        request_id=request_id or f"run:{run_id}",
-                        run_id=run_id,
-                        status=RunStatus.FAILED,
-                        request_record=request_record,
-                        current_attempt=attempt_number,
-                        effective_session_timeout_sec=(
-                            interactive_profile.session_timeout_sec if interactive_profile is not None else None
-                        ),
-                        error=normalized_error,
-                        warnings=[],
-                        terminal_result={
-                            "data": None,
-                            "artifacts": [],
-                            "repair_level": "none",
-                            "validation_warnings": [],
-                            "error": normalized_error,
-                        },
-                        run_store_backend=run_store,
-                    )
-                await run_store.update_run_status(
-                    run_id,
-                    RunStatus.FAILED,
-                    str(result_path) if result_path is not None else None,
+                current_outcome = _build_terminal_outcome(
+                    final_status=RunStatus.FAILED,
+                    normalized_error=normalized_error,
+                    warnings=[],
+                    final_error_code=final_error_code,
+                    terminal_error_summary=_summarize_terminal_error_message(
+                        normalized_error_message
+                    ),
+                    effective_session_timeout_sec=(
+                        interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                    ),
+                    auth_detection_result=auth_detection_result,
+                    auth_session_meta=auth_session_meta,
+                    process_exit_code=process_exit_code,
+                    process_failure_reason=process_failure_reason,
+                    process_raw_stdout=process_raw_stdout,
+                    process_raw_stderr=process_raw_stderr,
                 )
                 if run_dir:
-                    failure_terminal_payload: Dict[str, Any] = {"status": RunStatus.FAILED.value}
-                    if isinstance(final_error_code, str) and final_error_code:
-                        failure_terminal_payload["code"] = final_error_code
-                    summary_message = _summarize_terminal_error_message(normalized_error_message)
-                    if isinstance(summary_message, str) and summary_message:
-                        failure_terminal_payload["message"] = summary_message
-                    self._append_orchestrator_event(
-                        run_dir=run_dir,
-                        attempt_number=attempt_number,
-                        category="lifecycle",
-                        type_name=OrchestratorEventType.LIFECYCLE_RUN_TERMINAL.value,
-                        data=failure_terminal_payload,
-                        engine_name=engine_name,
-                    )
-                    self._append_orchestrator_event(
-                        run_dir=run_dir,
-                        attempt_number=attempt_number,
-                        category="error",
-                        type_name=OrchestratorEventType.ERROR_RUN_FAILED.value,
-                        data={
-                            "message": _summarize_terminal_error_message(normalized_error_message) or "unknown",
-                            "code": final_error_code or "ORCHESTRATOR_ERROR",
-                        },
-                        engine_name=engine_name,
-                    )
-                log_event(
-                    logger,
-                    event="run.lifecycle.failed",
-                    phase="run_lifecycle",
-                    outcome="error",
-                    level=logging.ERROR,
-                    request_id=request_id,
-                    run_id=run_id,
-                    attempt=attempt_number,
-                    engine=engine_name,
-                    error_code=final_error_code,
-                    error_type=type(e).__name__,
-                )
-            finally:
-                if run_dir is not None:
-                    try:
-                        self._write_attempt_audit_artifacts(
+                    await orchestrator.run_attempt_projection_finalizer.finalize(
+                        inputs=_build_finalize_input(
+                            request=request,
+                            context=context,
+                            execution=execution,
+                            outcome=current_outcome,
                             run_dir=run_dir,
-                            run_id=run_id,
+                            request_record=request_record,
                             request_id=request_id,
-                            engine_name=engine_name,
                             execution_mode=execution_mode,
+                            conversation_mode=conversation_mode,
+                            session_capable=session_capable,
+                            is_interactive=is_interactive,
+                            interactive_auto_reply=interactive_auto_reply,
+                            can_wait_for_user=can_wait_for_user,
+                            can_persist_waiting_user=can_persist_waiting_user,
+                            interactive_profile=interactive_profile,
                             attempt_number=attempt_number,
-                            started_at=attempt_started_at,
-                            finished_at=datetime.utcnow(),
-                            status=final_status,
-                            fs_before_snapshot=fs_before_snapshot,
-                            process_exit_code=process_exit_code,
-                            process_failure_reason=process_failure_reason,
-                            process_raw_stdout=process_raw_stdout,
-                            process_raw_stderr=process_raw_stderr,
                             adapter=adapter,
-                            turn_payload=turn_payload_for_completion,
-                            validation_warnings=final_validation_warnings,
-                            terminal_error_code=final_error_code,
+                            run_options=context.run_options if context is not None else options,
+                            run_id=run_id,
+                            cache_key=cache_key,
+                            attempt_started_at=attempt_started_at,
+                            fs_before_snapshot=fs_before_snapshot,
+                            run_store_backend=run_store,
+                            run_projection_backend=run_projection_service,
+                            audit_service=orchestrator.audit_service,
+                            build_run_bundle=orchestrator.build_run_bundle,
                             options=options,
-                            auth_detection=auth_detection_result.as_dict(),
-                            auth_session=auth_session_meta,
-                        )
-                    except (OSError, RuntimeError, TypeError, ValueError):
-                        # Observability side-effect only: do not alter terminal run status.
-                        logger.warning(
-                            "Failed to write attempt audit artifacts for run_id=%s attempt=%s",
-                            run_id,
-                            attempt_number,
-                            exc_info=True,
-                        )
-                if trust_registered and run_dir:
-                    try:
-                        run_folder_trust_manager.remove_run_folder(engine_name, run_dir)
-                    except (OSError, RuntimeError, ValueError):
-                        # Best-effort cleanup during finalization.
-                        logger.warning(
-                            "Failed to cleanup run folder trust in finalizer for engine=%s run_id=%s",
-                            engine_name,
-                            run_id,
-                            exc_info=True,
-                        )
+                        ),
+                        emit_error_run_failed_event=True,
+                        failure_error_type=type(e).__name__,
+                    )
+            finally:
+                if run_dir is not None and current_outcome is not None:
+                    orchestrator.run_attempt_audit_finalizer.finalize(
+                        inputs=_build_finalize_input(
+                            request=request,
+                            context=context,
+                            execution=execution,
+                            outcome=current_outcome,
+                            run_dir=run_dir,
+                            request_record=request_record,
+                            request_id=request_id,
+                            execution_mode=execution_mode,
+                            conversation_mode=conversation_mode,
+                            session_capable=session_capable,
+                            is_interactive=is_interactive,
+                            interactive_auto_reply=interactive_auto_reply,
+                            can_wait_for_user=can_wait_for_user,
+                            can_persist_waiting_user=can_persist_waiting_user,
+                            interactive_profile=interactive_profile,
+                            attempt_number=attempt_number,
+                            adapter=adapter,
+                            run_options=context.run_options if context is not None else options,
+                            run_id=run_id,
+                            cache_key=cache_key,
+                            attempt_started_at=attempt_started_at,
+                            fs_before_snapshot=fs_before_snapshot,
+                            run_store_backend=run_store,
+                            run_projection_backend=run_projection_service,
+                            audit_service=orchestrator.audit_service,
+                            build_run_bundle=orchestrator.build_run_bundle,
+                            options=options,
+                        ),
+                        finished_at=datetime.utcnow(),
+                    )
                 return RunJobOutcome(
                     run_id=run_id,
                     final_status=final_status,
@@ -1605,11 +1215,5 @@ class RunJobLifecycleService:
     ) -> RunJobOutcome:
         return await _RunJobLifecyclePipeline.run_job(
             orchestrator,
-            run_id=request.run_id,
-            skill_id=request.skill_id,
-            engine_name=request.engine_name,
-            options=request.options,
-            cache_key=request.cache_key,
-            skill_override=request.skill_override,
-            temp_request_id=request.temp_request_id,
+            request=request,
         )

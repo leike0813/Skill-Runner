@@ -45,14 +45,9 @@ class _FakeWorkspace:
 class _FakeJobControl:
     def __init__(self) -> None:
         self.used_build_run_bundle = False
-        self.used_legacy_bundle = False
 
     def build_run_bundle(self, run_dir: Path, debug: bool = False):
         self.used_build_run_bundle = True
-        return self._build_run_bundle(run_dir, debug)
-
-    def _build_run_bundle(self, run_dir: Path, debug: bool = False):
-        self.used_legacy_bundle = True
         bundle_dir = run_dir / "bundle"
         bundle_dir.mkdir(parents=True, exist_ok=True)
         bundle_path = bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
@@ -101,7 +96,6 @@ async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
         _ = await RunReadFacade().get_bundle(source_adapter=source_adapter, request_id=request_id)
         assert (run_dir / "bundle" / "run_bundle.zip").exists()
         assert fake_job_control.used_build_run_bundle is True
-        assert fake_job_control.used_legacy_bundle is True
     finally:
         observability_module.run_store = previous_run_store
         observability_module.workspace_manager = previous_workspace

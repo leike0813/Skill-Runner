@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from server.services.orchestration.job_orchestrator import JobOrchestrator
+from server.services.orchestration.run_filesystem_snapshot_service import (
+    RunFilesystemSnapshotService,
+)
 
 
 def _write(path: Path, content: str = "x") -> None:
@@ -8,7 +10,7 @@ def _write(path: Path, content: str = "x") -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
+def test_snapshot_service_ignores_internal_prefixes(tmp_path: Path):
     run_dir = tmp_path / "run-1"
     _write(run_dir / "result" / "result.json", "{}")
     _write(run_dir / ".audit" / "meta.1.json", "{}")
@@ -19,8 +21,7 @@ def test_job_orchestrator_snapshot_ignores_internal_prefixes(tmp_path: Path):
     _write(run_dir / ".iflow" / "settings.json", "x")
     _write(run_dir / "opencode.json", "{}")
 
-    orchestrator = JobOrchestrator()
-    snapshot = orchestrator._capture_filesystem_snapshot(run_dir)
+    snapshot = RunFilesystemSnapshotService().capture_filesystem_snapshot(run_dir)
 
     assert "result/result.json" in snapshot
     assert ".audit/meta.1.json" not in snapshot
