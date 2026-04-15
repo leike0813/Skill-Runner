@@ -10,6 +10,10 @@ from typing import Any
 import jsonschema  # type: ignore[import-untyped]
 
 from server.models import SkillManifest
+from server.runtime.adapter.common.output_schema_cli import (
+    RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH,
+    TARGET_OUTPUT_SCHEMA_RELPATH,
+)
 from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 from server.services.skill.skill_patch_output_schema import (
     build_interactive_pending_contract_note,
@@ -19,8 +23,6 @@ from server.services.skill.skill_patch_output_schema import (
 
 logger = logging.getLogger(__name__)
 
-TARGET_OUTPUT_SCHEMA_RELPATH = ".audit/contracts/target_output_schema.json"
-RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH = "__target_output_schema_relpath"
 REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH = "target_output_schema_path_first_attempt"
 
 

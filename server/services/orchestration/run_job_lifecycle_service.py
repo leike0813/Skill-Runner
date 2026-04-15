@@ -102,6 +102,7 @@ def _resolve_provider_id(
     request_record: Dict[str, Any] | None,
 ) -> str | None:
     normalized_engine = engine_name.strip().lower()
+    requested_model = _resolve_requested_model(options=options, request_record=request_record)
     explicit_provider = None
     for candidate in _iter_request_option_candidates(
         options=options,
@@ -116,12 +117,12 @@ def _resolve_provider_id(
     try:
         normalized = model_registry.normalize_model_selection(
             normalized_engine,
-            model=_resolve_requested_model(options=options, request_record=request_record),
+            model=requested_model,
             provider_id=explicit_provider,
         )
         return normalized.provider_id
     except ValueError:
-        return explicit_provider
+        return explicit_provider or _provider_from_prefixed_model(requested_model)
 
 
 def _resolve_requested_model(

@@ -20,7 +20,7 @@
     },
     "entrypoint": {
         "prompts": {
-            "gemini": "Please analyze the CSV file `{{ input.csv_file }}` using the provided script. Calculate the mean of column `{{ parameter.column }}`. \n\nIMPORTANT: Execute `{{ skill_dir }}/scripts/analyze.py` and output the FINAL result as a valid JSON object: `{\"mean\": <value>}`."
+            "gemini": "Please analyze the CSV file `{{ input.csv_file }}`. Calculate the mean of column `{{ parameter.column }}`. Follow `SKILL.md` for the exact script path and output the FINAL result as a valid JSON object: `{\"mean\": <value>}`."
         }
     }
 }

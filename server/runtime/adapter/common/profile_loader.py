@@ -14,8 +14,6 @@ from server.config_registry.registry import config_registry
 SCHEMA_PATHS = config_registry.adapter_profile_schema_paths()
 
 
-PromptParamsJsonSource = Literal["none", "input_data", "combined_input_parameter"]
-PromptSource = Literal["none", "parameter.prompt"]
 SessionStrategy = Literal["first_json_line", "json_recursive_key", "json_lines_scan", "regex_extract"]
 SessionTextFinder = Literal["find_session_id_in_text"]
 SessionJsonLineFinder = Literal["find_session_id"]
@@ -53,16 +51,9 @@ ImportValidatorName = Literal[
 
 @dataclass(frozen=True)
 class PromptBuilderProfile:
-    engine_key: str
     skill_invoke_line_template: str
-    body_default_template_path: str | None
-    body_fallback_inline: str
-    merge_input_if_no_parameter_schema: bool
-    params_json_source: PromptParamsJsonSource
-    body_prompt_source: PromptSource
-    body_prompt_fallback_template: str
-    include_input_file_name: bool
-    include_skill_dir: bool
+    body_prefix_extra_block: str
+    body_suffix_extra_block: str
 
 
 @dataclass(frozen=True)
@@ -246,9 +237,6 @@ class AdapterProfile:
         if not candidate.is_absolute():
             candidate = (self.profile_path.parent / candidate).resolve()
         return candidate
-
-    def resolve_body_template_path(self) -> Path | None:
-        return self._resolve_profile_relative_path(self.prompt_builder.body_default_template_path)
 
     def resolve_bootstrap_path(self) -> Path:
         resolved = self._resolve_profile_relative_path(self.config_assets.bootstrap_path)
@@ -537,16 +525,9 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             ),
         ),
         prompt_builder=PromptBuilderProfile(
-            engine_key=str(prompt_raw["engine_key"]),
             skill_invoke_line_template=str(prompt_raw["skill_invoke_line_template"]),
-            body_default_template_path=prompt_raw.get("body_default_template_path"),
-            body_fallback_inline=str(prompt_raw["body_fallback_inline"]),
-            merge_input_if_no_parameter_schema=bool(prompt_raw["merge_input_if_no_parameter_schema"]),
-            params_json_source=prompt_raw["params_json_source"],
-            body_prompt_source=prompt_raw["body_prompt_source"],
-            body_prompt_fallback_template=str(prompt_raw["body_prompt_fallback_template"]),
-            include_input_file_name=bool(prompt_raw["include_input_file_name"]),
-            include_skill_dir=bool(prompt_raw["include_skill_dir"]),
+            body_prefix_extra_block=str(prompt_raw.get("body_prefix_extra_block") or ""),
+            body_suffix_extra_block=str(prompt_raw.get("body_suffix_extra_block") or ""),
         ),
         session_codec=SessionCodecProfile(
             strategy=session_raw["strategy"],

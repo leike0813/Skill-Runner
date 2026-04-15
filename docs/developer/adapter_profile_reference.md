@@ -30,16 +30,9 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `engine_key` | `str` | 引擎标识，通常与顶层 `engine` 一致 |
 | `skill_invoke_line_template` | `str` | skill 调用首行模板，永远位于最终 prompt 第 1 行 |
-| `body_default_template_path` | `str \| null` | body prompt 的 Jinja2 模板文件路径（相对路径） |
-| `body_fallback_inline` | `str` | body 模板缺失时的内联 fallback |
-| `merge_input_if_no_parameter_schema` | `bool` | 无参数 schema 时是否将 input 合并到 prompt |
-| `params_json_source` | `"none" \| "input_data" \| "combined_input_parameter"` | 参数 JSON 来源 |
-| `body_prompt_source` | `"parameter.prompt" \| "none"` | body prompt 的动态来源 |
-| `body_prompt_fallback_template` | `str` | `body_prompt_source` 需要默认值时使用的模板文本 |
-| `include_input_file_name` | `bool` | 模板上下文中是否注入输入文件名 |
-| `include_skill_dir` | `bool` | 模板上下文中是否注入技能目录路径 |
+| `body_prefix_extra_block` | `str` | 默认 body 模板前附加的可选 Jinja block，用于少量 engine 特例声明 |
+| `body_suffix_extra_block` | `str` | 默认 body 模板后附加的可选 Jinja block |
 
 ---
 
@@ -49,20 +42,37 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `strategy` | `"json_lines_extract" \| "regex_extract" \| "json_recursive_extract"` | 提取策略 |
+| `strategy` | `"first_json_line" \| "json_recursive_key" \| "json_lines_scan" \| "regex_extract"` | 提取策略 |
 | `error_message` | `str` | 提取失败时的错误消息 |
 | `error_prefix` | `str \| null` | 错误日志前缀 |
 | `required_type` | `str \| null` | 入口 JSON 中 `type` 字段须匹配的值 |
 | `id_field` | `str \| null` | JSON 提取时的 ID 字段名 |
 | `recursive_key` | `str \| null` | 递归提取时的嵌套键名 |
-| `fallback_text_finder` | `object \| null` | 文本 fallback 提取器配置 |
-| `json_lines_finder` | `object \| null` | JSON 行扫描器配置（含 `key` 字段） |
+| `fallback_text_finder` | `"find_session_id_in_text" \| null` | 文本 fallback 提取器标识 |
+| `json_lines_finder` | `"find_session_id" \| null` | JSON 行扫描器标识 |
 | `regex_pattern` | `str \| null` | 正则提取模式 |
 
 策略选择指南：
-- 引擎输出 JSON 行 → `json_lines_extract` + `json_lines_finder.key`
+- 引擎输出首条结构化行包含句柄 → `first_json_line` + `required_type` + `id_field`
+- 引擎输出 JSON 行中扫描句柄 → `json_lines_scan` + `json_lines_finder`
 - 引擎输出需正则匹配 → `regex_extract` + `regex_pattern`
-- 引擎输出 JSON 且 session ID 在嵌套结构中 → `json_recursive_extract`
+- 引擎输出 JSON 且 session ID 在嵌套结构中 → `json_recursive_key`
+
+顶层 profile 结构以 [adapter_profile_schema.json](../../server/contracts/schemas/adapter_profile_schema.json) 为准。
+除文档示例常省略的可选节外，当前主要顶层块包括：
+
+- `engine`
+- `provider_contract`
+- `prompt_builder`
+- `session_codec`
+- `attempt_workspace`
+- `config_assets`
+- `model_catalog`
+- `command_defaults`
+- `structured_output`
+- `ui_shell`
+- `cli_management`
+- `parser_auth_patterns`
 
 ---
 

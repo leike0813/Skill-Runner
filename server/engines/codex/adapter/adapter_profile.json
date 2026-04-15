@@ -5,16 +5,9 @@
     "canonical_provider_id": "openai"
   },
   "prompt_builder": {
-    "engine_key": "codex",
     "skill_invoke_line_template": "${{ skill.id }}",
-    "body_default_template_path": "../../../assets/templates/codex_default.j2",
-    "body_fallback_inline": "Execute the skill using the inputs and parameters listed below.\n\n{{ params_json }}",
-    "merge_input_if_no_parameter_schema": true,
-    "params_json_source": "combined_input_parameter",
-    "body_prompt_source": "none",
-    "body_prompt_fallback_template": "Execute skill {skill_id}",
-    "include_input_file_name": false,
-    "include_skill_dir": false
+    "body_prefix_extra_block": "",
+    "body_suffix_extra_block": ""
   },
   "session_codec": {
     "strategy": "first_json_line",

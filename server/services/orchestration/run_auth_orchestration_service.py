@@ -136,6 +136,7 @@ class RunAuthOrchestrationService:
             engine_name=engine_name,
             auth_detection=auth_detection,
             canonical_provider_id=canonical_provider_id,
+            options=options,
         )
         available_methods = self._available_methods_for(engine_name, provider_id)
         if not available_methods:
@@ -2194,18 +2195,32 @@ class RunAuthOrchestrationService:
         engine_name: str,
         auth_detection: AuthDetectionResult,
         canonical_provider_id: str | None,
+        options: dict[str, Any] | None = None,
     ) -> str | None:
         normalized_engine = engine_name.strip().lower()
         if model_registry.is_multi_provider_engine(normalized_engine):
             return (
                 self._normalize_provider_id(canonical_provider_id)
                 or self._normalize_provider_id(auth_detection.provider_id)
+                or self._provider_id_from_model_options(options)
                 or self._provider_id_from_auth_detection(
                     engine_name=normalized_engine,
                     auth_detection=auth_detection,
                 )
             )
         return self._normalize_provider_id(auth_detection.provider_id)
+
+    def _provider_id_from_model_options(self, options: dict[str, Any] | None) -> str | None:
+        for key in ("model", "runtime_model"):
+            value = options.get(key) if isinstance(options, dict) else None
+            normalized = self._normalize_string(value)
+            if normalized is None or "/" not in normalized:
+                continue
+            provider_id, _rest = normalized.split("/", 1)
+            resolved = self._normalize_provider_id(provider_id)
+            if resolved is not None:
+                return resolved
+        return None
 
     def _provider_id_from_auth_detection(
         self,

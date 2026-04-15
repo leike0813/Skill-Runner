@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -9,13 +8,15 @@ from jinja2 import Template
 
 from ....models import SkillManifest
 from ....services.platform.schema_validator import schema_validator
-from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
 
 
 RUN_EXECUTION_INSTRUCTIONS_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[3] / "assets" / "templates" / "run_execution_instructions.md.j2"
+)
+PROMPT_BODY_COMMON_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[3] / "assets" / "templates" / "prompt_body_common.j2"
 )
 
 
@@ -49,7 +50,6 @@ def build_prompt_contexts(
     skill: SkillManifest,
     run_dir: Path,
     input_data: dict[str, Any],
-    merge_input_if_no_parameter_schema: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     input_ctx, missing_required = schema_validator.build_input_context(skill, run_dir, input_data)
     if missing_required:
@@ -57,41 +57,28 @@ def build_prompt_contexts(
 
     input_ctx = normalize_prompt_file_input_context(skill=skill, input_ctx=input_ctx)
     parameter_ctx = schema_validator.build_parameter_context(skill, input_data)
-    if merge_input_if_no_parameter_schema and resolve_schema_asset(skill, "parameter").path is None:
-        parameter_ctx.update(input_data.get("input", {}))
-
     return input_ctx, parameter_ctx
 
 
-def resolve_body_template_text(
+def resolve_skill_body_prompt_text(
     *,
     skill: SkillManifest,
-    engine_key: str,
-    body_default_template_path: Path | None,
-    body_fallback_inline: str,
+    engine_name: str,
 ) -> str:
     prompts_obj = skill.entrypoint.get("prompts") if skill.entrypoint else None
     if isinstance(prompts_obj, dict):
-        engine_prompt = prompts_obj.get(engine_key)
+        engine_prompt = prompts_obj.get(engine_name)
         if isinstance(engine_prompt, str):
             return engine_prompt
 
         common_prompt = prompts_obj.get("common")
         if isinstance(common_prompt, str):
             return common_prompt
-
-    if body_default_template_path is not None and body_default_template_path.exists():
-        return body_default_template_path.read_text(encoding="utf-8")
-
-    return body_fallback_inline
+    return ""
 
 
 def render_template(template_text: str, **context: Any) -> str:
     return Template(template_text).render(**context)
-
-
-def to_params_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
 def _normalize_relative_prompt_dir(value: str) -> str:
@@ -146,36 +133,13 @@ def build_prompt_render_context(
         skill=skill,
         run_dir=run_dir,
         input_data=input_data,
-        merge_input_if_no_parameter_schema=prompt_profile.merge_input_if_no_parameter_schema,
     )
-
-    params_json: str | None = None
-    if prompt_profile.params_json_source == "input_data":
-        params_json = to_params_json(input_data)
-    elif prompt_profile.params_json_source == "combined_input_parameter":
-        params_json = to_params_json({"input": input_ctx, "parameter": parameter_ctx})
 
     context: dict[str, Any] = {
         **build_prompt_base_context(run_dir=run_dir, profile=profile, skill=skill),
         "input": input_ctx,
         "parameter": parameter_ctx,
     }
-    if params_json is not None:
-        context["params_json"] = params_json
-    if prompt_profile.include_input_file_name:
-        context["input_file"] = (run_dir / ".audit" / "request_input.json").name
-    if prompt_profile.include_skill_dir:
-        skill_dir = skill.path or (
-            profile.skills_root_from(
-                run_dir=run_dir,
-                config_path=run_dir / profile.attempt_workspace.workspace_subdir / "settings.json",
-            ) / skill.id
-        )
-        context["skill_dir"] = str(skill_dir)
-
-    if prompt_profile.body_prompt_source == "parameter.prompt":
-        default_prompt = prompt_profile.body_prompt_fallback_template.format(skill_id=skill.id)
-        context["input_prompt"] = parameter_ctx.get("prompt", default_prompt)
     if isinstance(extra_context, dict) and extra_context:
         context.update(extra_context)
     return context
@@ -204,6 +168,24 @@ def assemble_prompt(*, invoke_line: str, body_prompt: str) -> str:
     if not body.strip():
         return invoke
     return f"{invoke}\n{body}"
+
+
+def build_default_body_prompt(
+    *,
+    profile: AdapterProfile,
+    context: dict[str, Any],
+) -> str:
+    template_path = PROMPT_BODY_COMMON_TEMPLATE_PATH
+    if not template_path.exists():
+        raise RuntimeError(f"Prompt body template missing: {template_path}")
+    sections: list[str] = []
+    if profile.prompt_builder.body_prefix_extra_block.strip():
+        sections.append(render_template(profile.prompt_builder.body_prefix_extra_block, **context).strip())
+    template_text = template_path.read_text(encoding="utf-8")
+    sections.append(render_template(template_text, **context).strip())
+    if profile.prompt_builder.body_suffix_extra_block.strip():
+        sections.append(render_template(profile.prompt_builder.body_suffix_extra_block, **context).strip())
+    return "\n\n".join(section for section in sections if section)
 
 
 def render_run_execution_instructions(
@@ -245,20 +227,20 @@ class ProfiledPromptBuilder:
 
     def render(self, ctx: AdapterExecutionContext) -> str:
         skill = ctx.skill
-        prompt_profile = self._profile.prompt_builder
         extra_context = self.build_extra_context(ctx)
-        template_text = resolve_body_template_text(
-            skill=skill,
-            engine_key=prompt_profile.engine_key,
-            body_default_template_path=self._profile.resolve_body_template_path(),
-            body_fallback_inline=prompt_profile.body_fallback_inline,
-        )
         context = build_prompt_render_context(
             ctx=ctx,
             profile=self._profile,
             extra_context=extra_context,
         )
-        body_prompt = render_template(template_text, **context)
+        body_prompt = resolve_skill_body_prompt_text(
+            skill=skill,
+            engine_name=self._profile.engine,
+        )
+        if body_prompt:
+            body_prompt = render_template(body_prompt, **context)
+        else:
+            body_prompt = build_default_body_prompt(profile=self._profile, context=context)
         invoke_line = render_skill_invoke_line(
             ctx=ctx,
             profile=self._profile,

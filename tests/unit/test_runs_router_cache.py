@@ -14,6 +14,7 @@ from fastapi import BackgroundTasks, UploadFile, HTTPException
 from server.config import config
 from server.models import RequestSkillSource, RunCreateRequest, RunStatus, SkillManifest
 from server.routers import jobs as jobs_router
+from server.services.orchestration.run_execution_core import validate_runtime_and_model_options
 from server.services.platform.cache_key_builder import (
     build_input_manifest,
     compute_cache_key,
@@ -22,6 +23,15 @@ from server.services.platform.cache_key_builder import (
 )
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
+
+
+def _normalized_engine_options(*, engine: str, model: str) -> dict[str, Any]:
+    _runtime_options, engine_options = validate_runtime_and_model_options(
+        engine=engine,
+        model=model,
+        runtime_options={},
+    )
+    return engine_options
 
 
 @pytest.fixture(autouse=True)
@@ -224,7 +234,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options={"model": model_name},
+        engine_options=_normalized_engine_options(engine="gemini", model=model_name),
         input_manifest_hash=manifest_hash
     )
     await store.record_cache_entry(cache_key, "run-cached")
@@ -640,7 +650,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options={"model": "gemini-2.5-pro"},
+        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
         input_manifest_hash=manifest_hash
     )
     await store.record_cache_entry(cache_key, "run-cached")
@@ -696,7 +706,7 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options={"model": "gemini-2.5-pro"},
+        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
         input_manifest_hash=manifest_hash
     )
     await store.record_cache_entry(cache_key, "run-cached")
@@ -914,7 +924,7 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options={"model": "gemini-2.5-pro"},
+        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
         input_manifest_hash=manifest_hash
     )
     await store.record_cache_entry(cache_key, "run-cached")
@@ -960,7 +970,7 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options={"model": "gemini-2.5-pro"},
+        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
         input_manifest_hash=manifest_hash
     )
     await store.record_cache_entry(cache_key, "run-cached")

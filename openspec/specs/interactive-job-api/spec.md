@@ -922,3 +922,83 @@ The `interaction/reply` payload in `mode=auth` MUST support `submission.kind=cus
 - **THEN** `submission.kind` MUST accept `custom_provider`
 - **AND** the backend MUST treat it as the canonical provider-config submission kind
 
+### Requirement: promoted final messages MUST come from real message candidates
+
+系统 MUST 只基于真实 assistant message candidate 进行 promoted/final 收敛，不得把 Claude
+completion summary echo 当成常规候选正文。
+
+#### Scenario: Claude result echo follows a real assistant body message
+
+- **GIVEN** Claude 当前 turn 已经产出真实 assistant body message
+- **AND** 同一 turn 的 `type=result.result` 回显了相同或等价文本
+- **WHEN** runtime 收敛 promoted/final assistant message
+- **THEN** promoted/final MUST 绑定真实 assistant body message 的 `message_id`
+- **AND** `type=result.result` MUST NOT 再注册新的常规候选消息
+
+### Requirement: pending payload minimum viability MUST align with target pending JSON projection
+The target `PendingInteraction` source MUST be a legal pending JSON branch projected into the existing external API shape.
+
+#### Scenario: pending projection keeps API shape stable
+- **WHEN** the backend exposes a pending interaction through the public API
+- **THEN** the external `PendingInteraction` shape MAY remain unchanged
+- **AND** the target source MUST be the pending JSON branch projected into that shape
+
+#### Scenario: legacy backend-generated or heuristic pending data is rollout-only
+- **WHEN** documentation references heuristic or legacy pending generation
+- **THEN** it MUST be labeled rollout/deprecated/current-implementation-only
+- **AND** it MUST NOT be presented as the target source
+
+### Requirement: interactive completion semantics MUST require explicit final branch
+The target interactive API semantics MUST not define soft completion as the normative completion path.
+
+#### Scenario: final result requires explicit done marker
+- **WHEN** an interactive run is complete under the target contract
+- **THEN** the final output MUST explicitly include `__SKILL_DONE__ = true`
+
+#### Scenario: soft completion is legacy context only
+- **WHEN** API documentation mentions completion without explicit done marker
+- **THEN** it MUST be marked as legacy rollout context only
+
+### Requirement: PendingInteraction Shape Remains Stable During Source Cutover
+
+Phase 4 MUST preserve the external `PendingInteraction` shape while changing its
+source priority.
+
+#### Scenario: Pending JSON and fallback share the same external schema
+- **WHEN** clients read the pending interaction payload for a `waiting_user` run
+- **THEN** they MUST continue to observe the existing external
+  `PendingInteraction` shape
+- **AND** pending JSON branches may populate rich fields
+- **AND** legacy fallback payloads may remain generic within that same shape
+
+### Requirement: API Diagnostics Preserve Conservative Phase-5 Semantics
+
+The public API MUST continue to expose the established compatibility signals
+while keeping the explicit branch contract primary.
+
+#### Scenario: soft completion remains externally visible as a compatibility completion
+- **WHEN** an interactive attempt succeeds through soft completion
+- **THEN** API diagnostics and warnings MUST continue to include
+  `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`
+
+#### Scenario: waiting fallback remains externally stable
+- **WHEN** an interactive attempt falls through to compatibility waiting
+- **THEN** clients MUST continue to observe the existing `PendingInteraction`
+  shape
+- **AND** that payload MAY remain generic/default when no valid pending branch
+  resolved
+
+### Requirement: Pending interaction cards MUST use `ui_hints` as the primary display source
+Interactive pending payloads MUST continue exposing compatibility fields such as `prompt`, but frontend prompt cards MUST be able to use `ui_hints.prompt`, `ui_hints.hint`, `ui_hints.options`, and `ui_hints.files` as their primary display surface.
+
+#### Scenario: valid pending branch
+- **WHEN** a run is waiting on a valid pending branch
+- **THEN** chat MUST show the pending `message`
+- **AND** the pending card MUST use `ui_hints.prompt` as its main card text
+- **AND** the pending card MUST NOT repeat the chat `message`
+
+#### Scenario: missing `ui_hints.prompt`
+- **WHEN** a pending payload lacks `ui_hints.prompt`
+- **THEN** the pending card MUST fall back to the stable default open-text prompt
+- **AND** the card MUST NOT copy the chat `message` into the prompt-card body
+

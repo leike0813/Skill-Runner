@@ -30,16 +30,9 @@ def _write_profile(
                     "canonical_provider_id": None if engine in {"gemini", "opencode"} else "openai",
                 },
                 "prompt_builder": {
-                    "engine_key": engine,
                     "skill_invoke_line_template": "${{ skill.id }}",
-                    "body_default_template_path": None,
-                    "body_fallback_inline": "fallback",
-                    "merge_input_if_no_parameter_schema": True,
-                    "params_json_source": "none",
-                    "body_prompt_source": "none",
-                    "body_prompt_fallback_template": "Execute skill {skill_id}",
-                    "include_input_file_name": False,
-                    "include_skill_dir": False,
+                    "body_prefix_extra_block": "",
+                    "body_suffix_extra_block": "",
                 },
                 "session_codec": {
                     "strategy": "regex_extract",

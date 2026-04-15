@@ -5,16 +5,9 @@
     "canonical_provider_id": "google"
   },
   "prompt_builder": {
-    "engine_key": "gemini",
     "skill_invoke_line_template": "/{{ skill.id }} invoke",
-    "body_default_template_path": "../../../assets/templates/gemini_default.j2",
-    "body_fallback_inline": "Execute the skill using the above inputs and parameters.",
-    "merge_input_if_no_parameter_schema": true,
-    "params_json_source": "input_data",
-    "body_prompt_source": "none",
-    "body_prompt_fallback_template": "Execute skill {skill_id}",
-    "include_input_file_name": true,
-    "include_skill_dir": true
+    "body_prefix_extra_block": "",
+    "body_suffix_extra_block": ""
   },
   "session_codec": {
     "strategy": "json_recursive_key",

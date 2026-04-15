@@ -16,6 +16,7 @@ from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.common.prompt_builder_common import (
     _normalize_prompt_file_path,
     assemble_prompt,
+    build_default_body_prompt,
     build_prompt_render_context,
     build_prompt_contexts,
     normalize_prompt_file_input_context,
@@ -23,7 +24,7 @@ from server.runtime.adapter.common.prompt_builder_common import (
     render_run_execution_instructions,
     render_skill_invoke_line,
     render_template,
-    resolve_body_template_text,
+    resolve_skill_body_prompt_text,
 )
 from server.runtime.adapter.common.session_codec_common import (
     extract_by_regex,
@@ -43,29 +44,27 @@ def test_prompt_builder_common_resolves_template_and_context(tmp_path: Path) -> 
         encoding="utf-8",
     )
     skill = SkillManifest(id="demo", path=skill_dir, schemas={"input": "input.schema.json"})
-    template_path = tmp_path / "default.j2"
-    template_path.write_text("{{ skill_id }}::{{ run_dir }}", encoding="utf-8")
-
     input_ctx, parameter_ctx = build_prompt_contexts(
         skill=skill,
         run_dir=tmp_path,
         input_data={"parameter": {}},
-        merge_input_if_no_parameter_schema=True,
     )
     assert isinstance(input_ctx, dict)
     assert isinstance(parameter_ctx, dict)
 
-    template_text = resolve_body_template_text(
-        skill=skill,
-        engine_key="codex",
-        body_default_template_path=template_path,
-        body_fallback_inline="fallback",
-    )
-    rendered = render_template(template_text, skill=skill, skill_id=skill.id, run_dir=str(tmp_path))
-    assert rendered.startswith("demo::")
+    context = {
+        "skill": skill,
+        "skill_id": skill.id,
+        "run_dir": str(tmp_path),
+        "input": input_ctx,
+        "parameter": parameter_ctx,
+    }
+    rendered = build_default_body_prompt(profile=CodexExecutionAdapter().profile, context=context)
+    assert "# Inputs" in rendered
+    assert "# Parameters" in rendered
 
 
-def test_resolve_body_template_text_prefers_engine_prompt_over_common(tmp_path: Path) -> None:
+def test_resolve_skill_body_prompt_text_prefers_engine_prompt_over_common() -> None:
     skill = SkillManifest(
         id="demo",
         entrypoint={
@@ -76,30 +75,30 @@ def test_resolve_body_template_text_prefers_engine_prompt_over_common(tmp_path: 
         },
     )
 
-    resolved = resolve_body_template_text(
+    resolved = resolve_skill_body_prompt_text(
         skill=skill,
-        engine_key="codex",
-        body_default_template_path=None,
-        body_fallback_inline="fallback",
+        engine_name="codex",
     )
 
     assert resolved == "codex prompt"
 
 
-def test_resolve_body_template_text_falls_back_to_common_prompt(tmp_path: Path) -> None:
+def test_resolve_skill_body_prompt_text_falls_back_to_common_prompt() -> None:
     skill = SkillManifest(
         id="demo",
         entrypoint={"prompts": {"common": "common prompt"}},
     )
 
-    resolved = resolve_body_template_text(
+    resolved = resolve_skill_body_prompt_text(
         skill=skill,
-        engine_key="gemini",
-        body_default_template_path=None,
-        body_fallback_inline="fallback",
+        engine_name="gemini",
     )
 
     assert resolved == "common prompt"
+
+
+def test_resolve_skill_body_prompt_text_returns_empty_when_skill_prompt_missing() -> None:
+    assert resolve_skill_body_prompt_text(skill=SkillManifest(id="demo"), engine_name="gemini") == ""
 
 
 def test_normalize_prompt_file_path_for_windows_and_posix() -> None:
@@ -220,7 +219,7 @@ def test_run_folder_validator_common_rejects_missing_schema_file(tmp_path: Path)
         validate_run_folder_contract(skill=skill, config_path=config_path)
 
 
-def test_claude_default_prompt_template_is_used_and_includes_skill_dir(tmp_path: Path) -> None:
+def test_claude_default_prompt_template_uses_prefix_extra_block(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text("# Demo", encoding="utf-8")
@@ -253,9 +252,12 @@ def test_claude_default_prompt_template_is_used_and_includes_skill_dir(tmp_path:
 
     rendered = adapter.prompt_builder.render(ctx)  # type: ignore[union-attr]
     assert rendered.startswith("/demo-claude-skill\n")
+    assert "# Sandbox Policy" in rendered
     assert "Prefer Bash inside the sandbox first." in rendered
     assert "you may retry that command once without sandbox." in rendered
     assert "Do not use unsandboxed fallback for ordinary policy denials" in rendered
+    assert "# Inputs" in rendered
+    assert "# Parameters" in rendered
     assert "Task: Execute the skill using the above inputs and parameters." in rendered
 
 
@@ -343,6 +345,24 @@ def test_claude_default_prompt_template_avoids_sandbox_first_when_probe_unavaila
     assert "Claude sandbox is unavailable in this environment." in rendered
     assert "Execute Bash normally without attempting sandbox-first retries." in rendered
     assert "Prefer Bash inside the sandbox first." not in rendered
+
+
+def test_build_default_body_prompt_includes_prefix_and_common_template() -> None:
+    adapter = ClaudeExecutionAdapter()
+    rendered = build_default_body_prompt(
+        profile=adapter.profile,
+        context={
+            "claude_sandbox_available": False,
+            "claude_sandbox_message": "sandbox broken",
+            "input": {"source_path": "/tmp/paper.md"},
+            "parameter": {"language": "zh-CN"},
+        },
+    )
+
+    assert rendered.startswith("# Sandbox Policy")
+    assert "sandbox broken" in rendered
+    assert "# Inputs" in rendered
+    assert "# Parameters" in rendered
 
 
 def test_prompt_render_context_exposes_engine_relative_dirs_and_run_instructions(tmp_path: Path) -> None:

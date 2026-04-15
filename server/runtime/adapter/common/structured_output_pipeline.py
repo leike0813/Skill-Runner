@@ -11,11 +11,11 @@ import yaml  # type: ignore[import-untyped]
 
 from server.config import config
 from server.config_registry.registry import config_registry
-from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
-from server.services.orchestration.run_output_schema_service import (
+from server.runtime.adapter.common.output_schema_cli import (
     RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH,
     TARGET_OUTPUT_SCHEMA_RELPATH,
 )
+from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.skill.skill_patch_output_schema import (
     build_schema_example_payload,
     build_codex_compatibility_note,
@@ -49,7 +49,7 @@ class StructuredOutputPipeline:
         canonical_prompt_contract_markdown: str | None = None,
     ) -> StructuredOutputArtifacts:
         normalized_engine = self._normalize_engine_name(engine_name)
-        adapter_profile = profile or self._load_profile(normalized_engine)
+        adapter_profile = profile or self._try_load_profile(normalized_engine)
         canonical_schema_path, canonical_schema_relpath = self._resolve_canonical_schema_path(
             run_dir=run_dir,
             options=options,
@@ -69,6 +69,8 @@ class StructuredOutputPipeline:
         effective_prompt_contract_markdown = prompt_contract_markdown
 
         if (
+            adapter_profile is not None
+            and
             adapter_profile.structured_output.compat_schema_strategy == "compat_translate"
             and normalized_engine == "codex"
             and canonical_schema_path is not None
@@ -151,7 +153,9 @@ class StructuredOutputPipeline:
         profile: AdapterProfile | None = None,
     ) -> dict[str, Any]:
         normalized_engine = self._normalize_engine_name(engine_name)
-        adapter_profile = profile or self._load_profile(normalized_engine)
+        adapter_profile = profile or self._try_load_profile(normalized_engine)
+        if adapter_profile is None:
+            return dict(payload)
         if adapter_profile.structured_output.payload_canonicalizer == "noop":
             return dict(payload)
         if (
@@ -176,7 +180,7 @@ class StructuredOutputPipeline:
         normalized = (engine_name or "").strip().lower()
         return normalized or "unknown"
 
-    def _load_profile(self, engine_name: str) -> AdapterProfile:
+    def _try_load_profile(self, engine_name: str) -> AdapterProfile | None:
         profile_path = (
             Path(config.SYSTEM.ROOT)
             / "server"
@@ -185,7 +189,10 @@ class StructuredOutputPipeline:
             / "adapter"
             / "adapter_profile.json"
         )
-        return load_adapter_profile(engine_name, profile_path)
+        try:
+            return load_adapter_profile(engine_name, profile_path)
+        except RuntimeError:
+            return None
 
     def _resolve_execution_mode(self, options: Mapping[str, object]) -> str:
         raw = options.get("execution_mode")

@@ -173,9 +173,8 @@ server/
 │
 └── assets/                 # 静态资源
     └── templates/          # Jinja2 模板
-        ├── gemini_default.j2    # Gemini prompt 模板
-        ├── codex_default.j2     # Codex prompt 模板
-        ├── iflow_default.j2     # iFlow prompt 模板
+        ├── prompt_body_common.j2        # 共享 skill body prompt 模板
+        ├── run_execution_instructions.md.j2  # run-root 全局执行约束模板
         └── ui/                  # Web UI HTML 模板
 ```
 

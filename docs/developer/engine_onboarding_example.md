@@ -28,7 +28,6 @@ server/engines/demo/
     callbacks/                  ← OAuth 回调处理
   config/
     auth_strategy.yaml          ← 认证支持矩阵
-    adapter_profile.json        ← 运行时合同与命令默认参数
     bootstrap.json              ← 引导配置默认值
     default.json                ← 默认运行配置
     enforced.json               ← 强制运行配置
@@ -45,27 +44,24 @@ server/engines/demo/
 ```jsonc
 {
   "engine": "demo",
+  "provider_contract": {
+    "multi_provider": false,
+    "canonical_provider_id": "demo"
+  },
   "prompt_builder": {
-    "engine_key": "demo",
     "skill_invoke_line_template": "invoke {{ skill.id }}",
-    "body_default_template_path": "../../../assets/templates/demo_default.j2",
-    "body_fallback_inline": "{{ input_prompt }}",
-    "merge_input_if_no_parameter_schema": false,
-    "params_json_source": "none",
-    "body_prompt_source": "parameter.prompt",
-    "body_prompt_fallback_template": "Execute skill {skill_id}",
-    "include_input_file_name": false,
-    "include_skill_dir": false
+    "body_prefix_extra_block": "",
+    "body_suffix_extra_block": ""
   },
   "session_codec": {
-    "strategy": "json_lines_extract",
+    "strategy": "json_lines_scan",
     "error_message": "SESSION_RESUME_FAILED: missing demo session-id",
     "error_prefix": null,
     "required_type": null,
-    "id_field": "session_id",
+    "id_field": null,
     "recursive_key": null,
     "fallback_text_finder": null,
-    "json_lines_finder": { "key": "session_id" },
+    "json_lines_finder": "find_session_id",
     "regex_pattern": null
   },
   "attempt_workspace": {
@@ -86,6 +82,35 @@ server/engines/demo/
     "manifest_path": "../models/manifest.json",
     "models_root": "../models",
     "seed_path": null
+  },
+  "command_defaults": {
+    "start": ["-p"],
+    "resume": ["-p", "--resume"],
+    "ui_shell": []
+  },
+  "structured_output": {
+    "mode": "noop",
+    "cli_schema_strategy": "noop",
+    "compat_schema_strategy": "noop",
+    "prompt_contract_strategy": "canonical_summary",
+    "payload_canonicalizer": "noop"
+  },
+  "ui_shell": {
+    "command_id": "demo-tui",
+    "label": "Demo TUI",
+    "trust_bootstrap_parent": false,
+    "sandbox_arg": null,
+    "retry_without_sandbox_on_early_exit": false,
+    "sandbox_probe_strategy": "static_unsupported",
+    "sandbox_probe_message": "Demo TUI has no sandbox integration.",
+    "auth_hint_strategy": "none",
+    "runtime_override_strategy": "none",
+    "config_assets": {
+      "default_path": null,
+      "enforced_path": null,
+      "settings_schema_path": null,
+      "target_relpath": null
+    }
   },
   "cli_management": {
     "package": "@demo-ai/demo-cli",
@@ -108,11 +133,16 @@ server/engines/demo/
       "bootstrap_format": "json",
       "normalize_strategy": null
     }
+  },
+  "parser_auth_patterns": {
+    "rules": []
   }
 }
 ```
 
-详细字段说明参见 [adapter_profile_reference.md](adapter_profile_reference.md)。
+详细字段说明参见 [adapter_profile_reference.md](adapter_profile_reference.md)。示例中的字段集合需始终以
+`server/contracts/schemas/adapter_profile_schema.json` 和 `server/runtime/adapter/common/profile_loader.py`
+为准。
 
 ## Step 3: Implement Adapter Components
 

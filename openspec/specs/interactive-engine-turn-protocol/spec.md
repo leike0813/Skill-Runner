@@ -2,20 +2,20 @@
 
 ## Purpose
 定义引擎适配层的统一回合协议、ask_user 载荷校验、模式感知补丁注入和按 execution_mode 区分的完成态判定规则。
-
 ## Requirements
 ### Requirement: 引擎适配层 MUST 输出统一回合协议
-The system MUST express turn results via a unified protocol, and `ask_user` MUST NOT be a hard prerequisite for entering `waiting_user` in interactive mode.
+The target interactive turn contract MUST be JSON-only. Legacy ask-user wrappers MAY still exist in current implementation paths, but they MUST be treated as deprecated rollout behavior rather than as the formal protocol.
 
-#### Scenario: ask_user 仅作为可选增强信息
-- **WHEN** 引擎输出 `ask_user` 结构
-- **THEN** 系统可将其解析为 pending 的增强字段（如 `ui_hints/options/context`）
-- **AND** 不将其作为唯一控制流判定依据
+#### Scenario: pending turn uses pending JSON branch
+- **WHEN** an interactive turn needs user input
+- **THEN** the target protocol MUST be a JSON object with `__SKILL_DONE__ = false`
+- **AND** it MUST include non-empty `message`
+- **AND** it MUST include object `ui_hints`
 
-#### Scenario: ask_user 可选增强优先使用非 JSON 结构
-- **WHEN** 引擎需要输出 ask_user 风格提示
-- **THEN** 应优先使用与 JSON 明显不同的结构化格式（例如 YAML block）
-- **AND** 避免被最终业务 JSON 解析链误识别
+#### Scenario: legacy wrapper is rollout-only
+- **WHEN** documentation or migration notes mention `<ASK_USER_YAML>`
+- **THEN** that wrapper MUST be labeled legacy / deprecated / current-implementation-only
+- **AND** it MUST NOT be presented as the formal target protocol
 
 ### Requirement: 系统 MUST 校验 ask_user 载荷完整性
 Validation of ask_user payload MUST be non-blocking: malformed ask_user MUST NOT directly fail the run and MUST NOT be treated as final business output for schema validation.
@@ -26,107 +26,66 @@ Validation of ask_user payload MUST be non-blocking: malformed ask_user MUST NOT
 - **AND** run 仍可进入 `waiting_user`
 
 ### Requirement: 运行时补丁 MUST 与执行模式一致
-Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require structured ask_user output, and it MUST enforce "no done marker before real completion".
+Runtime patching for the target contract MUST describe explicit JSON-only branches rather than YAML-side-channel interaction output.
 
-#### Scenario: interactive 模式补丁
-- **WHEN** run 以 `interactive` 模式执行
-- **THEN** 补丁允许请求用户输入
-- **AND** 不强制 ask_user JSON 结构
-- **AND** 未完成前不得提前输出 `__SKILL_DONE__`
+#### Scenario: interactive patch describes the union contract
+- **WHEN** execution mode is `interactive`
+- **THEN** the target patch contract MUST describe one union output object
+- **AND** the final branch MUST require `__SKILL_DONE__ = true`
+- **AND** the pending branch MUST require `__SKILL_DONE__ = false`, `message`, and `ui_hints`
+
+#### Scenario: auto patch requires explicit final object
+- **WHEN** execution mode is `auto`
+- **THEN** the target patch contract MUST require a JSON object with explicit `__SKILL_DONE__ = true`
 
 ### Requirement: Adapter CLI 命令构造 MUST 与执行模式一致
-系统 MUST 在构造引擎 CLI 命令时保持自动执行参数策略一致：`auto` 与 `interactive` 两种模式都保留自动执行参数。  
-并且 iFlow 在所有执行场景 MUST 默认包含 `--thinking` 参数。
+系统 MUST 在构造引擎 CLI 命令时保持自动执行参数策略一致；Codex headless 自动执行参数的选择 MUST 受真实 sandbox runtime probe 结果治理，而不是只受 `LANDLOCK_ENABLED` 粗判断治理。
 
-#### Scenario: Gemini auto 模式命令
-- **WHEN** Gemini 以 `auto` 模式执行
-- **THEN** 命令包含 `--yolo`
+#### Scenario: Codex auto 模式在 sandbox 可用时保留 `--full-auto`
 
-#### Scenario: Gemini interactive 模式命令
-- **WHEN** Gemini 以 `interactive` 模式执行
-- **THEN** 命令包含 `--yolo`
+- **WHEN** Codex 以 `auto` 模式执行 headless start 回合
+- **AND** Codex sandbox runtime probe 结果为 `available=true`
+- **THEN** 命令 MUST 包含 `--full-auto`
+- **AND** 命令 MUST NOT 因运行时 probe 治理而降级为 `--yolo`
 
-#### Scenario: iFlow auto 模式命令
-- **WHEN** iFlow 以 `auto` 模式执行
-- **THEN** 命令包含 `--yolo`
-- **AND** 命令包含 `--thinking`
+#### Scenario: Codex interactive 模式在 sandbox 可用时保留 `--full-auto`
 
-#### Scenario: iFlow interactive 模式命令
-- **WHEN** iFlow 以 `interactive` 模式执行
-- **THEN** 命令包含 `--yolo`
-- **AND** 命令包含 `--thinking`
+- **WHEN** Codex 以 `interactive` 模式执行 headless start 回合
+- **AND** Codex sandbox runtime probe 结果为 `available=true`
+- **THEN** 命令 MUST 包含 `--full-auto`
 
-#### Scenario: Codex auto 模式命令
-- **WHEN** Codex 以 `auto` 模式执行
-- **THEN** 命令包含自动执行参数（`--full-auto` 或 `--yolo`）
+#### Scenario: Codex headless start 在 sandbox 不可用时降级为 `--yolo`
 
-#### Scenario: Codex interactive 模式命令
-- **WHEN** Codex 以 `interactive` 模式执行
-- **THEN** 命令包含自动执行参数（`--full-auto` 或 `--yolo`）
+- **WHEN** Codex 构造 headless start 命令
+- **AND** Codex sandbox runtime probe 结果为 `available=false`
+- **THEN** 命令 MUST 包含 `--yolo`
+- **AND** 命令 MUST NOT 再包含 `--full-auto`
 
-#### Scenario: interactive resume 回合命令
-- **WHEN** run 在 `interactive` 模式执行 reply/resume 回合
-- **THEN** Gemini 命令包含自动执行参数（`--yolo`）
-- **AND** iFlow 命令包含自动执行参数（`--yolo`）与 `--thinking`
-- **AND** Codex 命令包含自动执行参数（`--yolo` / `--full-auto`）
+#### Scenario: Codex headless resume 在 sandbox 不可用时降级为 `--yolo`
+
+- **WHEN** Codex 构造 headless resume 命令
+- **AND** Codex sandbox runtime probe 结果为 `available=false`
+- **THEN** resume 命令 MUST 包含 `--yolo`
+- **AND** resume 命令 MUST NOT 再包含 `--full-auto`
+
+#### Scenario: Codex headless start 与 resume 共享同一 sandbox probe 真值
+
+- **WHEN** Codex 在同一 headless runtime 中分别构造 start 与 resume 命令
+- **THEN** 这两个路径 MUST 消费同一份 Codex sandbox probe 结果
+- **AND** MUST NOT 由 start/resume 各自实现独立的 sandbox 可用性判定分支
 
 ### Requirement: 完成态判定 MUST 按 execution_mode 区分
-系统 MUST 以 execution_mode 区分完成态判定规则。
+The target contract MUST remove soft-completion semantics from normative completion rules.
 
-#### Scenario: interactive 模式强条件判定完成
-- **WHEN** run 以 `interactive` 模式执行
-- **AND** 解析到 `__SKILL_DONE__`
-- **THEN** 回合可进入完成判定与最终输出校验并可结束运行
+#### Scenario: interactive final turn requires explicit final branch
+- **WHEN** an interactive turn is complete under the target contract
+- **THEN** it MUST emit a JSON object with `__SKILL_DONE__ = true`
+- **AND** business fields MUST satisfy the skill output schema
 
-#### Scenario: done marker 检测兼容转义流文本
-- **WHEN** 运行时输出为 NDJSON 事件行，且 marker 位于 assistant 回复字段的字符串文本（例如 `\"__SKILL_DONE__\": true`）
-- **THEN** 系统必须将其识别为 done marker 证据
-- **AND** done marker 证据仅来自 assistant 回复内容（例如 codex `item.completed.item.type=agent_message`、gemini `response`、opencode `type=text`）
-- **AND** `tool_use`/tool 回显中的 marker 文本 MUST NOT 作为 done marker 证据
-- **AND** 运行时判定与审计判定必须保持一致
-
-#### Scenario: interactive 模式软条件判定完成
-- **WHEN** run 以 `interactive` 模式执行
-- **AND** 未解析到 `__SKILL_DONE__`
-- **AND** 未命中 ask_user 证据
-- **AND** 当前回合成功提取标准化 JSON
-- **AND** 当前回合输出通过 output schema 校验
-- **THEN** 系统可判定执行完成
-- **AND** 记录 warning `INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER`
-
-#### Scenario: ask_user yaml 命中时禁止 assistant 文本 JSON 提升
-- **WHEN** run 以 `interactive` 模式执行
-- **AND** 当前回合 assistant 文本命中 `<ASK_USER_YAML>`
-- **THEN** 系统不得再从该文本提取 JSON 并提升为 final payload
-
-#### Scenario: assistant 正文内嵌 JSON 片段不得直接成为 final payload
-- **WHEN** assistant 文本包含正文、证据数组或示例 JSON 片段
-- **AND** 这些 JSON 不是最外层最终结果
-- **THEN** 系统不得将其直接视为 final payload
-
-#### Scenario: interactive 模式缺失 done marker 进入等待态
-- **WHEN** run 以 `interactive` 模式执行
-- **AND** 未解析到 `__SKILL_DONE__`
-- **AND** 当前回合未命中 soft completion
-- **AND** 进程未发生中断性失败
-- **THEN** 系统进入 `waiting_user`
-
-#### Scenario: auto 模式不严格依赖 done marker
-- **WHEN** run 以 `auto` 模式执行
-- **AND** 最终输出通过 schema 校验
-- **THEN** 系统可判定执行成功
-- **AND** 不要求必须存在 `__SKILL_DONE__`
-
-#### Scenario: done marker 在两种模式下均不参与业务校验
-- **WHEN** 系统执行 output schema validation
-- **THEN** 必须先移除 `__SKILL_DONE__`
-- **AND** 仅对业务字段进行校验
-
-#### Scenario: marker 已检测但输出无效必须失败
-- **WHEN** 当前回合检测到 `__SKILL_DONE__`
-- **AND** 输出解析失败或 output schema 校验失败
-- **THEN** run 必须进入 `failed`
-- **AND** 不得回退为 `waiting_user`
+#### Scenario: legacy soft completion is not the target rule
+- **WHEN** historical rollout notes mention completion without explicit done marker
+- **THEN** they MUST be labeled as legacy rollout context
+- **AND** they MUST NOT be presented as the target completion rule
 
 ### Requirement: 运行时 skill patch 注入 MUST 模块化且顺序固定
 系统 MUST 按固定模块顺序注入运行时 patch 到 `SKILL.md`。
@@ -146,7 +105,7 @@ Runtime patching MUST remain mode-aware; in interactive mode it MUST NOT require
 - **AND** 不注入 auto mode patch
 
 ### Requirement: assistant 文本 JSON 提取 MUST be constrained in interactive mode
-interactive 模式下从 assistant 文本提取标准化 JSON 必须受 ask-user 证据与候选边界约束。
+interactive 模式下从 assistant 文本提取标准化 JSON MUST 受 ask-user 证据与候选边界约束。
 
 #### Scenario: embedded evidence json must not become final payload
 - **WHEN** assistant 文本包含正文、证据数组或示例 JSON 片段
@@ -158,8 +117,76 @@ interactive 模式下从 assistant 文本提取标准化 JSON 必须受 ask-user
 - **THEN** assistant 文本 JSON 提取 MUST NOT 参与 final/soft-completion 判定
 
 ### Requirement: repair MUST NOT decide completion
-repair 只能修复已识别完成候选的 payload / artifact，不得负责提升当前回合为完成态。
+Repair MUST act as same-attempt schema convergence only; it MUST NOT invent waiting-state control flow or upgrade deprecated legacy ask-user payloads into compliant final outputs.
 
-#### Scenario: repair cannot upgrade ask_user turn
-- **WHEN** 当前回合命中 ask_user 证据
-- **THEN** repair MUST NOT 将该回合转化为 final output
+#### Scenario: repair stays inside one attempt
+- **WHEN** a turn fails schema validation and enters repair
+- **THEN** each repair retry MUST remain inside the current attempt
+- **AND** repair MUST NOT increment `attempt_number`
+
+#### Scenario: repair cannot transform legacy ask-user into primary protocol
+- **WHEN** a turn only provides legacy ask-user wrapper evidence
+- **THEN** repair MUST NOT treat that wrapper as the target compliant protocol
+- **AND** future compliant behavior MUST instead produce the pending JSON branch
+
+### Requirement: Interactive Prompt Contract Uses JSON Pending or Final Branches
+
+Interactive engine prompts MUST instruct the agent to emit the JSON union contract only.
+
+#### Scenario: Pending-turn guidance forbids legacy ask-user blocks
+- **WHEN** runtime patches a skill for interactive execution
+- **THEN** the prompt MUST instruct the agent to emit either:
+  - a final JSON object with `__SKILL_DONE__ = true`, or
+  - a pending JSON object with `__SKILL_DONE__ = false`, `message`, and `ui_hints`
+- **AND** the prompt MUST explicitly forbid `<ASK_USER_YAML>` as a valid output protocol
+
+### Requirement: repair protocol MUST expose explicit round semantics
+The target engine-turn protocol MUST describe repair as attempt-internal rounds rather than an implicit retry side effect.
+
+#### Scenario: engine turn stays on the same attempt during repair
+- **WHEN** a turn enters output convergence
+- **THEN** the protocol model MUST describe repair work as `internal_round`s inside the current attempt
+- **AND** it MUST reserve orchestrator repair events that carry both `attempt_number` and `internal_round_index`
+
+### Requirement: repair MUST NOT create competing executors
+Engine adapters and parsers MAY contribute repaired candidates, but they MUST NOT become separate repair authorities.
+
+#### Scenario: adapter repair is subordinate to orchestrator ownership
+- **WHEN** an adapter or parser applies deterministic repair
+- **THEN** the resulting candidate MUST be treated as input to the orchestrator convergence executor
+- **AND** the protocol MUST NOT describe adapter-level repair as a parallel governance path
+
+### Requirement: Legacy Ask-User Markup Does Not Populate Waiting Payloads
+
+Interactive engine turn processing MUST reject deprecated ask-user wrappers as a
+data source for waiting payload enrichment.
+
+#### Scenario: Deprecated ask-user markup cannot supply prompt metadata
+- **WHEN** model output contains `<ASK_USER_YAML>` or similar legacy ask-user
+  markup
+- **THEN** runtime MUST NOT populate canonical `PendingInteraction` fields from
+  that markup
+- **AND** only a valid pending JSON branch may supply rich waiting payload data
+
+### Requirement: Interactive Turn Protocol Distinguishes Formal Branches From Compatibility Paths
+
+Interactive turn processing MUST keep the formal contract and compatibility
+fallbacks distinct.
+
+#### Scenario: pending branch remains the formal waiting source
+- **WHEN** an interactive turn produces a valid pending JSON branch
+- **THEN** runtime MUST project that branch into canonical `PendingInteraction`
+- **AND** this path MUST be preferred over compatibility waiting fallback
+
+#### Scenario: missing explicit branch may still soft-complete
+- **WHEN** an interactive turn does not resolve a valid final or pending branch
+- **AND** business output remains schema-valid
+- **THEN** runtime MAY still classify the turn as soft completion
+- **AND** that classification MUST remain a compatibility path
+
+#### Scenario: compatibility waiting fallback stays generic
+- **WHEN** an interactive turn reaches waiting fallback instead of a valid
+  pending branch
+- **THEN** runtime MUST use the default pending payload
+- **AND** it MUST NOT restore deprecated ask-user enrichment
+

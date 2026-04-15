@@ -67,14 +67,16 @@ The invoke line is declared in each engine's `adapter_profile.json` under:
 
 Current engine mappings:
 
-- `codex`: ``${{ skill.id }}``
+- `codex`: `${{ skill.id }}`
 - `claude`: `/{{ skill.id }}`
 - `opencode`: `/skills {{ skill.id }}`
-- `qwen`: `/skills {{ skill.id }}`
+- `qwen`: `Invoke skill named {{ skill.id }}`
 - `gemini`: `/{{ skill.id }} invoke`
-- `iflow`: `invoke {{ skill.id }}`
+- `iflow`: `Invoke skill named {{ skill.id }}`
 
 The invoke line is always rendered as the first line of the final prompt.
+This table is a documentation projection of each engine profile. If there is any conflict,
+`adapter_profile.json -> prompt_builder.skill_invoke_line_template` is the authoritative source.
 
 ### Body Prompt
 
@@ -84,10 +86,11 @@ Resolution order is fixed:
 
 1. `runner.json.entrypoint.prompts[engine]`
 2. `runner.json.entrypoint.prompts.common`
-3. adapter profile `body_default_template_path`
-4. adapter profile `body_fallback_inline`
+3. adapter profile `body_prefix_extra_block`
+4. common body template `server/assets/templates/prompt_body_common.j2`
+5. adapter profile `body_suffix_extra_block`
 
-The body prompt is responsible only for post-invocation instructions. It must not be the place where the runtime decides how to call the skill.
+When engine/common prompts are absent, the runtime renders a single shared body template and optionally wraps it with profile-level prefix/suffix extra blocks. The body prompt is responsible only for post-invocation instructions. It must not be the place where the runtime decides how to call the skill.
 
 ## Adapter Profile Truth
 
@@ -95,18 +98,11 @@ The body prompt is responsible only for post-invocation instructions. It must no
 
 Relevant `prompt_builder` fields are:
 
-- `engine_key`
 - `skill_invoke_line_template`
-- `body_default_template_path`
-- `body_fallback_inline`
-- `merge_input_if_no_parameter_schema`
-- `params_json_source`
-- `body_prompt_source`
-- `body_prompt_fallback_template`
-- `include_input_file_name`
-- `include_skill_dir`
+- `body_prefix_extra_block`
+- `body_suffix_extra_block`
 
-`body_prompt_source` remains the switch for parameter-driven body prompts such as `parameter.prompt`.
+Prompt builder no longer injects compatibility variables such as `params_json`, `input_prompt`, `input_file`, or `skill_dir`.
 
 ## Unified Runtime Pipeline
 

@@ -2,36 +2,36 @@
 
 ## Purpose
 定义输出解析阶段的 deterministic generic repair 策略和 Schema-first 成功标准。
-
 ## Requirements
 ### Requirement: 系统 MUST 在输出解析阶段执行 deterministic generic repair
-当引擎最终输出不是严格 JSON 时，系统 MUST 尝试可预测、无语义猜测的通用修复。
+The target repair model MUST be described as a bounded schema-convergence loop for both `auto` and `interactive`.
 
-#### Scenario: Code Fence 修复
-- **WHEN** 输出文本包含 ```json ... ``` 代码块
-- **THEN** 系统应剥离 fence 并尝试解析 JSON
+#### Scenario: repair retry budget is attempt-local
+- **WHEN** a turn enters repair
+- **THEN** repair retries MUST stay inside the current attempt
+- **AND** they MUST NOT increase `attempt_number`
 
-#### Scenario: Envelope Response 修复
-- **WHEN** 输出为 envelope JSON 且业务内容位于 `response` 字段
-- **THEN** 系统应提取 `response` 文本并继续解析
-
-#### Scenario: First JSON Object 修复
-- **WHEN** 输出包含噪声文本与单个 JSON 对象
-- **THEN** 系统应提取首个 JSON 对象并尝试解析
+#### Scenario: repair is bounded
+- **WHEN** repair executes
+- **THEN** it MUST use a bounded retry budget
+- **AND** the default retry budget MUST be 3
 
 ### Requirement: 系统 MUST 维持 Schema-first 成功标准
-repair 后结果 MUST 通过 `output.schema` 才可标记成功。
+The target success rule MUST remain schema-first, and repair exhaustion MUST only return control to lifecycle fallback.
 
-#### Scenario: Repair 后 schema 通过
-- **WHEN** repair 产物通过 output schema 校验
-- **THEN** run 状态为成功
-- **AND** 结果标记 `repair_level=deterministic_generic`
-- **AND** 结果包含 warning `OUTPUT_REPAIRED_GENERIC`
+#### Scenario: compliant repaired final object may complete
+- **WHEN** repair yields a compliant final JSON object
+- **THEN** the turn MAY continue on the completion path
 
-#### Scenario: Repair 后 schema 失败
-- **WHEN** repair 后仍不满足 output schema
-- **THEN** run 状态保持失败
-- **AND** 返回结构化解析/校验错误信息
+#### Scenario: compliant repaired pending object may wait
+- **WHEN** repair yields a compliant pending JSON object
+- **THEN** the turn MAY continue on the waiting-user path
+
+#### Scenario: repair exhaustion is not a terminal classifier
+- **WHEN** repair exhausts its retry budget without a compliant branch
+- **THEN** repair MUST stop
+- **AND** the system MUST return control to the existing lifecycle normalization path
+- **AND** repair exhaustion itself MUST NOT directly classify the turn as `waiting_user` or `failed`
 
 ### Requirement: Repair-success 结果 MUST 可缓存
 对于 repair 后成功且 schema 通过的结果，系统 MUST 允许写入 cache。
@@ -69,3 +69,85 @@ repair 后结果 MUST 通过 `output.schema` 才可标记成功。
 - **WHEN** lifecycle 执行终态标准化
 - **THEN** run 状态必须保持失败
 - **AND** 结果必须包含对应 warning
+
+### Requirement: Repair prompts MUST reuse the runtime output contract builder
+系统 MUST 让 repair prompt 复用与 runtime `SKILL.md` 注入相同的动态 output contract builder，避免维护第二套 prompt summary wording。
+
+#### Scenario: build repair prompt contract
+- **WHEN** orchestrator 为某个 attempt 构建 schema repair prompt
+- **THEN** repair prompt 中的 contract details MUST 来自统一动态 builder
+- **AND** 该文本 MUST 与当前引擎有效的 prompt contract 保持一致
+
+#### Scenario: prompt contract artifact removed
+- **WHEN** run 目录中不存在 prompt-facing schema Markdown artifact
+- **THEN** repair prompt 构建 MUST 仍然成功
+- **AND** 系统 MUST NOT 依赖 `.audit/contracts/*.md` summary 文件
+
+### Requirement: Repair audit MUST preserve convergence evidence
+Future compliant implementations MUST record the repair process as explicit audit evidence.
+
+#### Scenario: repair audit captures retry context
+- **WHEN** schema repair executes
+- **THEN** audit expectations MUST include raw output, extracted JSON candidate, validation errors, repair round index, and convergence or fallback outcome
+
+### Requirement: Attempt-Level Output Convergence Loop
+
+Each runtime attempt MUST be governed by one orchestrator-owned output convergence loop.
+
+#### Scenario: Deterministic parse repair runs inside each loop iteration
+- **WHEN** an attempt produces raw assistant output
+- **THEN** the orchestrator MUST first apply deterministic parse normalization for that loop iteration
+- **AND** only the normalized candidate is validated against the attempt target schema
+- **AND** downstream fallback logic MUST NOT repeat deterministic parse repair after loop exhaustion
+
+#### Scenario: Repair reruns are handle-gated
+- **WHEN** the attempt output still does not satisfy the target schema after deterministic parse normalization
+- **THEN** the orchestrator MAY issue a repair rerun only if a persisted session handle already exists
+- **AND** the rerun MUST stay within the same `attempt_number`
+- **AND** the rerun MUST increment `internal_round_index`
+
+#### Scenario: No session handle skips repair
+- **WHEN** a repair rerun would otherwise be required but no session handle exists
+- **THEN** the orchestrator MUST emit `diagnostic.output_repair.skipped`
+- **AND** the skip reason MUST identify the missing session handle
+- **AND** runtime MUST continue via the legacy fallback chain without a repair rerun
+
+### Requirement: 系统 MUST 通过统一 output convergence executor 管理修复链
+The target repair model MUST be governed by a single orchestrator-side output convergence executor.
+
+#### Scenario: deterministic parse repair is pre-processing, not a separate owner
+- **WHEN** parser or adapter yields a repaired JSON candidate
+- **THEN** that repaired candidate MUST re-enter the orchestrator-owned output convergence pipeline
+- **AND** parser/adapter repair MUST NOT become a separate completion or waiting classifier
+
+#### Scenario: result-file fallback remains inside the same governance model
+- **WHEN** the primary structured-output path fails to converge
+- **THEN** result-file fallback MUST be described as a legacy downstream stage within the same output convergence model
+- **AND** it MUST NOT be described as an unrelated recovery subsystem
+
+### Requirement: 系统 MUST 使用 `attempt + internal_round` 双层 repair 模型
+The target repair model MUST distinguish outer attempts from inner convergence rounds.
+
+#### Scenario: repair rounds stay inside the current attempt
+- **WHEN** a turn enters repair
+- **THEN** each convergence retry MUST be represented as an `internal_round`
+- **AND** the retries MUST stay inside the current `attempt_number`
+
+#### Scenario: repair round budget is bounded
+- **WHEN** repair executes
+- **THEN** the default `internal_round` retry budget MUST be 3
+- **AND** exhaustion MUST return control to legacy lifecycle fallback instead of creating a new attempt
+
+### Requirement: Repair MUST remain schema-first while preserving legacy fallback ordering
+Repair MUST only converge when a compliant branch exists; otherwise the target model MUST return control to the legacy fallback chain in a fixed order.
+
+#### Scenario: compliant final branch converges
+- **WHEN** output convergence yields a compliant final JSON object
+- **THEN** the turn MAY continue on the completion path
+
+#### Scenario: repair exhaustion returns to legacy chain
+- **WHEN** the `internal_round` budget is exhausted without a compliant branch
+- **THEN** the output convergence executor MUST stop repair
+- **AND** it MUST return control to legacy lifecycle fallback first
+- **AND** later legacy stages MAY still include result-file fallback or interactive waiting heuristics
+

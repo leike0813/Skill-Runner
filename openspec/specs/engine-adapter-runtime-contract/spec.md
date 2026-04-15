@@ -15,17 +15,25 @@
 - **THEN** Adapter 返回仅基于透传参数与必要上下文的命令数组
 
 ### Requirement: Adapter MUST 提供统一 runtime 流解析接口
+
 系统 MUST 要求所有引擎 Adapter 提供 runtime 流解析接口，输出统一结构字段（parser、confidence、session_id、assistant_messages、raw_rows、diagnostics、structured_types），并暴露可供 auth detection 使用的原始材料。
 
-#### Scenario: Adapter 暴露 auth-detection-ready evidence
-- **WHEN** 任一引擎 Adapter 完成 stdout/stderr/pty 原始字节流解析
-- **THEN** 返回值必须保留可供 auth detection 使用的证据
-- **AND** 这些证据包括：
-  - `stdout`
-  - `stderr`
-  - `pty`（如果有）
-  - parser diagnostics
-  - structured rows / extracted structured payloads（如适用）
+#### Scenario: Claude `type=result` defaults to completion-only semantics
+
+- **GIVEN** Claude runtime stream contains a terminal `{"type":"result"}` row
+- **WHEN** adapter 解析该 runtime 流
+- **THEN** 该 `result` 行 MUST 继续产出 turn completion 语义与 completion metadata
+- **AND** `result.result` MUST NOT 默认进入 `assistant_messages`
+
+#### Scenario: Claude `result.result` may become a fallback assistant message only in narrow conditions
+
+- **GIVEN** Claude runtime stream contains a terminal `{"type":"result"}` row
+- **AND** 当前 turn 没有真实 assistant body message
+- **AND** 该 `result` 行没有 `structured_output`
+- **AND** `result.result` 非空
+- **WHEN** adapter 解析该 runtime 流
+- **THEN** adapter MAY 产出一条 fallback assistant message
+- **AND** 该消息 MUST 带有 `details.source = "claude_result_fallback"`
 
 ### Requirement: Adapter MUST 暴露 chunk 级运行时输出
 系统 MUST 允许 adapter 在子进程执行过程中逐 chunk 暴露 stdout/stderr，以支撑 live protocol publish。
@@ -420,32 +428,36 @@ The system MUST decode `io_chunks` for strict replay using the same incremental 
 
 - **WHEN** an NDJSON engine emits a single stdout logical line whose size exceeds `4096` bytes before the terminating newline
 - **AND** that logical line is not semantically classified as `agent.reasoning` or `agent.message`
-- **THEN** runtime ingress MUST stop retaining that line's full original body for downstream audit persistence
-- **AND** it MUST sanitize the retained prefix into either a repaired JSON line or a runtime diagnostic JSON line before writing to runtime audit surfaces
+- **THEN** runtime ingress MUST stop retaining that line's full original body in live parser memory
+- **AND** it MUST sanitize the retained prefix into either a repaired JSON line or a runtime diagnostic JSON line before writing to the normal runtime audit hot path
 - **AND** the original oversized body MUST NOT be written to `io_chunks` or `stdout.log`
 
-#### Scenario: oversized agent reasoning or message line remains canonical raw truth
+#### Scenario: oversized non-message line is quarantined into sidecar audit assets
 
-- **WHEN** runtime ingress receives an NDJSON logical line that is semantically classified as `agent.reasoning` or `agent.message`
-- **AND** that logical line exceeds `4096` bytes before the terminating newline
-- **THEN** runtime ingress MUST preserve that full logical line as the canonical raw truth for live parser, raw publisher, strict replay, and `raw_stdout`
-- **AND** downstream runtime audit surfaces MUST NOT observe a truncated or substituted version of that line solely because of the `4096` byte limit
+- **WHEN** runtime ingress sanitizes or substitutes an oversized non-message NDJSON logical line
+- **THEN** it MUST preserve the original decoded logical line in a dedicated overflow sidecar raw file
+- **AND** it MUST append an attempt-scoped overflow index record pointing to that raw file
+- **AND** downstream parser/live publication MUST continue consuming only the sanitized row or diagnostic stub
 
 ### Requirement: Sanitized overflow handling MUST preserve business semantics when possible
 
 系统 MUST 优先保住超长 NDJSON 行的业务语义，而不是保留完整中间正文。
 
-#### Scenario: agent reasoning or message classification is shared across live and audit paths
+#### Scenario: oversized tool_result line is repaired into valid JSON
 
-- **WHEN** runtime decides whether an oversized NDJSON logical line should be exempted from the `4096` byte overflow guard
-- **THEN** live semantic parsing and runtime ingress sanitization MUST use the same semantic exemption decision
-- **AND** the system MUST NOT allow live parsing to preserve the full line while audit/raw ingestion truncates the same line, or vice versa
+- **WHEN** an oversized NDJSON line can be repaired into a valid JSON object from its retained prefix
+- **THEN** runtime MUST emit that repaired JSON line as the sanitized raw row
+- **AND** downstream engine-specific parsers MUST continue normal semantic extraction from that repaired object
+- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED`
+- **AND** the overflow sidecar index record MUST mark the quarantined row as `sanitized`
 
-#### Scenario: non-message oversized line continues using sanitized overflow path
+#### Scenario: unrecoverable oversized line is substituted with runtime diagnostic JSON
 
-- **WHEN** an oversized NDJSON line is classified as a non-message payload such as `tool_result`, `tool_call`, or `command_execution`
-- **THEN** runtime MUST continue using the existing repair / sanitize / diagnostic substitution path
-- **AND** overflow diagnostics such as `RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED` and `RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED` MUST continue to apply
+- **WHEN** an oversized NDJSON line cannot be repaired into a valid JSON object
+- **THEN** runtime MUST substitute a runtime diagnostic JSON line in place of the original row
+- **AND** runtime MUST emit a diagnostic warning with code `RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED`
+- **AND** the overflow sidecar index record MUST mark the quarantined row as `substituted`
+- **AND** later logical lines in the same stream MUST continue normal runtime parsing and publication
 
 ### Requirement: Runtime audit writing MUST NOT block the single-worker execution hot path
 
@@ -575,4 +587,152 @@ Qwen parser 语义 MUST 作为共享 adapter runtime contract 的一部分定义
 - **WHEN** runtime 读取 qwen adapter profile 的 `ui_shell.config_assets`
 - **THEN** profile MUST 能解析 default、enforced、settings schema 与 target relpath
 - **AND** target relpath MUST 指向 `.qwen/settings.json`
+
+### Requirement: Codex headless sandbox availability MUST be determined by runtime probe
+
+Codex headless execution MUST determine sandbox availability from a real runtime probe and persist
+that result in a Codex-side sidecar asset.
+
+#### Scenario: `LANDLOCK_ENABLED=0` marks Codex sandbox unavailable
+
+- **WHEN** runtime probes Codex sandbox availability
+- **AND** environment variable `LANDLOCK_ENABLED=0`
+- **THEN** the probe result MUST be `available=false`
+- **AND** it MUST use warning code `CODEX_SANDBOX_DISABLED_BY_ENV`
+
+#### Scenario: missing bubblewrap marks Codex sandbox unavailable
+
+- **WHEN** runtime probes Codex sandbox availability
+- **AND** neither `bwrap` nor `bubblewrap` can be resolved
+- **THEN** the probe result MUST be `available=false`
+- **AND** it MUST use warning code `CODEX_SANDBOX_DEPENDENCY_MISSING`
+- **AND** the missing dependency list MUST include `bubblewrap`
+
+#### Scenario: bubblewrap uid-map failure marks Codex sandbox runtime unavailable
+
+- **WHEN** runtime probes Codex sandbox availability
+- **AND** the bubblewrap smoke test fails with `uid_map`, `Operation not permitted`, `Permission denied`, or equivalent initialization failure wording
+- **THEN** the probe result MUST be `available=false`
+- **AND** it MUST use warning code `CODEX_SANDBOX_RUNTIME_UNAVAILABLE`
+- **AND** the diagnostic message MUST preserve the first failing line for troubleshooting
+
+#### Scenario: successful smoke test marks Codex sandbox available
+
+- **WHEN** runtime probes Codex sandbox availability
+- **AND** the bubblewrap smoke test succeeds
+- **THEN** the probe result MUST be `available=true`
+- **AND** it MUST be persisted to `agent_home/.codex/sandbox_probe.json`
+
+### Requirement: Codex headless fallback MUST downgrade both command and generated config
+
+Codex headless fallback MUST be effective: when sandbox runtime is unavailable, the runtime MUST
+downgrade both CLI intent and generated profile settings.
+
+#### Scenario: unavailable probe downgrades headless argv and config together
+
+- **WHEN** Codex headless start or resume runs with sandbox probe `available=false`
+- **THEN** command construction MUST downgrade `--full-auto` to `--yolo`
+- **AND** generated Codex profile settings MUST set `sandbox_mode = "danger-full-access"`
+- **AND** generated Codex profile settings MUST preserve `approval_policy = "never"`
+
+#### Scenario: available probe keeps declared sandboxed defaults
+
+- **WHEN** Codex headless start or resume runs with sandbox probe `available=true`
+- **THEN** command construction MAY keep `--full-auto`
+- **AND** generated Codex profile settings MUST keep the declared sandboxed mode rather than forcing `danger-full-access`
+
+#### Scenario: missing or unreadable sidecar does not fail open
+
+- **WHEN** headless Codex needs sandbox availability
+- **AND** `agent_home/.codex/sandbox_probe.json` is missing or unreadable
+- **THEN** runtime MUST synchronously execute a fresh Codex sandbox probe
+- **AND** it MUST persist the new probe result before command/config decisions are finalized
+
+### Requirement: Codex sandbox status collection MUST reuse probe truth
+
+Codex sandbox management status MUST surface the same persisted runtime probe truth used by the
+headless launch path.
+
+#### Scenario: status collection returns runtime probe detail
+
+- **WHEN** management code collects Codex sandbox status
+- **THEN** it MUST return the persisted or freshly probed Codex sandbox result
+- **AND** it MUST surface `available`, `status`, `warning_code`, `message`, `dependencies`, and `missing_dependencies`
+- **AND** it MUST NOT regress to an environment-variable-only heuristic once the runtime probe model exists
+
+### Requirement: Structured output pipeline MUST align machine schema transport and prompt contract rendering
+系统 MUST 通过统一 structured-output pipeline 决定引擎实际使用的 machine schema 与对应 prompt contract 文本，禁止两者分别由不同调用点独立选择。
+
+#### Scenario: canonical passthrough engine
+- **WHEN** 某引擎使用 canonical passthrough 策略
+- **THEN** CLI schema 注入 MUST 使用 canonical machine schema
+- **AND** prompt contract rendering MUST 使用 canonical schema 派生文本
+
+#### Scenario: compat-translated engine
+- **WHEN** 某引擎使用 compat translate 策略
+- **THEN** CLI schema 注入 MUST 使用 engine-effective compat schema
+- **AND** prompt contract rendering MUST 使用与该 compat schema 一致的派生文本
+
+### Requirement: Engine adapters MUST consume prompt contract text as in-memory runtime data
+系统 MUST 将 prompt contract 文本视为 structured-output pipeline 的内存结果，而不是 run-scoped Markdown artifact 路径。
+
+#### Scenario: adapter or patch consumer requests prompt contract
+- **WHEN** adapter bootstrap、skill patcher 或 repair builder 请求 prompt contract
+- **THEN** 返回值 MUST 为内存中的 rendered contract text
+- **AND** 系统 MUST NOT 依赖 `.audit/contracts/*.md` prompt artifact path
+
+### Requirement: Adapter structured-output dispatch MUST route through the shared runtime pipeline
+
+Adapter command construction and parsed payload handling MUST delegate structured-output transport decisions to the shared runtime pipeline.
+
+#### Scenario: command builder asks pipeline for effective schema artifact
+- **WHEN** an adapter constructs a non-passthrough start or resume command
+- **THEN** it MUST resolve structured-output CLI arguments from the shared runtime pipeline
+- **AND** engine-local command builders MUST NOT independently decide between canonical and compatibility schema artifacts
+
+#### Scenario: parsed payload is canonicalized in shared adapter runtime
+- **WHEN** an adapter parser extracts a structured final payload
+- **THEN** the shared adapter runtime MUST apply the configured payload canonicalizer before returning the final turn result
+- **AND** downstream orchestration MUST receive the canonical payload shape rather than any engine transport shim
+
+### Requirement: Run-root instruction files MUST carry engine-agnostic global execution constraints
+系统 MUST 在 run materialization 阶段将 engine-agnostic 全局执行约束渲染到 `run_dir` 根目录的引擎约定文件中，而不是在 first-attempt prompt 中追加隐藏前缀。
+
+#### Scenario: materialize run-root instruction file
+- **WHEN** 系统为某个 run 物化 run-local skill snapshot
+- **THEN** Claude MUST 生成 `run_dir/CLAUDE.md`
+- **AND** Gemini MUST 生成 `run_dir/GEMINI.md`
+- **AND** 其他引擎 MUST 生成 `run_dir/AGENTS.md`
+- **AND** 系统 MUST NOT 在 engine workspace 子目录再写第二份同类文件
+
+### Requirement: Engine prompt assembly MUST begin with an adapter-owned invoke line
+系统 MUST 由 adapter profile 声明 skill invoke line 模板，并保证最终 prompt 的第一行始终为该 invoke line。
+
+#### Scenario: assemble skill prompt
+- **WHEN** runtime 为某个 skill 构建最终 prompt
+- **THEN** 第 1 行 MUST 来自 `prompt_builder.skill_invoke_line_template`
+- **AND** 第 2 行起 MUST 来自 body prompt
+- **AND** 若 body prompt 为空，最终 prompt MUST 仅包含 invoke line
+
+### Requirement: Prompt builder profiles MUST declare invoke-line and optional default-body extra blocks only
+系统 MUST 将 adapter profile 中的 prompt builder 配置收口为 skill 调用首行模板与默认 body 前后 extra block，禁止继续声明旧的 body-template fallback、parameter-prompt、params-json、skill-dir 注入开关。
+
+#### Scenario: adapter profile declares prompt builder
+- **WHEN** 系统加载某引擎的 `adapter_profile.json`
+- **THEN** `prompt_builder` MUST 至少声明 `skill_invoke_line_template`
+- **AND** `prompt_builder` MUST 声明 `body_prefix_extra_block` 与 `body_suffix_extra_block`
+- **AND** 系统 MUST reject removed legacy prompt-builder fields
+
+### Requirement: Runtime prompt assembly MUST use a shared default body template
+系统 MUST 在 skill 未声明 engine/common body prompt 时回退到一份共享默认 body 模板，而不是为各引擎维护重复的默认 body 模板文件。
+
+#### Scenario: skill prompt override is absent
+- **WHEN** `entrypoint.prompts[engine]` 与 `entrypoint.prompts.common` 都不存在
+- **THEN** runtime MUST render the shared prompt body template
+- **AND** runtime MUST apply profile prefix/suffix extra blocks around that shared body
+
+#### Scenario: skill prompt override exists
+- **WHEN** `entrypoint.prompts[engine]` 或 `.common` 命中
+- **THEN** runtime MUST treat that prompt text as the full body prompt
+- **AND** runtime MUST NOT wrap it with profile default-body extra blocks
 

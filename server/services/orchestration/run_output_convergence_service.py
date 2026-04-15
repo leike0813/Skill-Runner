@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -915,7 +916,15 @@ class RunOutputConvergenceService:
                 stderr_raw=raw_stderr.encode("utf-8", errors="replace"),
                 pty_raw=b"",
             )
-        except Exception:
+        except (
+            AttributeError,
+            LookupError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ):
             return None
 
     def _parse_json_with_deterministic_repair(

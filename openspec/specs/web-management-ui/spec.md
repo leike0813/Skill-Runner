@@ -2,7 +2,6 @@
 
 ## Purpose
 定义基于 Jinja2 SSR 的 Management Web UI 的页面结构、路由和数据绑定约束。
-
 ## Requirements
 ### Requirement: 系统 MUST 提供 `/ui` 管理界面用于技能可视化管理
 系统 MUST 暴露 `/ui` 页面，用户可在页面中查看当前已安装技能列表。
@@ -128,3 +127,63 @@
 - **WHEN** 文件树、文件预览或日志内容持续增长
 - **THEN** 对应分区在内部容器滚动
 - **AND** 页面主结构保持稳定，不出现无限增高导致的交互退化
+
+### Requirement: Management run detail MUST render backend-projected chat text
+The management run-detail page MUST treat canonical chat as a backend-derived display surface and MUST NOT perform its own structured-output dispatch.
+
+#### Scenario: final structured output appears in management chat
+- **WHEN** `/chat` supplies assistant final text rendered as markdown
+- **THEN** the management run-detail page MUST render that markdown in chat
+- **AND** it MUST NOT re-parse raw structured JSON to decide how to display the message
+
+#### Scenario: pending structured output appears in management chat
+- **WHEN** `/chat` supplies pending display text
+- **THEN** the management run-detail page MUST render the projected text directly
+- **AND** it MUST NOT add a second final summary card for the same content
+
+### Requirement: Management run detail chat MUST use the shared markdown renderer
+The management run-detail page MUST render canonical chat with the same shared markdown renderer and scoped markdown styles used by the built-in E2E observe client.
+
+#### Scenario: markdown chat content appears in run detail
+- **WHEN** the management run-detail page renders chat text from `/chat` or `/chat/history`
+- **THEN** it MUST use the shared chat markdown assets
+- **AND** it MUST render formulas, code blocks, lists, tables, and quotes with the same markdown capabilities as the E2E observe page
+- **AND** it MUST NOT rely on browser default paragraph margins for chat spacing
+
+### Requirement: Management run detail MUST expose raw chat event inspection
+The management run-detail page MUST allow operators to inspect the raw `chat-replay` event envelope behind chat items without leaving the canonical chat view.
+
+#### Scenario: operator inspects a chat bubble
+- **WHEN** the operator clicks a normal chat bubble
+- **THEN** the page MUST open a right-side inspector drawer
+- **AND** the drawer MUST show the corresponding raw `chat-replay` event envelope
+- **AND** the drawer MAY expose a `raw_ref` preview jump when available
+
+#### Scenario: operator inspects a thinking or process child item
+- **WHEN** the operator expands a thinking/process group and selects a child item inspector trigger
+- **THEN** the page MUST open the same inspector drawer for that child item's `chat-replay` event envelope
+- **AND** the expand/collapse interaction MUST remain intact
+
+### Requirement: Management run detail MUST use one shared event inspector drawer
+The management run-detail page MUST use a single right-side event inspector drawer for chat, protocol streams, and timeline event inspection.
+
+#### Scenario: operator inspects a protocol stream row
+- **WHEN** the operator clicks a FCMP, RASP, or Orchestrator row while raw mode is disabled
+- **THEN** the page MUST open the shared right-side event inspector drawer
+- **AND** it MUST show the corresponding audit row envelope
+- **AND** it MUST NOT expand a local inline detail block inside the protocol pane
+
+#### Scenario: operator inspects a timeline event
+- **WHEN** the operator clicks a timeline bubble
+- **THEN** the page MUST open the same shared right-side event inspector drawer
+- **AND** it MUST show the corresponding timeline event payload
+- **AND** it MUST NOT expand a local inline detail block inside the timeline pane
+
+### Requirement: Management run detail chat MUST expose clickable affordance
+Clickable chat items in the management run-detail page MUST provide visible hover or focus feedback.
+
+#### Scenario: operator hovers a clickable chat message
+- **WHEN** the operator hovers a clickable chat entry
+- **THEN** the entry MUST show a visible hover affordance aligned with the protocol-pane interaction style
+- **AND** the existing keyboard focus indication MUST remain available
+

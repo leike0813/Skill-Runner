@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 
+TARGET_OUTPUT_SCHEMA_RELPATH = ".audit/contracts/target_output_schema.json"
 RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH = "__target_output_schema_relpath"
 
 

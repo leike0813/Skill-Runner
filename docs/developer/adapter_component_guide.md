@@ -31,16 +31,21 @@
 `server/runtime/adapter/common/*` 的 `Profiled*` 实现承接，并通过每个引擎的
 `adapter_profile.json` 注入差异。
 
-`adapter_profile.json` 是引擎配置的**单一数据源**，涵盖以下 8 个顶层节：
+`adapter_profile.json` 是引擎配置的**单一数据源**。当前实现中的主要顶层节包括：
 
 | 节 | 用途 |
 |---|---|
-| `prompt_builder` | skill 调用首行模板、body prompt 来源与渲染策略 |
+| `provider_contract` | 单 provider / 多 provider 合同与 canonical provider 约束 |
+| `prompt_builder` | skill 调用首行模板，以及默认 body 模板前后的可选 extra block |
 | `session_codec` | 会话句柄提取策略（regex/json/text） |
 | `attempt_workspace` | run folder 目录布局 |
 | `config_assets` | bootstrap/default/enforced/settings_schema/skill_defaults 路径 |
 | `model_catalog` | 模型目录模式（`manifest` 或 `runtime_probe`）和路径 |
+| `command_defaults` | start / resume / ui_shell 的默认 CLI 参数 |
+| `structured_output` | 结构化输出 CLI 注入、compat schema、payload canonicalization 策略 |
+| `ui_shell` | UI shell 命令、sandbox 提示与运行时 override 策略 |
 | `cli_management` | CLI 管理全配置（见下） |
+| `parser_auth_patterns` | engine-specific auth 高置信检测规则 |
 
 `cli_management` 子节管理引擎 CLI 的安装、凭据、目录布局和恢复探测：
 
@@ -67,14 +72,14 @@
 ### 5.1 引擎包内文件
 
 1. 新建 `server/engines/<new>/adapter/` 并实现：
-   - `adapter_profile.json`（必须，八段配置）
+   - `adapter_profile.json`（必须，符合当前 schema）
    - `execution_adapter.py`（必须）
    - `config_composer.py`（必须）
    - `command_builder.py`（必须）
    - `stream_parser.py`（必须）
 2. 新建 `server/engines/<new>/config/` 并创建：
    - `auth_strategy.yaml`（认证支持矩阵）
-   - `adapter_profile.json` 中的 `command_defaults`（start / resume / ui_shell 默认参数）
+   - profile 所引用的 `bootstrap/default/enforced` 配置资产
 3. 新建 `server/engines/<new>/models/` 并提供：
    - `manifest.json` + 至少一个 `models_*.json` snapshot
 

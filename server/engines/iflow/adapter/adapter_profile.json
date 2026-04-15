@@ -5,16 +5,9 @@
     "canonical_provider_id": "iflowcn"
   },
   "prompt_builder": {
-    "engine_key": "iflow",
-    "skill_invoke_line_template": "invoke {{ skill.id }}",
-    "body_default_template_path": "../../../assets/templates/iflow_default.j2",
-    "body_fallback_inline": "{{ input_prompt }}",
-    "merge_input_if_no_parameter_schema": false,
-    "params_json_source": "none",
-    "body_prompt_source": "parameter.prompt",
-    "body_prompt_fallback_template": "Execute skill {skill_id}",
-    "include_input_file_name": false,
-    "include_skill_dir": false
+    "skill_invoke_line_template": "Invoke skill named {{ skill.id }}",
+    "body_prefix_extra_block": "",
+    "body_suffix_extra_block": ""
   },
   "session_codec": {
     "strategy": "regex_extract",
