@@ -61,11 +61,14 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 
 - RASP 使用 `agent.*`
 - FCMP 使用 `assistant.*`
-- Turn marker 仅在 RASP：`agent.turn_start` / `agent.turn_complete`
+- Turn marker 仅在 RASP：`agent.turn_start` / `agent.turn_complete` / `agent.turn_failed`
 - `agent.turn_complete.data` 可直接承载结构化统计信息（例如 usage/tokens/cost/stats）
+- `agent.turn_failed.data` 承载语义失败摘要；terminal failure summary 应优先消费它，而不是先退化到 `Exit code N`
+- `agent.turn_failed` 可以与最终 `waiting_auth` 共存；在这种情况下它只作为 engine failure evidence 保留，不得单独驱动 terminal failed projection
 - Run 句柄事件仅在 RASP：`lifecycle.run_handle`（`data.handle_id`）
 - FCMP 明确不包含 `assistant.turn_*`
 - 同一 `message_id` 的收敛顺序：`*.message.promoted` 必须先于 `*.message.final`
+- 普通 engine `type:"error"` / `item.type:"error"` 必须保留 raw evidence，并额外归一化为 `diagnostic.warning`；它们不是 terminal lifecycle event 真源
 
 ### 3.1 `conversation.state.changed`
 
@@ -91,6 +94,7 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `waiting_user` 的正式富数据来源是合法 pending JSON 分支投影；对外 `PendingInteraction` 形状可保持稳定。
 - interactive turn classification 的固定顺序是：final branch -> pending branch -> soft completion -> default waiting fallback。
 - `waiting_auth` 不能被客户端解释为“当前一定是 interactive”；它只说明 run 已进入 auth contract。
+- 若同一 attempt 同时存在 semantic `turn.failed` 与高置信 auth remediation 证据，canonical state 仍必须进入 `waiting_auth`；`turn_failed` 只作为 waiting-auth 原因说明与审计证据保留。
 - lifecycle fallback 若仍进入 `waiting_user`，当前只会生成默认 pending payload，不再从 `<ASK_USER_YAML>`、runtime stream 或 direct interaction-like payload 中恢复 prompt/hints。
 - 当前 UI 状态必须来自 `.state/state.json` + FCMP 增量，不得从 `result/result.json` 反推。
 - `resume_cause` / `pending_owner` / `resume_ticket_id` / `ticket_consumed` 为可选扩展字段，用于描述 waiting 态离开时的 winner 路径；
@@ -186,6 +190,7 @@ terminal 示例：
 说明：
 
 - `auth.required` 只说明进入 auth contract，不说明 `execution_mode`。
+- 若 auth remediation 是由 semantic `turn_failed` 或 auth-related diagnostic 驱动，waiting-auth payload 应继续通过 `last_error` / `instructions` 暴露该原因，而不是只显示抽象的 `AUTH_REQUIRED`。
 - 如果客户端要判断是否具备真实会话能力，必须读取 status/read-model 中的 `conversation_mode`，不能从 FCMP 状态名反推。
 - 对于新 run，current waiting payload 只存在于 `.state/state.json.pending`，不再存在独立 `pending_auth*.json`。
 - 多方式鉴权下，`auth.required(phase=method_selection)` 才表示客户端需要先选择鉴权方式。

@@ -290,6 +290,51 @@ def test_turn_markers_are_rasp_only_and_not_mapped_to_fcmp(tmp_path: Path) -> No
     assert not any(type_name.startswith("assistant.turn") for type_name in fcmp_types)
 
 
+def test_turn_failed_is_emitted_as_rasp_marker_and_error_rows_become_diagnostics(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-turn-failed"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"thread-failed"}',
+                '{"type":"turn.started"}',
+                '{"type":"error","message":"You\'ve hit your usage limit. Upgrade to Plus."}',
+                '{"type":"turn.failed","error":{"message":"You\'ve hit your usage limit. Upgrade to Plus."}}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-turn-failed",
+        engine="codex",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+    rasp_types = [event.event.type for event in rasp_events]
+    assert "agent.turn_failed" in rasp_types
+    assert "agent.turn_complete" not in rasp_types
+    turn_failed_event = next(event for event in rasp_events if event.event.type == "agent.turn_failed")
+    assert turn_failed_event.data["fatal"] is True
+    assert "usage limit" in turn_failed_event.data["message"]
+    diagnostic_event = next(
+        event
+        for event in rasp_events
+        if event.event.type == "diagnostic.warning" and event.data.get("source_type") == "type:error"
+    )
+    assert diagnostic_event.data["pattern_kind"] == "engine_rate_limit_hint"
+    fcmp_events = build_fcmp_events(rasp_events, status="failed")
+    fcmp_diagnostic = next(event for event in fcmp_events if event.type == "diagnostic.warning")
+    assert fcmp_diagnostic.data["source_type"] == "type:error"
+    assert fcmp_diagnostic.data["pattern_kind"] == "engine_rate_limit_hint"
+
+
 def test_no_fallback_final_on_failed_without_turn_completed(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-no-fallback-final"
     logs_dir = run_dir / "logs"
@@ -926,15 +971,25 @@ def test_fcmp_waiting_auth_suppresses_process_exit_failed_event(tmp_path: Path):
     run_dir = tmp_path / "run-auth-selection-no-fail"
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"turn.started"}',
+                '{"type":"error","message":"You\'ve hit your usage limit. Upgrade to Plus."}',
+                '{"type":"turn.failed","error":{"message":"You\'ve hit your usage limit. Upgrade to Plus."}}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
     pending_selection = {
         "engine": "codex",
         "provider_id": None,
         "available_methods": ["callback", "device_auth"],
         "prompt": "Authentication is required. Choose how to continue.",
-        "instructions": "Select an authentication method to continue.",
-        "last_error": None,
+        "instructions": "Select an authentication method to continue. Previous error: You've hit your usage limit. Upgrade to Plus.",
+        "last_error": "You've hit your usage limit. Upgrade to Plus.",
         "source_attempt": 1,
         "phase": "method_selection",
         "ui_hints": {"widget": "choice"},
@@ -967,6 +1022,7 @@ def test_fcmp_waiting_auth_suppresses_process_exit_failed_event(tmp_path: Path):
         ],
     )
 
+    assert any(event.event.type == "agent.turn_failed" for event in rasp_events)
     assert any(event.type == "auth.required" for event in fcmp_events)
     assert not any(
         event.type == "conversation.state.changed" and event.data.get("to") == "failed"

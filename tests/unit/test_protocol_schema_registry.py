@@ -144,6 +144,28 @@ def test_validate_rasp_event_accepts_turn_complete_structured_payload() -> None:
     assert validate_rasp_event(payload) == payload
 
 
+def test_validate_rasp_event_accepts_turn_failed_payload() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 6,
+        "ts": "2026-03-10T00:00:06Z",
+        "source": {"engine": "codex", "parser": "live_semantic", "confidence": 0.95},
+        "event": {"category": "agent", "type": "agent.turn_failed"},
+        "data": {
+            "message": "You've hit your usage limit.",
+            "code": "ENGINE_RATE_LIMIT_HINT",
+            "source_type": "turn.failed",
+            "pattern_kind": "engine_rate_limit_hint",
+            "fatal": True,
+        },
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": None,
+    }
+    assert validate_rasp_event(payload) == payload
+
+
 def test_validate_fcmp_event_accepts_optional_correlation() -> None:
     payload = {
         "protocol_version": "fcmp/1.0",

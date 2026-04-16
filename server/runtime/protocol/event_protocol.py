@@ -240,6 +240,11 @@ def build_rasp_events(
         if isinstance(parsed.get("turn_complete_data"), dict)
         else None
     )
+    parsed_turn_failure_data = (
+        parsed.get("turn_failure_data")
+        if isinstance(parsed.get("turn_failure_data"), dict)
+        else None
+    )
     if isinstance(turn_markers_obj, list):
         for marker_item in turn_markers_obj:
             if not isinstance(marker_item, dict):
@@ -250,6 +255,8 @@ def build_rasp_events(
                 marker_type = "agent.turn_start"
             elif marker == "complete":
                 marker_type = "agent.turn_complete"
+            elif marker == "failed":
+                marker_type = "agent.turn_failed"
             else:
                 continue
             marker_data_obj = marker_item.get("data")
@@ -258,6 +265,12 @@ def build_rasp_events(
                     marker_data_obj
                     if isinstance(marker_data_obj, dict)
                     else (parsed_turn_complete_data or {})
+                )
+            elif marker_type == "agent.turn_failed":
+                marker_data = (
+                    marker_data_obj
+                    if isinstance(marker_data_obj, dict)
+                    else (parsed_turn_failure_data or {})
                 )
             else:
                 marker_data = {}
@@ -279,6 +292,14 @@ def build_rasp_events(
             correlation=correlation,
         )
         marker_types_seen.add("agent.turn_start")
+    if bool(parsed.get("turn_failed")) and "agent.turn_failed" not in marker_types_seen:
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.turn_failed",
+            data=parsed_turn_failure_data or {},
+            correlation=correlation,
+        )
+        marker_types_seen.add("agent.turn_failed")
 
     run_handle_obj = parsed.get("run_handle")
     if isinstance(run_handle_obj, dict):
@@ -377,8 +398,9 @@ def build_rasp_events(
             correlation=correlation,
         )
 
+    turn_failed = bool(parsed.get("turn_failed")) or ("agent.turn_failed" in marker_types_seen)
     turn_completed = bool(parsed.get("turn_completed")) or ("agent.turn_complete" in marker_types_seen)
-    if turn_completed and "agent.turn_complete" not in marker_types_seen:
+    if turn_completed and not turn_failed and "agent.turn_complete" not in marker_types_seen:
         push(
             RuntimeEventCategory.AGENT,
             "agent.turn_complete",
@@ -407,6 +429,50 @@ def build_rasp_events(
             raw_row=promoted_raw_ref if isinstance(promoted_raw_ref, dict) else None,
             correlation=correlation,
         )
+
+    diagnostic_events_obj = parsed.get("diagnostic_events", [])
+    if isinstance(diagnostic_events_obj, list):
+        for diagnostic_event in diagnostic_events_obj:
+            if not isinstance(diagnostic_event, dict):
+                continue
+            code_obj = diagnostic_event.get("code")
+            if not isinstance(code_obj, str) or not code_obj.strip():
+                continue
+            raw_ref_row = diagnostic_event.get("raw_ref")
+            push(
+                RuntimeEventCategory.DIAGNOSTIC,
+                "diagnostic.warning",
+                data=make_diagnostic_warning_payload(
+                    code=code_obj.strip(),
+                    severity=(
+                        diagnostic_event.get("severity")
+                        if isinstance(diagnostic_event.get("severity"), str)
+                        else None
+                    ),
+                    pattern_kind=(
+                        diagnostic_event.get("pattern_kind")
+                        if isinstance(diagnostic_event.get("pattern_kind"), str)
+                        else None
+                    ),
+                    source_type=(
+                        diagnostic_event.get("source_type")
+                        if isinstance(diagnostic_event.get("source_type"), str)
+                        else None
+                    ),
+                    message=(
+                        diagnostic_event.get("message")
+                        if isinstance(diagnostic_event.get("message"), str)
+                        else None
+                    ),
+                    detail=(
+                        diagnostic_event.get("detail")
+                        if isinstance(diagnostic_event.get("detail"), str)
+                        else None
+                    ),
+                ),
+                raw_row=raw_ref_row if isinstance(raw_ref_row, dict) else None,
+                correlation=correlation,
+            )
 
     for code in parsed.get("diagnostics", []):
         if not isinstance(code, str) or not code:
@@ -1133,7 +1199,12 @@ def build_fcmp_events(
         code = event.data.get("code")
         if not isinstance(code, str) or not code:
             continue
-        push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code}, raw_ref=event.raw_ref)
+        payload = {"code": code}
+        for key in ("severity", "pattern_kind", "source_type", "message", "detail", "confidence", "suppressed_count"):
+            value = event.data.get(key)
+            if value is not None:
+                payload[key] = value
+        push(FcmpEventType.DIAGNOSTIC_WARNING.value, payload, raw_ref=event.raw_ref)
 
     raw_events = [event for event in rasp_events if event.event.type in {"raw.stdout", "raw.stderr"}]
     assistant_line_set: set[str] = set()

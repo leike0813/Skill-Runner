@@ -92,6 +92,14 @@
       "expected_subcategory": null
     },
     {
+      "sample_id": "openai_usage_limit_plus",
+      "engine": "codex",
+      "provider_id": "openai",
+      "source_run_id": "8ed4484f-7a9d-4f7f-a203-b2c231369424",
+      "expected_classification": "auth_required",
+      "expected_subcategory": null
+    },
+    {
       "sample_id": "auth_method_not_configured",
       "engine": "gemini",
       "provider_id": null,

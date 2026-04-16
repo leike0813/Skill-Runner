@@ -1632,6 +1632,30 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "severity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pattern_kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "path": {
                     "type": [
                       "string",
@@ -2034,6 +2058,7 @@
                 "agent.message.intermediate",
                 "agent.turn_start",
                 "agent.turn_complete",
+                "agent.turn_failed",
                 "agent.message.promoted",
                 "agent.message.final",
                 "parsed.json",
@@ -2120,6 +2145,57 @@
             "properties": {
               "data": {
                 "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "event": {
+                "properties": {
+                  "type": {
+                    "const": "agent.turn_failed"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pattern_kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fatal": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "message",
+                  "source_type",
+                  "pattern_kind",
+                  "fatal"
+                ]
               }
             }
           }
@@ -2454,6 +2530,30 @@
                   "code": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "severity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pattern_kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "confidence": {
                     "type": "number",
@@ -3424,6 +3524,30 @@
                   "code": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "severity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pattern_kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "message": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "confidence": {
                     "type": "number",

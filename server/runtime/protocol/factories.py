@@ -251,10 +251,22 @@ def make_fcmp_auth_failed(
 def make_diagnostic_warning_payload(
     *,
     code: str,
+    severity: Optional[str] = None,
+    pattern_kind: Optional[str] = None,
+    source_type: Optional[str] = None,
+    message: Optional[str] = None,
     path: Optional[str] = None,
     detail: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"code": code}
+    if severity is not None:
+        payload["severity"] = severity
+    if pattern_kind is not None:
+        payload["pattern_kind"] = pattern_kind
+    if source_type is not None:
+        payload["source_type"] = source_type
+    if message is not None:
+        payload["message"] = message
     if path is not None:
         payload["path"] = path
     if detail is not None:

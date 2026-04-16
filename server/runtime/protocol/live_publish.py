@@ -577,6 +577,29 @@ class _BufferedLiveParserSession:
             if isinstance(session_id, str) and session_id:
                 diagnostic_emission["session_id"] = session_id
             emissions.append(diagnostic_emission)
+        diagnostic_events_obj = parsed.get("diagnostic_events")
+        if isinstance(diagnostic_events_obj, list):
+            for diagnostic_event in diagnostic_events_obj:
+                if not isinstance(diagnostic_event, dict):
+                    continue
+                code_obj = diagnostic_event.get("code")
+                if not isinstance(code_obj, str) or not code_obj.strip():
+                    continue
+                diagnostic_emission = {
+                    "kind": "diagnostic",
+                    "code": code_obj.strip(),
+                    "details": {
+                        key: value
+                        for key, value in diagnostic_event.items()
+                        if key != "raw_ref"
+                    },
+                }
+                raw_ref_obj = diagnostic_event.get("raw_ref")
+                if isinstance(raw_ref_obj, dict):
+                    diagnostic_emission["raw_ref"] = cast(RuntimeStreamRawRef, raw_ref_obj)
+                if isinstance(session_id, str) and session_id:
+                    diagnostic_emission["session_id"] = session_id
+                emissions.append(cast(LiveParserEmission, diagnostic_emission))
         turn_markers_obj = parsed.get("turn_markers")
         if isinstance(turn_markers_obj, list):
             for marker_item in turn_markers_obj:
@@ -584,10 +607,10 @@ class _BufferedLiveParserSession:
                     continue
                 marker_obj = marker_item.get("marker")
                 marker = marker_obj if isinstance(marker_obj, str) else None
-                if marker not in {"start", "complete"}:
+                if marker not in {"start", "complete", "failed"}:
                     continue
-                marker_literal: Literal["start", "complete"] = cast(
-                    Literal["start", "complete"],
+                marker_literal: Literal["start", "complete", "failed"] = cast(
+                    Literal["start", "complete", "failed"],
                     marker,
                 )
                 marker_emission: LiveParserEmission = {"kind": "turn_marker", "marker": marker_literal}
@@ -597,6 +620,10 @@ class _BufferedLiveParserSession:
                         marker_emission["turn_complete_data"] = marker_data_obj
                     elif isinstance(parsed_turn_complete_data, dict):
                         marker_emission["turn_complete_data"] = parsed_turn_complete_data
+                elif marker_literal == "failed":
+                    marker_data_obj = marker_item.get("data")
+                    if isinstance(marker_data_obj, dict):
+                        marker_emission["details"] = marker_data_obj
                 raw_ref_obj = marker_item.get("raw_ref")
                 if isinstance(raw_ref_obj, dict):
                     marker_emission["raw_ref"] = cast(RuntimeStreamRawRef, raw_ref_obj)
@@ -605,6 +632,12 @@ class _BufferedLiveParserSession:
                 emissions.append(marker_emission)
         if bool(parsed.get("turn_started")):
             emissions.append({"kind": "turn_marker", "marker": "start"})
+        if bool(parsed.get("turn_failed")):
+            failed_emission: LiveParserEmission = {"kind": "turn_marker", "marker": "failed"}
+            turn_failure_data = parsed.get("turn_failure_data")
+            if isinstance(turn_failure_data, dict):
+                failed_emission["details"] = turn_failure_data
+            emissions.append(failed_emission)
         if bool(parsed.get("turn_completed")):
             completion_emission: LiveParserEmission = {"kind": "turn_completed"}
             if isinstance(parsed_turn_complete_data, dict):
@@ -657,6 +690,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         self._promotion = FinalPromotionCoordinator()
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
+        self._turn_failed_emitted = False
 
     async def on_process_started(self, *, event_ts: datetime | None = None) -> None:
         if self._engine not in {"gemini", "iflow"}:
@@ -1032,9 +1066,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 marker_obj = emission.get("marker")
                 marker = marker_obj if isinstance(marker_obj, str) else None
                 if marker == "start":
-                    marker_literal: Literal["start", "complete"] = "start"
+                    marker_literal: Literal["start", "complete", "failed"] = "start"
                 elif marker == "complete":
                     marker_literal = "complete"
+                elif marker == "failed":
+                    marker_literal = "failed"
                 else:
                     continue
                 turn_complete_data = (
@@ -1042,10 +1078,14 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     if isinstance(emission.get("turn_complete_data"), dict)
                     else None
                 )
+                marker_data = turn_complete_data
+                if marker_literal == "failed":
+                    marker_details_obj = emission.get("details")
+                    marker_data = marker_details_obj if isinstance(marker_details_obj, dict) else None
                 self._emit_turn_marker(
                     marker=marker_literal,
                     raw_ref=raw_ref,
-                    data=turn_complete_data,
+                    data=marker_data,
                     event_ts=event_ts,
                 )
             elif kind == "turn_completed":
@@ -1068,7 +1108,10 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 data: dict[str, Any] = {"code": code}
                 diagnostic_details_obj = emission.get("details")
                 if isinstance(diagnostic_details_obj, dict):
-                    data.update(diagnostic_details_obj)
+                    for key, value in diagnostic_details_obj.items():
+                        if key == "raw_ref":
+                            continue
+                        data[key] = value
                 rasp = make_rasp_event(
                     run_id=self._run_id,
                     seq=1,
@@ -1097,7 +1140,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
     def _emit_turn_marker(
         self,
         *,
-        marker: Literal["start", "complete"],
+        marker: Literal["start", "complete", "failed"],
         raw_ref: RuntimeEventRef | None,
         data: dict[str, Any] | None,
         event_ts: datetime | None = None,
@@ -1108,11 +1151,17 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             self._turn_start_emitted = True
             type_name = "agent.turn_start"
             payload: dict[str, Any] = {}
-        else:
+        elif marker == "complete":
             if self._turn_complete_emitted:
                 return
             self._turn_complete_emitted = True
             type_name = "agent.turn_complete"
+            payload = data if isinstance(data, dict) else {}
+        else:
+            if self._turn_failed_emitted:
+                return
+            self._turn_failed_emitted = True
+            type_name = "agent.turn_failed"
             payload = data if isinstance(data, dict) else {}
 
         correlation: dict[str, Any] = {"publish_id": uuid.uuid4().hex}

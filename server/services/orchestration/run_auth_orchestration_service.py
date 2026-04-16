@@ -125,6 +125,7 @@ class RunAuthOrchestrationService:
         attempt_number: int,
         auth_detection: AuthDetectionResult,
         canonical_provider_id: str | None = None,
+        last_error: str | None = None,
         run_store_backend: Any = run_store,
         append_orchestrator_event: Callable[..., None],
         update_status: Callable[..., None],
@@ -160,7 +161,7 @@ class RunAuthOrchestrationService:
                 provider_id=provider_id,
                 available_methods=available_methods,
                 source_attempt=attempt_number,
-                last_error=None,
+                last_error=last_error,
             )
             await self._persist_method_selection(
                 request_id=request_id,
@@ -178,6 +179,7 @@ class RunAuthOrchestrationService:
                 engine=engine_name,
                 provider_id=provider_id,
                 source_attempt=attempt_number,
+                last_error=last_error,
             )
             await self._persist_pending_auth(
                 request_id=request_id,
@@ -255,7 +257,7 @@ class RunAuthOrchestrationService:
                 event_type=OrchestratorEventType.AUTH_SESSION_BUSY.value,
             )
             return selection
-        return pending_auth
+        return self._apply_last_error_to_pending_auth(pending_auth, last_error)
 
     async def create_custom_provider_pending_auth(
         self,
@@ -267,6 +269,7 @@ class RunAuthOrchestrationService:
         engine: str | None = None,
         requested_model: str,
         source_attempt: int,
+        last_error: str | None = None,
         run_store_backend: Any = run_store,
         append_orchestrator_event: Callable[..., None],
         update_status: Callable[..., None] | None = None,
@@ -279,6 +282,7 @@ class RunAuthOrchestrationService:
             engine=resolved_engine,
             requested_model=requested_model,
             source_attempt=source_attempt,
+            last_error=last_error,
         )
         snapshot = {
             "session_id": pending_auth.auth_session_id,
@@ -1590,10 +1594,17 @@ class RunAuthOrchestrationService:
         engine: str,
         provider_id: str | None,
         source_attempt: int,
+        last_error: str | None = None,
     ) -> PendingAuth:
         ask_user = self._build_import_ask_user_hint(
             engine=engine,
             provider_id=provider_id,
+        )
+        instructions = (
+            self._append_last_error_to_instructions(
+                self._normalize_string(ask_user.hint) or "Use the import action and upload required auth files.",
+                last_error,
+            )
         )
         return PendingAuth(
             auth_session_id=f"import::{request_id}",
@@ -1604,10 +1615,10 @@ class RunAuthOrchestrationService:
             prompt=self._normalize_string(ask_user.prompt) or "Upload credential files to complete authentication.",
             auth_url=None,
             user_code=None,
-            instructions=self._normalize_string(ask_user.hint) or "Use the import action and upload required auth files.",
+            instructions=instructions,
             accepts_chat_input=False,
             input_kind=None,
-            last_error=None,
+            last_error=last_error,
             source_attempt=source_attempt,
             phase=AuthSessionPhase.CHALLENGE_ACTIVE,
             timeout_sec=None,
@@ -1650,6 +1661,7 @@ class RunAuthOrchestrationService:
         engine: str,
         requested_model: str,
         source_attempt: int,
+        last_error: str | None = None,
     ) -> PendingAuth:
         provider_id, model_name = requested_model.split("/", 1)
         providers = engine_custom_provider_service.list_providers(engine)
@@ -1724,16 +1736,54 @@ class RunAuthOrchestrationService:
             prompt="Claude 自定义 provider 配置是继续当前任务所必需的。",
             auth_url=None,
             user_code=None,
-            instructions="提交后会把 provider 配置写入 managed agent home，并立即重试当前 run。",
+            instructions=self._append_last_error_to_instructions(
+                "提交后会把 provider 配置写入 managed agent home，并立即重试当前 run。",
+                last_error,
+            ),
             accepts_chat_input=True,
             input_kind=AuthSubmissionKind.CUSTOM_PROVIDER,
-            last_error=None,
+            last_error=last_error,
             source_attempt=source_attempt,
             phase=AuthSessionPhase.CHALLENGE_ACTIVE,
             timeout_sec=None,
             created_at=_utc_iso(),
             expires_at=None,
             ask_user=ask_user,
+        )
+
+    def _append_last_error_to_instructions(
+        self,
+        instructions: str | None,
+        last_error: str | None,
+    ) -> str | None:
+        normalized_instructions = self._normalize_string(instructions)
+        normalized_last_error = self._normalize_string(last_error)
+        if not normalized_last_error:
+            return normalized_instructions
+        if normalized_instructions and normalized_last_error in normalized_instructions:
+            return normalized_instructions
+        if normalized_instructions:
+            return f"{normalized_instructions} Last error: {normalized_last_error}"
+        return f"Last error: {normalized_last_error}"
+
+    def _apply_last_error_to_pending_auth(
+        self,
+        pending_auth: PendingAuth,
+        last_error: str | None,
+    ) -> PendingAuth:
+        normalized_last_error = self._normalize_string(last_error)
+        if not normalized_last_error:
+            return pending_auth
+        if self._normalize_string(pending_auth.last_error):
+            return pending_auth
+        return pending_auth.model_copy(
+            update={
+                "last_error": normalized_last_error,
+                "instructions": self._append_last_error_to_instructions(
+                    pending_auth.instructions,
+                    normalized_last_error,
+                ),
+            }
         )
 
     async def _apply_custom_provider_submission(

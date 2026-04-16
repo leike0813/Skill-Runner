@@ -29,8 +29,11 @@ Schema 文件：
 
 2. 内部桥接：告警降级
 - 记录 `diagnostic.warning`，`code=SCHEMA_INTERNAL_INVALID`；
+- 记录 `agent.turn_failed` 作为 canonical semantic turn-failure marker，且 raw evidence 必须继续保留；
+- 如果同一 attempt 最终经 auth remediation 进入 `waiting_auth`，`agent.turn_failed` 仍保留为 evidence，但不得单独驱动 terminal failed projection；
 - 回退最小安全载荷，尽量不中断主流程。
 - phase 3A 预留的 `diagnostic.output_repair.*` 目前是 schema-reserved internal event surface；实现前不要求已有生产者。
+- 普通 engine `type:"error"` 与 `item.type:"error"` 统一归入 `diagnostic.warning`，并通过 `pattern_kind` / `source_type` / `message` 暴露治理元数据。
 
 3. 读取路径：读兼容
 - 旧历史中不合规行被过滤；
@@ -51,6 +54,7 @@ Schema 文件：
 - payload 复用 `pending_auth`
 - 包含 challenge、provider、输入方式和 auth session 标识
 - `auth.challenge.updated` 仅用于 challenge-active 的真实 challenge 更新或重投影；`auth.session.busy` 不得替代它
+- 当 `waiting_auth` 由 semantic `agent.turn_failed` 或 auth-related runtime diagnostic 触发时，现有 `last_error` / `instructions` 字段 SHOULD 保留该原因，供鉴权卡片直接展示
 
 4. `auth.input.accepted`
 - `auth_session_id`, `submission_kind`, `accepted_at`
@@ -120,6 +124,7 @@ Schema 文件：
   - `code`（错误码摘要）
   - `message`（长度受控的错误摘要）
 - FCMP terminal `conversation.state.changed.data.terminal.error` SHOULD 优先使用上述摘要字段。
+- 若 canonical status 最终为 `waiting_auth`，semantic `agent.turn_failed.message` 不应进入 terminal failed 摘要；它应被消费到 waiting-auth 的 `last_error` / `instructions` 展示链。
 
 11. `interaction.auto_decide.timeout`
 - `interaction_id`, `resolution_mode=auto_decide_timeout`, `policy`, `accepted_at`, `timeout_sec?`

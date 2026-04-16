@@ -40,6 +40,6 @@
 - [x] 基于全局结构化输出的升级，优化输出消息信封的消费（chat不直接显示json对象，提示卡也不再显示message）
 - [x] 修复 Claude Code 的双重终态消息问题
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
-- [ ] 进一步拆分 god object，重构 run store
+- [x] 进一步拆分 god object，重构 run store
 - [ ] 对单元测试进行全面审查、规范化、去重
 - [ ] CI/CD流水线

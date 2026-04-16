@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
+from typing import cast
 
 from server.models import (
     AdapterTurnOutcome,
@@ -17,6 +18,7 @@ from server.runtime.auth_detection.signal import (
     is_high_confidence_auth_signal,
 )
 from server.runtime.auth_detection.types import AuthDetectionResult
+from server.runtime.adapter.types import RuntimeAuthSignal
 from server.runtime.protocol.factories import make_diagnostic_warning_payload
 from server.runtime.protocol.parse_utils import extract_fenced_or_plain_json
 from server.services.engine_management.model_registry import model_registry
@@ -164,6 +166,57 @@ def resolve_structured_output_candidate(
     return None
 
 
+def extract_semantic_turn_failed_message(runtime_parse_result: dict[str, Any] | None) -> str | None:
+    if not isinstance(runtime_parse_result, dict):
+        return None
+    turn_failure_data = runtime_parse_result.get("turn_failure_data")
+    if isinstance(turn_failure_data, dict):
+        message_obj = turn_failure_data.get("message")
+        if isinstance(message_obj, str) and message_obj.strip():
+            return message_obj.strip()
+    turn_markers = runtime_parse_result.get("turn_markers")
+    if isinstance(turn_markers, list):
+        for marker in reversed(turn_markers):
+            if not isinstance(marker, dict):
+                continue
+            if str(marker.get("marker") or "") != "failed":
+                continue
+            data_obj = marker.get("data")
+            if not isinstance(data_obj, dict):
+                continue
+            message_obj = data_obj.get("message")
+            if isinstance(message_obj, str) and message_obj.strip():
+                return message_obj.strip()
+    return None
+
+
+def extract_waiting_auth_reason_message(runtime_parse_result: dict[str, Any] | None) -> str | None:
+    semantic_message = extract_semantic_turn_failed_message(runtime_parse_result)
+    if isinstance(semantic_message, str) and semantic_message.strip():
+        return semantic_message.strip()
+    if not isinstance(runtime_parse_result, dict):
+        return None
+    diagnostic_events = runtime_parse_result.get("diagnostic_events")
+    if not isinstance(diagnostic_events, list):
+        return None
+    preferred_pattern_kinds = (
+        "engine_auth_hint",
+        "engine_rate_limit_hint",
+        "engine_error_row",
+        "engine_error_item",
+    )
+    for pattern_kind in preferred_pattern_kinds:
+        for diagnostic in diagnostic_events:
+            if not isinstance(diagnostic, dict):
+                continue
+            if str(diagnostic.get("pattern_kind") or "") != pattern_kind:
+                continue
+            message_obj = diagnostic.get("message")
+            if isinstance(message_obj, str) and message_obj.strip():
+                return message_obj.strip()
+    return None
+
+
 @dataclass
 class RunAttemptResolvedOutcome:
     final_status: RunStatus
@@ -224,7 +277,7 @@ class RunAttemptOutcomeService:
             raw_stdout=process_raw_stdout,
             raw_stderr=process_raw_stderr,
         )
-        auth_signal_snapshot = execution.auth_signal_snapshot
+        auth_signal_snapshot = cast(RuntimeAuthSignal | None, execution.auth_signal_snapshot)
         auth_detection_result = auth_detection_result_from_auth_signal(
             engine=engine_name,
             auth_signal=auth_signal_snapshot,
@@ -304,7 +357,8 @@ class RunAttemptOutcomeService:
             live_runtime_emitter_factory=inputs.live_runtime_emitter_factory,
         )
         result = convergence.engine_result or result
-        runtime_parse_result = convergence.runtime_parse_result
+        if isinstance(convergence.runtime_parse_result, dict):
+            runtime_parse_result = convergence.runtime_parse_result
         if convergence.process_exit_code is not None:
             process_exit_code = convergence.process_exit_code
         if convergence.process_failure_reason is not None:
@@ -358,6 +412,8 @@ class RunAttemptOutcomeService:
                     + ", ".join(resolution_result.missing_required_fields)
                 )
 
+        waiting_auth_reason_message = extract_waiting_auth_reason_message(runtime_parse_result)
+
         if auth_detection_high and context.session_capable and request_id:
             canonical_provider_id = inputs.resolve_provider_id(
                 engine_name=engine_name,
@@ -374,6 +430,7 @@ class RunAttemptOutcomeService:
                 attempt_number=attempt_number,
                 auth_detection=auth_detection_result,
                 canonical_provider_id=canonical_provider_id,
+                last_error=waiting_auth_reason_message,
                 run_store_backend=inputs.run_store_backend,
                 append_orchestrator_event=inputs.append_orchestrator_event,
                 update_status=inputs.update_status,
@@ -439,6 +496,10 @@ class RunAttemptOutcomeService:
                     engine_name=engine_name,
                     requested_model=context.custom_provider_model,
                     source_attempt=attempt_number,
+                    last_error=(
+                        waiting_auth_reason_message
+                        or "Authentication is required to continue."
+                    ),
                     run_store_backend=inputs.run_store_backend,
                     append_orchestrator_event=inputs.append_orchestrator_event,
                 )
@@ -554,6 +615,7 @@ class RunAttemptOutcomeService:
             normalized_error = None
         elif normalized_status != "success":
             error_code: str | None = None
+            semantic_turn_failed_message = extract_semantic_turn_failed_message(runtime_parse_result)
             if forced_failure_reason == "AUTH_REQUIRED":
                 error_code = "AUTH_REQUIRED"
                 error_message = "AUTH_REQUIRED: engine authentication is required or expired"
@@ -576,6 +638,8 @@ class RunAttemptOutcomeService:
                     "Client conversation_mode=non_session cannot enter waiting_user; "
                     "interactive flow must auto-resolve without waiting."
                 )
+            elif isinstance(semantic_turn_failed_message, str) and semantic_turn_failed_message:
+                error_message = semantic_turn_failed_message
             elif has_output_error:
                 error_message = "; ".join(terminal_validation_errors)
             else:

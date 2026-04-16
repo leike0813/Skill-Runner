@@ -69,13 +69,17 @@ class _FakeAuthService:
     ) -> None:
         self.pending_auth = pending_auth
         self.custom_pending_auth = custom_pending_auth
+        self.create_pending_auth_calls: list[dict[str, Any]] = []
+        self.create_custom_provider_pending_auth_calls: list[dict[str, Any]] = []
 
     async def create_pending_auth(self, **_kwargs: Any) -> _PendingModel | None:
+        self.create_pending_auth_calls.append(dict(_kwargs))
         if self.pending_auth is None:
             return None
         return _PendingModel(self.pending_auth)
 
     async def create_custom_provider_pending_auth(self, **_kwargs: Any) -> _PendingModel:
+        self.create_custom_provider_pending_auth_calls.append(dict(_kwargs))
         return _PendingModel(self.custom_pending_auth or {})
 
 
@@ -295,18 +299,19 @@ async def test_resolve_waiting_auth_with_high_confidence_signal(tmp_path: Path) 
         },
     )
     convergence = OutputConvergenceResult()
+    auth_service = _FakeAuthService(
+        pending_auth={
+            "auth_session_id": "auth-1",
+            "engine": "codex",
+            "provider_id": "openai",
+            "challenge_kind": "api_key",
+        }
+    )
     inputs, _events = _build_inputs(
         context=context,
         execution=execution,
         convergence=convergence,
-        auth_service=_FakeAuthService(
-            pending_auth={
-                "auth_session_id": "auth-1",
-                "engine": "codex",
-                "provider_id": "openai",
-                "challenge_kind": "api_key",
-            }
-        ),
+        auth_service=auth_service,
     )
 
     outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
@@ -315,6 +320,7 @@ async def test_resolve_waiting_auth_with_high_confidence_signal(tmp_path: Path) 
     assert outcome.pending_auth is not None
     assert outcome.pending_auth["auth_session_id"] == "auth-1"
     assert outcome.pending_auth_method_selection is None
+    assert auth_service.create_pending_auth_calls[0]["last_error"] is None
 
 
 @pytest.mark.asyncio
@@ -381,18 +387,19 @@ async def test_resolve_custom_provider_post_execute_fallback_waits_for_auth(tmp_
     )
     execution = _build_execution(exit_code=1, failure_reason="TIMEOUT")
     convergence = OutputConvergenceResult()
+    auth_service = _FakeAuthService(
+        custom_pending_auth={
+            "auth_session_id": "auth-custom",
+            "engine": "claude",
+            "provider_id": "openrouter",
+            "challenge_kind": "provider_config",
+        }
+    )
     inputs, _events = _build_inputs(
         context=context,
         execution=execution,
         convergence=convergence,
-        auth_service=_FakeAuthService(
-            custom_pending_auth={
-                "auth_session_id": "auth-custom",
-                "engine": "claude",
-                "provider_id": "openrouter",
-                "challenge_kind": "provider_config",
-            }
-        ),
+        auth_service=auth_service,
     )
 
     outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
@@ -400,3 +407,179 @@ async def test_resolve_custom_provider_post_execute_fallback_waits_for_auth(tmp_
     assert outcome.final_status == RunStatus.WAITING_AUTH
     assert outcome.pending_auth is not None
     assert outcome.pending_auth["auth_session_id"] == "auth-custom"
+    assert auth_service.create_custom_provider_pending_auth_calls[0]["last_error"] == "Authentication is required to continue."
+
+
+@pytest.mark.asyncio
+async def test_resolve_failed_prefers_semantic_turn_failed_message_over_exit_code(tmp_path: Path) -> None:
+    context = _build_context(tmp_path)
+
+    class _SemanticFailureAdapter:
+        def parse_runtime_stream(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "parser": "codex_ndjson",
+                "confidence": 0.95,
+                "session_id": None,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": ["turn.failed"],
+                "turn_failed": True,
+                "turn_failure_data": {
+                    "message": "You've hit your usage limit. Upgrade to Plus.",
+                    "source_type": "turn.failed",
+                    "pattern_kind": "engine_rate_limit_hint",
+                    "fatal": True,
+                },
+                "turn_markers": [
+                    {
+                        "marker": "failed",
+                        "data": {
+                            "message": "You've hit your usage limit. Upgrade to Plus.",
+                            "source_type": "turn.failed",
+                            "pattern_kind": "engine_rate_limit_hint",
+                            "fatal": True,
+                        },
+                    }
+                ],
+            }
+
+    context.adapter = _SemanticFailureAdapter()
+    execution = _build_execution(exit_code=1, raw_stdout='{"type":"turn.failed"}')
+    convergence = OutputConvergenceResult()
+    inputs, _events = _build_inputs(context=context, execution=execution, convergence=convergence)
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.FAILED
+    assert outcome.normalized_error is not None
+    assert outcome.normalized_error["message"] == "You've hit your usage limit. Upgrade to Plus."
+    assert outcome.terminal_error_summary == "You've hit your usage limit. Upgrade to Plus."
+
+
+@pytest.mark.asyncio
+async def test_resolve_waiting_auth_preserves_semantic_turn_failed_message_in_pending_auth_reason(
+    tmp_path: Path,
+) -> None:
+    context = _build_context(tmp_path)
+
+    class _UsageLimitAdapter:
+        def parse_runtime_stream(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "parser": "codex_ndjson",
+                "confidence": 0.95,
+                "session_id": None,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": ["turn.failed", "error"],
+                "turn_failed": True,
+                "turn_failure_data": {
+                    "message": "You've hit your usage limit. Upgrade to Plus.",
+                    "source_type": "turn.failed",
+                    "pattern_kind": "engine_rate_limit_hint",
+                    "fatal": True,
+                },
+                "diagnostic_events": [
+                    {
+                        "code": "ENGINE_RATE_LIMIT_HINT",
+                        "severity": "warning",
+                        "pattern_kind": "engine_rate_limit_hint",
+                        "source_type": "type:error",
+                        "message": "You've hit your usage limit. Upgrade to Plus.",
+                    }
+                ],
+            }
+
+    context.adapter = _UsageLimitAdapter()
+    execution = _build_execution(
+        exit_code=1,
+        raw_stdout='{"type":"turn.failed"}',
+        auth_signal_snapshot={
+            "required": True,
+            "confidence": "high",
+            "matched_pattern_id": "codex_usage_limit_plus_reauth_required",
+        },
+    )
+    convergence = OutputConvergenceResult()
+    auth_service = _FakeAuthService(
+        pending_auth={
+            "auth_session_id": "auth-usage-limit",
+            "engine": "codex",
+            "provider_id": "openai",
+            "challenge_kind": "api_key",
+        }
+    )
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+        auth_service=auth_service,
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.WAITING_AUTH
+    assert outcome.normalized_error is None
+    assert auth_service.create_pending_auth_calls[0]["last_error"] == "You've hit your usage limit. Upgrade to Plus."
+
+
+@pytest.mark.asyncio
+async def test_resolve_waiting_auth_failfast_falls_back_to_diagnostic_message_for_pending_auth_reason(
+    tmp_path: Path,
+) -> None:
+    context = _build_context(tmp_path)
+
+    class _FailFastAuthAdapter:
+        def parse_runtime_stream(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "parser": "codex_ndjson",
+                "confidence": 0.9,
+                "assistant_messages": [],
+                "raw_rows": [],
+                "diagnostics": [],
+                "structured_types": ["error"],
+                "turn_failed": False,
+                "diagnostic_events": [
+                    {
+                        "code": "ENGINE_AUTH_HINT",
+                        "severity": "warning",
+                        "pattern_kind": "engine_auth_hint",
+                        "source_type": "type:error",
+                        "message": "Missing bearer or basic authentication in header.",
+                    }
+                ],
+            }
+
+    context.adapter = _FailFastAuthAdapter()
+    execution = _build_execution(
+        exit_code=143,
+        failure_reason="AUTH_REQUIRED",
+        raw_stdout='{"type":"error"}',
+        auth_signal_snapshot={
+            "required": True,
+            "confidence": "high",
+            "matched_pattern_id": "codex_missing_bearer_401",
+        },
+    )
+    convergence = OutputConvergenceResult()
+    auth_service = _FakeAuthService(
+        pending_auth={
+            "auth_session_id": "auth-failfast",
+            "engine": "codex",
+            "provider_id": "openai",
+            "challenge_kind": "api_key",
+        }
+    )
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+        auth_service=auth_service,
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.WAITING_AUTH
+    assert outcome.normalized_error is None
+    assert auth_service.create_pending_auth_calls[0]["last_error"] == "Missing bearer or basic authentication in header."

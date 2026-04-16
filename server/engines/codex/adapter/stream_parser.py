@@ -24,6 +24,10 @@ from server.runtime.protocol.parse_utils import (
     stream_lines_with_offsets,
     strip_runtime_script_envelope,
 )
+from server.runtime.protocol.engine_error_governance import (
+    classify_engine_error_payload,
+    extract_turn_failed_payload,
+)
 if TYPE_CHECKING:
     from server.runtime.adapter.common.profile_loader import ProcessItemMappingProfile
     from .execution_adapter import CodexExecutionAdapter
@@ -182,13 +186,17 @@ class CodexStreamParser:
         assistant_messages: list[RuntimeAssistantMessage] = []
         process_events: list[RuntimeProcessEvent] = []
         diagnostics: list[str] = []
+        diagnostic_events: list[dict[str, Any]] = []
         session_id: str | None = None
         structured_types: list[str] = []
         turn_completed = False
+        turn_failed = False
         turn_complete_data: dict[str, Any] | None = None
+        turn_failure_data: dict[str, Any] | None = None
         turn_start_seen = False
         turn_start_raw_ref: dict[str, Any] | None = None
         turn_complete_raw_ref: dict[str, Any] | None = None
+        turn_failed_raw_ref: dict[str, Any] | None = None
         run_handle_id: str | None = None
         run_handle_raw_ref: dict[str, Any] | None = None
         turn_start_types, turn_end_types, process_mapping_by_item = self._process_extract_profile()
@@ -217,7 +225,8 @@ class CodexStreamParser:
             run_handle_id, run_handle_raw_ref = _extract_run_handle(cast(list[dict[str, Any]], pty_records_all))
 
         def _collect(rows: list[dict[str, Any]]) -> None:
-            nonlocal session_id, turn_completed, turn_complete_data, turn_start_seen, turn_start_raw_ref, turn_complete_raw_ref
+            nonlocal session_id, turn_completed, turn_failed, turn_complete_data, turn_failure_data
+            nonlocal turn_start_seen, turn_start_raw_ref, turn_complete_raw_ref, turn_failed_raw_ref
             for row in rows:
                 payload = row["payload"]
                 if not isinstance(payload, dict):
@@ -246,6 +255,40 @@ class CodexStreamParser:
                         usage_obj = payload.get("usage")
                         if isinstance(usage_obj, dict):
                             turn_complete_data = dict(usage_obj)
+                    if payload_type == "turn.failed":
+                        turn_failed = True
+                        turn_failed_raw_ref = {
+                            "stream": str(row["stream"]),
+                            "byte_from": row["byte_from"] if isinstance(row["byte_from"], int) else 0,
+                            "byte_to": row["byte_to"] if isinstance(row["byte_to"], int) else 0,
+                        }
+                        extracted_turn_failure = extract_turn_failed_payload(payload)
+                        if isinstance(extracted_turn_failure, dict):
+                            turn_failure_data = extracted_turn_failure
+                        raw_rows.append(
+                            {
+                                "stream": str(row["stream"]),
+                                "line": json.dumps(payload, ensure_ascii=False),
+                                "byte_from": int(row["byte_from"]) if isinstance(row["byte_from"], int) else 0,
+                                "byte_to": int(row["byte_to"]) if isinstance(row["byte_to"], int) else 0,
+                            }
+                        )
+                    diagnostic_payload = classify_engine_error_payload(payload)
+                    if isinstance(diagnostic_payload, dict):
+                        diagnostic_payload["raw_ref"] = {
+                            "stream": str(row["stream"]),
+                            "byte_from": row["byte_from"] if isinstance(row["byte_from"], int) else 0,
+                            "byte_to": row["byte_to"] if isinstance(row["byte_to"], int) else 0,
+                        }
+                        diagnostic_events.append(diagnostic_payload)
+                        raw_rows.append(
+                            {
+                                "stream": str(row["stream"]),
+                                "line": json.dumps(payload, ensure_ascii=False),
+                                "byte_from": int(row["byte_from"]) if isinstance(row["byte_from"], int) else 0,
+                                "byte_to": int(row["byte_to"]) if isinstance(row["byte_to"], int) else 0,
+                            }
+                        )
 
                 item = payload.get("item")
                 if not isinstance(item, dict):
@@ -375,22 +418,31 @@ class CodexStreamParser:
             if isinstance(turn_complete_data, dict):
                 marker_payload["data"] = turn_complete_data
             turn_markers.append(marker_payload)
+        if turn_failed:
+            marker_payload = {"marker": "failed", "raw_ref": turn_failed_raw_ref}
+            if isinstance(turn_failure_data, dict):
+                marker_payload["data"] = turn_failure_data
+            turn_markers.append(marker_payload)
 
         result: dict[str, object] = {
             "parser": "codex_ndjson",
-            "confidence": 0.95 if assistant_messages else 0.6,
+            "confidence": 0.95 if (assistant_messages or turn_failed) else 0.6,
             "session_id": session_id,
             "assistant_messages": dedup_assistant_messages(assistant_messages),
             "process_events": process_events,
             "turn_started": turn_start_seen,
             "turn_completed": turn_completed,
+            "turn_failed": turn_failed,
             "turn_markers": turn_markers,
+            "diagnostic_events": diagnostic_events,
             "raw_rows": list(raw_rows),
             "diagnostics": diagnostics,
             "structured_types": list(dict.fromkeys(structured_types)),
         }
         if isinstance(turn_complete_data, dict):
             result["turn_complete_data"] = turn_complete_data
+        if isinstance(turn_failure_data, dict):
+            result["turn_failure_data"] = turn_failure_data
         if isinstance(run_handle_id, str) and run_handle_id.strip():
             result["run_handle"] = {
                 "handle_id": run_handle_id.strip(),
@@ -418,6 +470,7 @@ class _CodexLiveSession(NdjsonLiveStreamParserSession):
         ) = self._parser._process_extract_profile()  # noqa: SLF001
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
+        self._turn_failed_emitted = False
         self._run_handle_emitted = False
 
     def handle_live_row(
@@ -468,6 +521,33 @@ class _CodexLiveSession(NdjsonLiveStreamParserSession):
             if isinstance(turn_complete_data, dict):
                 completion_emission["turn_complete_data"] = turn_complete_data
             emissions.append(completion_emission)
+        elif payload_type == "turn.failed" and not self._turn_failed_emitted:
+            self._turn_failed_emitted = True
+            extracted_turn_failure = extract_turn_failed_payload(payload) or {
+                "message": "turn failed",
+                "source_type": "turn.failed",
+                "pattern_kind": "engine_turn_failed",
+                "fatal": True,
+            }
+            emissions.append(
+                {
+                    "kind": "turn_marker",
+                    "marker": "failed",
+                    "raw_ref": raw_ref,
+                    "details": dict(extracted_turn_failure),
+                }
+            )
+
+        diagnostic_payload = classify_engine_error_payload(payload)
+        if isinstance(diagnostic_payload, dict):
+            emissions.append(
+                {
+                    "kind": "diagnostic",
+                    "code": str(diagnostic_payload.get("code") or "ENGINE_ERROR_ROW"),
+                    "details": dict(diagnostic_payload),
+                    "raw_ref": raw_ref,
+                }
+            )
 
         item = payload.get("item")
         if not isinstance(item, dict):

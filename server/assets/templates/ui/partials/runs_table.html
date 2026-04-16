@@ -1,66 +1,74 @@
-<table class="table table-striped">
-    <thead>
-        <tr>
-            <th>{{ t("ui.runs.table.request_id", default="Request ID") }}</th>
-            <th>{{ t("ui.runs.table.run_id", default="Run ID") }}</th>
-            <th>{{ t("ui.runs.table.skill", default="Skill") }}</th>
-            <th>{{ t("ui.runs.table.engine", default="Engine") }}</th>
-            <th>{{ t("ui.runs.table.model", default="Model") }}</th>
-            <th>{{ t("ui.runs.table.status", default="Status") }}</th>
-            <th>{{ t("ui.runs.table.pending", default="Pending") }}</th>
-            <th>{{ t("ui.runs.table.interactions", default="Interactions") }}</th>
-            <th>{{ t("ui.runs.table.updated_at", default="Updated At") }}</th>
-            <th>{{ t("ui.runs.table.actions", default="Actions") }}</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for row in runs %}
-        <tr>
-            <td>{{ row.request_id }}</td>
-            <td>{{ row.run_id }}</td>
-            <td>{{ row.skill_id or "-" }}</td>
-            <td>{{ row.engine or "-" }}</td>
-            <td>{{ row.model or "-" }}</td>
-            <td>{{ row.status }}</td>
-            <td>{{ row.pending_interaction_id if row.pending_interaction_id is not none else "-" }}</td>
-            <td>{{ row.interaction_count }}</td>
-            <td><span class="js-local-datetime" data-ts="{{ row.updated_at or '' }}">{{ row.updated_at or "-" }}</span></td>
-            <td>
-                <div class="table-actions">
-                    <a class="btn btn-secondary" href="/ui/runs/{{ row.request_id }}?page={{ page }}&page_size={{ page_size }}">{{ t("ui.runs.table.details", default="查看详情") }}</a>
-                </div>
-            </td>
-        </tr>
-    {% endfor %}
-    {% if not runs %}
-        <tr>
-            <td colspan="10" style="color:#6b7280;">{{ t("ui.runs.table.empty", default="暂无可观测 runs") }}</td>
-        </tr>
-    {% endif %}
-    </tbody>
-</table>
-<div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; gap:8px; flex-wrap:wrap;">
-    <div class="muted">
-        {{ t("ui.runs.pagination.summary", default="Page {page}/{total_pages} · Total {total}", page=page, total_pages=total_pages or 1, total=total) }}
-    </div>
-    <div style="display:flex; gap:8px;">
-        {% set prev_page = page - 1 %}
-        {% set next_page = page + 1 %}
-        <button
-            class="btn btn-secondary"
-            type="button"
-            {% if page <= 1 %}disabled{% endif %}
-            hx-get="/ui/management/runs/table?page={{ prev_page if prev_page > 0 else 1 }}&page_size={{ page_size }}"
-            hx-target="#runs-table-container"
-            hx-swap="innerHTML"
-        >{{ t("ui.runs.pagination.prev", default="Previous") }}</button>
-        <button
-            class="btn btn-secondary"
-            type="button"
-            {% if total_pages and page >= total_pages %}disabled{% endif %}
-            hx-get="/ui/management/runs/table?page={{ next_page }}&page_size={{ page_size }}"
-            hx-target="#runs-table-container"
-            hx-swap="innerHTML"
-        >{{ t("ui.runs.pagination.next", default="Next") }}</button>
+<div
+    id="runs-table-container"
+    hx-get="/ui/management/runs/table?page={{ page }}&page_size={{ page_size }}"
+    hx-trigger="every 5s"
+    hx-target="this"
+    hx-swap="outerHTML"
+>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>{{ t("ui.runs.table.request_id", default="Request ID") }}</th>
+                <th>{{ t("ui.runs.table.run_id", default="Run ID") }}</th>
+                <th>{{ t("ui.runs.table.skill", default="Skill") }}</th>
+                <th>{{ t("ui.runs.table.engine", default="Engine") }}</th>
+                <th>{{ t("ui.runs.table.model", default="Model") }}</th>
+                <th>{{ t("ui.runs.table.status", default="Status") }}</th>
+                <th>{{ t("ui.runs.table.pending", default="Pending") }}</th>
+                <th>{{ t("ui.runs.table.interactions", default="Interactions") }}</th>
+                <th>{{ t("ui.runs.table.updated_at", default="Updated At") }}</th>
+                <th>{{ t("ui.runs.table.actions", default="Actions") }}</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in runs %}
+            <tr>
+                <td>{{ row.request_id }}</td>
+                <td>{{ row.run_id }}</td>
+                <td>{{ row.skill_id or "-" }}</td>
+                <td>{{ row.engine or "-" }}</td>
+                <td>{{ row.model or "-" }}</td>
+                <td>{{ row.status }}</td>
+                <td>{{ row.pending_interaction_id if row.pending_interaction_id is not none else "-" }}</td>
+                <td>{{ row.interaction_count }}</td>
+                <td><span class="js-local-datetime" data-ts="{{ row.updated_at or '' }}">{{ row.updated_at or "-" }}</span></td>
+                <td>
+                    <div class="table-actions">
+                        <a class="btn btn-secondary" href="/ui/runs/{{ row.request_id }}?page={{ page }}&page_size={{ page_size }}">{{ t("ui.runs.table.details", default="查看详情") }}</a>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        {% if not runs %}
+            <tr>
+                <td colspan="10" style="color:#6b7280;">{{ t("ui.runs.table.empty", default="暂无可观测 runs") }}</td>
+            </tr>
+        {% endif %}
+        </tbody>
+    </table>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; gap:8px; flex-wrap:wrap;">
+        <div class="muted">
+            {{ t("ui.runs.pagination.summary", default="Page {page}/{total_pages} · Total {total}", page=page, total_pages=total_pages or 1, total=total) }}
+        </div>
+        <div style="display:flex; gap:8px;">
+            {% set prev_page = page - 1 %}
+            {% set next_page = page + 1 %}
+            <button
+                class="btn btn-secondary"
+                type="button"
+                {% if page <= 1 %}disabled{% endif %}
+                hx-get="/ui/management/runs/table?page={{ prev_page if prev_page > 0 else 1 }}&page_size={{ page_size }}"
+                hx-target="#runs-table-container"
+                hx-swap="outerHTML"
+            >{{ t("ui.runs.pagination.prev", default="Previous") }}</button>
+            <button
+                class="btn btn-secondary"
+                type="button"
+                {% if total_pages and page >= total_pages %}disabled{% endif %}
+                hx-get="/ui/management/runs/table?page={{ next_page }}&page_size={{ page_size }}"
+                hx-target="#runs-table-container"
+                hx-swap="outerHTML"
+            >{{ t("ui.runs.pagination.next", default="Next") }}</button>
+        </div>
     </div>
 </div>

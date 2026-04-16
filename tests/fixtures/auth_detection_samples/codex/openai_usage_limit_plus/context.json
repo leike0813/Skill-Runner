@@ -1,0 +1,23 @@
+{
+  "sample_id": "openai_usage_limit_plus",
+  "source_run_id": "8ed4484f-7a9d-4f7f-a203-b2c231369424",
+  "engine": "codex",
+  "provider_id": "openai",
+  "execution_mode": "interactive",
+  "capture_date": "2026-04-16",
+  "scenario": "Codex usage-limit failure that should enter waiting_auth while preserving semantic turn failure",
+  "expected_detection": {
+    "classification": "auth_required",
+    "subcategory": null,
+    "confidence": "high"
+  },
+  "evidence_priority": [
+    "stdout_text",
+    "stderr_text",
+    "pty_output"
+  ],
+  "notes": [
+    "Derived from run 8ed4484f-7a9d-4f7f-a203-b2c231369424.",
+    "The usage-limit message should remain visible via waiting_auth payload while semantic turn_failed remains preserved."
+  ]
+}

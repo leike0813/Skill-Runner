@@ -69,3 +69,25 @@ def test_codex_auth_detection_matches_logged_out_access_token_fixture() -> None:
     assert result.confidence == "high"
     assert "codex_access_token_reauth_required" in result.matched_rule_ids
     assert result.details.get("reason_code") == "CODEX_ACCESS_TOKEN_REAUTH_REQUIRED"
+
+
+def test_codex_auth_detection_matches_usage_limit_plus_fixture() -> None:
+    sample = load_sample("codex", "openai_usage_limit_plus")
+    adapter = CodexExecutionAdapter()
+    runtime_parse_result = adapter.parse_runtime_stream(
+        stdout_raw=sample["stdout"].encode("utf-8"),
+        stderr_raw=sample["stderr"].encode("utf-8"),
+        pty_raw=sample["pty_output"].encode("utf-8"),
+    )
+    result = auth_detection_service.detect(
+        engine="codex",
+        raw_stdout=sample["stdout"],
+        raw_stderr=sample["stderr"],
+        pty_output=sample["pty_output"],
+        runtime_parse_result=runtime_parse_result,
+    )
+    assert result.classification == "auth_required"
+    assert result.subcategory is None
+    assert result.confidence == "high"
+    assert "codex_usage_limit_plus_reauth_required" in result.matched_rule_ids
+    assert result.details.get("reason_code") == "CODEX_USAGE_LIMIT_PLUS_REAUTH_REQUIRED"

@@ -255,6 +255,47 @@ async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, t
 
 
 @pytest.mark.asyncio
+async def test_create_pending_auth_multi_method_preserves_last_error_message(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-selection-last-error"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    start_session = AsyncMock()
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
+        start_session,
+    )
+
+    backend = SimpleNamespace(
+        clear_pending_auth=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
+        set_pending_auth_method_selection=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        update_run_status=AsyncMock(),
+    )
+
+    service = RunAuthOrchestrationService()
+    selection = await service.create_pending_auth(
+        run_id="run-1",
+        run_dir=run_dir,
+        request_id="req-1",
+        skill_id="demo-skill",
+        engine_name="codex",
+        options={"execution_mode": "interactive"},
+        attempt_number=2,
+        auth_detection=_build_detection(engine="codex", provider_id=None, subcategory="oauth_reauth"),
+        last_error="You've hit your usage limit. Upgrade to Plus.",
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **_kwargs: None,
+        update_status=lambda *_args, **_kwargs: None,
+    )
+
+    assert selection is not None
+    assert selection.last_error == "You've hit your usage limit. Upgrade to Plus."
+    assert selection.instructions is not None
+    assert "Previous error: You've hit your usage limit. Upgrade to Plus." in selection.instructions
+    start_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_pending_auth_single_method_starts_session(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-create"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -310,6 +351,57 @@ async def test_create_pending_auth_single_method_starts_session(monkeypatch, tmp
     state_payload = _read_state_payload(run_dir)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
+
+
+@pytest.mark.asyncio
+async def test_create_pending_auth_single_method_preserves_last_error_message(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-create-last-error"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
+        lambda **_kwargs: {
+            "session_id": "auth-usage-limit",
+            "engine": "opencode",
+            "provider_id": "deepseek",
+            "status": "waiting_user",
+            "input_kind": "api_key",
+            "auth_url": None,
+            "user_code": None,
+            "created_at": "2099-03-03T00:00:00Z",
+            "expires_at": "2099-03-03T00:15:00Z",
+            "error": None,
+        },
+    )
+
+    backend = SimpleNamespace(
+        clear_pending_auth_method_selection=AsyncMock(),
+        set_pending_auth=AsyncMock(),
+        set_current_projection=AsyncMock(),
+        update_run_status=AsyncMock(),
+    )
+
+    service = RunAuthOrchestrationService()
+    pending_auth = await service.create_pending_auth(
+        run_id="run-1",
+        run_dir=run_dir,
+        request_id="req-1",
+        skill_id="demo-skill",
+        engine_name="opencode",
+        options={"execution_mode": "interactive"},
+        attempt_number=1,
+        auth_detection=_build_detection(),
+        canonical_provider_id="deepseek",
+        last_error="You've hit your usage limit. Upgrade to Plus.",
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **_kwargs: None,
+        update_status=lambda *_args, **_kwargs: None,
+    )
+
+    assert pending_auth is not None
+    assert pending_auth.last_error == "You've hit your usage limit. Upgrade to Plus."
+    assert pending_auth.instructions is not None
+    assert "Last error: You've hit your usage limit. Upgrade to Plus." in pending_auth.instructions
 
 
 @pytest.mark.asyncio

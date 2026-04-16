@@ -91,6 +91,10 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         assert event.data.get("terminal", {}).get("status") == "succeeded"
 
     failed_stdout, failed_stderr = _write_logs(tmp_path / "run-failed" / "logs")
+    failed_stdout.write_text(
+        '{"type":"turn.failed","error":{"message":"semantic failure"}}\n',
+        encoding="utf-8",
+    )
     failed_stderr.write_text(json.dumps({"error": "boom"}), encoding="utf-8")
     failed_rasp = build_rasp_events(
         run_id="run-failed",
@@ -101,6 +105,7 @@ def test_terminal_protocol_events_align_with_state_transitions(tmp_path: Path) -
         stdout_path=failed_stdout,
         stderr_path=failed_stderr,
     )
+    assert any(event.event.type == "agent.turn_failed" for event in failed_rasp)
     failed_fcmp = build_fcmp_events(
         failed_rasp,
         status="failed",

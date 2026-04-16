@@ -79,9 +79,19 @@ class RuntimeProcessEvent(TypedDict, total=False):
 
 
 class RuntimeTurnMarker(TypedDict, total=False):
-    marker: Literal["start", "complete"]
+    marker: Literal["start", "complete", "failed"]
     raw_ref: RuntimeStreamRawRef | None
     data: dict[str, Any]
+
+
+class RuntimeDiagnosticEvent(TypedDict, total=False):
+    code: str
+    severity: str
+    pattern_kind: str
+    source_type: str
+    message: str
+    detail: str
+    raw_ref: RuntimeStreamRawRef | None
 
 
 class RuntimeRunHandle(TypedDict, total=False):
@@ -101,7 +111,7 @@ class LiveParserEmission(TypedDict):
     message_id: NotRequired[str]
     text: NotRequired[str]
     code: NotRequired[str]
-    marker: NotRequired[Literal["start", "complete"]]
+    marker: NotRequired[Literal["start", "complete", "failed"]]
     process_type: NotRequired[Literal["reasoning", "tool_call", "command_execution"]]
     summary: NotRequired[str]
     details: NotRequired[dict[str, Any]]
@@ -124,10 +134,13 @@ class RuntimeStreamParseResult(TypedDict):
     structured_payloads: NotRequired[list[RuntimeStructuredPayload]]
     process_events: NotRequired[list[RuntimeProcessEvent]]
     turn_markers: NotRequired[list[RuntimeTurnMarker]]
+    diagnostic_events: NotRequired[list[RuntimeDiagnosticEvent]]
     run_handle: NotRequired[RuntimeRunHandle]
     turn_started: NotRequired[bool]
     turn_completed: NotRequired[bool]
+    turn_failed: NotRequired[bool]
     turn_complete_data: NotRequired[dict[str, Any]]
+    turn_failure_data: NotRequired[dict[str, Any]]
     auth_signal: NotRequired[RuntimeAuthSignal]
 
 

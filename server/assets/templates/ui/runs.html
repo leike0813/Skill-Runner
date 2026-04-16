@@ -32,7 +32,8 @@
             id="runs-table-container"
             hx-get="/ui/management/runs/table?page={{ page }}&page_size={{ page_size }}"
             hx-trigger="load, every 5s"
-            hx-swap="innerHTML"
+            hx-target="this"
+            hx-swap="outerHTML"
         >
             <div class="loading-wrap">
                 <div class="spinner"></div>

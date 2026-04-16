@@ -1,0 +1,7 @@
+- [x] 1.1 Add OpenSpec delta spec for turn-failed / waiting-auth precedence and waiting-auth message preservation.
+- [x] 1.2 Update runtime docs/invariants to clarify that `agent.turn_failed` is evidence-only when canonical state becomes `waiting_auth`.
+- [x] 2.1 Add a Codex usage-limit auth pattern and fixture coverage.
+- [x] 2.2 Preserve semantic failure messages into `pending_auth` / `pending_auth_method_selection` when entering `waiting_auth`.
+- [x] 2.3 Cover fail-fast/high-confidence auth scenarios so waiting-auth still shows a concrete reason message.
+- [x] 3.1 Run targeted pytest coverage for auth detection, outcome normalization, runtime protocol, and auth orchestration.
+- [x] 3.2 Run targeted mypy for `server/runtime` and `server/services/orchestration` touched by this change.

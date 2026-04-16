@@ -164,6 +164,25 @@
             }
           ]
         }
+      },
+      {
+        "id": "codex_usage_limit_plus_reauth_required",
+        "enabled": true,
+        "priority": 891,
+        "match": {
+          "all": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(you've hit your usage limit|usage\\s+limit|quota\\s+exceeded)"
+            },
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(upgrade\\s+to\\s+plus|continue\\s+using\\s+codex|try\\s+again\\s+at)"
+            }
+          ]
+        }
       }
     ]
   },

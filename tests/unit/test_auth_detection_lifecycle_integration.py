@@ -218,6 +218,38 @@ class _CodexAccessTokenReauthExitOneAdapter:
         )
 
 
+class _CodexUsageLimitExitOneAdapter:
+    def __init__(self, stdout_text: str = "", stderr_text: str = "", pty_text: str = ""):
+        self.stdout_text = stdout_text
+        self.stderr_text = stderr_text
+        self.pty_text = pty_text
+        self._adapter = CodexExecutionAdapter()
+        self.stream_parser = self._adapter.stream_parser
+
+    def parse_runtime_stream(self, **kwargs):
+        return self._adapter.parse_runtime_stream(**kwargs)
+
+    async def run(self, skill, input_data, run_dir: Path, options, live_runtime_emitter=None):
+        _ = skill
+        _ = input_data
+        _ = run_dir
+        _ = options
+        _ = live_runtime_emitter
+        parsed = self.parse_runtime_stream(
+            stdout_raw=self.stdout_text.encode("utf-8"),
+            stderr_raw=self.stderr_text.encode("utf-8"),
+            pty_raw=self.pty_text.encode("utf-8"),
+        )
+        auth_signal = parsed.get("auth_signal")
+        return EngineRunResult(
+            exit_code=1,
+            raw_stdout=self.stdout_text,
+            raw_stderr=self.stderr_text,
+            artifacts_created=[],
+            auth_signal_snapshot=dict(auth_signal) if isinstance(auth_signal, dict) else None,
+        )
+
+
 class _ExitOneAdapter:
     def __init__(
         self,
@@ -818,6 +850,64 @@ async def test_codex_logged_out_access_token_reauth_high_confidence_enters_waiti
         assert meta_data["auth_detection"]["classification"] == "auth_required"
         assert meta_data["auth_detection"]["confidence"] == "high"
         assert "codex_access_token_reauth_required" in meta_data["auth_detection"]["matched_rule_ids"]
+    finally:
+        config.defrost()
+        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.RUNS_DB = old_runs_db
+        config.freeze()
+
+
+@pytest.mark.asyncio
+async def test_codex_usage_limit_high_confidence_enters_waiting_auth_and_preserves_reason(
+    tmp_path: Path,
+) -> None:
+    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_runs_db = config.SYSTEM.RUNS_DB
+    config.defrost()
+    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.freeze()
+    try:
+        local_store = RunStore(db_path=tmp_path / "runs.db")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-codex-usage-limit", engine="codex")
+        run_id = _create_run(skill, "codex")
+        await _seed_interactive_request(
+            local_store,
+            request_id="req-auth-codex-usage-limit",
+            run_id=run_id,
+            skill_id=skill.id,
+            engine="codex",
+        )
+        fixture = load_sample("codex", "openai_usage_limit_plus")
+        orchestrator = _build_orchestrator(local_store)
+        orchestrator.adapters = {
+            "codex": _CodexUsageLimitExitOneAdapter(
+                stdout_text=fixture["stdout"],
+                stderr_text=fixture["stderr"],
+                pty_text=fixture["pty_output"],
+            )
+        }
+
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+            await orchestrator.run_job(
+                run_id,
+                skill.id,
+                "codex",
+                options={"execution_mode": "interactive"},
+            )
+
+        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+        state_data = _read_state_data(run_dir)
+        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        pending_selection = state_data["pending"]["payload"]
+        assert state_data["status"] == RunStatus.WAITING_AUTH.value
+        assert state_data["error"] is None
+        assert state_data["pending"]["owner"] == "waiting_auth.method_selection"
+        assert "usage limit" in str(pending_selection.get("last_error", "")).lower()
+        assert "usage limit" in str(pending_selection.get("instructions", "")).lower()
+        assert meta_data["auth_detection"]["classification"] == "auth_required"
+        assert meta_data["auth_detection"]["confidence"] == "high"
+        assert "codex_usage_limit_plus_reauth_required" in meta_data["auth_detection"]["matched_rule_ids"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

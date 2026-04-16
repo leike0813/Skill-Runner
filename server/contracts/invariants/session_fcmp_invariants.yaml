@@ -60,6 +60,8 @@ transitions:
     source: running
     event: turn.failed
     target: failed
+    evidence:
+      preferred_rasp_event: agent.turn_failed
   - id: TR-12
     source: waiting_auth
     event: run.canceled
@@ -103,10 +105,13 @@ fcmp_mapping:
       source: running
       target: waiting_user
       trigger: turn.needs_input
-    - id: FM-03
+  - id: FM-03
       source: running
       target: waiting_auth
       trigger: auth.required
+      notes:
+        - semantic `agent.turn_failed` evidence may coexist with this transition
+        - when auth remediation succeeds, canonical state prefers `waiting_auth` and the turn-failed marker remains evidence-only
     - id: FM-04
       source: waiting_auth
       target: queued
@@ -318,3 +323,7 @@ ordering_rules:
     rule: rasp_turn_marker_ordered
   - id: OR-60
     rule: fcmp_must_not_emit_assistant_turn_markers
+  - id: OR-61
+    rule: waiting_auth_may_coexist_with_turn_failed_evidence
+  - id: OR-62
+    rule: waiting_auth_reason_should_preserve_semantic_failure_message

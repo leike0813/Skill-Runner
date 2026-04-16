@@ -1694,6 +1694,20 @@ async def test_ui_pages_use_management_data_endpoints(monkeypatch):
     assert '/ui/management/runs/table' in runs_res.text
 
 
+def test_ui_runs_templates_preserve_current_page_during_auto_refresh() -> None:
+    page_template = _read_ui_template("server/assets/templates/ui/runs.html")
+    table_template = _read_ui_template("server/assets/templates/ui/partials/runs_table.html")
+
+    assert 'id="runs-table-container"' in page_template
+    assert 'hx-target="this"' in page_template
+    assert 'hx-swap="outerHTML"' in page_template
+
+    assert 'id="runs-table-container"' in table_template
+    assert 'hx-get="/ui/management/runs/table?page={{ page }}&page_size={{ page_size }}"' in table_template
+    assert 'hx-trigger="every 5s"' in table_template
+    assert table_template.count('hx-swap="outerHTML"') >= 3
+
+
 @pytest.mark.asyncio
 async def test_ui_legacy_data_endpoint_can_switch_to_410(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)

@@ -70,6 +70,70 @@ def test_codex_runtime_stream_detects_logged_out_reauth_signal_high_confidence()
     assert auth_signal.get("required") is True
     assert auth_signal.get("confidence") == "high"
     assert auth_signal.get("matched_pattern_id") == "codex_access_token_reauth_required"
+    assert parsed.get("turn_failed") is True
+    turn_failure_data = parsed.get("turn_failure_data")
+    assert isinstance(turn_failure_data, dict)
+    assert "sign in again" in str(turn_failure_data.get("message"))
+    assert turn_failure_data.get("source_type") == "turn.failed"
+    diagnostic_events = parsed.get("diagnostic_events")
+    assert isinstance(diagnostic_events, list)
+    assert any(
+        isinstance(item, dict)
+        and item.get("pattern_kind") == "engine_auth_hint"
+        and item.get("source_type") == "type:error"
+        for item in diagnostic_events
+    )
+    raw_rows = parsed.get("raw_rows")
+    assert isinstance(raw_rows, list)
+    assert any(isinstance(row, dict) and '"type": "error"' in str(row.get("line")) for row in raw_rows)
+    assert any(isinstance(row, dict) and '"type": "turn.failed"' in str(row.get("line")) for row in raw_rows)
+
+
+def test_codex_runtime_stream_classifies_item_error_as_diagnostic_warning_candidate():
+    adapter = CodexExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"thread.started","thread_id":"thread-1"}\n'
+            b'{"type":"turn.started"}\n'
+            b'{"type":"item.completed","item":{"id":"item_0","type":"error","message":"[features].web_search_request is deprecated and will be removed soon."}}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+
+    diagnostic_events = parsed.get("diagnostic_events")
+    assert isinstance(diagnostic_events, list)
+    assert any(
+        isinstance(item, dict)
+        and item.get("code") == "ENGINE_DEPRECATION_WARNING"
+        and item.get("pattern_kind") == "engine_deprecation_warning"
+        and item.get("source_type") == "item.type:error"
+        for item in diagnostic_events
+    )
+
+
+def test_codex_runtime_stream_detects_usage_limit_as_high_confidence_waiting_auth_signal():
+    adapter = CodexExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"thread.started","thread_id":"thread-usage-limit"}\n'
+            b'{"type":"turn.started"}\n'
+            b'{"type":"error","message":"You\'ve hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again at Apr 21st, 2026 7:42 PM."}\n'
+            b'{"type":"turn.failed","error":{"message":"You\'ve hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again at Apr 21st, 2026 7:42 PM."}}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+
+    auth_signal = parsed.get("auth_signal")
+    assert isinstance(auth_signal, dict)
+    assert auth_signal.get("required") is True
+    assert auth_signal.get("confidence") == "high"
+    assert auth_signal.get("matched_pattern_id") == "codex_usage_limit_plus_reauth_required"
+    assert parsed.get("turn_failed") is True
+    turn_failure_data = parsed.get("turn_failure_data")
+    assert isinstance(turn_failure_data, dict)
+    assert "usage limit" in str(turn_failure_data.get("message")).lower()
 
 
 def test_iflow_parse_output_from_code_fence():
