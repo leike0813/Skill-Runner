@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.skip(reason="iflow engine is deprecated and sealed off from active regression")
+
 from server.engines.iflow.auth.protocol.oauth_proxy_flow import IFlowOAuthProxyError, IFlowOAuthProxyFlow
 
 

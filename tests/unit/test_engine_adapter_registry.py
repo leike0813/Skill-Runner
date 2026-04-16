@@ -7,7 +7,6 @@ import pytest
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
-from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.services.engine_management.engine_adapter_registry import EngineAdapterRegistry
@@ -17,11 +16,10 @@ def test_registry_exposes_all_supported_adapters() -> None:
     registry = EngineAdapterRegistry()
     adapters = registry.adapter_map()
 
-    assert set(adapters.keys()) == {"codex", "gemini", "iflow", "opencode", "claude", "qwen"}
+    assert set(adapters.keys()) == {"codex", "gemini", "opencode", "claude", "qwen"}
     assert isinstance(adapters["claude"], ClaudeExecutionAdapter)
     assert isinstance(adapters["codex"], CodexExecutionAdapter)
     assert isinstance(adapters["gemini"], GeminiExecutionAdapter)
-    assert isinstance(adapters["iflow"], IFlowExecutionAdapter)
     assert isinstance(adapters["opencode"], OpencodeExecutionAdapter)
     assert isinstance(adapters["qwen"], QwenExecutionAdapter)
 

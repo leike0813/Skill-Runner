@@ -213,7 +213,15 @@ class RunAttemptPreparationService:
         if request_id:
             run_options["__request_id"] = request_id
         run_options["__engine_name"] = request.engine_name
-        run_options.update(run_output_schema_service.build_run_option_fields(run_dir=run_dir))
+        run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
+        if not run_option_fields:
+            run_output_schema_service.materialize(
+                skill=skill,
+                execution_mode=execution_mode,
+                run_dir=run_dir,
+            )
+            run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
+        run_options.update(run_option_fields)
         if is_interactive and request_id and interactive_profile:
             await inject_interactive_resume_context(
                 interaction_service=interaction_service or orchestrator.interaction_service,

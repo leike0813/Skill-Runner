@@ -166,6 +166,42 @@
             overflow-wrap: anywhere;
             word-break: break-word;
         }
+        .chat-plain-revision {
+            margin: 0 0 12px;
+            border-left: 3px solid #d1d5db;
+            padding: 0 0 0 12px;
+        }
+        .chat-plain-revision-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .chat-plain-revision-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #4b5563;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .chat-plain-revision-latest {
+            margin-top: 6px;
+            color: #374151;
+            white-space: pre-wrap;
+            line-height: 1.6;
+            font-size: 12px;
+        }
+        .chat-plain-revision-body {
+            margin-top: 8px;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #111827;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
         .chat-thinking-header {
             display: flex;
             align-items: center;
@@ -213,6 +249,43 @@
         .chat-thinking-item-body {
             font-size: 12px;
             color: #0f172a;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        .chat-item.revision {
+            border-style: solid;
+            border-color: #d1d5db;
+            background: #f9fafb;
+            cursor: pointer;
+        }
+        .chat-revision-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .chat-revision-title {
+            color: #4b5563;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .chat-revision-arrow {
+            color: #4b5563;
+            font-size: 12px;
+            line-height: 1;
+            user-select: none;
+        }
+        .chat-revision-latest {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #374151;
+            white-space: pre-wrap;
+        }
+        .chat-revision-body {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #111827;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             word-break: break-word;
@@ -813,7 +886,7 @@
 
 {% block extra_scripts %}
 <script src="/static/js/file_explorer.js"></script>
-<script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
+<script src="/static/js/chat_thinking_core.js?v=20260416b"></script>
 <link rel="stylesheet" href="/static/css/chat_markdown.css?v=20260415a">
 <script src="/static/vendor/markdown-it/markdown-it.min.js"></script>
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -848,9 +921,13 @@
         roleUser: {{ t("ui.run_detail.role_user", default="User") | tojson }},
         roleSystem: {{ t("ui.run_detail.role_system", default="System") | tojson }},
         roleThinking: {{ t("ui.run_detail.role_thinking", default="Agent Thinking") | tojson }},
+        roleRevision: {{ t("ui.run_detail.role_revision", default="Rejected Final Reply") | tojson }},
         thinkingCollapsedPrefix: {{ t("ui.run_detail.thinking_collapsed_prefix", default="Thinking (latest)") | tojson }},
         thinkingExpand: {{ t("ui.run_detail.thinking_expand", default="Expand") | tojson }},
         thinkingCollapse: {{ t("ui.run_detail.thinking_collapse", default="Collapse") | tojson }},
+        revisionCollapsedPrefix: {{ t("ui.run_detail.revision_collapsed_prefix", default="(collapsed)") | tojson }},
+        revisionExpand: {{ t("ui.run_detail.revision_expand", default="Show rejected final reply") | tojson }},
+        revisionCollapse: {{ t("ui.run_detail.revision_collapse", default="Hide rejected final reply") | tojson }},
         processReasoning: {{ t("ui.run_detail.process_reasoning", default="Reasoning") | tojson }},
         processMessage: {{ t("ui.run_detail.process_message", default="Message") | tojson }},
         processToolCall: {{ t("ui.run_detail.process_tool_call", default="Tool call") | tojson }},
@@ -2066,6 +2143,133 @@
                 stdoutEl.appendChild(item);
                 continue;
             }
+            if (entry.type === "revision") {
+                const originalEvent = entry.originalEvent && typeof entry.originalEvent === "object" ? entry.originalEvent : {};
+                const rawRef = extractRawRef(originalEvent);
+                const seq = Number(originalEvent && originalEvent.seq);
+                const localSeqObj = originalEvent && originalEvent.meta && originalEvent.meta.local_seq;
+                const localSeq = Number(localSeqObj || 0);
+                const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : (Number.isFinite(seq) ? Math.floor(seq) : 0);
+                const attempt = eventAttempt(originalEvent || {});
+                const revisionId = safeText(entry.id) || `revision-${attempt}-${safeText(entry.messageId)}`;
+                const normalizedText = safeText(originalEvent.text).trim();
+                const previewText = I18N.revisionCollapsedPrefix;
+                const toggleRevision = () => {
+                    if (chatModel && typeof chatModel.toggleRevision === "function") {
+                        chatModel.toggleRevision(revisionId);
+                        renderChatModel({ preserveScroll: true });
+                    }
+                };
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = "chat-plain-revision";
+                    const header = document.createElement("div");
+                    header.className = "chat-plain-revision-header";
+                    header.setAttribute("role", "button");
+                    header.setAttribute("tabindex", "0");
+                    const title = document.createElement("span");
+                    title.className = "chat-plain-revision-title";
+                    title.textContent = I18N.roleRevision;
+                    const arrow = document.createElement("span");
+                    arrow.textContent = entry.collapsed ? "◀" : "▼";
+                    header.appendChild(title);
+                    header.appendChild(arrow);
+                    item.appendChild(header);
+                    header.addEventListener("click", toggleRevision);
+                    header.addEventListener("keydown", (evt) => {
+                        if (evt.key === "Enter" || evt.key === " ") {
+                            evt.preventDefault();
+                            toggleRevision();
+                        }
+                    });
+                    if (entry.collapsed) {
+                        const latestLine = document.createElement("div");
+                        latestLine.className = "chat-plain-revision-latest";
+                        renderMarkdownInto(latestLine, previewText);
+                        item.appendChild(latestLine);
+                    } else {
+                        const body = document.createElement("div");
+                        body.className = "chat-plain-revision-body";
+                        renderMarkdownInto(body, normalizedText || I18N.revisionCollapsedPrefix);
+                        item.appendChild(body);
+                    }
+                    const meta = document.createElement("div");
+                    meta.className = "chat-plain-meta";
+                    meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
+                    item.appendChild(meta);
+                    const actions = document.createElement("div");
+                    actions.className = "chat-entry-actions";
+                    const eventBtn = createEventInspectorButton(originalEvent);
+                    if (eventBtn) {
+                        actions.appendChild(eventBtn);
+                    }
+                    if (rawRef) {
+                        const rawRefBtn = createRawRefButton(rawRef);
+                        if (rawRefBtn) {
+                            actions.appendChild(rawRefBtn);
+                        }
+                    }
+                    if (actions.childNodes.length) {
+                        item.appendChild(actions);
+                    }
+                    stdoutEl.appendChild(item);
+                    continue;
+                }
+                const item = document.createElement("div");
+                item.className = "chat-item revision";
+                item.setAttribute("role", "button");
+                item.setAttribute("tabindex", "0");
+                const header = document.createElement("div");
+                header.className = "chat-revision-header";
+                const title = document.createElement("strong");
+                title.className = "chat-revision-title";
+                title.textContent = I18N.roleRevision;
+                const arrow = document.createElement("span");
+                arrow.className = "chat-revision-arrow";
+                arrow.textContent = entry.collapsed ? "◀" : "▼";
+                header.appendChild(title);
+                header.appendChild(arrow);
+                item.appendChild(header);
+                item.addEventListener("click", toggleRevision);
+                item.addEventListener("keydown", (evt) => {
+                    if (evt.key === "Enter" || evt.key === " ") {
+                        evt.preventDefault();
+                        toggleRevision();
+                    }
+                });
+                if (entry.collapsed) {
+                    const latestLine = document.createElement("div");
+                    latestLine.className = "chat-revision-latest";
+                    renderMarkdownInto(latestLine, previewText);
+                    item.appendChild(latestLine);
+                } else {
+                    const body = document.createElement("div");
+                    body.className = "chat-revision-body";
+                    renderMarkdownInto(body, normalizedText || I18N.revisionCollapsedPrefix);
+                    item.appendChild(body);
+                }
+                const meta = document.createElement("div");
+                meta.className = "meta";
+                meta.textContent = `${I18N.metaAttemptPrefix} ${attempt}${displaySeq ? ` · ${I18N.metaSeqPrefix} ${displaySeq}` : ""}`;
+                item.appendChild(meta);
+                const actions = document.createElement("div");
+                actions.className = "chat-entry-actions";
+                const eventBtn = createEventInspectorButton(originalEvent);
+                if (eventBtn) {
+                    actions.appendChild(eventBtn);
+                }
+                if (rawRef) {
+                    const rawRefBtn = createRawRefButton(rawRef);
+                    if (rawRefBtn) {
+                        actions.appendChild(rawRefBtn);
+                    }
+                }
+                if (actions.childNodes.length) {
+                    item.appendChild(actions);
+                }
+                stdoutEl.appendChild(item);
+                continue;
+            }
             if (entry.type === "thinking") {
                 const items = Array.isArray(entry.items) ? entry.items : [];
                 if (!items.length) continue;
@@ -2232,16 +2436,20 @@
 
     function appendChatEvent(role, text, event, rawRef) {
         const seq = typeof event?.seq === "number" ? event.seq : 0;
+        const kind = safeText(event?.kind);
         const localSeqObj = event && event.meta && event.meta.local_seq;
         const localSeq = Number(localSeqObj || 0);
         const displaySeq = Number.isFinite(localSeq) && localSeq > 0 ? Math.floor(localSeq) : seq;
         const attempt = eventAttempt(event);
-        const key = `${attempt}:${seq}:${event?.type || ""}:${safeText(event?.kind)}:${role}:${text || ""}`;
+        const key = `${attempt}:${seq}:${event?.type || ""}:${kind}:${role}:${text || ""}`;
         if (renderedChatSeq.has(key)) return;
         renderedChatSeq.add(key);
         if (chatModel && event && typeof event === "object") {
             chatModel.consume(event);
             renderChatModel();
+            return;
+        }
+        if (kind === "assistant_revision") {
             return;
         }
         const item = document.createElement("div");
@@ -2708,7 +2916,8 @@
             }
             const role = typeof event.role === "string" ? event.role : "";
             const text = typeof event.text === "string" ? event.text : "";
-            if (role && text.trim()) {
+            const kind = typeof event.kind === "string" ? event.kind : "";
+            if (role && (text.trim() || kind === "assistant_revision")) {
                 appendChatEvent(role, text, event, extractRawRef(event));
             }
         }
@@ -2731,7 +2940,8 @@
             }
             const role = typeof event.role === "string" ? event.role : "";
             const text = typeof event.text === "string" ? event.text : "";
-            if (role && text.trim()) {
+            const kind = typeof event.kind === "string" ? event.kind : "";
+            if (role && (text.trim() || kind === "assistant_revision")) {
                 appendChatEvent(role, text, event, extractRawRef(event));
             }
         }
@@ -2794,7 +3004,8 @@
             }
             const role = typeof data.role === "string" ? data.role : "";
             const text = typeof data.text === "string" ? data.text : "";
-            if (role && text.trim()) {
+            const kind = typeof data.kind === "string" ? data.kind : "";
+            if (role && (text.trim() || kind === "assistant_revision")) {
                 appendChatEvent(role, text, data, extractRawRef(data));
             }
         });

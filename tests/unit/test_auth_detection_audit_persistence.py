@@ -62,3 +62,34 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
     assert diagnostics_rows[0]["data"]["code"] == "AUTH_SIGNAL_MATCHED_HIGH"
     assert diagnostics_rows[0]["data"]["auth_signal"]["confidence"] == "high"
     assert diagnostics_rows[0]["data"]["auth_signal"]["reason_code"] == "OPENCODE_INVALID_API_KEY_FROM_MESSAGE"
+
+
+def test_write_attempt_audit_artifacts_uses_canonical_waiting_auth_completion_state(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-waiting-auth-audit"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    service = RunAuditService()
+    service.write_attempt_audit_artifacts(
+        run_dir=run_dir,
+        run_id="run-waiting-auth-audit",
+        request_id="req-waiting-auth-audit",
+        engine_name="codex",
+        execution_mode="interactive",
+        attempt_number=1,
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
+        status=RunStatus.WAITING_AUTH,
+        fs_before_snapshot={},
+        process_exit_code=1,
+        process_failure_reason="AUTH_REQUIRED",
+        process_raw_stdout="",
+        process_raw_stderr="",
+        adapter=None,
+        turn_payload={},
+        validation_warnings=[],
+        terminal_error_code=None,
+        options={},
+    )
+
+    meta_payload = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+    assert meta_payload["completion"]["state"] == "waiting_auth"
+    assert meta_payload["completion"]["reason_code"] == "WAITING_AUTH_REQUIRED"

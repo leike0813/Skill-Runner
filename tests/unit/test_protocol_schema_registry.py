@@ -79,12 +79,34 @@ def test_validate_fcmp_event_accepts_local_seq_meta() -> None:
         "type": "assistant.message.final",
         "data": {
             "message_id": "m-1",
+            "message_family_id": "family-1",
             "text": "hello",
             "display_text": "hello",
             "display_format": "plain_text",
             "display_origin": "raw_text",
         },
         "meta": {"attempt": 2, "local_seq": 1},
+        "raw_ref": None,
+    }
+    assert validate_fcmp_event(payload) == payload
+
+
+def test_validate_fcmp_event_accepts_assistant_message_superseded() -> None:
+    payload = {
+        "protocol_version": "fcmp/1.0",
+        "run_id": "run-1",
+        "seq": 5,
+        "ts": "2026-04-16T00:00:05",
+        "engine": "codex",
+        "type": "assistant.message.superseded",
+        "data": {
+            "message_id": "m-1",
+            "message_family_id": "family-1",
+            "reason": "output_repair_started",
+            "repair_round_index": 1,
+            "replacement_expected": True,
+        },
+        "meta": {"attempt": 1},
         "raw_ref": None,
     }
     assert validate_fcmp_event(payload) == payload
@@ -158,6 +180,49 @@ def test_validate_rasp_event_accepts_turn_failed_payload() -> None:
             "source_type": "turn.failed",
             "pattern_kind": "engine_rate_limit_hint",
             "fatal": True,
+        },
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": None,
+    }
+    assert validate_rasp_event(payload) == payload
+
+
+def test_validate_rasp_event_accepts_diagnostic_warning_authoritative_field() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 7,
+        "ts": "2026-03-10T00:00:07Z",
+        "source": {"engine": "codex", "parser": "live_semantic", "confidence": 0.6},
+        "event": {"category": "diagnostic", "type": "diagnostic.warning"},
+        "data": {
+            "code": "LOW_CONFIDENCE_PARSE",
+            "severity": "warning",
+            "pattern_kind": "parser_low_confidence",
+            "source_type": "parser:confidence",
+            "authoritative": False,
+            "confidence": 0.2,
+        },
+        "correlation": {},
+        "attempt_number": 1,
+        "raw_ref": None,
+    }
+    assert validate_rasp_event(payload) == payload
+
+
+def test_validate_rasp_event_accepts_canonical_waiting_completion_state() -> None:
+    payload = {
+        "protocol_version": "rasp/1.0",
+        "run_id": "run-1",
+        "seq": 8,
+        "ts": "2026-03-10T00:00:08Z",
+        "source": {"engine": "codex", "parser": "unknown", "confidence": 0.2},
+        "event": {"category": "lifecycle", "type": "lifecycle.completion.state"},
+        "data": {
+            "state": "waiting_auth",
+            "reason_code": "WAITING_AUTH_REQUIRED",
+            "diagnostics": [],
         },
         "correlation": {},
         "attempt_number": 1,

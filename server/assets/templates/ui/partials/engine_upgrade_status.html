@@ -40,3 +40,10 @@
     </div>
     {% endif %}
 </div>
+{% if engine_rows %}
+<div id="engines-table-container" hx-swap-oob="innerHTML">
+    {% with rows=engine_rows %}
+        {% include "ui/partials/engines_table.html" %}
+    {% endwith %}
+</div>
+{% endif %}

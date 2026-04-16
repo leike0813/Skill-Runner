@@ -1,0 +1,48 @@
+version: 1
+
+auth_session:
+  scope_key:
+    format: "{engine}::{provider_id|_none_}"
+    exclusivity: scoped_by_engine_provider
+  lifecycle:
+    active:
+      - created
+      - challenge_active
+    terminal:
+      - succeeded
+      - failed
+      - canceled
+      - expired
+      - superseded
+  ownership:
+    required_fields:
+      - auth_session_id
+      - engine
+      - scope_key
+      - request_id
+      - run_id
+      - status
+      - created_at
+      - updated_at
+      - expires_at
+  precedence:
+    - when: same_owner_same_scope_active_session_exists
+      then: recover_challenge_active
+    - when: cross_owner_same_scope_active_session_exists
+      then: surface_busy_without_stealing_session
+  cleanup:
+    - when: run_canceled
+      then:
+        - cancel_or_supersede_owned_auth_session
+        - clear_pending_auth_projection
+        - clear_pending_auth_method_selection
+        - clear_auth_resume_context
+    - when: run_terminal_and_owned_session_still_active
+      then:
+        - reconcile_auth_session_terminal_state
+  ttl:
+    source: durable_record.expires_at
+    default_seconds: 900
+    on_expiry:
+      - mark_session_expired
+      - stop_projecting_challenge_active

@@ -39,6 +39,15 @@ class RunRecoveryService:
         run_store_backend: Any,
     ) -> None:
         reason = "missing_run_dir_before_resume_redrive"
+        durable_sessions = await run_store_backend.list_active_durable_auth_sessions_for_request(request_id)
+        for session in durable_sessions if isinstance(durable_sessions, list) else []:
+            auth_session_id = session.get("auth_session_id")
+            if isinstance(auth_session_id, str) and auth_session_id:
+                await run_store_backend.mark_durable_auth_session_terminal(
+                    auth_session_id,
+                    status="superseded",
+                    terminal_reason=reason,
+                )
         await run_store_backend.update_run_status(run_id, RunStatus.FAILED)
         await run_store_backend.set_recovery_info(
             run_id,

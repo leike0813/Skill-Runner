@@ -150,6 +150,32 @@ def test_assistant_final_derivation_prefers_display_text() -> None:
     assert rows[0]["text"] == "Choose the next action."
 
 
+def test_assistant_superseded_derivation_maps_to_revision_row() -> None:
+    rows = derive_chat_replay_rows_from_fcmp(
+        {
+            "seq": 13,
+            "run_id": "run-chat-derive",
+            "ts": "2026-03-04T10:04:30Z",
+            "type": "assistant.message.superseded",
+            "data": {
+                "message_id": "m-12",
+                "message_family_id": "family-1",
+                "reason": "output_repair_started",
+                "repair_round_index": 1,
+                "replacement_expected": True,
+            },
+            "meta": {"attempt": 2},
+        }
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["role"] == "assistant"
+    assert rows[0]["kind"] == "assistant_revision"
+    assert rows[0]["text"] == ""
+    assert rows[0]["correlation"]["message_id"] == "m-12"
+    assert rows[0]["correlation"]["message_family_id"] == "family-1"
+
+
 def test_assistant_process_derivation_maps_reasoning_tool_and_command() -> None:
     reasoning_rows = derive_chat_replay_rows_from_fcmp(
         {

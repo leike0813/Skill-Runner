@@ -6,6 +6,8 @@ from pathlib import Path
 from server.config import config
 from server.services.platform import aiosqlite_compat as aiosqlite
 
+from .auth_session_durable_store import DURABLE_AUTH_SESSION_TABLE
+
 
 class RunStoreSchemaMigration:
     async def migrate_interactive_runtime_table(self, conn: aiosqlite.Connection) -> None:
@@ -343,6 +345,33 @@ class RunStoreDatabase:
                 """
             )
             await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {DURABLE_AUTH_SESSION_TABLE} (
+                    auth_session_id TEXT PRIMARY KEY,
+                    engine TEXT NOT NULL,
+                    provider_id TEXT,
+                    scope_key TEXT NOT NULL,
+                    request_id TEXT,
+                    run_id TEXT,
+                    source_attempt INTEGER,
+                    status TEXT NOT NULL,
+                    auth_method TEXT,
+                    challenge_kind TEXT,
+                    driver TEXT,
+                    execution_mode TEXT,
+                    transport TEXT,
+                    input_kind TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    last_error TEXT,
+                    resume_ticket_id TEXT,
+                    terminal_reason TEXT,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS request_current_projection (
                     request_id TEXT PRIMARY KEY,
@@ -397,6 +426,24 @@ class RunStoreDatabase:
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_request_auth_sessions_session_id
                 ON request_auth_sessions (auth_session_id)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_scope_status
+                ON {DURABLE_AUTH_SESSION_TABLE} (scope_key, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_request_status
+                ON {DURABLE_AUTH_SESSION_TABLE} (request_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_run_status
+                ON {DURABLE_AUTH_SESSION_TABLE} (run_id, status)
                 """
             )
             await conn.commit()

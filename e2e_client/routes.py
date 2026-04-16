@@ -59,7 +59,6 @@ VALID_RUN_SOURCES = {RUN_SOURCE_INSTALLED, RUN_SOURCE_TEMP}
 ENGINE_DEFAULT_PROVIDER = {
     "codex": "openai",
     "gemini": "google",
-    "iflow": "iflowcn",
     "qwen": "qwen-oauth",
 }
 

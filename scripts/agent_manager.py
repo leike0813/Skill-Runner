@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from server.config_registry import keys  # noqa: E402
 from server.services.engine_management.agent_cli_manager import (  # noqa: E402
     AgentCliManager,
     format_auth_status_payload,
@@ -40,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--upgrade", action="store_true", help="Upgrade all engines")
     mode.add_argument(
         "--upgrade-engine",
-        choices=["codex", "gemini", "iflow", "opencode", "claude"],
+        choices=list(keys.ENGINE_KEYS),
         help="Upgrade a single engine",
     )
     parser.add_argument(

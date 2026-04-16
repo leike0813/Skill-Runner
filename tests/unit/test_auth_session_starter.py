@@ -34,8 +34,8 @@ class _FakeCliManager:
         return {
             "codex": {"credential_state": "missing"},
             "gemini": {"credential_state": "missing"},
-            "iflow": {"credential_state": "missing"},
             "opencode": {"credential_state": "missing"},
+            "qwen": {"credential_state": "missing"},
         }
 
 

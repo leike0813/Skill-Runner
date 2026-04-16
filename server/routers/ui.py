@@ -454,6 +454,24 @@ def _with_engine_status_rows(rows: list[dict[str, object]]) -> list[dict[str, ob
     return enriched
 
 
+async def _management_engine_rows(request: Request) -> list[dict[str, object]]:
+    engines_payload = await _resolve_async(management_router.list_management_engines())
+    rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
+    engine_ui_metadata = _build_engine_ui_metadata(request)
+    for row in rows:
+        engine = str(row.get("engine") or "").strip().lower()
+        metadata = engine_ui_metadata.get(engine, {})
+        row["auth_entry_label"] = metadata.get(
+            "auth_entry_label",
+            request.state.t(
+                "ui.engines.table.auth_engine",
+                default="Auth ({engine})",
+                engine=engine,
+            ),
+        )
+    return rows
+
+
 def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
     t = getattr(
         request.state,
@@ -463,7 +481,6 @@ def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
     label_defaults = {
         "codex": "Codex",
         "gemini": "Gemini",
-        "iflow": "iFlow",
         "opencode": "OpenCode",
         "claude": "Claude Code",
         "qwen": "Qwen",
@@ -474,13 +491,6 @@ def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
             "default_input_label": t(
                 "ui.engines.input_label_gemini",
                 default="Paste the authorization code below and submit.",
-            ),
-        },
-        "iflow": {
-            "default_input_kind": "text",
-            "default_input_label": t(
-                "ui.engines.input_label_iflow",
-                default="Paste the authorization code or callback URL below and submit.",
             ),
         },
         "claude": {
@@ -528,6 +538,7 @@ def _render_engine_upgrade_status(
     results: dict,
     error: str | None,
     poll: bool,
+    engine_rows: list[dict[str, object]] | None = None,
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
@@ -538,6 +549,8 @@ def _render_engine_upgrade_status(
             "results": results,
             "error": error,
             "poll": poll,
+            "engine_rows": engine_rows,
+            "ttyd_available": _is_ttyd_available(),
         },
     )
 
@@ -805,8 +818,7 @@ async def ui_run_logs_tail(request: Request, request_id: str):
 
 @router.get("/engines", response_class=HTMLResponse)
 async def ui_engines(request: Request):
-    engines_payload = await _resolve_async(management_router.list_management_engines())
-    rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
+    rows = await _management_engine_rows(request)
     engine_ui_metadata = _build_engine_ui_metadata(request)
     ui_shell_engines = {
         str(item.get("engine") or "").strip().lower()
@@ -1186,25 +1198,11 @@ async def ui_engines_table(request: Request):
 
 @router.get("/management/engines/table", response_class=HTMLResponse)
 async def ui_management_engines_table(request: Request):
-    engines_payload = await _resolve_async(management_router.list_management_engines())
-    rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
-    engine_ui_metadata = _build_engine_ui_metadata(request)
-    for row in rows:
-        engine = str(row.get("engine") or "").strip().lower()
-        metadata = engine_ui_metadata.get(engine, {})
-        row["auth_entry_label"] = metadata.get(
-            "auth_entry_label",
-            request.state.t(
-                "ui.engines.table.auth_engine",
-                default="Auth ({engine})",
-                engine=engine,
-            ),
-        )
     return templates.TemplateResponse(
         request=request,
         name="ui/partials/engines_table.html",
         context={
-            "rows": rows,
+            "rows": await _management_engine_rows(request),
             "ttyd_available": _is_ttyd_available(),
         },
     )
@@ -1266,6 +1264,7 @@ async def ui_engine_upgrade_status(request: Request, request_id: str):
         EngineUpgradeTaskStatus.QUEUED.value,
         EngineUpgradeTaskStatus.RUNNING.value,
     }
+    engine_rows = None if poll else await _management_engine_rows(request)
     return _render_engine_upgrade_status(
         request=request,
         request_id=request_id,
@@ -1273,6 +1272,7 @@ async def ui_engine_upgrade_status(request: Request, request_id: str):
         results=results,
         error=None,
         poll=poll,
+        engine_rows=engine_rows,
     )
 
 

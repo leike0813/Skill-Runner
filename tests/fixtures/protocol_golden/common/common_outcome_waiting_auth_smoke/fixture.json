@@ -1,0 +1,126 @@
+{
+  "fixture_id": "common_outcome_waiting_auth_smoke",
+  "layer": "outcome_core",
+  "engine": "common",
+  "capability_requirements": [],
+  "inputs": {
+    "run_id": "run-common-waiting-auth",
+    "context": {
+      "request": {
+        "run_id": "run-common-waiting-auth",
+        "skill_id": "skill-1",
+        "engine_name": "codex",
+        "options": {
+          "execution_mode": "interactive"
+        }
+      },
+      "request_id": "req-common-waiting-auth",
+      "request_record": {
+        "request_id": "req-common-waiting-auth"
+      },
+      "execution_mode": "interactive",
+      "conversation_mode": "session",
+      "session_capable": true,
+      "is_interactive": true,
+      "interactive_auto_reply": false,
+      "can_wait_for_user": true,
+      "can_persist_waiting_user": false,
+      "interactive_profile": {
+        "reason": "probe_ok",
+        "session_timeout_sec": 900
+      },
+      "attempt_number": 2,
+      "input_data": {
+        "input": {
+          "prompt": "hello"
+        },
+        "parameter": {}
+      },
+      "run_options": {
+        "__run_id": "run-common-waiting-auth",
+        "__attempt_number": 2,
+        "__request_id": "req-common-waiting-auth",
+        "__engine_name": "codex"
+      }
+    },
+    "execution": {
+      "exit_code": 1,
+      "failure_reason": "AUTH_REQUIRED",
+      "raw_stdout": "",
+      "raw_stderr": "",
+      "auth_signal_snapshot": {
+        "required": true,
+        "confidence": "high",
+        "provider_id": "openai",
+        "reason_code": "CODEX_USAGE_LIMIT_PLUS_REAUTH_REQUIRED",
+        "matched_pattern_id": "codex_usage_limit_plus_reauth_required"
+      }
+    },
+    "convergence": {
+      "output_data": {},
+      "has_structured_output": false,
+      "done_signal_found": false,
+      "schema_output_errors": [],
+      "repair_level": "none",
+      "validation_warnings": [],
+      "pending_interaction_candidate": null,
+      "convergence_state": "not_needed",
+      "process_exit_code": 1,
+      "process_failure_reason": "AUTH_REQUIRED",
+      "turn_payload_for_completion": {},
+      "runtime_parse_result": {
+        "turn_failed": true,
+        "turn_failure_data": {
+          "message": "You've hit your usage limit. Upgrade to Plus.",
+          "source_type": "turn.failed",
+          "pattern_kind": "engine_rate_limit_hint",
+          "fatal": true
+        },
+        "assistant_messages": [],
+        "diagnostic_events": [
+          {
+            "code": "ENGINE_RATE_LIMIT_HINT",
+            "severity": "warning",
+            "pattern_kind": "engine_rate_limit_hint",
+            "source_type": "type:error",
+            "authoritative": false,
+            "message": "You've hit your usage limit. Upgrade to Plus.",
+            "detail": "You've hit your usage limit. Upgrade to Plus."
+          }
+        ],
+        "raw_rows": []
+      }
+    },
+    "auth": {
+      "pending_auth": {
+        "auth_session_id": "auth-session-1",
+        "engine": "codex",
+        "provider_id": "openai",
+        "challenge_kind": "oauth",
+        "status": "waiting",
+        "instructions": "Sign in again. Last error: You've hit your usage limit. Upgrade to Plus.",
+        "last_error": "You've hit your usage limit. Upgrade to Plus."
+      },
+      "canonical_provider_id": "openai"
+    }
+  },
+  "expected": {
+    "outcome": {
+      "final_status": "waiting_auth",
+      "normalized_error": null,
+      "pending_auth": {
+        "provider_id": "openai",
+        "last_error": "You've hit your usage limit. Upgrade to Plus."
+      },
+      "final_error_code": null,
+      "terminal_error_summary": null
+    }
+  },
+  "normalization": {
+    "ignore_fields": [
+      "auth_session_meta.session_id"
+    ]
+  },
+  "source": "synthetic_minimal",
+  "source_run_id": null
+}

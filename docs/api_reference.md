@@ -535,7 +535,7 @@
   - 声明失败时静默回退到固定文件名：
     - `codex` -> `assets/codex_config.toml`
     - `gemini` -> `assets/gemini_settings.json`
-    - `iflow` -> `assets/iflow_settings.json`
+    - `qwen` -> `assets/qwen_config.json`
     - `opencode` -> `assets/opencode_config.json`
   - 若声明和 fallback 都不存在：视为“未提供 skill-specific engine config”，不阻断运行
 - `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
@@ -584,7 +584,7 @@
 ```json
 {
   "skill_id": "demo-prime-number",
-  "engine": "qwen",            // 可选: "gemini" / "codex" / "iflow" / "opencode" / "claude" / "qwen" (默认: codex)
+  "engine": "qwen",            // 可选: "gemini" / "codex" / "opencode" / "claude" / "qwen" (默认: codex)
   "provider_id": "qwen-oauth",
   "effort": "default",
   "input": {
@@ -610,16 +610,14 @@
   - `effort` 为空时按 `"default"` 处理。
   - 对支持 effort 的模型，`"default"` 会映射到引擎实际生效值；通常为 `"medium"`。
   - 对不支持 effort 的模型，`supported_effort` 固定为 `["default"]`；此时传入任何 `effort` 都不会改变行为。
-  - 单 provider 引擎（`codex`、`gemini`、`iflow`）允许 `provider_id` 为空或任意值；系统会统一收口到 canonical provider。
+  - 单 provider 引擎（`codex`、`gemini`）允许 `provider_id` 为空或任意值；系统会统一收口到 canonical provider。
   - 多 provider 引擎（`claude`、`qwen`、`opencode`）标准写法必须显式带 `provider_id`。
   - 旧客户端仍兼容：
     - `model="provider/model@effort"`
     - `model="provider/model"`
     - `model="model@effort"`
   - 兼容仅存在于请求解析层；新客户端不应再主动拼接这些旧式字符串。
-  - **iFlow 运行时默认配置（托管环境）**：若未提供 `~/.iflow/settings.json`，服务会写入最小可用默认值：
-    - `selectedAuthType = "oauth-iflow"`
-    - `baseUrl = "https://apis.iflow.cn/v1"`
+  - `qwen` 的 skill/runtime 配置统一写入 `.qwen/settings.json`，由 `default -> runtime -> enforced` 合成。
 - **运行时选项**:
   - `runtime_options.execution_mode` 支持 `auto`（默认）与 `interactive`。
   - 会话回复超时键：`runtime_options.interactive_reply_timeout_sec`（默认 `1200`）。
@@ -1501,7 +1499,6 @@ Query 参数：
   "engines": [
     {"engine": "codex", "cli_version_detected": "0.89.0"},
     {"engine": "gemini", "cli_version_detected": "0.25.2"},
-    {"engine": "iflow", "cli_version_detected": "0.5.2"},
     {"engine": "opencode", "cli_version_detected": "0.1.0"},
     {"engine": "claude", "cli_version_detected": "0.1.0"},
     {"engine": "qwen", "cli_version_detected": "0.1.0"}
@@ -1549,17 +1546,13 @@ provider-aware 示例：
 说明：
 - `transport` 支持 `oauth_proxy` 与 `cli_delegate`。
 - V2 下 `auth_method` 为必填；公开引擎鉴权接口当前支持 `callback` / `auth_code_or_url` / `api_key`，而会话内 provider-config 路径还会使用 `custom_provider`。
-- 旧值 `browser-oauth/device-auth/screen-reader-google-oauth/iflow-cli-oauth/opencode-provider-auth` 已废弃并返回 `422`。
+- 旧值 `browser-oauth/device-auth/screen-reader-google-oauth/iflow-cli-oauth/opencode-provider-auth` 已废弃并返回 `422`；`iflow` 引擎本身已不再作为活跃支持引擎提供。
 - V2 下不再使用 `method` 历史字段；兼容层仍可接收 `method`。
 - provider-aware engine（当前为 `opencode`、`qwen`）应显式提交 `provider_id`；这也是新的推荐写法。
 - `codex` 支持 2x2 组合：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
 - `gemini` 支持：
   - `oauth_proxy + callback`（自动回调优先，零 CLI，支持 `/input` 兜底）
   - `oauth_proxy + auth_code_or_url`（手工码流，需 `/input`）
-  - `cli_delegate + auth_code_or_url`（现有 CLI 委托链路）
-- `iflow` 支持：
-  - `oauth_proxy + callback`（自动回调优先，支持 `/input` 兜底）
-  - `oauth_proxy + auth_code_or_url`（纯手工码流，通过 `/input` 回填）
   - `cli_delegate + auth_code_or_url`（现有 CLI 委托链路）
 - `opencode(provider_id=openai)` 支持 2x2：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
 - `opencode(provider_id=google)` 支持：
@@ -1635,12 +1628,6 @@ Claude bootstrap / runtime 配置说明：
   - `permissions.defaultMode = "dontAsk"`
   - 默认只保留轻量网络交互，文件编辑与 shell 类工具默认禁用
 
-iFlow OAuth 代理说明：
-- `oauth_proxy + iflow` 使用本地回调地址 `http://localhost:11451/oauth2callback`。
-- `callback` 模式会尝试拉起本地 listener（`127.0.0.1:11451`）；若不可用，会话仍可通过 `/input` 手工兜底完成。
-- `auth_code_or_url` 模式不依赖 listener，通过 `/input(kind=text|code)` 手工提交授权返回内容完成。
-- 鉴权成功后写入 `.iflow/oauth_creds.json`、`.iflow/iflow_accounts.json`、`.iflow/settings.json`（`selectedAuthType=oauth-iflow`）。
-
 服务端回调端点（免 Basic Auth）：
 - `GET /v1/engines/auth/oauth-proxy/callback/openai`
 - `GET /v1/engines/auth/callback/openai`（兼容）
@@ -1678,7 +1665,6 @@ iFlow OAuth 代理说明：
 - 单 provider 引擎的 `provider_id` 固定为 canonical provider：
   - `codex -> openai`
   - `gemini -> google`
-  - `iflow -> iflowcn`
 
 OpenCode 返回示例（动态探测缓存）：
 ```json
@@ -1816,7 +1802,6 @@ OpenCode 兼容视图说明：
   "results": {
     "codex": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
     "gemini": {"status": "failed", "action": "install", "stdout": "...", "stderr": "...", "error": "Install command exited with code 1"},
-    "iflow": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
     "opencode": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null}
   },
   "created_at": "2026-02-12T10:00:00.000000",

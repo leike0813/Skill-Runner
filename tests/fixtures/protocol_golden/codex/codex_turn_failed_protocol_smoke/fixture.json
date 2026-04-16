@@ -1,0 +1,59 @@
+{
+  "fixture_id": "codex_turn_failed_protocol_smoke",
+  "layer": "protocol_core",
+  "engine": "codex",
+  "capability_requirements": [
+    "semantic_turn_markers.failed",
+    "generic_error_governance"
+  ],
+  "inputs": {
+    "stdout_file": "stdout.log",
+    "stderr": "",
+    "status_hint": "failed"
+  },
+  "expected": {
+    "rasp_events": [
+      {
+        "type": "agent.turn_start"
+      },
+      {
+        "type": "agent.turn_failed",
+        "data": {
+          "fatal": true,
+          "pattern_kind": "engine_rate_limit_hint"
+        }
+      }
+    ],
+    "rasp_absent_event_types": [
+      "agent.turn_complete"
+    ],
+    "fcmp_events": [
+      {
+        "type": "conversation.state.changed",
+        "data": {
+          "to": "failed",
+          "trigger": "turn.failed"
+        }
+      }
+    ],
+    "diagnostics": [
+      {
+        "type": "diagnostic.warning",
+        "data": {
+          "code": "ENGINE_RATE_LIMIT_HINT",
+          "pattern_kind": "engine_rate_limit_hint",
+          "source_type": "type:error",
+          "authoritative": false
+        }
+      }
+    ]
+  },
+  "normalization": {
+    "ignore_fields": [
+      "correlation.thread_id",
+      "correlation.session_id"
+    ]
+  },
+  "source": "synthetic_minimal",
+  "source_run_id": null
+}

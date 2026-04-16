@@ -77,7 +77,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
   - 失败时回退到固定文件名：
     - `codex` -> `assets/codex_config.toml`
     - `gemini` -> `assets/gemini_settings.json`
-    - `iflow` -> `assets/iflow_settings.json`
+    - `qwen` -> `assets/qwen_config.json`
     - `opencode` -> `assets/opencode_config.json`
 - schema 声明失败会产生显式 warning；engine config 声明失败仅后台日志记录
 - `runtime.default_options` 是可选的 skill 默认 runtime options 声明：

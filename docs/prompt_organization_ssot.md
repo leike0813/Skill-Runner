@@ -17,7 +17,7 @@ Global execution constraints are rendered during run provisioning and written in
 
 - `claude` → `CLAUDE.md`
 - `gemini` → `GEMINI.md`
-- `codex` / `opencode` / `qwen` / `iflow` → `AGENTS.md`
+- `codex` / `opencode` / `qwen` → `AGENTS.md`
 
 These files are rendered from:
 
@@ -72,7 +72,6 @@ Current engine mappings:
 - `opencode`: `/skills {{ skill.id }}`
 - `qwen`: `Invoke skill named {{ skill.id }}`
 - `gemini`: `/{{ skill.id }} invoke`
-- `iflow`: `Invoke skill named {{ skill.id }}`
 
 The invoke line is always rendered as the first line of the final prompt.
 This table is a documentation projection of each engine profile. If there is any conflict,

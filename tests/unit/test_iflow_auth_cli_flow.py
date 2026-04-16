@@ -3,6 +3,10 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.skip(reason="iflow engine is deprecated and sealed off from active regression")
+
 from server.engines.iflow.auth.drivers.cli_delegate_flow import (
     IFlowAuthCliFlow,
     IFlowAuthCliSession,

@@ -1,0 +1,7 @@
+- [x] 1.1 Add OpenSpec delta spec for protocol-core golden fixture framework, capability gating, and semantic assertion utilities.
+- [x] 1.2 Add a machine-readable golden fixture contract, manifest, and minimal fixture corpus layout.
+- [x] 2.1 Add shared loader and capability-gating utilities tied to `runtime_parser_capabilities.yaml`.
+- [x] 2.2 Add shared normalizer and semantic assertion helpers for RASP / FCMP / outcome comparisons.
+- [x] 2.3 Add minimal smoke fixtures and harness coverage for one `common` outcome fixture and one `codex` protocol fixture.
+- [x] 3.1 Run targeted pytest for golden fixture contract, loader, normalizer, assertions, protocol smoke, outcome smoke, and outer protocol regressions.
+- [x] 3.2 Run targeted mypy for added test-common harness modules.

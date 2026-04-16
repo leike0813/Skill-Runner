@@ -36,7 +36,7 @@ class FakeBackend:
             "engines": [
                 {"engine": "gemini"},
                 {"engine": "codex"},
-                {"engine": "iflow"},
+                {"engine": "qwen"},
             ]
         }
 

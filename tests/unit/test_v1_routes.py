@@ -308,15 +308,6 @@ async def test_v1_oauth_proxy_grouped_routes(monkeypatch):
     assert cancel_res.status_code == 200
     assert cancel_res.json()["canceled"] is True
 
-    iflow_start = await _request(
-        "POST",
-        "/v1/engines/auth/oauth-proxy/sessions",
-        json={"engine": "iflow", "transport": "oauth_proxy", "auth_method": "auth_code_or_url"},
-    )
-    assert iflow_start.status_code == 200
-    assert iflow_start.json()["engine"] == "iflow"
-
-
 @pytest.mark.asyncio
 async def test_v1_cli_delegate_grouped_routes(monkeypatch):
     monkeypatch.setattr(
@@ -426,36 +417,14 @@ async def test_v1_engine_auth_session_start_route_passes_auth_method(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_v1_engine_auth_session_start_route_iflow(monkeypatch):
-    monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.start_session",
-        lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
-            "session_id": "auth-iflow-1",
-            "engine": engine,
-            "method": method,
-            "provider_id": provider_id,
-            "status": "waiting_user",
-            "auth_url": "https://iflow.cn/oauth?state=abc",
-            "user_code": None,
-            "created_at": "2026-02-26T00:00:00Z",
-            "updated_at": "2026-02-26T00:00:01Z",
-            "expires_at": "2026-02-26T00:15:00Z",
-            "credential_state": "missing",
-            "error": None,
-            "exit_code": None,
-            "terminal": False,
-        },
-    )
+async def test_v1_engine_auth_session_start_route_iflow_unsupported(monkeypatch):
     response = await _request(
         "POST",
         "/v1/engines/auth/sessions",
         json={"engine": "iflow", "method": "auth"},
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["session_id"] == "auth-iflow-1"
-    assert body["engine"] == "iflow"
-    assert body["method"] == "auth"
+    assert response.status_code == 422
+    assert "auth proxy" in response.text.lower()
 
 
 @pytest.mark.asyncio
@@ -667,35 +636,14 @@ async def test_v1_engine_auth_session_input(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_v1_engine_auth_session_input_iflow(monkeypatch):
-    monkeypatch.setattr(
-        "server.routers.engines.engine_auth_flow_manager.input_session",
-        lambda _session_id, _kind, _value: {
-            "session_id": "auth-iflow-1",
-            "engine": "iflow",
-            "method": "auth",
-            "status": "code_submitted_waiting_result",
-            "input_kind": "code",
-            "auth_url": "https://iflow.cn/oauth?state=abc",
-            "user_code": None,
-            "created_at": "2026-02-26T00:00:00Z",
-            "updated_at": "2026-02-26T00:00:02Z",
-            "expires_at": "2026-02-26T00:15:00Z",
-            "credential_state": "missing",
-            "error": None,
-            "exit_code": None,
-            "terminal": False,
-        },
-    )
+async def test_v1_engine_auth_oauth_proxy_iflow_unsupported(monkeypatch):
     response = await _request(
         "POST",
-        "/v1/engines/auth/sessions/auth-iflow-1/input",
-        json={"kind": "code", "value": "CODE-1234"},
+        "/v1/engines/auth/oauth-proxy/sessions",
+        json={"engine": "iflow", "transport": "oauth_proxy", "auth_method": "auth_code_or_url"},
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["accepted"] is True
-    assert body["session"]["engine"] == "iflow"
+    assert response.status_code == 422
+    assert "iflow" in response.text.lower()
 
 
 @pytest.mark.asyncio

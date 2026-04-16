@@ -50,7 +50,7 @@ class RunAttemptOutcomeInputs:
     provider_unresolved_detail: Callable[..., str]
     summarize_terminal_error_message: Callable[[Any], str | None]
     resolve_hard_timeout_seconds: Callable[[dict[str, Any]], int]
-    live_runtime_emitter_factory: Callable[[], Any]
+    live_runtime_emitter_factory: Callable[..., Any]
     collect_run_artifacts: Callable[..., list[str]]
     resolve_output_artifact_paths: Callable[..., Any]
     interaction_service: RunInteractionLifecycleService

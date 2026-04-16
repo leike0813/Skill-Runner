@@ -4,6 +4,6 @@ __all__ = [
     "claude",
     "codex",
     "gemini",
-    "iflow",
     "opencode",
+    "qwen",
 ]

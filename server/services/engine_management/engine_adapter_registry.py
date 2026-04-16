@@ -6,7 +6,6 @@ from typing import Dict
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
-from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
@@ -25,11 +24,6 @@ class EngineAdapterRegistry:
                 "gemini": Path(__file__).resolve().parents[2]
                 / "engines"
                 / "gemini"
-                / "adapter"
-                / "adapter_profile.json",
-                "iflow": Path(__file__).resolve().parents[2]
-                / "engines"
-                / "iflow"
                 / "adapter"
                 / "adapter_profile.json",
                 "opencode": Path(__file__).resolve().parents[2]
@@ -52,7 +46,6 @@ class EngineAdapterRegistry:
         self._adapters: Dict[str, EngineExecutionAdapter] = {
             "codex": CodexExecutionAdapter(),
             "gemini": GeminiExecutionAdapter(),
-            "iflow": IFlowExecutionAdapter(),
             "opencode": OpencodeExecutionAdapter(),
             "claude": ClaudeExecutionAdapter(),
             "qwen": QwenExecutionAdapter(),

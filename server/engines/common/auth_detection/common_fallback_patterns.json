@@ -183,30 +183,6 @@
       }
     },
     {
-      "id": "iflow_low_conf_auth_hint_fallback",
-      "enabled": true,
-      "priority": 145,
-      "match": {
-        "all": [
-          {
-            "field": "engine",
-            "op": "eq",
-            "value": "iflow"
-          },
-          {
-            "field": "parser_diagnostics",
-            "op": "contains",
-            "value": "LOW_CONFIDENCE_PARSE"
-          },
-          {
-            "field": "combined_text",
-            "op": "regex",
-            "value": "(oauth|token|authorize|api\\s*key|credential)"
-          }
-        ]
-      }
-    },
-    {
       "id": "gemini_noncanonical_oauth_prompt_fallback",
       "enabled": true,
       "priority": 140,

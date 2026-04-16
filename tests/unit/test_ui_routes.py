@@ -70,6 +70,24 @@ def test_build_engine_ui_metadata_prefers_engine_specific_auth_label() -> None:
     assert payload["qwen"]["auth_entry_label"] == "鉴权(Qwen)"
 
 
+def test_run_detail_revision_renders_collapsed_placeholder_only_and_expanded_body_once() -> None:
+    content = _read_run_detail_template()
+    assert "const previewText = I18N.revisionCollapsedPrefix;" in content
+    assert 'if (entry.collapsed) {' in content
+    assert 'latestLine.className = "chat-revision-latest"' in content
+    assert 'body.className = "chat-revision-body"' in content
+    assert 'latestLine.className = "chat-plain-revision-latest"' in content
+    assert 'body.className = "chat-plain-revision-body"' in content
+
+
+def test_run_detail_revision_uses_rejected_final_reply_wording() -> None:
+    content = _read_run_detail_template()
+    assert 'default="Rejected Final Reply"' in content
+    assert 'default="(collapsed)"' in content
+    assert 'default="Show rejected final reply"' in content
+    assert 'default="Hide rejected final reply"' in content
+
+
 @pytest.mark.asyncio
 async def test_ui_index_available_when_auth_disabled(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
@@ -146,8 +164,8 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
             "claude": SimpleNamespace(present=False, version=None),
             "codex": SimpleNamespace(present=True, version="0.89.0"),
             "gemini": SimpleNamespace(present=True, version=""),
-            "iflow": SimpleNamespace(present=False, version=None),
             "opencode": SimpleNamespace(present=True, version=None),
+            "qwen": SimpleNamespace(present=False, version=None),
         },
     )
 
@@ -158,11 +176,10 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
     assert 'id="engine-status-indicator"' in response.text
     assert 'data-engine-status-refresh="static"' in response.text
-    assert 'data-engine-count="6"' in response.text
-    assert "style=\"--engine-count: 6;\"" in response.text
+    assert 'data-engine-count="5"' in response.text
+    assert "style=\"--engine-count: 5;\"" in response.text
     assert 'data-engine="codex" data-status-level="healthy"' in response.text
     assert 'data-engine="gemini" data-status-level="warning"' in response.text
-    assert 'data-engine="iflow" data-status-level="error"' in response.text
     assert 'data-engine="qwen" data-status-level="error"' in response.text
 
 
@@ -650,14 +667,14 @@ async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypat
             "oauth_proxy": {
                 "codex": ["callback"],
                 "gemini": ["callback"],
-                "iflow": ["callback"],
                 "opencode": {"deepseek": ["api_key"]},
+                "qwen": {"qwen-oauth": ["callback"], "coding-plan-global": ["api_key"]},
             },
             "cli_delegate": {
                 "codex": ["auth_code_or_url"],
                 "gemini": ["auth_code_or_url"],
-                "iflow": ["auth_code_or_url"],
                 "opencode": {},
+                "qwen": {"qwen-oauth": ["auth_code_or_url"], "coding-plan-global": ["api_key"]},
             },
         },
     )
@@ -667,14 +684,14 @@ async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypat
             "oauth_proxy": {
                 "codex": [],
                 "gemini": [],
-                "iflow": [],
                 "opencode": {"google": ["callback", "auth_code_or_url"]},
+                "qwen": {"qwen-oauth": ["callback"]},
             },
             "cli_delegate": {
                 "codex": [],
                 "gemini": [],
-                "iflow": [],
                 "opencode": {"google": ["auth_code_or_url"]},
+                "qwen": {"qwen-oauth": ["auth_code_or_url"]},
             },
         },
     )
@@ -846,8 +863,8 @@ async def test_ui_engines_table_partial(monkeypatch):
                     models_count=12,
                 ),
                 SimpleNamespace(
-                    engine="iflow",
-                    cli_version="1.2.3",
+                    engine="qwen",
+                    cli_version="0.14.5",
                     models_count=8,
                 ),
             ]
@@ -857,7 +874,7 @@ async def test_ui_engines_table_partial(monkeypatch):
         "server.routers.ui.engine_status_cache_service.get_snapshot",
         lambda: {
             "codex": SimpleNamespace(present=True, version="0.89.0"),
-            "iflow": SimpleNamespace(present=False, version=""),
+            "qwen": SimpleNamespace(present=False, version=""),
         },
     )
     monkeypatch.setattr(
@@ -873,15 +890,15 @@ async def test_ui_engines_table_partial(monkeypatch):
     assert response.status_code == 200
     assert response.headers.get("Deprecation") == "true"
     assert "codex" in response.text
-    assert "iflow" in response.text
+    assert "qwen" in response.text
     assert "/ui/engines/codex/models" in response.text
-    assert "/ui/engines/iflow/models" in response.text
+    assert "/ui/engines/qwen/models" in response.text
     assert "Auth Ready" not in response.text
     assert 'data-engine-start="codex"' in response.text
     assert 'data-engine-auth-entry="codex"' in response.text
-    assert 'data-engine-auth-entry="iflow"' in response.text
+    assert 'data-engine-auth-entry="qwen"' in response.text
     assert ("Auth (Codex)" in response.text) or ("鉴权(Codex)" in response.text)
-    assert ("Auth (iFlow)" in response.text) or ("鉴权(iFlow)" in response.text)
+    assert ("Auth (Qwen)" in response.text) or ("鉴权(Qwen)" in response.text)
     assert "启动TUI" in response.text
     assert "升级" in response.text
     assert "安装" in response.text or "Install" in response.text
@@ -1219,65 +1236,17 @@ async def test_ui_engine_auth_start_route_qwen_provider_aware(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ui_engine_auth_session_iflow_start_and_input(monkeypatch):
+async def test_ui_engine_auth_session_iflow_is_unsupported(monkeypatch):
     monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
     monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
-    monkeypatch.setattr(
-        "server.routers.ui.engine_auth_flow_manager.start_session",
-        lambda engine, method, auth_method=None, provider_id=None, transport=None, callback_base_url=None: {
-            "session_id": "auth-iflow-1",
-            "engine": engine,
-            "method": method,
-            "provider_id": provider_id,
-            "status": "waiting_user",
-            "auth_url": "https://iflow.cn/oauth?state=abc",
-            "user_code": None,
-            "created_at": "2026-02-25T00:00:00Z",
-            "updated_at": "2026-02-25T00:00:01Z",
-            "expires_at": "2026-02-25T00:15:00Z",
-            "credential_state": "missing",
-            "error": None,
-            "exit_code": None,
-            "terminal": False,
-        },
-    )
-    monkeypatch.setattr(
-        "server.routers.ui.engine_auth_flow_manager.input_session",
-        lambda _session_id, _kind, _value: {
-            "session_id": "auth-iflow-1",
-            "engine": "iflow",
-            "method": "auth",
-            "status": "code_submitted_waiting_result",
-            "input_kind": "code",
-            "auth_url": "https://iflow.cn/oauth?state=abc",
-            "user_code": None,
-            "created_at": "2026-02-25T00:00:00Z",
-            "updated_at": "2026-02-25T00:00:02Z",
-            "expires_at": "2026-02-25T00:15:00Z",
-            "credential_state": "missing",
-            "error": None,
-            "exit_code": None,
-            "terminal": False,
-        },
-    )
 
     start_res = await _request(
         "POST",
         "/ui/engines/auth/sessions",
         json={"engine": "iflow", "method": "auth"},
     )
-    assert start_res.status_code == 200
-    assert start_res.json()["engine"] == "iflow"
-    assert start_res.json()["method"] == "auth"
-
-    input_res = await _request(
-        "POST",
-        "/ui/engines/auth/sessions/auth-iflow-1/input",
-        json={"kind": "code", "value": "CODE-1234"},
-    )
-    assert input_res.status_code == 200
-    assert input_res.json()["accepted"] is True
-    assert input_res.json()["session"]["engine"] == "iflow"
+    assert start_res.status_code == 422
+    assert "auth proxy" in start_res.text.lower()
 
 
 @pytest.mark.asyncio
@@ -1332,6 +1301,62 @@ async def test_ui_engine_upgrade_status_partial(monkeypatch):
     assert "gemini" in response.text
     assert "stdout" in response.text
     assert "安装" in response.text or "install" in response.text
+    assert 'hx-swap-oob="innerHTML"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_ui_engine_upgrade_status_terminal_refreshes_engines_table(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: False)
+    monkeypatch.setattr(
+        "server.routers.ui.engine_upgrade_manager.get_task",
+        AsyncMock(return_value={
+            "status": "succeeded",
+            "results": {
+                "qwen": {
+                    "status": "succeeded",
+                    "action": "upgrade",
+                    "stdout": "ok",
+                    "stderr": "",
+                    "error": None,
+                }
+            },
+        }),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.management_router.list_management_engines",
+        lambda: SimpleNamespace(
+            engines=[
+                SimpleNamespace(
+                    engine="qwen",
+                    cli_version="0.14.5",
+                    models_count=5,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.engine_status_cache_service.get_snapshot",
+        lambda: {
+            "qwen": SimpleNamespace(present=True, version="0.14.5"),
+        },
+    )
+    monkeypatch.setattr(
+        "server.routers.ui.agent_cli_manager.collect_sandbox_status",
+        lambda _engine: {
+            "warning_code": None,
+            "message": "",
+            "missing_dependencies": [],
+        },
+    )
+    monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: False)
+
+    response = await _request("GET", "/ui/engines/upgrades/req-2/status")
+    assert response.status_code == 200
+    assert 'id="engines-table-container"' in response.text
+    assert 'hx-swap-oob="innerHTML"' in response.text
+    assert "0.14.5" in response.text
+    assert "qwen" in response.text
 
 
 @pytest.mark.asyncio
@@ -1566,7 +1591,7 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert "/v1/management/runs/${requestId}/timeline/history?" in detail_res.text
     assert "/v1/management/runs/${requestId}/logs/range" in detail_res.text
     assert "SkillRunnerFileExplorer" in detail_res.text
-    assert "chat_thinking_core.js?v=20260405a" in detail_res.text
+    assert "chat_thinking_core.js?v=20260416b" in detail_res.text
     assert "SkillRunnerChatMarkdown.createRenderer()" in detail_res.text
     assert 'id="event-inspector-drawer"' in detail_res.text
     assert 'id="event-inspector-json"' in detail_res.text
@@ -1582,9 +1607,12 @@ async def test_ui_run_detail_preview_and_logs(monkeypatch):
     assert 'stdoutEl.classList.toggle("bubble-mode", mode === "bubble")' in detail_res.text
     assert 'item.className = `chat-plain-entry${role === "system" ? " system" : role === "user" ? " user" : ""}`' in detail_res.text
     assert "entry.type === \"thinking\"" in detail_res.text
+    assert "entry.type === \"revision\"" in detail_res.text
     assert 'item.className = "chat-plain-process"' in detail_res.text
+    assert 'item.className = "chat-plain-revision"' in detail_res.text
     assert 'meta.className = "chat-plain-process-item-meta"' in detail_res.text
     assert 'body.className = "chat-plain-process-item-body"' in detail_res.text
+    assert "chatModel.toggleRevision" in detail_res.text
     assert "chat-thinking-arrow" in detail_res.text
     assert "chat-thinking-meta" in detail_res.text
     assert "thinkingItem.rawRef" in detail_res.text

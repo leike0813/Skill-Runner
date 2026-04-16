@@ -1,0 +1,10 @@
+- [x] 1.1 Add OpenSpec delta spec and invariants for auth session ownership, lifecycle, scoped mutual exclusion, TTL, and cleanup semantics.
+- [x] 1.2 Add durable auth session persistence to the run-store auth subsystem and expose scope-aware lookup / lifecycle CRUD through the façade.
+- [x] 2.1 Refactor `engine_auth_flow_manager` and `engine_interaction_gate` to use `engine + provider_id` scoped active session semantics instead of a single global auth session.
+- [x] 2.2 Sync auth session start / refresh / finalize / cancel transitions into durable state while keeping in-memory runtime handlers as execution cache only.
+- [x] 3.1 Update run auth orchestration to recover same-owner single-method challenges, keep cross-owner busy visible, and stop regressing recoverable flows to method selection.
+- [x] 3.2 Make run cancellation and terminal cleanup clear pending waiting-auth state and cancel / supersede owned auth sessions.
+- [x] 3.3 Add orphan auth session reconciliation for terminal or timed-out runs.
+- [x] 4.1 Extend auth session models / status payloads with stable durable session metadata needed by waiting-auth clients.
+- [x] 4.2 Add targeted tests for scope-aware mutual exclusion, durable session truth, cancel cleanup, recovery, TTL expiry, and waiting-auth UI behavior.
+- [x] 4.3 Run targeted pytest coverage plus mypy for touched orchestration / runtime modules.

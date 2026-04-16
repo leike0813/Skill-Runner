@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.skip(reason="iflow engine is deprecated and sealed off from active regression")
+
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.models import AdapterTurnOutcome, SkillManifest
 

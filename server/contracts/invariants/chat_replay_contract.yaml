@@ -9,6 +9,7 @@ kinds:
   - assistant_process
   - assistant_message
   - assistant_final
+  - assistant_revision
   - orchestration_notice
 order_source:
   canonical: chat_publish_order
@@ -24,6 +25,9 @@ derivation_rules:
   - source: assistant.message.final
     role: assistant
     kind: assistant_final
+  - source: assistant.message.superseded
+    role: assistant
+    kind: assistant_revision
   - source: assistant.message.intermediate
     role: assistant
     kind: assistant_message
@@ -53,5 +57,7 @@ derivation_rules:
 invariants:
   - no_local_render
   - assistant_final_prefers_display_text
+  - repair_family_winner_only
+  - assistant_revision_is_folded_history
   - live_history_consistent
   - persisted_truth_is_chat_replay_jsonl

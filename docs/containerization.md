@@ -6,7 +6,7 @@ into the same image with different entrypoints. Agent CLIs are still not bundled
 ## Goals
 
 - Use a Debian-based Node.js base image.
-- Keep agent CLIs (codex/gemini/iflow/opencode) out of the image for fast upgrades.
+- Keep agent CLIs (codex/gemini/qwen/opencode/claude) out of the image for fast upgrades.
 - Use host bind mount `./skills:/app/skills` by default for user skill management.
 - Persist data, configs, and CLI installs via volumes.
 - Centralize caches/packages under managed named volumes.
@@ -63,7 +63,7 @@ The image does not ship the agent CLIs. Install them into the mounted prefix:
 docker compose run --rm api sh -lc "npm install -g <cli-package>"
 ```
 
-Install packages that provide `codex`, `gemini`, `iflow`, and `opencode` commands.
+Install packages that provide `codex`, `gemini`, `qwen`, `opencode`, and `claude` commands.
 
 ## Upgrading agent CLIs
 
@@ -138,7 +138,7 @@ The entrypoint and application startup refresh engine versions and persist statu
   - CLIs read/write config under:
     - `${SKILL_RUNNER_AGENT_HOME}/.codex`
     - `${SKILL_RUNNER_AGENT_HOME}/.gemini`
-    - `${SKILL_RUNNER_AGENT_HOME}/.iflow`
+    - `${SKILL_RUNNER_AGENT_HOME}/.qwen`
     - `${SKILL_RUNNER_AGENT_HOME}/.config/opencode`
     - `${SKILL_RUNNER_AGENT_HOME}/.local/share/opencode`
 - Engine CLI install/upgrade/check always use managed prefix:
@@ -207,9 +207,9 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
 - Default config bootstrap (inside isolated Agent Home):
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.gemini/settings.json` with:
     - `security.auth.selectedType = "oauth-personal"`
-  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.iflow/settings.json` with:
-    - `selectedAuthType = "oauth-iflow"`
-    - `baseUrl = "https://apis.iflow.cn/v1"`
+  - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.qwen/settings.json` with:
+    - `general.enableAutoUpdate = false`
+    - `general.checkpointing.enabled = false`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.codex/config.toml` with:
     - `cli_auth_credentials_store = "file"`
   - If missing, the entrypoint writes `${SKILL_RUNNER_AGENT_HOME}/.claude.json` with:
@@ -269,10 +269,10 @@ Method 1: Login inside the container (TUI)
   - `codex login` (browser OAuth, creates `auth.json`)
   - `codex login --device-auth` (device auth)
   - `gemini` (creates `google_accounts.json`, `oauth_creds.json`)
-  - `iflow` (creates `iflow_accounts.json`, `oauth_creds.json`)
+  - `qwen` (creates `.qwen/oauth_creds.json`, or writes `.qwen/settings.json` for Coding Plan API Key)
   - `opencode` (creates `.local/share/opencode/auth.json`; plugin auth may create `.config/opencode/antigravity-accounts.json`)
 - The files are stored under isolated Agent Home:
-  - Codex/Gemini/iFlow: `${SKILL_RUNNER_AGENT_HOME}/.<tool>/...`
+  - Codex/Gemini/Qwen: `${SKILL_RUNNER_AGENT_HOME}/.<tool>/...`
   - OpenCode: `${SKILL_RUNNER_AGENT_HOME}/.local/share/opencode/auth.json` and `${SKILL_RUNNER_AGENT_HOME}/.config/opencode/antigravity-accounts.json`
 
 Method 2: Import credential files from Admin UI
@@ -302,10 +302,8 @@ OpenAI OAuth proxy note:
 - Gemini OAuth 代理需要注入：
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
   - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`
-- `iflow` `oauth_proxy` 提供两种模式：
-  - `callback`：自动回调优先（`127.0.0.1:11451/oauth2callback`），并支持 `/input` 兜底
-  - `auth_code_or_url`：手工码流，通过 `/input` 回填
-- `iflow` `oauth_proxy` 成功后会更新 `.iflow/oauth_creds.json`、`.iflow/iflow_accounts.json` 和 `.iflow/settings.json`。
+- `qwen(provider_id=qwen-oauth)` 使用设备码语义，服务端自动轮询并更新 `.qwen/oauth_creds.json`。
+- `qwen(provider_id=coding-plan-china|coding-plan-global)` 使用 API Key，会写入 `.qwen/settings.json`。
 - `opencode/google` `oauth_proxy` (Antigravity browser OAuth) starts a per-session local callback listener on `127.0.0.1:51121` (`/oauth-callback`) and also supports `/input` fallback.
 - OpenCode Google（Antigravity）OAuth 代理需要注入：
   - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID`
@@ -357,7 +355,7 @@ Container startup now writes structured bootstrap diagnostics to:
 
 By default, container bootstrap only ensures `opencode,codex`. Override with
 `SKILL_RUNNER_BOOTSTRAP_ENGINES=all`, `none`, or a comma-separated subset such as
-`gemini,iflow`.
+`gemini,qwen`.
 
 If startup prints `Failed to install <engine>: exit=1` or later warns
 `opencode CLI not found`, inspect the two files above first. The report includes

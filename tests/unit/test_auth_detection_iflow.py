@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.skip(reason="iflow engine is deprecated and sealed off from active regression")
+
 from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.runtime.auth_detection.service import auth_detection_service
 from tests.unit.auth_detection_test_utils import load_sample

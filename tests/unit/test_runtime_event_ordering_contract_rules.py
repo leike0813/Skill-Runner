@@ -33,6 +33,10 @@ def test_runtime_event_ordering_contract_declares_projection_gate() -> None:
 def test_runtime_event_ordering_contract_declares_single_method_busy_recovery() -> None:
     payload = load_runtime_event_ordering_contract()
     normalization = payload["lifecycle_normalization_rules"]
+    assert normalization["waiting_auth_precedence"] == {
+        "semantic_turn_failed_is_evidence_only": True,
+        "terminal_failed_projection_forbidden": True,
+    }
     assert normalization["auth_routes"]["single_method"]["requires_method_selection"] is False
     assert normalization["busy_recovery"]["single_method"] == {
         "preserve_phase": "challenge_active",

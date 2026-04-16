@@ -42,6 +42,7 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `assistant.command_execution`
 - `assistant.message.promoted`
 - `assistant.message.final`
+- `assistant.message.superseded`
 - `user.input.required`
 - `auth.required`
 - `auth.challenge.updated`
@@ -56,6 +57,7 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 补充约束：
 
 - future repair governance 若需要发出 `diagnostic.output_repair.*`，这些类型只保留在 orchestrator audit，不进入 FCMP。
+- repair 接管已经公开的 final 时，对外只新增 `assistant.message.superseded`；该信号来自 orchestrator repair governance，而不是 parser/RASP。
 
 过程事件约束（通用，非引擎专属）：
 
@@ -68,7 +70,10 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - Run 句柄事件仅在 RASP：`lifecycle.run_handle`（`data.handle_id`）
 - FCMP 明确不包含 `assistant.turn_*`
 - 同一 `message_id` 的收敛顺序：`*.message.promoted` 必须先于 `*.message.final`
+- 同一 repair family 的可见性规则是 winner-only：进入 repair 的旧 final 一旦收到 `assistant.message.superseded`，就退出主聊天面，仅保留为折叠历史
 - 普通 engine `type:"error"` / `item.type:"error"` 必须保留 raw evidence，并额外归一化为 `diagnostic.warning`；它们不是 terminal lifecycle event 真源
+- parser capability 差异由机器可读合同 `server/contracts/invariants/runtime_parser_capabilities.yaml` 定义；测试与 mock 不应再通过实现细节猜测某个 engine 是否承诺支持某类 parser 能力
+- `diagnostic.warning` 的稳定治理面至少包括 `severity` / `pattern_kind` / `source_type` / `authoritative`；parser 与 protocol fallback warning 默认是 `authoritative=false`
 
 ### 3.1 `conversation.state.changed`
 

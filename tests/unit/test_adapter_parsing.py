@@ -4,8 +4,8 @@ from pathlib import Path
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
-from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.models import EngineSessionHandle, EngineSessionHandleType
 from server.models import AdapterTurnOutcome
 
@@ -81,6 +81,7 @@ def test_codex_runtime_stream_detects_logged_out_reauth_signal_high_confidence()
         isinstance(item, dict)
         and item.get("pattern_kind") == "engine_auth_hint"
         and item.get("source_type") == "type:error"
+        and item.get("authoritative") is False
         for item in diagnostic_events
     )
     raw_rows = parsed.get("raw_rows")
@@ -108,6 +109,7 @@ def test_codex_runtime_stream_classifies_item_error_as_diagnostic_warning_candid
         and item.get("code") == "ENGINE_DEPRECATION_WARNING"
         and item.get("pattern_kind") == "engine_deprecation_warning"
         and item.get("source_type") == "item.type:error"
+        and item.get("authoritative") is False
         for item in diagnostic_events
     )
 
@@ -136,8 +138,8 @@ def test_codex_runtime_stream_detects_usage_limit_as_high_confidence_waiting_aut
     assert "usage limit" in str(turn_failure_data.get("message")).lower()
 
 
-def test_iflow_parse_output_from_code_fence():
-    adapter = IFlowExecutionAdapter()
+def test_qwen_parse_output_from_code_fence():
+    adapter = QwenExecutionAdapter()
     raw = "```json\n{\"value\": 2}\n```"
     result = adapter._parse_output(raw)
     assert result.outcome == AdapterTurnOutcome.FINAL
@@ -145,8 +147,8 @@ def test_iflow_parse_output_from_code_fence():
     assert result.repair_level == "deterministic_generic"
 
 
-def test_iflow_parse_output_from_raw_text():
-    adapter = IFlowExecutionAdapter()
+def test_qwen_parse_output_from_raw_text():
+    adapter = QwenExecutionAdapter()
     raw = "start {\"v\": 3} end"
     result = adapter._parse_output(raw)
     assert result.outcome == AdapterTurnOutcome.FINAL

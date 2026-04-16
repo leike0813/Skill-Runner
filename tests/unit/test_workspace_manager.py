@@ -16,7 +16,7 @@ def _allow_test_skill(monkeypatch, tmp_path):
     skill = SkillManifest(
         id="test-skill",
         name="test-skill",
-        engines=["codex", "gemini", "iflow", "opencode"],
+        engines=["codex", "gemini", "opencode", "qwen"],
         path=tmp_path
     )
 

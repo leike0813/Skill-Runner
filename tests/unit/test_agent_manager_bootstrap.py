@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 from server.services.engine_management.agent_cli_manager import CommandResult
@@ -35,13 +36,13 @@ def test_ensure_with_diagnostics_reports_partial_failure() -> None:
             self._managed = {"codex": Path("/managed/codex"), "gemini": None}
 
         def supported_engines(self):
-            return ["codex", "gemini", "iflow", "opencode"]
+            return ["codex", "gemini", "opencode", "qwen"]
 
         def resolve_bootstrap_targets(self, engine_spec=None):
             assert engine_spec is None
             return {
                 "requested_engines": ["opencode", "codex"],
-                "skipped_engines": ["gemini", "iflow"],
+                "skipped_engines": ["gemini", "qwen"],
                 "resolved_mode": "subset",
             }
 
@@ -60,7 +61,7 @@ def test_ensure_with_diagnostics_reports_partial_failure() -> None:
     report = module._ensure_with_diagnostics(FakeManager())
     assert report["summary"]["outcome"] == "partial_failure"
     assert report["summary"]["requested_engines"] == ["opencode", "codex"]
-    assert report["summary"]["skipped_engines"] == ["gemini", "iflow"]
+    assert report["summary"]["skipped_engines"] == ["gemini", "qwen"]
     assert report["summary"]["resolved_mode"] == "subset"
     assert report["summary"]["failed_engines"] == ["opencode"]
     assert report["opencode_warmup"]["attempted"] is False
@@ -77,13 +78,13 @@ def test_ensure_with_diagnostics_honors_explicit_engine_subset() -> None:
 
     class FakeManager:
         def supported_engines(self):
-            return ["codex", "gemini", "iflow", "opencode"]
+            return ["codex", "gemini", "opencode", "qwen"]
 
         def resolve_bootstrap_targets(self, engine_spec=None):
             assert engine_spec == "gemini"
             return {
                 "requested_engines": ["gemini"],
-                "skipped_engines": ["codex", "iflow", "opencode"],
+                "skipped_engines": ["codex", "opencode", "qwen"],
                 "resolved_mode": "subset",
             }
 
@@ -101,7 +102,7 @@ def test_ensure_with_diagnostics_honors_explicit_engine_subset() -> None:
 
     report = module._ensure_with_diagnostics(FakeManager(), "gemini")
     assert report["summary"]["requested_engines"] == ["gemini"]
-    assert report["summary"]["skipped_engines"] == ["codex", "iflow", "opencode"]
+    assert report["summary"]["skipped_engines"] == ["codex", "opencode", "qwen"]
     assert report["summary"]["resolved_mode"] == "subset"
     assert report["summary"]["failed_engines"] == ["gemini"]
     gemini = report["engines"]["gemini"]
@@ -157,3 +158,23 @@ def test_ensure_with_diagnostics_opencode_warmup_failure_is_warning_only(monkeyp
     assert warmup["outcome"] == "failed"
     assert warmup["returncode"] == 1
     assert "warmup failed" in warmup["stderr_summary"]
+
+
+def test_main_accepts_qwen_for_single_engine_upgrade(monkeypatch) -> None:
+    module = _load_agent_manager_module()
+    calls: list[str] = []
+
+    class FakeManager:
+        def ensure_layout(self) -> None:
+            return None
+
+        def upgrade_engine(self, engine: str) -> CommandResult:
+            calls.append(engine)
+            return CommandResult(returncode=0, stdout="upgraded", stderr="")
+
+    monkeypatch.setattr(module, "AgentCliManager", lambda: FakeManager())
+    monkeypatch.setattr(module, "_write_status", lambda manager, status_file: {})
+    monkeypatch.setattr(sys, "argv", ["agent_manager.py", "--upgrade-engine", "qwen"])
+
+    assert module.main() == 0
+    assert calls == ["qwen"]

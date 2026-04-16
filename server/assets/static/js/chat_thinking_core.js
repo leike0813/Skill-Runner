@@ -25,6 +25,12 @@
     return normalizeText(messageId) || null;
   }
 
+  function messageFamilyIdOf(event) {
+    const familyId = correlationOf(event).message_family_id;
+    const normalized = normalizeText(familyId);
+    return normalized || messageIdOf(event);
+  }
+
   function replacesMessageIdOf(event) {
     const replaceId = correlationOf(event).replaces_message_id;
     return normalizeText(replaceId) || null;
@@ -57,6 +63,10 @@
     return normalizeText(event && event.role) === "assistant" && normalizeText(event && event.kind) === "assistant_final";
   }
 
+  function isAssistantRevision(event) {
+    return normalizeText(event && event.role) === "assistant" && normalizeText(event && event.kind) === "assistant_revision";
+  }
+
   function buildProcessItem(atom) {
     return {
       seq: toPositiveInt(atom.event && atom.event.seq, 0),
@@ -66,6 +76,7 @@
       text: atom.text || atom.summary,
       summary: atom.summary || atom.text,
       messageId: atom.messageId,
+      messageFamilyId: atom.messageFamilyId,
       normalizedText: atom.normalizedText,
       replacesMessageId: atom.replacesMessageId,
       details: atom.details,
@@ -94,6 +105,7 @@
       summary: summary || text,
       normalizedText: normalizeText(text || summary),
       messageId: messageIdOf(event),
+      messageFamilyId: messageFamilyIdOf(event),
       replacesMessageId: replacesMessageIdOf(event),
       processType: processTypeOf(event),
       details: correlation.details && typeof correlation.details === "object" ? correlation.details : null,
@@ -119,12 +131,18 @@
   function createThinkingChatModel(initialDisplayMode = "plain") {
     const sourceEvents = [];
     const thinkingCollapseState = new Map();
+    const revisionCollapseState = new Map();
     let displayMode = normalizeText(initialDisplayMode) === "bubble" ? "bubble" : "plain";
+
+    function revisionIdFor(messageId, attempt) {
+      return `revision-${attempt}-${messageId || "unknown"}`;
+    }
 
     function buildCanonicalAtoms() {
       const atoms = [];
       for (const event of sourceEvents) {
         if (!event || typeof event !== "object") continue;
+        if (isAssistantRevision(event)) continue;
         const atom = buildCanonicalAtom(event);
         if (atom.atomKind === "final") {
           for (let index = atoms.length - 1; index >= 0; index -= 1) {
@@ -135,7 +153,14 @@
               atoms.splice(index, 1);
             }
           }
-          if (atoms.some((existing) => existing.atomKind === "final" && existing.attempt === atom.attempt && sameMessageChain(existing, atom))) {
+          if (
+            atoms.some(
+              (existing) =>
+                existing.atomKind === "final" &&
+                existing.attempt === atom.attempt &&
+                sameMessageChain(existing, atom),
+            )
+          ) {
             continue;
           }
         }
@@ -144,8 +169,20 @@
       return atoms;
     }
 
+    function buildRevisionMap() {
+      const revisionsByMessageId = new Map();
+      for (const event of sourceEvents) {
+        if (!isAssistantRevision(event)) continue;
+        const messageId = messageIdOf(event);
+        if (!messageId) continue;
+        revisionsByMessageId.set(messageId, event);
+      }
+      return revisionsByMessageId;
+    }
+
     function buildEntries() {
       const atoms = buildCanonicalAtoms();
+      const revisionsByMessageId = buildRevisionMap();
       const entries = [];
       const attemptThinkingCounts = new Map();
       let activeThinking = null;
@@ -180,14 +217,35 @@
           type: "message",
           event: atom.event,
           messageId: atom.messageId,
+          messageFamilyId: atom.messageFamilyId,
           replacesMessageId: atom.replacesMessageId,
           normalizedText: atom.normalizedText,
           atomKind: atom.atomKind,
         });
       }
 
+      function appendRevisionAtom(atom, revisionEvent) {
+        activeThinking = null;
+        const revisionId = revisionIdFor(atom.messageId, atom.attempt);
+        entries.push({
+          type: "revision",
+          id: revisionId,
+          collapsed: revisionCollapseState.has(revisionId) ? revisionCollapseState.get(revisionId) === true : true,
+          originalEvent: atom.event,
+          revisionEvent,
+          messageId: atom.messageId,
+          messageFamilyId: atom.messageFamilyId,
+        });
+      }
+
       for (const atom of atoms) {
-        const shouldGoToThinking = atom.atomKind === "process" || (displayMode === "bubble" && atom.atomKind === "intermediate");
+        const revisionEvent = atom.messageId ? revisionsByMessageId.get(atom.messageId) : null;
+        if (revisionEvent && atom.atomKind === "final") {
+          appendRevisionAtom(atom, revisionEvent);
+          continue;
+        }
+        const shouldGoToThinking =
+          atom.atomKind === "process" || (displayMode === "bubble" && atom.atomKind === "intermediate");
         if (shouldGoToThinking) {
           appendThinkingAtom(atom);
           continue;
@@ -201,6 +259,12 @@
     function toggleThinking(id) {
       const current = thinkingCollapseState.has(id) ? thinkingCollapseState.get(id) === true : true;
       thinkingCollapseState.set(id, !current);
+      return true;
+    }
+
+    function toggleRevision(id) {
+      const current = revisionCollapseState.has(id) ? revisionCollapseState.get(id) === true : true;
+      revisionCollapseState.set(id, !current);
       return true;
     }
 
@@ -226,6 +290,7 @@
     return {
       consume,
       toggleThinking,
+      toggleRevision,
       setDisplayMode,
       getDisplayMode,
       getEntries,

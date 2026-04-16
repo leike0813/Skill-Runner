@@ -19,7 +19,6 @@
       "required": [
         "codex",
         "gemini",
-        "iflow",
         "opencode",
         "claude",
         "qwen"
@@ -29,9 +28,6 @@
           "$ref": "#/$defs/engine_scoped_engine"
         },
         "gemini": {
-          "$ref": "#/$defs/engine_scoped_engine"
-        },
-        "iflow": {
           "$ref": "#/$defs/engine_scoped_engine"
         },
         "opencode": {

@@ -100,3 +100,23 @@ def test_validate_chat_replay_event_rejects_invalid_role() -> None:
                 "correlation": {},
             }
         )
+
+
+def test_validate_chat_replay_event_accepts_assistant_revision_without_text() -> None:
+    payload = {
+        "protocol_version": "chat-replay/1.0",
+        "seq": 11,
+        "run_id": "run-chat-revision",
+        "attempt": 1,
+        "role": "assistant",
+        "kind": "assistant_revision",
+        "text": "",
+        "created_at": "2026-03-04T10:00:00Z",
+        "correlation": {
+            "message_id": "m-11",
+            "message_family_id": "family-1",
+            "reason": "output_repair_started",
+            "fcmp_seq": 31,
+        },
+    }
+    assert validate_chat_replay_event(payload) == payload

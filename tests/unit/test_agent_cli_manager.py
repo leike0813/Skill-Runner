@@ -69,7 +69,6 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
 
     codex_config = manager.profile.agent_home / ".codex" / "config.toml"
     gemini_settings = manager.profile.agent_home / ".gemini" / "settings.json"
-    iflow_settings = manager.profile.agent_home / ".iflow" / "settings.json"
     claude_bootstrap = manager.profile.agent_home / ".claude.json"
     claude_settings = manager.profile.agent_home / ".claude" / "settings.json"
     claude_probe = manager.profile.agent_home / ".claude" / "sandbox_probe.json"
@@ -82,9 +81,6 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     assert codex_probe.exists()
     assert 'cli_auth_credentials_store = "file"' in codex_config.read_text(encoding="utf-8")
     assert json.loads(gemini_settings.read_text(encoding="utf-8"))["security"]["auth"]["selectedType"] == "oauth-personal"
-    iflow_payload = json.loads(iflow_settings.read_text(encoding="utf-8"))
-    assert iflow_payload["selectedAuthType"] == "oauth-iflow"
-    assert iflow_payload["baseUrl"] == "https://apis.iflow.cn/v1"
     assert json.loads(claude_bootstrap.read_text(encoding="utf-8"))["hasCompletedOnboarding"] is True
     assert json.loads(claude_settings.read_text(encoding="utf-8")) == {}
     assert claude_probe.exists()
@@ -360,7 +356,6 @@ def test_import_credentials_whitelist_only(tmp_path):
     src = tmp_path / "src"
     (src / "codex").mkdir(parents=True)
     (src / "gemini").mkdir(parents=True)
-    (src / "iflow").mkdir(parents=True)
     (src / "opencode").mkdir(parents=True)
     (src / "claude").mkdir(parents=True)
     (src / "qwen").mkdir(parents=True)
@@ -372,9 +367,6 @@ def test_import_credentials_whitelist_only(tmp_path):
     (src / "gemini" / "oauth_creds.json").write_text("{}", encoding="utf-8")
     (src / "gemini" / "settings.json").write_text('{"bad":"override"}', encoding="utf-8")
 
-    (src / "iflow" / "iflow_accounts.json").write_text("{}", encoding="utf-8")
-    (src / "iflow" / "oauth_creds.json").write_text("{}", encoding="utf-8")
-    (src / "iflow" / "settings.json").write_text('{"bad":"override"}', encoding="utf-8")
     (src / "opencode" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (src / "opencode" / "antigravity-accounts.json").write_text('{"accounts":[]}', encoding="utf-8")
     (src / "claude" / ".credentials.json").write_text('{"claudeAiOauth":{"accessToken":"x"}}', encoding="utf-8")
@@ -384,14 +376,12 @@ def test_import_credentials_whitelist_only(tmp_path):
     assert copied["codex"] == ["auth.json"]
     assert copied["claude"] == [".credentials.json"]
     assert copied["gemini"] == ["google_accounts.json", "oauth_creds.json"]
-    assert copied["iflow"] == ["iflow_accounts.json", "oauth_creds.json"]
     assert copied["opencode"] == ["auth.json", "antigravity-accounts.json"]
     assert copied["qwen"] == ["oauth_creds.json"]
 
     codex_dst = manager.profile.agent_home / ".codex"
     claude_dst = manager.profile.agent_home / ".claude"
     gemini_dst = manager.profile.agent_home / ".gemini"
-    iflow_dst = manager.profile.agent_home / ".iflow"
     opencode_data_dst = manager.profile.agent_home / ".local" / "share" / "opencode"
     opencode_config_dst = manager.profile.agent_home / ".config" / "opencode"
     qwen_dst = manager.profile.agent_home / ".qwen"
@@ -402,28 +392,9 @@ def test_import_credentials_whitelist_only(tmp_path):
     gemini_settings = json.loads((gemini_dst / "settings.json").read_text(encoding="utf-8"))
     assert gemini_settings["security"]["auth"]["selectedType"] == "oauth-personal"
     assert (claude_dst / ".credentials.json").exists()
-
-    iflow_settings = json.loads((iflow_dst / "settings.json").read_text(encoding="utf-8"))
-    assert iflow_settings["selectedAuthType"] == "oauth-iflow"
-    assert iflow_settings["baseUrl"] == "https://apis.iflow.cn/v1"
     assert (qwen_dst / "oauth_creds.json").exists()
     assert (opencode_data_dst / "auth.json").exists()
     assert (opencode_config_dst / "antigravity-accounts.json").exists()
-
-
-def test_ensure_layout_migrates_legacy_iflow_settings(tmp_path):
-    manager = AgentCliManager(_build_profile(tmp_path))
-    iflow_dir = manager.profile.agent_home / ".iflow"
-    iflow_dir.mkdir(parents=True, exist_ok=True)
-    legacy = iflow_dir / "settings.json"
-    legacy.write_text('{"selectedAuthType":"iflow"}', encoding="utf-8")
-
-    manager.ensure_layout()
-
-    payload = json.loads(legacy.read_text(encoding="utf-8"))
-    assert payload["selectedAuthType"] == "oauth-iflow"
-    assert payload["baseUrl"] == "https://apis.iflow.cn/v1"
-
 
 def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
     manager = AgentCliManager(_build_profile(tmp_path))
@@ -513,9 +484,9 @@ def test_probe_resume_capability_failure_keeps_resumable_profile(tmp_path, monke
         return CommandResult(returncode=1, stdout="", stderr="bad flag")
 
     monkeypatch.setattr(manager, "_run_command", _fake_run)
-    capability = manager.probe_resume_capability("iflow")
+    capability = manager.probe_resume_capability("qwen")
     assert capability.supported is False
-    profile = manager.resolve_interactive_profile("iflow", 900)
+    profile = manager.resolve_interactive_profile("qwen", 900)
     assert profile.reason == "forced_resumable:resume_flag_missing"
     assert profile.session_timeout_sec == 900
 
@@ -681,7 +652,6 @@ def test_install_package_returns_failure_on_oserror(tmp_path: Path, monkeypatch)
     [
         ("codex", "auth.json", ".codex/auth.json"),
         ("gemini", "oauth_creds.json", ".gemini/oauth_creds.json"),
-        ("iflow", "iflow_accounts.json", ".iflow/iflow_accounts.json"),
         ("opencode", "auth.json", ".local/share/opencode/auth.json"),
         ("qwen", "oauth_creds.json", ".qwen/oauth_creds.json"),
     ],

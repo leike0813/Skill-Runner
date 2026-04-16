@@ -18,6 +18,20 @@ def test_invariant_contract_file_exists_and_loadable() -> None:
     assert payload["version"] == 1
 
 
+def test_invariant_contract_rule_ids_are_unique() -> None:
+    payload = load_session_invariant_contract()
+    sections = ("transitions", "ordering_rules")
+    for section in sections:
+        rows = payload[section]
+        ids = [row["id"] for row in rows]
+        assert len(ids) == len(set(ids)), f"duplicate ids found in {section}"
+    mapping = payload["fcmp_mapping"]
+    for section in ("state_changed", "paired_events"):
+        rows = mapping[section]
+        ids = [row["id"] for row in rows]
+        assert len(ids) == len(set(ids)), f"duplicate ids found in fcmp_mapping.{section}"
+
+
 def test_canonical_states_and_terminals_match_session_statechart() -> None:
     transitions = tuple(session_statechart.transition_rows())
     expected_states = {row.source for row in transitions} | {row.target for row in transitions}
@@ -125,4 +139,6 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "interactive_invalid_structured_output_waits_not_fails",
         "interactive_missing_structured_output_waits_not_fails",
         "repair_must_not_promote_ask_user_turn",
+        "waiting_auth_may_coexist_with_turn_failed_evidence",
+        "waiting_auth_reason_should_preserve_semantic_failure_message",
     }

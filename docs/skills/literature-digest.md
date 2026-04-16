@@ -7,7 +7,7 @@
 `literature-digest` 仅允许以下引擎：
 - `gemini`
 - `codex`
-- `iflow`
+- `qwen`
 
 若请求中的 `engine` 不在列表内，`POST /v1/jobs` 会返回 400。
 

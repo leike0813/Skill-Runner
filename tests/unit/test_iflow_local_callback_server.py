@@ -3,6 +3,8 @@ import urllib.request
 
 import pytest
 
+pytestmark = pytest.mark.skip(reason="iflow engine is deprecated and sealed off from active regression")
+
 from server.engines.iflow.auth.callbacks.local_callback_server import IFlowLocalCallbackServer
 
 

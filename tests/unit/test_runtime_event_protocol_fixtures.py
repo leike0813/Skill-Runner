@@ -30,13 +30,15 @@ from server.runtime.protocol.event_protocol import build_rasp_events
             "t-gemini",
         ),
         (
-            "iflow",
-            "waiting_user",
-            '<Execution Info>{"session-id":"t-iflow"}</Execution Info>\niflow message\n',
+            "qwen",
+            "succeeded",
+            '{"type":"system","subtype":"init","session_id":"t-qwen"}\n'
+            '{"type":"assistant","message":{"id":"msg-1","content":[{"type":"text","text":"qwen message"}]}}\n'
+            '{"type":"result","subtype":"success","session_id":"t-qwen","result":"qwen message"}\n',
             "",
-            "iflow_text",
-            "iflow message",
-            "t-iflow",
+            "qwen_ndjson",
+            "qwen message",
+            "t-qwen",
         ),
         (
             "opencode",

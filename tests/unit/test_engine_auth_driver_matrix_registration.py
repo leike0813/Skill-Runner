@@ -36,8 +36,8 @@ class _AgentManager:
         return {
             "codex": {"credential_state": "missing"},
             "gemini": {"credential_state": "missing"},
-            "iflow": {"credential_state": "missing"},
             "opencode": {"credential_state": "missing"},
+            "qwen": {"credential_state": "missing"},
         }
 
 
@@ -94,16 +94,6 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
         auth_method="api_key",
         provider_id=None,
     )
-    assert manager._driver_registry.supports(  # noqa: SLF001
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method="auth_code_or_url",
-    )
-    assert manager.resolve_transport_start_method(
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method="auth_code_or_url",
-    ) == "iflow-cli-oauth"
     assert manager.resolve_transport_start_method(
         transport="oauth_proxy",
         engine="codex",
@@ -114,4 +104,10 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
         engine="qwen",
         auth_method="auth_code_or_url",
         provider_id="qwen-oauth",
+    ) == "auth"
+    assert manager.resolve_transport_start_method(
+        transport="cli_delegate",
+        engine="qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-global",
     ) == "auth"

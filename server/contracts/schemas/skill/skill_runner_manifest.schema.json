@@ -87,9 +87,6 @@
         "gemini": {
           "type": "string"
         },
-        "iflow": {
-          "type": "string"
-        },
         "opencode": {
           "type": "string"
         },
@@ -133,7 +130,6 @@
         "codex",
         "claude",
         "gemini",
-        "iflow",
         "opencode",
         "qwen"
       ]

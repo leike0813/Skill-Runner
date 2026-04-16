@@ -90,6 +90,7 @@ class ChatReplayKind(str, Enum):
     ASSISTANT_PROCESS = "assistant_process"
     ASSISTANT_MESSAGE = "assistant_message"
     ASSISTANT_FINAL = "assistant_final"
+    ASSISTANT_REVISION = "assistant_revision"
     ORCHESTRATION_NOTICE = "orchestration_notice"
 
 
@@ -103,7 +104,7 @@ class ChatReplayEventEnvelope(BaseModel):
     attempt: int = Field(ge=1)
     role: ChatReplayRole
     kind: ChatReplayKind
-    text: str = Field(min_length=1)
+    text: str = ""
     correlation: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -117,6 +118,7 @@ class FcmpEventType(str, Enum):
     ASSISTANT_MESSAGE_INTERMEDIATE = "assistant.message.intermediate"
     ASSISTANT_MESSAGE_PROMOTED = "assistant.message.promoted"
     ASSISTANT_MESSAGE_FINAL = "assistant.message.final"
+    ASSISTANT_MESSAGE_SUPERSEDED = "assistant.message.superseded"
     USER_INPUT_REQUIRED = "user.input.required"
     AUTH_REQUIRED = "auth.required"
     AUTH_CHALLENGE_UPDATED = "auth.challenge.updated"
@@ -148,6 +150,7 @@ class OrchestratorEventType(str, Enum):
     AUTH_SESSION_TIMED_OUT = "auth.session.timed_out"
     AUTH_SESSION_BUSY = "auth.session.busy"
     ERROR_RUN_FAILED = "error.run.failed"
+    ASSISTANT_MESSAGE_SUPERSEDED = "assistant.message.superseded"
     OUTPUT_REPAIR_STARTED = "diagnostic.output_repair.started"
     OUTPUT_REPAIR_ROUND_STARTED = "diagnostic.output_repair.round.started"
     OUTPUT_REPAIR_ROUND_COMPLETED = "diagnostic.output_repair.round.completed"

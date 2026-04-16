@@ -1,0 +1,7 @@
+- [x] 1.1 Add OpenSpec delta spec for runtime contract hygiene, parser capability SSOT, and diagnostic taxonomy governance.
+- [x] 1.2 Repair runtime contract docs/invariants/schema drift so machine-readable SSOT matches current implementation.
+- [x] 2.1 Add a machine-readable parser capability contract for current engines and a contract test that validates its structure and implementation alignment.
+- [x] 2.2 Stabilize `diagnostic.warning` taxonomy fields and normalize unknown/low-confidence parser warnings into that taxonomy.
+- [x] 2.3 Stop new canonical completion-state writes from using legacy aliases while preserving read compatibility.
+- [x] 3.1 Run targeted pytest coverage for invariants, schema registry, protocol mapping/alignment, parser governance, and observability.
+- [x] 3.2 Run targeted mypy for touched runtime/orchestration protocol files.

@@ -162,7 +162,7 @@
 |------|------|-----------|---------|
 | **Codex** | `server/engines/codex/` | `command_builder` / `config_composer` / `execution_adapter` / `stream_parser` / `trust_folder_strategy` | `oauth_proxy` / `runtime_handler` |
 | **Gemini** | `server/engines/gemini/` | 同上结构 | 同上 + `cli_delegate` / `drivers/` |
-| **iFlow** | `server/engines/iflow/` | 同上结构 | 同上 + `cli_delegate` / `drivers/` |
+| **Qwen** | `server/engines/qwen/` | 同上结构 | `oauth_proxy` / `cli_delegate` / `provider_registry` |
 | **OpenCode** | `server/engines/opencode/` | 同上结构 | 双 OAuth proxy（Google/OpenAI）+ `provider_registry` |
 | **Common** | `server/engines/common/` | 共享配置生成、Trust Registry | 共享 OAuth 逻辑、Callback Server 基类 |
 

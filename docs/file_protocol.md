@@ -62,7 +62,7 @@
   - 固定 fallback 文件名：
     - `codex` -> `assets/codex_config.toml`
     - `gemini` -> `assets/gemini_settings.json`
-    - `iflow` -> `assets/iflow_settings.json`
+    - `qwen` -> `assets/qwen_config.json`
     - `opencode` -> `assets/opencode_config.json`
 - schema 声明失败会 warning；engine config 声明失败仅后台日志，不做用户可见 warning。
 - `runtime.default_options` 为可选 skill 默认运行参数声明：

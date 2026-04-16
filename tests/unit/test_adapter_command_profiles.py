@@ -11,7 +11,6 @@ from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapt
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.codex.adapter.sandbox_probe import CodexSandboxProbeResult
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
-from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.models import SkillManifest
@@ -382,26 +381,19 @@ def test_codex_resume_command_does_not_inject_output_schema_when_available(monke
     assert "--output-schema" not in command
 
 
-def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None:
+def test_qwen_harness_resume_command_uses_passthrough_only(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 
-    adapter = IFlowExecutionAdapter()
-    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/iflow"))
-    monkeypatch.setattr(
-        adapter,
-        "_resolve_profile_flags",
-        lambda *, action, use_profile_defaults: ["--yolo", "--thinking"]
-        if use_profile_defaults and action == "resume"
-        else [],
-    )
+    adapter = QwenExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/qwen"))
 
     command = adapter.build_resume_command(
         prompt="next turn",
         options={"__harness_mode": True},
         session_handle=EngineSessionHandle(
-            engine="iflow",
+            engine="qwen",
             handle_type=EngineSessionHandleType.SESSION_ID,
-            handle_value="sess-iflow",
+            handle_value="sess-qwen",
             created_at_turn=1,
         ),
         passthrough_args=["--custom-flag"],
@@ -409,10 +401,10 @@ def test_iflow_harness_resume_command_uses_passthrough_only(monkeypatch) -> None
     )
 
     assert command == [
-        _platform_cmd("/usr/bin/iflow"),
-        "--resume",
-        "sess-iflow",
+        _platform_cmd("/usr/bin/qwen"),
         "--custom-flag",
+        "--resume",
+        "sess-qwen",
         "-p",
         "next turn",
     ]

@@ -254,9 +254,14 @@ def make_diagnostic_warning_payload(
     severity: Optional[str] = None,
     pattern_kind: Optional[str] = None,
     source_type: Optional[str] = None,
+    authoritative: Optional[bool] = None,
     message: Optional[str] = None,
     path: Optional[str] = None,
     detail: Optional[str] = None,
+    confidence: Optional[float] = None,
+    suppressed_count: Optional[int] = None,
+    original_rows: Optional[int] = None,
+    coalesced_rows: Optional[int] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"code": code}
     if severity is not None:
@@ -265,12 +270,22 @@ def make_diagnostic_warning_payload(
         payload["pattern_kind"] = pattern_kind
     if source_type is not None:
         payload["source_type"] = source_type
+    if authoritative is not None:
+        payload["authoritative"] = authoritative
     if message is not None:
         payload["message"] = message
     if path is not None:
         payload["path"] = path
     if detail is not None:
         payload["detail"] = detail
+    if confidence is not None:
+        payload["confidence"] = confidence
+    if suppressed_count is not None:
+        payload["suppressed_count"] = suppressed_count
+    if original_rows is not None:
+        payload["original_rows"] = original_rows
+    if coalesced_rows is not None:
+        payload["coalesced_rows"] = coalesced_rows
     return payload
 
 

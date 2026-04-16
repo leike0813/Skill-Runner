@@ -19,9 +19,9 @@ SessionTextFinder = Literal["find_session_id_in_text"]
 SessionJsonLineFinder = Literal["find_session_id"]
 ModelCatalogMode = Literal["manifest", "runtime_probe"]
 CredentialPolicyMode = Literal["all_of_sources", "any_of_sources"]
-SettingsValidator = Literal["iflow_oauth_settings"]
+SettingsValidator = Literal["qwen_settings_coding_plan"]
 BootstrapFormat = Literal["json", "text"]
-NormalizeStrategy = Literal["iflow_settings_v1"]
+NormalizeStrategy = Literal["noop"]
 ProcessEventType = Literal["reasoning", "tool_call", "command_execution"]
 UiShellSandboxProbeStrategy = Literal[
     "static_supported",
@@ -41,11 +41,10 @@ ImportValidatorName = Literal[
     "codex_auth_json",
     "gemini_google_accounts_json",
     "gemini_oauth_creds_json",
-    "iflow_accounts_json",
-    "iflow_oauth_creds_json",
     "opencode_auth_json",
     "opencode_antigravity_accounts_json",
     "qwen_oauth_creds_json",
+    "qwen_settings_coding_plan",
 ]
 
 

@@ -195,6 +195,13 @@ class JobOrchestrator:
             if adapter is not None:
                 with contextlib.suppress(OSError, RuntimeError, TypeError, ValueError):
                     await adapter.cancel_run_process(run_id)
+        if request_id:
+            with contextlib.suppress(OSError, RuntimeError, TypeError, ValueError):
+                await self.auth_orchestration_service.cancel_request_auth_sessions(
+                    request_id=request_id,
+                    run_store_backend=run_store,
+                    terminal_reason="run_canceled",
+                )
 
         canceled_error = self._build_canceled_error()
         request_record = (

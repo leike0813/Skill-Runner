@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 
-ENGINE_KEYS = ("codex", "gemini", "iflow", "opencode", "claude", "qwen")
+ENGINE_KEYS = ("codex", "gemini", "opencode", "claude", "qwen")
+LEGACY_READONLY_ENGINE_KEYS = ("iflow",)
 
 ENGINE_AUTH_STRATEGY_NAME = "auth_strategy.yaml"
 

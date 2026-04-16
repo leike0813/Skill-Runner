@@ -8,7 +8,7 @@ from server.services.ui.engine_shell_capability_provider import EngineShellCapab
 
 def test_engine_shell_capability_provider_uses_adapter_profile_ui_shell_metadata() -> None:
     provider = EngineShellCapabilityProvider()
-    for engine in ("codex", "gemini", "iflow", "opencode", "claude"):
+    for engine in ("codex", "gemini", "opencode", "claude", "qwen"):
         capability = provider.get(engine)
         assert capability is not None
         profile = load_adapter_profile(

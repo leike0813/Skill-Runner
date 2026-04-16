@@ -21,7 +21,7 @@
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "gemini", "iflow", "opencode", "claude", "qwen"]
+      "enum": ["codex", "gemini", "opencode", "claude", "qwen"]
     },
     "provider_contract": {
       "type": "object",
@@ -297,8 +297,6 @@
                   "codex_auth_json",
                   "gemini_google_accounts_json",
                   "gemini_oauth_creds_json",
-                  "iflow_accounts_json",
-                  "iflow_oauth_creds_json",
                   "opencode_auth_json",
                   "opencode_antigravity_accounts_json",
                   "qwen_oauth_creds_json"
@@ -328,7 +326,7 @@
             },
             "settings_validator": {
               "type": ["string", "null"],
-              "enum": [null, "iflow_oauth_settings"]
+              "enum": [null]
             }
           }
         },
@@ -369,7 +367,7 @@
             },
             "normalize_strategy": {
               "type": ["string", "null"],
-              "enum": [null, "iflow_settings_v1"]
+              "enum": [null]
             }
           }
         }

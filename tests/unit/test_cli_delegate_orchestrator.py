@@ -45,8 +45,6 @@ class _ManagerStub:
 
     def resolve_transport_start_method(self, **kwargs):
         self.calls.append(("resolve_method", kwargs))
-        if kwargs.get("engine") == "iflow":
-            return "iflow-cli-oauth"
         return "auth"
 
 

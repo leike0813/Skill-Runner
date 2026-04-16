@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import sqlite3
 import subprocess
 import tempfile
 import uuid
@@ -33,6 +34,10 @@ from server.services.engine_management.engine_interaction_gate import (
 )
 from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
+from server.services.orchestration.auth_session_durable_store import (
+    DurableAuthSessionSyncStore,
+    build_auth_session_scope_key,
+)
 from server.services.platform.process_supervisor import process_supervisor
 from server.services.platform.process_termination import terminate_popen_process_tree
 
@@ -92,6 +97,10 @@ class _AuthSession:
     log_root: Path | None = None
     log_paths: TransportLogPaths | None = None
     process_lease_id: Optional[str] = None
+    scope_key: str = ""
+    owner_request_id: Optional[str] = None
+    owner_run_id: Optional[str] = None
+    source_attempt: Optional[int] = None
 
 
 class TrustManagerProtocol(Protocol):
@@ -111,13 +120,15 @@ class EngineAuthFlowManager:
         agent_manager: AgentCliManager | None = None,
         interaction_gate: EngineInteractionGate | None = None,
         trust_manager: TrustManagerProtocol | None = None,
+        durable_store: DurableAuthSessionSyncStore | None = None,
     ) -> None:
         self.agent_manager = agent_manager or AgentCliManager()
         self.interaction_gate = interaction_gate or engine_interaction_gate
         self.trust_manager = trust_manager or run_folder_trust_manager
         self._lock = Lock()
         self._sessions: Dict[str, _AuthSession] = {}
-        self._active_session_id: Optional[str] = None
+        self._active_session_ids_by_scope: Dict[str, str] = {}
+        self._durable_store = durable_store
         bootstrap_bundle = build_engine_auth_bootstrap(
             self,
             agent_home=self.agent_manager.profile.agent_home,
@@ -185,6 +196,23 @@ class EngineAuthFlowManager:
     def _ttl_seconds(self) -> int:
         raw = int(config.SYSTEM.ENGINE_AUTH_DEVICE_PROXY_TTL_SECONDS)
         return max(60, raw)
+
+    def _scope_key(self, engine: str, provider_id: str | None) -> str:
+        return build_auth_session_scope_key(engine, provider_id)
+
+    def _persist_session_locked(self, session: _AuthSession, *, terminal_reason: str | None = None) -> None:
+        if self._durable_store is None:
+            return
+        try:
+            self._durable_store.upsert_snapshot(
+                snapshot=self._to_snapshot(session),
+                request_id=session.owner_request_id,
+                run_id=session.owner_run_id,
+                source_attempt=session.source_attempt,
+                terminal_reason=terminal_reason,
+            )
+        except (OSError, RuntimeError, ValueError, sqlite3.Error, TypeError):
+            logger.warning("failed to persist durable auth session", exc_info=True)
 
     def _session_root(self) -> Path:
         if not self._auth_log_persistence_enabled:
@@ -351,11 +379,17 @@ class EngineAuthFlowManager:
             finalize_hook = getattr(handler, "on_session_finalizing", None)
             if callable(finalize_hook):
                 finalize_hook(session)
-        if self._active_session_id == session.session_id:
-            self._active_session_id = None
+        if session.scope_key and self._active_session_ids_by_scope.get(session.scope_key) == session.session_id:
+            self._active_session_ids_by_scope.pop(session.scope_key, None)
         self._session_store.clear_active(session.transport, session.session_id)
         self._release_session_process_lease(session, reason="auth_session_finalized")
-        self.interaction_gate.release("auth_flow", session.session_id)
+        self._persist_session_locked(session, terminal_reason=session.error)
+        self.interaction_gate.release(
+            "auth_flow",
+            session.session_id,
+            engine=session.engine,
+            provider_id=session.provider_id,
+        )
         self._cleanup_trust_for_session(session)
         if session.log_paths is not None:
             self._auth_log_writer.cleanup_paths(session.log_paths)
@@ -525,21 +559,43 @@ class EngineAuthFlowManager:
             "transport_state_machine": transport_state_machine,
             "orchestrator": orchestrator,
             "log_root": log_root,
+            "scope_key": session.scope_key,
+            "owner_request_id": session.owner_request_id,
+            "owner_run_id": session.owner_run_id,
+            "source_attempt": session.source_attempt,
             "deprecated": False,
             "audit": session.audit,
             "terminal": session.status in _TERMINAL_STATUSES,
         }
 
-    def get_active_session_snapshot(self) -> Dict[str, Any]:
+    def get_active_session_snapshot(
+        self,
+        *,
+        engine: str | None = None,
+        provider_id: str | None = None,
+    ) -> Dict[str, Any]:
         with self._lock:
-            if not self._active_session_id:
-                return {"active": False}
-            session = self._sessions.get(self._active_session_id)
-            if session is None:
-                self._active_session_id = None
-                return {"active": False}
+            session: _AuthSession | None = None
+            if engine is not None:
+                scope_key = self._scope_key(engine, provider_id)
+                session_id = self._active_session_ids_by_scope.get(scope_key)
+                if session_id is None:
+                    return {"active": False}
+                session = self._sessions.get(session_id)
+                if session is None:
+                    self._active_session_ids_by_scope.pop(scope_key, None)
+                    return {"active": False}
+            else:
+                for scope_key, session_id in list(self._active_session_ids_by_scope.items()):
+                    session = self._sessions.get(session_id)
+                    if session is not None:
+                        break
+                    self._active_session_ids_by_scope.pop(scope_key, None)
+                if session is None:
+                    return {"active": False}
             self._refresh_session_locked(session)
             active = session.status not in _TERMINAL_STATUSES
+            self._persist_session_locked(session)
             payload = self._to_snapshot(session)
             payload["active"] = active
             return payload
@@ -552,6 +608,9 @@ class EngineAuthFlowManager:
         provider_id: str | None = None,
         transport: str | None = None,
         callback_base_url: str | None = None,
+        owner_request_id: str | None = None,
+        owner_run_id: str | None = None,
+        source_attempt: int | None = None,
     ) -> Dict[str, Any]:
         if not self._enabled():
             raise ValueError("Engine auth device proxy is disabled")
@@ -563,29 +622,48 @@ class EngineAuthFlowManager:
             transport=transport,
         )
         normalized_engine = plan.engine
+        scope_key = self._scope_key(normalized_engine, plan.provider_id)
         session_id = str(uuid.uuid4())
         with self._lock:
-            if self._active_session_id:
-                active = self._sessions.get(self._active_session_id)
+            active_session_id = self._active_session_ids_by_scope.get(scope_key)
+            if active_session_id:
+                active = self._sessions.get(active_session_id)
                 if active is not None:
                     self._refresh_session_locked(active)
                     self._try_settle_active_session_before_new_start_locked(active)
                     if active.status not in _TERMINAL_STATUSES:
+                        if (
+                            owner_request_id
+                            and owner_request_id == active.owner_request_id
+                            and owner_run_id
+                            and owner_run_id == active.owner_run_id
+                        ):
+                            return self._to_snapshot(active)
                         raise EngineInteractionBusyError(
                             f"Auth session already active: {active.session_id}"
                         )
-                self._active_session_id = None
+                self._active_session_ids_by_scope.pop(scope_key, None)
 
             self.interaction_gate.acquire(
                 "auth_flow",
                 session_id=session_id,
                 engine=normalized_engine,
+                provider_id=plan.provider_id,
             )
-            return self._session_starter.start_from_plan_locked(
+            payload = self._session_starter.start_from_plan_locked(
                 plan=plan,
                 session_id=session_id,
                 callback_base_url=callback_base_url,
             )
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session.scope_key = scope_key
+                session.owner_request_id = owner_request_id
+                session.owner_run_id = owner_run_id
+                session.source_attempt = source_attempt
+                self._active_session_ids_by_scope[scope_key] = session_id
+                self._persist_session_locked(session)
+            return payload
 
     def complete_callback(
         self,
@@ -610,6 +688,7 @@ class EngineAuthFlowManager:
             if session is None:
                 raise KeyError(session_id)
             self._refresh_session_locked(session)
+            self._persist_session_locked(session)
             return self._to_snapshot(session)
 
     def cancel_session(self, session_id: str) -> Dict[str, Any]:
@@ -639,6 +718,7 @@ class EngineAuthFlowManager:
                 if termination_error:
                     session.error = f"{session.error} (terminate error: {termination_error})"
                 self._finalize_active_session(session)
+            self._persist_session_locked(session, terminal_reason="canceled_by_user")
             return self._to_snapshot(session)
 
     def input_session(self, session_id: str, kind: str, value: str) -> Dict[str, Any]:
@@ -647,7 +727,11 @@ class EngineAuthFlowManager:
             if session is None:
                 raise KeyError(session_id)
             self._refresh_session_locked(session)
-            return self._session_input_handler.handle_input(session, kind, value)
+            payload = self._session_input_handler.handle_input(session, kind, value)
+            self._persist_session_locked(session)
+            return payload
 
 
-engine_auth_flow_manager = EngineAuthFlowManager()
+engine_auth_flow_manager = EngineAuthFlowManager(
+    durable_store=DurableAuthSessionSyncStore(Path(config.SYSTEM.RUNS_DB))
+)

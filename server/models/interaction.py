@@ -283,6 +283,9 @@ class AuthSessionStatusResponse(BaseModel):
     available_methods: List[AuthMethod] = Field(default_factory=list)
     selected_method: Optional[AuthMethod] = None
     auth_session_id: Optional[str] = None
+    provider_id: Optional[str] = None
+    transport: Optional[str] = None
+    session_status: Optional[str] = None
     challenge_kind: Optional[AuthChallengeKind] = None
     timeout_sec: Optional[int] = Field(default=None, ge=1)
     created_at: Optional[str] = None

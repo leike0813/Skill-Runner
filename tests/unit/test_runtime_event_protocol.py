@@ -116,6 +116,44 @@ def test_build_rasp_events_coalesces_large_stderr_bursts(tmp_path: Path) -> None
     )
 
 
+def test_build_rasp_events_unknown_engine_uses_stable_diagnostic_taxonomy(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-unknown-engine"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-unknown-engine",
+        engine="unknown",
+        attempt_number=1,
+        status="failed",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    unknown_warning = next(
+        event
+        for event in rasp_events
+        if event.event.type == "diagnostic.warning" and event.data.get("code") == "UNKNOWN_ENGINE_PROFILE"
+    )
+    assert unknown_warning.data["severity"] == "warning"
+    assert unknown_warning.data["pattern_kind"] == "parser_unknown_engine"
+    assert unknown_warning.data["source_type"] == "parser:fallback"
+    assert unknown_warning.data["authoritative"] is False
+
+    low_confidence = next(
+        event
+        for event in rasp_events
+        if event.event.type == "diagnostic.warning" and event.data.get("code") == "LOW_CONFIDENCE_PARSE"
+    )
+    assert low_confidence.data["severity"] == "warning"
+    assert low_confidence.data["pattern_kind"] == "parser_low_confidence"
+    assert low_confidence.data["source_type"] == "parser:confidence"
+    assert low_confidence.data["authoritative"] is False
+
+
 def test_build_rasp_events_coalesces_pretty_json_blocks_below_min_threshold(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-pretty-json"
     logs_dir = run_dir / "logs"
@@ -329,10 +367,12 @@ def test_turn_failed_is_emitted_as_rasp_marker_and_error_rows_become_diagnostics
         if event.event.type == "diagnostic.warning" and event.data.get("source_type") == "type:error"
     )
     assert diagnostic_event.data["pattern_kind"] == "engine_rate_limit_hint"
+    assert diagnostic_event.data["authoritative"] is False
     fcmp_events = build_fcmp_events(rasp_events, status="failed")
     fcmp_diagnostic = next(event for event in fcmp_events if event.type == "diagnostic.warning")
     assert fcmp_diagnostic.data["source_type"] == "type:error"
     assert fcmp_diagnostic.data["pattern_kind"] == "engine_rate_limit_hint"
+    assert fcmp_diagnostic.data["authoritative"] is False
 
 
 def test_no_fallback_final_on_failed_without_turn_completed(tmp_path: Path) -> None:
@@ -725,6 +765,29 @@ def test_fcmp_assistant_final_projects_final_branch_markdown() -> None:
     assert final_event.data["display_origin"] == "final_branch"
     assert "`summary`" in final_event.data["display_text"]
     assert "__SKILL_DONE__" not in final_event.data["display_text"]
+
+
+def test_translate_orchestrator_superseded_event_to_public_fcmp() -> None:
+    specs = translate_orchestrator_event_to_fcmp_specs(
+        engine="codex",
+        type_name="assistant.message.superseded",
+        data={
+            "message_id": "m-1",
+            "message_family_id": "family-1",
+            "reason": "output_repair_started",
+            "repair_round_index": 2,
+            "replacement_expected": True,
+        },
+        updated_at="2026-04-16T00:00:00Z",
+        default_attempt_number=1,
+    )
+
+    assert len(specs) == 1
+    assert specs[0]["type_name"] == "assistant.message.superseded"
+    assert specs[0]["data"]["message_id"] == "m-1"
+    assert specs[0]["data"]["message_family_id"] == "family-1"
+    assert specs[0]["data"]["repair_round_index"] == 2
+    assert specs[0]["data"]["replacement_expected"] is True
 
 
 def test_fcmp_emits_auth_required_and_waiting_auth_transition(tmp_path: Path):

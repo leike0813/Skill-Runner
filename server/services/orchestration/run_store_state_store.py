@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from server.models import CurrentRunProjection, PendingOwner, ResumeCause, RunDispatchEnvelope, RunStateEnvelope, RunStatus
 from server.services.platform import aiosqlite_compat as aiosqlite
 
+from .auth_session_durable_store import DURABLE_AUTH_SESSION_TABLE
 from .run_store_database import RunStoreDatabase
 
 logger = logging.getLogger(__name__)
@@ -312,6 +313,10 @@ class RunRecoveryStateStore:
                     tuple(request_ids),
                 )
                 await conn.execute(
+                    f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE} WHERE request_id IN ({placeholders})",
+                    tuple(request_ids),
+                )
+                await conn.execute(
                     f"DELETE FROM request_current_projection WHERE request_id IN ({placeholders})",
                     tuple(request_ids),
                 )
@@ -350,6 +355,7 @@ class RunRecoveryStateStore:
             await conn.execute("DELETE FROM request_interaction_history")
             await conn.execute("DELETE FROM request_auth_sessions")
             await conn.execute("DELETE FROM request_auth_method_selection")
+            await conn.execute(f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE}")
             await conn.execute("DELETE FROM request_resume_tickets")
             await conn.execute("DELETE FROM request_current_projection")
             await conn.execute("DELETE FROM request_run_state")

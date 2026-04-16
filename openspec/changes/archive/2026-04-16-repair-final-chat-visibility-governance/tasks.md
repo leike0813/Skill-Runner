@@ -1,0 +1,7 @@
+- [x] Add OpenSpec change artifacts and delta spec for repair final visibility governance
+- [x] Extend runtime/chat replay contracts with `assistant.message.superseded`, `message_family_id`, and revision semantics
+- [x] Emit supersede events when output repair takes ownership of an already published invalid final
+- [x] Reuse stable `message_family_id` across repair reruns
+- [x] Add chat replay revision derivation and winner-only chat model behavior
+- [x] Update management chat UI to consume revision mutations without rendering them as ordinary bubbles
+- [x] Add regression tests for protocol, convergence, chat replay, UI model, and observability paths

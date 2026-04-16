@@ -203,7 +203,12 @@ class AuthSessionStarter:
                 self._manager._auth_log_writer.cleanup_paths(log_paths)  # noqa: SLF001
             except (OSError, RuntimeError, ValueError):
                 pass
-            self._manager.interaction_gate.release("auth_flow", session_id)
+            self._manager.interaction_gate.release(
+                "auth_flow",
+                session_id,
+                engine=plan.engine,
+                provider_id=(plan.provider.provider_id if plan.provider is not None else None),
+            )
             # Boundary behavior: re-raise original startup exception after cleanup attempts.
             raise
 
@@ -230,7 +235,11 @@ class AuthSessionStarter:
                 "provider_id": session.provider_id,
             },
         )
-        self._manager._active_session_id = session_id  # noqa: SLF001
+        session.scope_key = self._manager._scope_key(  # noqa: SLF001
+            plan.engine,
+            plan.provider.provider_id if plan.provider is not None else None,
+        )
+        self._manager._active_session_ids_by_scope[session.scope_key] = session_id  # noqa: SLF001
         self._manager._refresh_session_locked(session)  # noqa: SLF001
         return self._manager._to_snapshot(session)  # noqa: SLF001
 

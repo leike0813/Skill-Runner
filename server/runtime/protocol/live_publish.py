@@ -32,7 +32,8 @@ from server.runtime.adapter.common.live_stream_parser_common import (
 )
 
 from .contracts import LiveRuntimeEmitter, LiveStreamParserSession
-from .factories import make_fcmp_event, make_rasp_event
+from .diagnostic_warning_governance import classify_protocol_diagnostic_code
+from .factories import make_diagnostic_warning_payload, make_fcmp_event, make_rasp_event
 from .final_promotion_coordinator import (
     FinalPromotionCoordinator,
     build_process_payload,
@@ -658,6 +659,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         fcmp_publisher: FcmpEventPublisher | None = None,
         rasp_publisher: RaspEventPublisher | None = None,
         run_handle_consumer: Callable[[str], Awaitable[dict[str, Any] | None] | dict[str, Any] | None] | None = None,
+        message_family_id: str | None = None,
     ) -> None:
         self._run_id = run_id
         self._run_dir = run_dir
@@ -687,13 +689,13 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         }
         self._session_id: str | None = None
         self._message_count = 0
-        self._promotion = FinalPromotionCoordinator()
+        self._promotion = FinalPromotionCoordinator(message_family_id=message_family_id)
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
         self._turn_failed_emitted = False
 
     async def on_process_started(self, *, event_ts: datetime | None = None) -> None:
-        if self._engine not in {"gemini", "iflow"}:
+        if self._engine not in {"gemini"}:
             return
         self._emit_turn_marker(marker="start", raw_ref=None, data=None, event_ts=event_ts)
 
@@ -898,6 +900,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 )
                 candidate = self._promotion.register_message_candidate(
                     message_id=message_id,
+                    message_family_id=(
+                        emission.get("message_family_id")
+                        if isinstance(emission.get("message_family_id"), str)
+                        else None
+                    ),
                     text=text,
                     raw_ref=raw_ref_obj if isinstance(raw_ref_obj, dict) else None,
                     details=details,
@@ -976,7 +983,15 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                             f"Run handle changed for attempt {self._attempt_number}: "
                             f"{previous_handle} -> {handle_id}"
                         )
-                        diag_payload = {"code": "RUN_HANDLE_CHANGED", "detail": detail}
+                        taxonomy = classify_protocol_diagnostic_code("RUN_HANDLE_CHANGED")
+                        diag_payload = make_diagnostic_warning_payload(
+                            code="RUN_HANDLE_CHANGED",
+                            severity=taxonomy.get("severity"),
+                            pattern_kind=taxonomy.get("pattern_kind"),
+                            source_type=taxonomy.get("source_type"),
+                            authoritative=taxonomy.get("authoritative"),
+                            detail=detail,
+                        )
                         diag_rasp = make_rasp_event(
                             run_id=self._run_id,
                             seq=1,
@@ -1105,7 +1120,14 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 code = emission.get("code")
                 if not isinstance(code, str) or not code:
                     continue
-                data: dict[str, Any] = {"code": code}
+                taxonomy = classify_protocol_diagnostic_code(code)
+                data: dict[str, Any] = make_diagnostic_warning_payload(
+                    code=code,
+                    severity=taxonomy.get("severity"),
+                    pattern_kind=taxonomy.get("pattern_kind"),
+                    source_type=taxonomy.get("source_type"),
+                    authoritative=taxonomy.get("authoritative"),
+                )
                 diagnostic_details_obj = emission.get("details")
                 if isinstance(diagnostic_details_obj, dict):
                     for key, value in diagnostic_details_obj.items():

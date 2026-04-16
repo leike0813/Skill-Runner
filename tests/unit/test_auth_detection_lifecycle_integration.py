@@ -52,7 +52,7 @@ class _HighAuthInteractiveAdapter:
                 "required": True,
                 "confidence": "high",
                 "subcategory": "oauth_reauth",
-                "matched_pattern_id": "iflow_server_oauth2_required",
+                "matched_pattern_id": "codex_refresh_token_reauth_required",
             }
         }
 
@@ -62,7 +62,7 @@ class _HighAuthInteractiveAdapter:
             "required": True,
             "confidence": "high",
             "subcategory": "oauth_reauth",
-            "matched_pattern_id": "iflow_server_oauth2_required",
+            "matched_pattern_id": "codex_refresh_token_reauth_required",
         }
         return EngineRunResult(
             exit_code=0,
@@ -475,23 +475,23 @@ async def test_high_confidence_auth_detection_overrides_waiting_user(tmp_path: P
     config.freeze()
     try:
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        skill = _build_interactive_skill(tmp_path, skill_id="auth-skill", engine="iflow")
-        run_id = _create_run(skill, "iflow")
+        skill = _build_interactive_skill(tmp_path, skill_id="auth-skill", engine="codex")
+        run_id = _create_run(skill, "codex")
         await _seed_interactive_request(
             local_store,
             request_id="req-auth-high",
             run_id=run_id,
             skill_id=skill.id,
-            engine="iflow",
+            engine="codex",
         )
         orchestrator = _build_orchestrator(local_store)
-        orchestrator.adapters = {"iflow": _HighAuthInteractiveAdapter()}
+        orchestrator.adapters = {"codex": _HighAuthInteractiveAdapter()}
 
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
-                "iflow",
+                "codex",
                 options={"execution_mode": "interactive"},
             )
 

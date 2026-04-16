@@ -531,7 +531,7 @@ async def test_create_pending_auth_single_method_busy_reprojects_active_challeng
     )
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.get_active_session_snapshot",
-        lambda: {
+        lambda **_kwargs: {
             "active": True,
             "session_id": "auth-1",
             "engine": "opencode",
@@ -578,6 +578,42 @@ async def test_create_pending_auth_single_method_busy_reprojects_active_challeng
     assert appended[0]["type_name"] == "auth.challenge.updated"
     state_payload = _read_state_payload(run_dir)
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
+
+
+@pytest.mark.asyncio
+async def test_cancel_request_auth_sessions_clears_pending_and_durable(monkeypatch) -> None:
+    canceled: list[str] = []
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.cancel_session",
+        lambda auth_session_id: canceled.append(auth_session_id) or {"session_id": auth_session_id, "status": "canceled"},
+    )
+    backend = SimpleNamespace(
+        list_active_durable_auth_sessions_for_request=AsyncMock(
+            return_value=[{"auth_session_id": "auth-1"}]
+        ),
+        mark_durable_auth_session_terminal=AsyncMock(),
+        clear_pending_auth=AsyncMock(),
+        clear_pending_auth_method_selection=AsyncMock(),
+        clear_auth_resume_context=AsyncMock(),
+    )
+
+    service = RunAuthOrchestrationService()
+    session_ids = await service.cancel_request_auth_sessions(
+        request_id="req-1",
+        run_store_backend=backend,
+    )
+
+    assert session_ids == ["auth-1"]
+    assert canceled == ["auth-1"]
+    backend.mark_durable_auth_session_terminal.assert_awaited_once_with(
+        "auth-1",
+        status="canceled",
+        last_error=None,
+        terminal_reason="run_canceled",
+    )
+    backend.clear_pending_auth.assert_awaited_once_with("req-1")
+    backend.clear_pending_auth_method_selection.assert_awaited_once_with("req-1")
+    backend.clear_auth_resume_context.assert_awaited_once_with("req-1")
 
 
 @pytest.mark.asyncio

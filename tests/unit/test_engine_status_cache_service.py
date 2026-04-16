@@ -16,8 +16,8 @@ class _FakeManager:
         self._status = {
             "codex": EngineStatus(present=True, version="0.105.0"),
             "gemini": EngineStatus(present=True, version="0.30.0"),
-            "iflow": EngineStatus(present=False, version=""),
             "opencode": EngineStatus(present=True, version="1.2.15"),
+            "qwen": EngineStatus(present=False, version=""),
         }
 
     def collect_status(self):

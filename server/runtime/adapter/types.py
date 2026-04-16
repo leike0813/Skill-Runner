@@ -89,6 +89,7 @@ class RuntimeDiagnosticEvent(TypedDict, total=False):
     severity: str
     pattern_kind: str
     source_type: str
+    authoritative: bool
     message: str
     detail: str
     raw_ref: RuntimeStreamRawRef | None

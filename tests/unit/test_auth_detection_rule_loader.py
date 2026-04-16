@@ -150,8 +150,9 @@ def test_auth_detection_rule_registry_loads_builtin_adapter_profiles() -> None:
     registry.load()
     assert "opencode" in registry._rules_by_engine
     assert "codex" in registry._rules_by_engine
-    assert "iflow" in registry._rules_by_engine
     assert "gemini" in registry._rules_by_engine
+    assert "qwen" in registry._rules_by_engine
+    assert "claude" in registry._rules_by_engine
 
 
 def test_auth_detection_rule_registry_rejects_duplicate_rule_ids(tmp_path: Path) -> None:
@@ -189,7 +190,8 @@ def test_auth_detection_evidence_must_be_declared_in_profiles_not_parser_core() 
     parser_and_core_paths = [
         PROJECT_ROOT / "server" / "engines" / "codex" / "adapter" / "stream_parser.py",
         PROJECT_ROOT / "server" / "engines" / "gemini" / "adapter" / "stream_parser.py",
-        PROJECT_ROOT / "server" / "engines" / "iflow" / "adapter" / "stream_parser.py",
+        PROJECT_ROOT / "server" / "engines" / "claude" / "adapter" / "stream_parser.py",
+        PROJECT_ROOT / "server" / "engines" / "qwen" / "adapter" / "stream_parser.py",
         PROJECT_ROOT / "server" / "engines" / "opencode" / "adapter" / "stream_parser.py",
         PROJECT_ROOT / "server" / "runtime" / "adapter" / "common" / "parser_auth_signal_matcher.py",
         PROJECT_ROOT / "server" / "services" / "orchestration" / "run_job_lifecycle_service.py",
@@ -207,7 +209,7 @@ def test_auth_detection_evidence_must_be_declared_in_profiles_not_parser_core() 
 def test_auth_detection_profiles_and_common_fallback_are_single_source() -> None:
     profile_paths = [
         PROJECT_ROOT / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
-        for engine in ("codex", "gemini", "iflow", "opencode")
+        for engine in ("codex", "gemini", "claude", "opencode", "qwen")
     ]
     for profile_path in profile_paths:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
@@ -243,7 +245,7 @@ def test_common_fallback_must_not_duplicate_engine_high_patterns() -> None:
     They must not be exact duplicates of engine-specific high-confidence rules.
     """
     engine_rules: list[tuple[str, tuple[tuple[str, str, str], ...]]] = []
-    for engine in ("codex", "gemini", "iflow", "opencode"):
+    for engine in ("codex", "gemini", "claude", "opencode", "qwen"):
         profile_path = (
             PROJECT_ROOT / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
         )

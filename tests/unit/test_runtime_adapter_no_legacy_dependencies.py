@@ -5,7 +5,7 @@ from pathlib import Path
 
 def test_legacy_adapter_files_removed() -> None:
     assert not Path("server/adapters/base.py").exists()
-    for engine in ("codex", "gemini", "iflow", "opencode"):
+    for engine in ("codex", "gemini", "opencode", "qwen"):
         assert not Path(f"server/engines/{engine}/adapter/adapter.py").exists()
         assert not Path(f"server/engines/{engine}/adapter/entry.py").exists()
         assert not Path(f"server/engines/{engine}/adapter/prompt_builder.py").exists()

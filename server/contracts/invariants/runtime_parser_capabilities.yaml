@@ -1,0 +1,77 @@
+version: 1
+
+common:
+  unknown_engine_fallback:
+    parser: unknown
+    confidence: 0.2
+    diagnostics:
+      - UNKNOWN_ENGINE_PROFILE
+    taxonomy:
+      severity: warning
+      pattern_kind: parser_unknown_engine
+      source_type: parser:fallback
+      authoritative: false
+  low_confidence_parse_threshold:
+    lt: 0.7
+    taxonomy:
+      severity: warning
+      pattern_kind: parser_low_confidence
+      source_type: parser:confidence
+      authoritative: false
+
+engines:
+  codex:
+    semantic_turn_markers:
+      start: true
+      complete: true
+      failed: true
+    generic_error_governance: true
+    auth_signal_snapshot: true
+    structured_payload_extraction: false
+    process_event_extraction: true
+    run_handle_extraction: true
+    parser_confidence_reporting: true
+  claude:
+    semantic_turn_markers:
+      start: true
+      complete: true
+      failed: false
+    generic_error_governance: false
+    auth_signal_snapshot: true
+    structured_payload_extraction: false
+    process_event_extraction: true
+    run_handle_extraction: true
+    parser_confidence_reporting: true
+  gemini:
+    semantic_turn_markers:
+      start: true
+      complete: true
+      failed: false
+    generic_error_governance: false
+    auth_signal_snapshot: true
+    structured_payload_extraction: true
+    process_event_extraction: false
+    run_handle_extraction: true
+    parser_confidence_reporting: true
+  opencode:
+    semantic_turn_markers:
+      start: true
+      complete: true
+      failed: false
+    generic_error_governance: false
+    auth_signal_snapshot: true
+    structured_payload_extraction: false
+    process_event_extraction: true
+    run_handle_extraction: true
+    parser_confidence_reporting: true
+  qwen:
+    semantic_turn_markers:
+      start: true
+      complete: true
+      failed: false
+    generic_error_governance: false
+    auth_signal_snapshot: true
+    structured_payload_extraction: false
+    process_event_extraction: true
+    run_handle_extraction: true
+    parser_confidence_reporting: true

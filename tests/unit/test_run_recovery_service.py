@@ -149,6 +149,8 @@ async def test_redrive_resume_ticket_missing_run_dir_reconciles_failed():
         clear_pending_interaction=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
         clear_pending_auth=AsyncMock(),
+        list_active_durable_auth_sessions_for_request=AsyncMock(return_value=[]),
+        mark_durable_auth_session_terminal=AsyncMock(),
         clear_engine_session_handle=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
     )

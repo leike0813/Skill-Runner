@@ -188,9 +188,18 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
         for line in (run_dir / ".audit" / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    orchestrator_rows = [
+        json.loads(line)
+        for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert repair_rows[0]["deterministic_repair_applied"] is True
     assert repair_rows[0]["deterministic_repair_succeeded"] is True
     assert repair_rows[0]["schema_valid"] is True
+    superseded = next(row for row in orchestrator_rows if row["type"] == "assistant.message.superseded")
+    assert superseded["data"]["message_id"].startswith("m_1_")
+    assert superseded["data"]["message_family_id"] == superseded["data"]["message_id"]
+    assert superseded["data"]["repair_round_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -291,3 +300,190 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
     assert result.pending_interaction_candidate is not None
     assert result.pending_interaction_candidate["prompt"] == "Need your choice"
     assert result.pending_interaction_candidate["interaction_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_convergence_canonicalizes_codex_compat_final_before_validation(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = _build_skill(tmp_path, interactive=True)
+    run_output_schema_service.materialize(skill=skill, execution_mode="interactive", run_dir=run_dir)
+    adapter = _FakeRepairAdapter([])
+    audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
+    compat_final = '{"__SKILL_DONE__": true, "value": "done", "message": null, "ui_hints": null}'
+    initial_result = EngineRunResult(
+        exit_code=0,
+        raw_stdout=compat_final,
+        raw_stderr="",
+        artifacts_created=[],
+    )
+
+    result = await run_output_convergence_service.converge(
+        adapter=adapter,
+        skill=skill,
+        input_data={"input": {}, "parameter": {}},
+        run_dir=run_dir,
+        request_id="req-1",
+        run_store_backend=_HandleStore(
+            EngineSessionHandle(
+                engine="codex",
+                handle_type=EngineSessionHandleType.SESSION_ID,
+                handle_value="thread-1",
+                created_at_turn=1,
+            ).model_dump(mode="json")
+        ),
+        run_id="run-1",
+        engine_name="codex",
+        execution_mode="interactive",
+        attempt_number=3,
+        options={"execution_mode": "interactive"},
+        initial_result=initial_result,
+        initial_runtime_parse_result=adapter.parse_runtime_stream(
+            stdout_raw=compat_final.encode("utf-8"),
+            stderr_raw=b"",
+        ),
+        auth_detection_result=_auth_result(),
+        auth_detection_high=False,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
+        append_orchestrator_event=_append_orchestrator_event(audit_service),
+        append_output_repair_record=audit_service.append_output_repair_record,
+        live_runtime_emitter_factory=lambda: SimpleNamespace(),
+    )
+
+    assert result.convergence_state == "not_needed"
+    assert result.branch_resolved == "final"
+    assert result.output_data == {"value": "done"}
+    assert result.pending_interaction_candidate is None
+    assert result.schema_output_errors == []
+    assert adapter.repair_run_count == 0
+    assert not (run_dir / ".audit" / "output_repair.3.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_convergence_canonicalizes_codex_compat_pending_before_validation(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = _build_skill(tmp_path, interactive=True)
+    run_output_schema_service.materialize(skill=skill, execution_mode="interactive", run_dir=run_dir)
+    adapter = _FakeRepairAdapter([])
+    audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
+    compat_pending = json.dumps(
+        {
+            "__SKILL_DONE__": False,
+            "value": None,
+            "message": "Need your choice",
+            "ui_hints": {
+                "kind": "choose_one",
+                "prompt": None,
+                "hint": "Pick one.",
+                "options": [{"label": "A", "value": "a"}],
+                "files": None,
+            },
+        },
+        ensure_ascii=False,
+    )
+    initial_result = EngineRunResult(
+        exit_code=0,
+        raw_stdout=compat_pending,
+        raw_stderr="",
+        artifacts_created=[],
+    )
+
+    result = await run_output_convergence_service.converge(
+        adapter=adapter,
+        skill=skill,
+        input_data={"input": {}, "parameter": {}},
+        run_dir=run_dir,
+        request_id="req-1",
+        run_store_backend=_HandleStore(
+            EngineSessionHandle(
+                engine="codex",
+                handle_type=EngineSessionHandleType.SESSION_ID,
+                handle_value="thread-1",
+                created_at_turn=1,
+            ).model_dump(mode="json")
+        ),
+        run_id="run-1",
+        engine_name="codex",
+        execution_mode="interactive",
+        attempt_number=3,
+        options={"execution_mode": "interactive"},
+        initial_result=initial_result,
+        initial_runtime_parse_result=adapter.parse_runtime_stream(
+            stdout_raw=compat_pending.encode("utf-8"),
+            stderr_raw=b"",
+        ),
+        auth_detection_result=_auth_result(),
+        auth_detection_high=False,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
+        append_orchestrator_event=_append_orchestrator_event(audit_service),
+        append_output_repair_record=audit_service.append_output_repair_record,
+        live_runtime_emitter_factory=lambda: SimpleNamespace(),
+    )
+
+    assert result.convergence_state == "not_needed"
+    assert result.branch_resolved == "pending"
+    assert result.output_data == {}
+    assert result.pending_interaction_candidate is not None
+    assert result.pending_interaction_candidate["kind"] == "choose_one"
+    assert result.pending_interaction_candidate["prompt"] == "Need your choice"
+    assert adapter.repair_run_count == 0
+
+
+@pytest.mark.asyncio
+async def test_convergence_exhausted_emits_supersede_for_last_invalid_final(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = _build_skill(tmp_path)
+    run_output_schema_service.materialize(skill=skill, execution_mode="auto", run_dir=run_dir)
+    adapter = _FakeRepairAdapter(["still bad", "still bad again", "still bad third"])
+    audit_service = RunAuditService()
+    interaction_service = RunInteractionLifecycleService()
+    initial_result = EngineRunResult(exit_code=0, raw_stdout="not-json", raw_stderr="", artifacts_created=[])
+
+    result = await run_output_convergence_service.converge(
+        adapter=adapter,
+        skill=skill,
+        input_data={"input": {}, "parameter": {}},
+        run_dir=run_dir,
+        request_id="req-1",
+        run_store_backend=_HandleStore(
+            EngineSessionHandle(
+                engine="codex",
+                handle_type=EngineSessionHandleType.SESSION_ID,
+                handle_value="thread-1",
+                created_at_turn=1,
+            ).model_dump(mode="json")
+        ),
+        run_id="run-1",
+        engine_name="codex",
+        execution_mode="auto",
+        attempt_number=1,
+        options={},
+        initial_result=initial_result,
+        initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"not-json", stderr_raw=b""),
+        auth_detection_result=_auth_result(),
+        auth_detection_high=False,
+        resolve_structured_output_candidate=resolve_structured_output_candidate,
+        strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
+        extract_pending_interaction=interaction_service.extract_pending_interaction,
+        append_orchestrator_event=_append_orchestrator_event(audit_service),
+        append_output_repair_record=audit_service.append_output_repair_record,
+        live_runtime_emitter_factory=lambda: SimpleNamespace(),
+    )
+
+    assert result.convergence_state == "exhausted"
+    orchestrator_rows = [
+        json.loads(line)
+        for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    superseded_rows = [row for row in orchestrator_rows if row["type"] == "assistant.message.superseded"]
+    assert len(superseded_rows) == 4
+    assert superseded_rows[-1]["data"]["repair_round_index"] == 4

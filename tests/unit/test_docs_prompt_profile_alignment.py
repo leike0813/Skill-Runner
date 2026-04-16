@@ -24,7 +24,6 @@ def test_prompt_organization_ssot_engine_mappings_match_profiles() -> None:
         "opencode": f"- `opencode`: `{_load_profile_prompt_template('opencode')}`",
         "qwen": f"- `qwen`: `{_load_profile_prompt_template('qwen')}`",
         "gemini": f"- `gemini`: `{_load_profile_prompt_template('gemini')}`",
-        "iflow": f"- `iflow`: `{_load_profile_prompt_template('iflow')}`",
     }
 
     for line in expected_lines.values():

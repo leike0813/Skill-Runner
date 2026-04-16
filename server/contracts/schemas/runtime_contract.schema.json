@@ -1141,6 +1141,7 @@
             "auth.session.failed",
             "auth.session.timed_out",
             "auth.session.busy",
+            "assistant.message.superseded",
             "error.run.failed",
             "diagnostic.output_repair.started",
             "diagnostic.output_repair.round.started",
@@ -1636,6 +1637,12 @@
                     "type": [
                       "string",
                       "null"
+                    ],
+                    "enum": [
+                      "info",
+                      "warning",
+                      "error",
+                      null
                     ]
                   },
                   "pattern_kind": {
@@ -1649,6 +1656,9 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "authoritative": {
+                    "type": "boolean"
                   },
                   "message": {
                     "type": [
@@ -2346,6 +2356,8 @@
                     "enum": [
                       "completed",
                       "interrupted",
+                      "waiting_user",
+                      "waiting_auth",
                       "awaiting_user_input",
                       "awaiting_auth",
                       "unknown"
@@ -2420,6 +2432,10 @@
                     "type": "string"
                   },
                   "replaces_message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message_family_id": {
                     "type": "string",
                     "minLength": 1
                   }
@@ -2500,6 +2516,10 @@
                   "replaces_message_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "message_family_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -2535,6 +2555,12 @@
                     "type": [
                       "string",
                       "null"
+                    ],
+                    "enum": [
+                      "info",
+                      "warning",
+                      "error",
+                      null
                     ]
                   },
                   "pattern_kind": {
@@ -2548,6 +2574,9 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "authoritative": {
+                    "type": "boolean"
                   },
                   "message": {
                     "type": [
@@ -2770,12 +2799,12 @@
             "assistant_process",
             "assistant_message",
             "assistant_final",
+            "assistant_revision",
             "orchestration_notice"
           ]
         },
         "text": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "correlation": {
           "type": "object"
@@ -2860,6 +2889,7 @@
             "assistant.message.intermediate",
             "assistant.message.promoted",
             "assistant.message.final",
+            "assistant.message.superseded",
             "user.input.required",
             "auth.required",
             "auth.challenge.updated",
@@ -3128,6 +3158,10 @@
                   "replaces_message_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "message_family_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -3179,11 +3213,58 @@
                   "replaces_message_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "message_family_id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
                   "message_id",
                   "text"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assistant.message.superseded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "properties": {
+                  "message_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message_family_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repair_round_index": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "replacement_expected": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "message_id",
+                  "message_family_id",
+                  "reason",
+                  "repair_round_index",
+                  "replacement_expected"
                 ]
               }
             }
@@ -3529,6 +3610,12 @@
                     "type": [
                       "string",
                       "null"
+                    ],
+                    "enum": [
+                      "info",
+                      "warning",
+                      "error",
+                      null
                     ]
                   },
                   "pattern_kind": {
@@ -3542,6 +3629,9 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "authoritative": {
+                    "type": "boolean"
                   },
                   "message": {
                     "type": [

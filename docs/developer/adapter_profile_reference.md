@@ -176,14 +176,14 @@ CLI 工具管理配置，由 `AgentCliManager` 消费。
 | `extra_dirs` | `str[]` | 需创建的额外目录（相对 agent_home） |
 | `bootstrap_target_relpath` | `str` | 引导配置写入路径（相对 agent_home） |
 | `bootstrap_format` | `"json" \| "text"` | 引导配置文件格式 |
-| `normalize_strategy` | `"iflow_settings_v1" \| null` | 可选的 settings 格式标准化策略 |
+| `normalize_strategy` | `"noop" \| null` | 可选的 bootstrap 标准化策略；当前活跃引擎默认不使用专门 normalizer |
 
 ---
 
 ## 完整示例
 
 参见现有引擎的 profile 文件：
-- `server/engines/iflow/adapter/adapter_profile.json` — 标准单 provider 引擎的典型配置
+- `server/engines/qwen/adapter/adapter_profile.json` — 多 provider 引擎与 ui shell 配置的典型示例
 - `server/engines/codex/adapter/adapter_profile.json` — 含 `skill_defaults_path` 的配置
 - `server/engines/opencode/adapter/adapter_profile.json` — `runtime_probe` 模式模型目录
 

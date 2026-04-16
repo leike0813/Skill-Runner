@@ -110,6 +110,7 @@ def classify_engine_error_payload(payload: dict[str, Any]) -> dict[str, Any] | N
         "severity": severity,
         "pattern_kind": pattern_kind,
         "source_type": source_type,
+        "authoritative": False,
     }
     if message is not None:
         result["message"] = message

@@ -164,7 +164,7 @@ class DemoExecutionAdapter(EngineExecutionAdapter):
 
 ### `config_composer.py` / `command_builder.py` / `stream_parser.py`
 
-按引擎 CLI 的实际行为实现。可参考现有引擎（如 `server/engines/iflow/adapter/`）。
+按引擎 CLI 的实际行为实现。可参考现有引擎（如 `server/engines/qwen/adapter/`）。
 
 ## Step 4: Implement Auth
 
@@ -241,7 +241,7 @@ cli_delegate:
 ### 6.1 `server/config_registry/keys.py`
 
 ```python
-ENGINE_KEYS = ("codex", "demo", "gemini", "iflow", "opencode")
+ENGINE_KEYS = ("codex", "demo", "gemini", "opencode", "claude", "qwen")
 ```
 
 ### 6.2 `server/services/engine_management/engine_adapter_registry.py`

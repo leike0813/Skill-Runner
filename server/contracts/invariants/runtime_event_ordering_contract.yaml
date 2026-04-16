@@ -21,6 +21,7 @@ event_kinds:
   - agent.turn_failed
   - interaction.prompted
   - assistant.message.final
+  - assistant.message.superseded
   - user.input.required
   - auth.required
   - auth.session.busy
@@ -49,6 +50,9 @@ precedence_rules:
     before: assistant.message.final
     after: conversation.state.changed.succeeded
   - id: PR-05
+    before: assistant.message.final
+    after: assistant.message.superseded
+  - id: PR-05B
     before: conversation.state.changed.failed
     after: projection.terminal.result
   - id: PR-06
@@ -154,6 +158,9 @@ lifecycle_normalization_rules:
     - conversation.failed
   normalize_to: conversation.state.changed
   terminal_payload_field: terminal
+  waiting_auth_precedence:
+    semantic_turn_failed_is_evidence_only: true
+    terminal_failed_projection_forbidden: true
   auth_routes:
     multi_method:
       requires_method_selection: true

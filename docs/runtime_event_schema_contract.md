@@ -34,6 +34,7 @@ Schema 文件：
 - 回退最小安全载荷，尽量不中断主流程。
 - phase 3A 预留的 `diagnostic.output_repair.*` 目前是 schema-reserved internal event surface；实现前不要求已有生产者。
 - 普通 engine `type:"error"` 与 `item.type:"error"` 统一归入 `diagnostic.warning`，并通过 `pattern_kind` / `source_type` / `message` 暴露治理元数据。
+- parser/protocol fallback warning 的稳定治理字段还包括 `severity` 与 `authoritative`；当前这类 warning 默认 `authoritative=false`。
 
 3. 读取路径：读兼容
 - 旧历史中不合规行被过滤；
@@ -126,55 +127,78 @@ Schema 文件：
 - FCMP terminal `conversation.state.changed.data.terminal.error` SHOULD 优先使用上述摘要字段。
 - 若 canonical status 最终为 `waiting_auth`，semantic `agent.turn_failed.message` 不应进入 terminal failed 摘要；它应被消费到 waiting-auth 的 `last_error` / `instructions` 展示链。
 
-11. `interaction.auto_decide.timeout`
+11. parser capability contract
+- `server/contracts/invariants/runtime_parser_capabilities.yaml` 是 parser 能力差异的机器可读真源。
+- 它描述 engine parser 当前稳定承诺的能力面，例如：
+  - semantic turn markers
+  - generic error governance
+  - auth signal snapshot
+  - structured payload extraction
+  - process event extraction
+  - run handle extraction
+- 后续 golden fixture / mock framework 应以该合同区分公共协议金例与 engine 专属金例。
+12. `interaction.auto_decide.timeout`
 - `interaction_id`, `resolution_mode=auto_decide_timeout`, `policy`, `accepted_at`, `timeout_sec?`
 
-12. `current_run_projection`
+13. `current_run_projection`
 - run 的唯一 current truth
 - `status`, `current_attempt`, `pending_owner`, `resume_ticket_id?`, `resume_cause?`
 - waiting/running/queued 只存在于 projection，不写 terminal result
 
-13. `terminal_run_result`
+14. `terminal_run_result`
 - 仅允许 terminal status
 - 当前合同兼容 `success|succeeded|failed|canceled`
 - 非 terminal 状态必须通过 projection 读取，不得通过 `/result` 或 `result/result.json` 读取
 
-14. `run_state_envelope`
+15. `run_state_envelope`
 - 对应 `.state/state.json`
 - 是 current truth 的 canonical 文件 schema
 - waiting payload 内嵌于 `pending.owner + pending.payload`
 
-15. `run_dispatch_envelope`
+16. `run_dispatch_envelope`
 - 对应 `.state/dispatch.json`
 - 是 dispatch lifecycle 的 canonical 文件 schema
 - 只允许 `created|admitted|dispatch_scheduled|worker_claimed|attempt_materializing`
 
-16. `fcmp_event_envelope.correlation`
+17. `fcmp_event_envelope.correlation`
 - 允许以 additive 方式承载 live publish 关联锚点
 - 当前 canonical 用法为 `correlation.publish_id`
 
-17. `rasp_event_envelope.correlation`
+18. `rasp_event_envelope.correlation`
 - live publish 下的 FCMP / RASP 关联同样通过 `correlation.publish_id` 表达
 - 不改变 RASP 的 attempt-local `seq` 语义
 
-18. lifecycle normalization
+19. lifecycle normalization
 - FCMP conversation lifecycle 已收敛为单轨：只保留 `conversation.state.changed`
 - `conversation.started`、`conversation.completed`、`conversation.failed` 不再是合法 FCMP 类型
 - terminal success/failure/cancel 统一通过 `conversation.state.changed.data.terminal` 表达
 
-19. `chat_replay_event_envelope`
+20. `chat_replay_event_envelope`
 - 聊天气泡的 canonical persisted truth
 - `seq` 为 run-scoped 全局递增顺序
 - `role` 只允许 `user|assistant|system`
 - `kind` 只允许：
   - `interaction_reply`
   - `auth_submission`
+  - `assistant_process`
+  - `assistant_message`
   - `assistant_final`
+  - `assistant_revision`
   - `orchestration_notice`
 - `text` 为最终可渲染文本
 - `correlation` 允许包含 `interaction_id`、`auth_session_id`、`submission_kind`、`fcmp_seq`
 
-20. `chat_replay_history_response`
+21. `assistant.message.superseded`
+- public FCMP event，用于表达某条之前已公开的 final 已被 repair 接管
+- 不驱动状态迁移，只改变 chat winner 可见性
+- payload 至少包含：
+  - `message_id`
+  - `message_family_id`
+  - `reason=output_repair_started`
+  - `repair_round_index`
+  - `replacement_expected=true`
+
+22. `chat_replay_history_response`
 - `/chat/history` 的 canonical 响应结构
 - 包含：
   - `events`

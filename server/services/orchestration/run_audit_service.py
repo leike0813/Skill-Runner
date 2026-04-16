@@ -137,6 +137,20 @@ class RunAuditService:
                 "reason_code": "DONE_SIGNAL_FOUND",
                 "diagnostics": diagnostics,
             }
+        if status == RunStatus.WAITING_USER:
+            diagnostics.append("DONE_MARKER_MISSING")
+            return {
+                "state": "waiting_user",
+                "reason_code": "WAITING_USER_INPUT",
+                "diagnostics": diagnostics,
+            }
+        if status == RunStatus.WAITING_AUTH:
+            diagnostics.append("DONE_MARKER_MISSING")
+            return {
+                "state": "waiting_auth",
+                "reason_code": "WAITING_AUTH_REQUIRED",
+                "diagnostics": diagnostics,
+            }
         if process_exit_code is not None and int(process_exit_code) != 0:
             if done_marker_found:
                 diagnostics.append("DONE_MARKER_PROCESS_FAILURE_CONFLICT")
@@ -176,20 +190,6 @@ class RunAuditService:
             return {
                 "state": "completed",
                 "reason_code": "DONE_MARKER_FOUND",
-                "diagnostics": diagnostics,
-            }
-        if status == RunStatus.WAITING_USER:
-            diagnostics.append("DONE_MARKER_MISSING")
-            return {
-                "state": "awaiting_user_input",
-                "reason_code": "WAITING_USER_INPUT",
-                "diagnostics": diagnostics,
-            }
-        if status == RunStatus.WAITING_AUTH:
-            diagnostics.append("DONE_MARKER_MISSING")
-            return {
-                "state": "awaiting_auth",
-                "reason_code": "WAITING_AUTH_REQUIRED",
                 "diagnostics": diagnostics,
             }
         if status in {RunStatus.FAILED, RunStatus.CANCELED}:

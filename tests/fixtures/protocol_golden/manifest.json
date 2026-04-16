@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "fixture_id": "common_outcome_waiting_auth_smoke",
+      "path": "common/common_outcome_waiting_auth_smoke/fixture.json",
+      "layer": "outcome_core",
+      "engine": "common",
+      "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "codex_turn_failed_protocol_smoke",
+      "path": "codex/codex_turn_failed_protocol_smoke/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codex",
+      "source": "synthetic_minimal"
+    }
+  ]
+}

@@ -142,6 +142,8 @@ sequenceDiagram
 - repair retries 属于同一 attempt 的 `internal_round`；唯一执行者是 orchestrator output convergence executor
 - deterministic parse repair、schema repair、result-file fallback 和 interactive waiting/completion legacy heuristics 都属于同一 output convergence 治理链
 - repair exhaustion只回落到 legacy lifecycle fallback，不直接改写 FCMP 终态
+- repair 接管已公开 final 时，orchestrator 必须发出 `assistant.message.superseded`；该事件不驱动状态迁移，只改变聊天 winner 可见性
+- 同一 repair family 在主聊天面始终只有一个 winner；被 supersede 的旧 final 永远只保留为折叠历史
 - `<ASK_USER_YAML>` 与 interactive soft completion 若在当前实现中仍出现，只属于 legacy rollout 背景，不是本时序文档描述的目标协议
 - failed/canceled terminal SHOULD 在 `data.terminal.error.code/message` 中携带错误摘要（message 为长度受控摘要）。
 - 过程语义映射：`agent.reasoning/tool_call/command_execution` 必须映射为 `assistant.reasoning/tool_call/command_execution`。

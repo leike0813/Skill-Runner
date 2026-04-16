@@ -184,7 +184,26 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
                     text,
                     {
                         "message_id": data.get("message_id"),
+                        "message_family_id": data.get("message_family_id"),
                         "replaces_message_id": data.get("replaces_message_id"),
+                        "fcmp_seq": seq,
+                    },
+                )
+            )
+    elif type_name == "assistant.message.superseded":
+        message_id = _safe_text(data.get("message_id"))
+        if message_id:
+            specs.append(
+                (
+                    ChatReplayRole.ASSISTANT.value,
+                    ChatReplayKind.ASSISTANT_REVISION.value,
+                    "",
+                    {
+                        "message_id": message_id,
+                        "message_family_id": data.get("message_family_id"),
+                        "reason": data.get("reason"),
+                        "repair_round_index": data.get("repair_round_index"),
+                        "replacement_expected": bool(data.get("replacement_expected", True)),
                         "fcmp_seq": seq,
                     },
                 )
@@ -266,7 +285,7 @@ def derive_chat_replay_rows_from_fcmp(row: dict[str, Any]) -> List[dict[str, Any
 
     rows: List[dict[str, Any]] = []
     for role, kind, text, row_correlation in specs:
-        if not text:
+        if not text and kind != ChatReplayKind.ASSISTANT_REVISION.value:
             continue
         event = make_chat_replay_event(
             run_id=run_id,

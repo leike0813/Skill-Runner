@@ -105,7 +105,7 @@ fcmp_mapping:
       source: running
       target: waiting_user
       trigger: turn.needs_input
-  - id: FM-03
+    - id: FM-03
       source: running
       target: waiting_auth
       trigger: auth.required
@@ -140,6 +140,13 @@ fcmp_mapping:
       source: running
       target: canceled
       trigger: run.canceled
+  supplementary_public_events:
+    - id: FM-SUP-01
+      event_type: assistant.message.superseded
+      notes:
+        - emitted when a previously published final enters repair ownership
+        - does not drive state changes
+        - only affects chat winner visibility within a repair family
   paired_events:
     - id: PE-01
       event_type: auth.completed
@@ -229,101 +236,101 @@ ordering_rules:
     rule: orphan_queued_run_reconciles_terminal
   - id: OR-25
     rule: runtime_slot_release_on_nonstarted_exit
-  - id: OR-23
-    rule: current_projection_and_resume_ticket_consistent
-  - id: OR-24
-    rule: fcmp_current_state_must_match_projection
-  - id: OR-25
-    rule: queued_requires_state_file
   - id: OR-26
-    rule: dispatch_phase_monotonic
+    rule: current_projection_and_resume_ticket_consistent
   - id: OR-27
-    rule: state_file_single_source_of_truth
+    rule: fcmp_current_state_must_match_projection
   - id: OR-28
-    rule: worker_claim_precedes_attempt_start
+    rule: queued_requires_state_file
   - id: OR-29
-    rule: attempt_audit_skeleton_precedes_turn_started
+    rule: dispatch_phase_monotonic
   - id: OR-30
-    rule: terminal_result_terminal_only
+    rule: state_file_single_source_of_truth
   - id: OR-31
-    rule: pending_owner_embedded_in_state
+    rule: worker_claim_precedes_attempt_start
   - id: OR-32
-    rule: audit_files_are_history_only
+    rule: attempt_audit_skeleton_precedes_turn_started
   - id: OR-33
-    rule: parser_diagnostics_non_authoritative
+    rule: terminal_result_terminal_only
   - id: OR-34
-    rule: state_and_dispatch_consistent
+    rule: pending_owner_embedded_in_state
   - id: OR-35
-    rule: fcmp_live_publish_precedes_audit_mirror
+    rule: audit_files_are_history_only
   - id: OR-36
-    rule: rasp_live_publish_precedes_audit_mirror
+    rule: parser_diagnostics_non_authoritative
   - id: OR-37
-    rule: sse_delivery_must_not_depend_on_fcmp_file_materialization
+    rule: state_and_dispatch_consistent
   - id: OR-38
-    rule: history_memory_first_audit_fallback
+    rule: fcmp_live_publish_precedes_audit_mirror
   - id: OR-39
+    rule: rasp_live_publish_precedes_audit_mirror
+  - id: OR-40
+    rule: sse_delivery_must_not_depend_on_fcmp_file_materialization
+  - id: OR-41
+    rule: history_memory_first_audit_fallback
+  - id: OR-42
     rule: fcmp_seq_assigned_at_publish_time
-  - id: OR-40
+  - id: OR-43
     rule: interactive_ask_user_evidence_blocks_soft_completion
-  - id: OR-41
+  - id: OR-44
     rule: interactive_invalid_structured_output_waits_not_fails
-  - id: OR-42
-    rule: interactive_missing_structured_output_waits_not_fails
-  - id: OR-43
-    rule: repair_must_not_promote_ask_user_turn
-  - id: OR-40
-    rule: auth_completion_requires_terminal_session_state
-  - id: OR-41
-    rule: auth_ready_must_not_drive_resume
-  - id: OR-42
-    rule: waiting_auth_exit_requires_auth_completed
-  - id: OR-43
-    rule: resume_ticket_auth_completed_requires_canonical_completion
-  - id: OR-44
-    rule: single_method_busy_reprojects_challenge_without_resume
-  - id: OR-40
-    rule: rasp_seq_assigned_at_publish_time
-  - id: OR-41
-    rule: fcmp_rasp_publish_order_must_be_stable_per_emission
-  - id: OR-42
-    rule: publish_order_is_canonical_for_active_runtime_events
-  - id: OR-43
-    rule: audit_mirror_must_not_redefine_active_event_order
-  - id: OR-44
-    rule: rasp_order_defined_by_live_parser_emission_order
   - id: OR-45
-    rule: fcmp_order_defined_by_shared_publisher_sequence
+    rule: interactive_missing_structured_output_waits_not_fails
   - id: OR-46
-    rule: auth_selection_must_precede_dependent_challenge_publication
+    rule: repair_must_not_promote_ask_user_turn
   - id: OR-47
-    rule: waiting_state_must_not_emit_terminal_result_projection
+    rule: auth_completion_requires_terminal_session_state
   - id: OR-48
-    rule: history_replay_must_preserve_canonical_publish_order
+    rule: auth_ready_must_not_drive_resume
   - id: OR-49
-    rule: batch_backfill_must_not_override_live_order
+    rule: waiting_auth_exit_requires_auth_completed
   - id: OR-50
-    rule: conversation_lifecycle_normalized_to_state_changed_only
+    rule: resume_ticket_auth_completed_requires_canonical_completion
   - id: OR-51
-    rule: single_method_auth_challenge_bypasses_selection
+    rule: single_method_busy_reprojects_challenge_without_resume
   - id: OR-52
-    rule: single_method_auth_busy_reprojects_existing_challenge
+    rule: rasp_seq_assigned_at_publish_time
   - id: OR-53
-    rule: terminal_failed_should_include_error_summary_when_available
+    rule: fcmp_rasp_publish_order_must_be_stable_per_emission
   - id: OR-54
-    rule: auth_signal_sources_single_source
+    rule: publish_order_is_canonical_for_active_runtime_events
   - id: OR-55
-    rule: lifecycle_consumes_auth_signal_snapshot_only
+    rule: audit_mirror_must_not_redefine_active_event_order
   - id: OR-56
-    rule: low_confidence_auth_signal_must_not_enter_waiting_auth
+    rule: rasp_order_defined_by_live_parser_emission_order
   - id: OR-57
-    rule: rasp_auth_signal_diagnostic_payload_structured
+    rule: fcmp_order_defined_by_shared_publisher_sequence
   - id: OR-58
-    rule: rasp_turn_marker_per_attempt_unique
+    rule: auth_selection_must_precede_dependent_challenge_publication
   - id: OR-59
-    rule: rasp_turn_marker_ordered
+    rule: waiting_state_must_not_emit_terminal_result_projection
   - id: OR-60
-    rule: fcmp_must_not_emit_assistant_turn_markers
+    rule: history_replay_must_preserve_canonical_publish_order
   - id: OR-61
-    rule: waiting_auth_may_coexist_with_turn_failed_evidence
+    rule: batch_backfill_must_not_override_live_order
   - id: OR-62
+    rule: conversation_lifecycle_normalized_to_state_changed_only
+  - id: OR-63
+    rule: single_method_auth_challenge_bypasses_selection
+  - id: OR-64
+    rule: single_method_auth_busy_reprojects_existing_challenge
+  - id: OR-65
+    rule: terminal_failed_should_include_error_summary_when_available
+  - id: OR-66
+    rule: auth_signal_sources_single_source
+  - id: OR-67
+    rule: lifecycle_consumes_auth_signal_snapshot_only
+  - id: OR-68
+    rule: low_confidence_auth_signal_must_not_enter_waiting_auth
+  - id: OR-69
+    rule: rasp_auth_signal_diagnostic_payload_structured
+  - id: OR-70
+    rule: rasp_turn_marker_per_attempt_unique
+  - id: OR-71
+    rule: rasp_turn_marker_ordered
+  - id: OR-72
+    rule: fcmp_must_not_emit_assistant_turn_markers
+  - id: OR-73
+    rule: waiting_auth_may_coexist_with_turn_failed_evidence
+  - id: OR-74
     rule: waiting_auth_reason_should_preserve_semantic_failure_message

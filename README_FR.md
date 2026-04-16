@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner encapsule des outils CLI d'agents IA matures — **Codex**, **Gemini CLI**, **iFlow CLI**, **OpenCode**, **Claude Code** et **Qwen** — derrière un protocole Skill unifié, offrant une exécution déterministe, une gestion structurée des artefacts et une interface d'administration web intégrée.
+Skill Runner encapsule des outils CLI d'agents IA matures — **Codex**, **Gemini CLI**, **OpenCode**, **Claude Code** et **Qwen** — derrière un protocole Skill unifié, offrant une exécution déterministe, une gestion structurée des artefacts et une interface d'administration web intégrée.
 
 ## ✨ Points Forts
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 Skills modulaires</strong><br/>Packages plug-and-play<br/><sub>E/S validées par schéma</sub></td>
-<td align="center" width="25%"><strong>🤖 Multi-moteur</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>Protocole d'adaptation unifié</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-moteur</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen<br/><sub>Protocole d'adaptation unifié</sub></td>
 <td align="center" width="25%"><strong>🔄 Double mode</strong><br/>Automatique &amp; Interactif<br/><sub>Conversations multi-tours</sub></td>
 <td align="center" width="25%"><strong>📦 Sortie structurée</strong><br/>JSON + artefacts + bundle<br/><sub>Exécutions isolées par contrat</sub></td>
 </tr>
@@ -279,7 +279,6 @@ graph TD
     subgraph Moteurs
         Orchestrator --> Codex[Codex Adapter]
         Orchestrator --> Gemini[Gemini Adapter]
-        Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
         Orchestrator --> ClaudeCode[Claude Code Adapter]
         Orchestrator --> Qwen[Qwen Adapter]
@@ -293,7 +292,6 @@ graph TD
 
     Codex --> CodexCLI[Codex CLI]
     Gemini --> GeminiCLI[Gemini CLI]
-    IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
     ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
     Qwen --> QwenCLI[Qwen CLI]
@@ -307,7 +305,6 @@ graph TD
 |--------|--------|
 | **Codex** | `@openai/codex` |
 | **Gemini CLI** | `@google/gemini-cli` |
-| **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
 | **Claude Code** | `@anthropic-ai/claude-code` |
 | **Qwen** | `@qwen-code/qwen-cli` |
@@ -329,7 +326,7 @@ graph TD
 
 ## ⚠️ Avertissement
 
-Codex, Gemini CLI, iFlow CLI et OpenCode sont des outils en évolution rapide. Leurs formats de configuration, comportements CLI et détails d'API peuvent changer fréquemment. Si vous rencontrez des problèmes de compatibilité avec des versions CLI plus récentes, veuillez [ouvrir une issue](https://github.com/leike0813/Skill-Runner/issues).
+Codex, Gemini CLI, OpenCode, Claude Code et Qwen sont des outils en évolution rapide. Leurs formats de configuration, comportements CLI et détails d'API peuvent changer fréquemment. Si vous rencontrez des problèmes de compatibilité avec des versions CLI plus récentes, veuillez [ouvrir une issue](https://github.com/leike0813/Skill-Runner/issues).
 
 ---
 

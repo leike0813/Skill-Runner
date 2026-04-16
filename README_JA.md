@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner は、成熟した AI エージェント CLI ツール — **Codex**、**Gemini CLI**、**iFlow CLI**、**OpenCode**、**Claude Code** と **Qwen** — を統一された Skill プロトコルで包み、決定論的な実行、構造化された成果物管理、内蔵 Web 管理 UI を提供します。
+Skill Runner は、成熟した AI エージェント CLI ツール — **Codex**、**Gemini CLI**、**OpenCode**、**Claude Code** と **Qwen** — を統一された Skill プロトコルで包み、決定論的な実行、構造化された成果物管理、内蔵 Web 管理 UI を提供します。
 
 ## ✨ ハイライト
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 プラグイン型スキル</strong><br/>ドロップイン型スキルパッケージ<br/><sub>スキーマ駆動の入出力</sub></td>
-<td align="center" width="25%"><strong>🤖 マルチエンジン</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>統一アダプタプロトコル</sub></td>
+<td align="center" width="25%"><strong>🤖 マルチエンジン</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen<br/><sub>統一アダプタプロトコル</sub></td>
 <td align="center" width="25%"><strong>🔄 デュアルモード</strong><br/>自動 &amp; 対話型実行<br/><sub>マルチターン会話対応</sub></td>
 <td align="center" width="25%"><strong>📦 構造化出力</strong><br/>JSON + 成果物 + バンドル<br/><sub>コントラクト駆動の分離実行</sub></td>
 </tr>
@@ -63,7 +63,7 @@ my-skill/
 ### 設計上の利点
 
 - **標準準拠**：Open Agent Skills エコシステムと互換 — スキルはプラットフォーム間で移植可能。
-- **エンジン非依存**：一度書けば、任意のサポートエンジンで実行可能。同じスキルが Codex、Gemini、iFlow、OpenCode で動作。
+- **エンジン非依存**：一度書けば、任意のサポートエンジンで実行可能。同じスキルが Codex、Gemini、OpenCode、Claude Code、Qwen で動作。
 - **スキーマ駆動 I/O**：入力、パラメータ、出力すべてが JSON Schema で定義 — Runner が自動検証。
 - **分離実行**：各 Run は独自のワークスペースと標準化された I/O コントラクトを取得 — Run 間の干渉なし。
 - **ゼロ統合インストール**：ユーザーディレクトリ `skills/` にスキルを配置（または API/UI でアップロード）するだけで即座に利用可能。内蔵 skills は `skills_builtin/` に同梱されます。
@@ -279,7 +279,6 @@ graph TD
     subgraph エンジン層
         Orchestrator --> Codex[Codex Adapter]
         Orchestrator --> Gemini[Gemini Adapter]
-        Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
         Orchestrator --> ClaudeCode[Claude Code Adapter]
         Orchestrator --> Qwen[Qwen Adapter]
@@ -293,7 +292,6 @@ graph TD
 
     Codex --> CodexCLI[Codex CLI]
     Gemini --> GeminiCLI[Gemini CLI]
-    IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
     ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
     Qwen --> QwenCLI[Qwen CLI]
@@ -307,7 +305,6 @@ graph TD
 |---------|-----------|
 | **Codex** | `@openai/codex` |
 | **Gemini CLI** | `@google/gemini-cli` |
-| **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
 | **Claude Code** | `@anthropic-ai/claude-code` |
 | **Qwen** | `@qwen-code/qwen-cli` |
@@ -329,7 +326,7 @@ graph TD
 
 ## ⚠️ 免責事項
 
-Codex、Gemini CLI、iFlow CLI、OpenCode は急速に進化しているツールです。設定形式、CLI の動作、API の詳細は短期間で変更される可能性があります。新しい CLI バージョンとの互換性の問題が発生した場合は、[Issue を作成](https://github.com/leike0813/Skill-Runner/issues)してください。
+Codex、Gemini CLI、OpenCode、Claude Code、Qwen は急速に進化しているツールです。設定形式、CLI の動作、API の詳細は短期間で変更される可能性があります。新しい CLI バージョンとの互換性の問題が発生した場合は、[Issue を作成](https://github.com/leike0813/Skill-Runner/issues)してください。
 
 ---
 

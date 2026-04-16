@@ -409,6 +409,41 @@ class RunStore:
     async def get_request_id_for_auth_session(self, auth_session_id: str) -> Optional[str]:
         return await self._auth_state_store.get_request_id_for_auth_session(auth_session_id)
 
+    async def upsert_durable_auth_session(self, **kwargs: Any) -> None:
+        await self._auth_state_store.upsert_durable_auth_session(**kwargs)
+
+    async def get_durable_auth_session(self, auth_session_id: str) -> Optional[Dict[str, Any]]:
+        return await self._auth_state_store.get_durable_auth_session(auth_session_id)
+
+    async def get_active_durable_auth_session_for_scope(
+        self,
+        *,
+        engine: str,
+        provider_id: str | None,
+    ) -> Optional[Dict[str, Any]]:
+        return await self._auth_state_store.get_active_durable_auth_session_for_scope(
+            engine=engine,
+            provider_id=provider_id,
+        )
+
+    async def list_active_durable_auth_sessions_for_request(self, request_id: str) -> List[Dict[str, Any]]:
+        return await self._auth_state_store.list_active_durable_auth_sessions_for_request(request_id)
+
+    async def mark_durable_auth_session_terminal(
+        self,
+        auth_session_id: str,
+        *,
+        status: str,
+        last_error: str | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
+        await self._auth_state_store.mark_durable_auth_session_terminal(
+            auth_session_id,
+            status=status,
+            last_error=last_error,
+            terminal_reason=terminal_reason,
+        )
+
     async def get_auth_session_status(self, request_id: str) -> Dict[str, Any]:
         return await self._auth_state_store.get_auth_session_status(request_id)
 

@@ -23,18 +23,12 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
     assert isinstance(bundle.driver_registry, AuthDriverRegistry)
     assert "codex" in bundle.engine_auth_handlers
     assert "gemini" in bundle.engine_auth_handlers
-    assert "iflow" in bundle.engine_auth_handlers
     assert "opencode" in bundle.engine_auth_handlers
     assert "qwen" in bundle.engine_auth_handlers
     assert bundle.driver_registry.supports(
         transport="oauth_proxy",
         engine="codex",
         auth_method="callback",
-    )
-    assert bundle.driver_registry.supports(
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method="auth_code_or_url",
     )
     assert bundle.driver_registry.supports(
         transport="oauth_proxy",
@@ -68,16 +62,6 @@ def test_engine_auth_bootstrap_disables_windows_cli_delegate_without_pywinpty(
     manager = _StubManager()
     bundle = build_engine_auth_bootstrap(manager, agent_home=tmp_path / "agent_home")
 
-    assert bundle.driver_registry.supports(
-        transport="oauth_proxy",
-        engine="iflow",
-        auth_method="auth_code_or_url",
-    )
-    assert not bundle.driver_registry.supports(
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method="auth_code_or_url",
-    )
     assert not bundle.driver_registry.supports(
         transport="cli_delegate",
         engine="gemini",
@@ -117,11 +101,6 @@ def test_engine_auth_bootstrap_keeps_windows_cli_delegate_with_pywinpty(
     manager = _StubManager()
     bundle = build_engine_auth_bootstrap(manager, agent_home=tmp_path / "agent_home")
 
-    assert bundle.driver_registry.supports(
-        transport="cli_delegate",
-        engine="iflow",
-        auth_method="auth_code_or_url",
-    )
     assert bundle.driver_registry.supports(
         transport="cli_delegate",
         engine="gemini",

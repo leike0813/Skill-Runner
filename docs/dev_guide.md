@@ -4,7 +4,7 @@ Version: v0.3+
 ================================================================================
 0. 项目一句话定义
 ================================================================================
-实现一个本地/自托管的 REST 服务（Agent Skill Runner），用于以统一 API 方式调用成熟商用/社区 CLI agent 工具（Codex、Gemini CLI、iFlow CLI、OpenCode）执行"完全自动化 skill"或"interactive 多轮会话 skill"，并返回严格结构化的结果（满足 output schema）与产物（artifacts）。Runner 负责执行编排、会话状态管理、输出校验与必要的规范化，不为 skill 的业务正确性背书。
+实现一个本地/自托管的 REST 服务（Agent Skill Runner），用于以统一 API 方式调用成熟商用/社区 CLI agent 工具（Codex、Gemini CLI、OpenCode、Claude Code、Qwen）执行"完全自动化 skill"或"interactive 多轮会话 skill"，并返回严格结构化的结果（满足 output schema）与产物（artifacts）。Runner 负责执行编排、会话状态管理、输出校验与必要的规范化，不为 skill 的业务正确性背书。
 
 内建 Web UI 提供 Skill 管理、Run 执行/监控、引擎管理与鉴权等界面。
 
@@ -21,11 +21,12 @@ R2. Skill 可插拔 ✅
 - Skill 包必须声明 `runner.json`（AutoSkill Manifest），包含引擎支持列表、执行模式、artifacts 合同等。
 - 服务端对上传包执行 meta-schema 预检。
 
-R3. 多引擎支持 ✅（4 引擎全部落地）
+R3. 多引擎支持 ✅（当前活跃引擎全部落地）
 - Codex（`server/engines/codex/`）
 - Gemini（`server/engines/gemini/`）
-- iFlow（`server/engines/iflow/`）
 - OpenCode（`server/engines/opencode/`）
+- Claude（`server/engines/claude/`）
+- Qwen（`server/engines/qwen/`）
 - 统一 `BaseExecutionAdapter` 接口（详见 §6）；引擎特定逻辑封装在各自子类中。
 
 R4. 输出稳定性：验证 + 规范化 ✅
@@ -83,8 +84,9 @@ N4. 不实现分布式队列/多节点（单机运行）
 |------|------|
 | `engines/codex/` | `CodexAdapter`、配置融合、OAuth 代理 |
 | `engines/gemini/` | `GeminiAdapter`、OAuth 流程 |
-| `engines/iflow/` | `IFlowAdapter`、OAuth 流程 |
 | `engines/opencode/` | `OpenCodeAdapter`、鉴权存储、OAuth 代理 |
+| `engines/claude/` | `ClaudeExecutionAdapter`、CLI 托管与沙箱探测 |
+| `engines/qwen/` | `QwenExecutionAdapter`、OAuth/API Key 双鉴权 |
 | `engines/common/` | 跨引擎共享逻辑（如 OpenAI-compatible SSOT） |
 
 ### Routers Layer（`server/routers/`）
@@ -184,7 +186,6 @@ skill-name/
 │   ├── output.schema.json       # 必需：输出 JSON Schema
 │   ├── codex_config.toml        # 可选：Codex CLI 推荐配置
 │   ├── gemini_settings.json     # 可选：Gemini CLI 推荐配置
-│   ├── iflow_settings.json      # 可选：iFlow CLI 推荐配置
 │   └── opencode.json            # 可选：OpenCode 推荐配置
 ├── scripts/                     # 可选
 └── references/                  # 可选
@@ -195,7 +196,7 @@ skill-name/
 {
   "id": "skill-name",
   "version": "1.0.0",
-  "engines": ["codex", "gemini", "iflow", "opencode"],
+  "engines": ["codex", "gemini", "opencode", "claude", "qwen"],
   "unsupported_engines": [],
   "execution_modes": ["auto", "interactive"],
   "entrypoint": {
@@ -241,8 +242,8 @@ skill-name/
   - 缺省/空值/非法/文件缺失时回退到固定文件名：
     - `codex` -> `assets/codex_config.toml`
     - `gemini` -> `assets/gemini_settings.json`
-    - `iflow` -> `assets/iflow_settings.json`
     - `opencode` -> `assets/opencode_config.json`
+    - `qwen` -> `assets/qwen_config.toml`
 - Schema 文件在上传阶段执行 meta-schema 预检（如 `x-input-source`、`x-type` 扩展字段）。
 - schema 声明失败会记录显式 warning；engine config 声明失败仅后台日志记录，不阻断运行。
 
@@ -292,8 +293,8 @@ _parse_output(raw_stdout) → AdapterTurnResult
 各引擎配置写入位置：
 - Codex：`run_dir/.codex/` 下的配置
 - Gemini：`run_dir/.gemini/settings.json`
-- iFlow：`run_dir/.iflow/settings.json`
 - OpenCode：`run_dir/opencode.json`，按模式覆盖 `permission.question`（auto=deny, interactive=allow）
+- Qwen：`run_dir/.qwen/settings.json`
 - OpenCode：enforced config 还会为已知 provider 强制写入 `provider.<id>.options.timeout=false`，用于禁用 OpenCode 默认的 provider 请求超时，避免长时间 SSE 流式响应被 5 分钟默认超时提前中断
 
 ### 6.3 各引擎策略

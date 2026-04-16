@@ -272,6 +272,43 @@
     .thinking-item-text > :last-child {
         margin-bottom: 0;
     }
+    .revision-bubble {
+        border-style: solid;
+        border-color: #d1d5db;
+        background: #f9fafb;
+        cursor: pointer;
+    }
+    .revision-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .revision-title {
+        font-size: 12px;
+        color: #4b5563;
+        font-weight: 600;
+    }
+    .revision-arrow {
+        color: #4b5563;
+        font-size: 12px;
+        line-height: 1;
+        user-select: none;
+    }
+    .revision-latest {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #374151;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .revision-body {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #111827;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
     .chat-plain-entry {
         margin: 0 0 14px;
         padding: 0 0 12px;
@@ -301,6 +338,29 @@
         overflow-wrap: anywhere;
         word-break: break-word;
         color: var(--neutral-900);
+    }
+    .chat-plain-revision-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        cursor: pointer;
+        user-select: none;
+    }
+    .chat-plain-revision-header .chat-plain-role {
+        margin-bottom: 0;
+    }
+    .chat-plain-revision-latest {
+        margin-top: 6px;
+        line-height: 1.5;
+        color: var(--neutral-700);
+    }
+    .chat-plain-revision-body {
+        margin-top: 8px;
+        line-height: 1.5;
+        color: var(--neutral-900);
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     /* Remove extra margin from last element in plain body to avoid trailing space */
@@ -951,7 +1011,7 @@
 </style>
 
 <script src="/static/js/file_explorer.js"></script>
-<script src="/static/js/chat_thinking_core.js?v=20260405a"></script>
+<script src="/static/js/chat_thinking_core.js?v=20260416b"></script>
 <!-- KaTeX for LaTeX formula rendering (local vendor assets) -->
 <link rel="stylesheet" href="/static/css/chat_markdown.css?v=20260415a">
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -981,9 +1041,13 @@
         roleAssistant: {{ t("client.observe_role_assistant", default="Agent") | tojson }},
         roleSystem: {{ t("client.observe_role_system", default="System") | tojson }},
         roleThinking: {{ t("client.observe_role_thinking", default="Agent Thinking") | tojson }},
+        roleRevision: {{ t("client.observe_role_revision", default="Rejected Final Reply") | tojson }},
         thinkingCollapsedPrefix: {{ t("client.observe_thinking_collapsed_prefix", default="Thinking (latest)") | tojson }},
         thinkingExpand: {{ t("client.observe_thinking_expand", default="Expand") | tojson }},
         thinkingCollapse: {{ t("client.observe_thinking_collapse", default="Collapse") | tojson }},
+        revisionCollapsedPrefix: {{ t("client.observe_revision_collapsed_prefix", default="(collapsed)") | tojson }},
+        revisionExpand: {{ t("client.observe_revision_expand", default="Show rejected final reply") | tojson }},
+        revisionCollapse: {{ t("client.observe_revision_collapse", default="Hide rejected final reply") | tojson }},
         processReasoning: {{ t("client.observe_process_reasoning", default="Reasoning") | tojson }},
         processMessage: {{ t("client.observe_process_message", default="Message") | tojson }},
         processToolCall: {{ t("client.observe_process_tool_call", default="Tool call") | tojson }},
@@ -1887,6 +1951,93 @@
                 chatEl.appendChild(row);
                 continue;
             }
+            if (entry.type === "revision") {
+                const originalEvent = entry.originalEvent && typeof entry.originalEvent === "object" ? entry.originalEvent : {};
+                const attempt = Number(originalEvent && originalEvent.attempt) > 0 ? Number(originalEvent.attempt) : 1;
+                const revisionId = safeText(entry.id) || `revision-${attempt}-${safeText(entry.messageId)}`;
+                const normalizedText = safeText(originalEvent.text).trim();
+                const previewText = I18N.revisionCollapsedPrefix;
+                const toggleRevision = () => {
+                    if (chatModel && typeof chatModel.toggleRevision === "function") {
+                        chatModel.toggleRevision(revisionId);
+                        renderChatModel({ preserveScroll: true });
+                    }
+                };
+                if (mode === "plain") {
+                    const item = document.createElement("div");
+                    item.className = "chat-plain-entry";
+                    const header = document.createElement("div");
+                    header.className = "chat-plain-revision-header";
+                    header.setAttribute("role", "button");
+                    header.setAttribute("tabindex", "0");
+                    const title = document.createElement("span");
+                    title.className = "chat-plain-role";
+                    title.textContent = I18N.roleRevision;
+                    const arrow = document.createElement("span");
+                    arrow.textContent = entry.collapsed ? "◀" : "▼";
+                    header.appendChild(title);
+                    header.appendChild(arrow);
+                    item.appendChild(header);
+                    header.addEventListener("click", toggleRevision);
+                    header.addEventListener("keydown", (evt) => {
+                        if (evt.key === "Enter" || evt.key === " ") {
+                            evt.preventDefault();
+                            toggleRevision();
+                        }
+                    });
+                    if (entry.collapsed) {
+                        const latestLine = document.createElement("div");
+                        latestLine.className = "chat-plain-revision-latest";
+                        renderMarkdownInto(latestLine, previewText);
+                        item.appendChild(latestLine);
+                    } else {
+                        const body = document.createElement("div");
+                        body.className = "chat-plain-revision-body";
+                        renderMarkdownInto(body, normalizedText || I18N.revisionCollapsedPrefix);
+                        item.appendChild(body);
+                    }
+                    chatEl.appendChild(item);
+                    continue;
+                }
+                const row = document.createElement("div");
+                row.className = "chat-row agent";
+                const bubble = document.createElement("div");
+                bubble.className = "chat-bubble agent revision-bubble";
+                bubble.setAttribute("role", "button");
+                bubble.setAttribute("tabindex", "0");
+                const header = document.createElement("div");
+                header.className = "revision-header";
+                const title = document.createElement("span");
+                title.className = "revision-title";
+                title.textContent = I18N.roleRevision;
+                const arrow = document.createElement("span");
+                arrow.className = "revision-arrow";
+                arrow.textContent = entry.collapsed ? "◀" : "▼";
+                header.appendChild(title);
+                header.appendChild(arrow);
+                bubble.appendChild(header);
+                bubble.addEventListener("click", toggleRevision);
+                bubble.addEventListener("keydown", (evt) => {
+                    if (evt.key === "Enter" || evt.key === " ") {
+                        evt.preventDefault();
+                        toggleRevision();
+                    }
+                });
+                if (entry.collapsed) {
+                    const latestLine = document.createElement("div");
+                    latestLine.className = "revision-latest";
+                    renderMarkdownInto(latestLine, previewText);
+                    bubble.appendChild(latestLine);
+                } else {
+                    const body = document.createElement("div");
+                    body.className = "revision-body";
+                    renderMarkdownInto(body, normalizedText || I18N.revisionCollapsedPrefix);
+                    bubble.appendChild(body);
+                }
+                row.appendChild(bubble);
+                chatEl.appendChild(row);
+                continue;
+            }
             if (entry.type === "thinking") {
                 const items = Array.isArray(entry.items) ? entry.items : [];
                 if (!items.length) continue;
@@ -2029,12 +2180,16 @@
 
     function appendChatBubble(role, text, key, event = null) {
         const normalizedText = safeText(text).trim();
-        if (!normalizedText) return;
+        const kind = safeText(event && event.kind).trim();
+        if (!normalizedText && kind !== "assistant_revision") return;
         if (key && renderedChatKeys.has(key)) return;
         if (key) renderedChatKeys.add(key);
         if (chatModel && event && typeof event === "object") {
             chatModel.consume(event);
             renderChatModel();
+            return;
+        }
+        if (kind === "assistant_revision") {
             return;
         }
         const row = document.createElement("div");
@@ -2734,7 +2889,8 @@
         }
         const role = safeText(event.role).trim();
         const text = safeText(event.text);
-        if (!role || !text.trim()) return;
+        const kind = safeText(event.kind).trim();
+        if (!role || (!text.trim() && kind !== "assistant_revision")) return;
         appendChatBubble(role, text, `chat:${event.seq || 0}:${role}:${safeText(event.kind)}:${text}`, event);
     }
 

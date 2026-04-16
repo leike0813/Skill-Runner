@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner 将成熟的 AI Agent CLI 工具 — **Codex**、**Gemini CLI**、**iFlow CLI**、**OpenCode**、**Claude Code** 与 **Qwen** — 统一封装在标准化的 Skill 协议之下，提供确定性执行、结构化产物管理和内置 Web 管理界面。
+Skill Runner 将成熟的 AI Agent CLI 工具 — **Codex**、**Gemini CLI**、**OpenCode**、**Claude Code** 与 **Qwen** — 统一封装在标准化的 Skill 协议之下，提供确定性执行、结构化产物管理和内置 Web 管理界面。
 
 ## ✨ 核心亮点
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 可插拔技能</strong><br/>即插即用的技能包<br/><sub>Schema 驱动的输入输出</sub></td>
-<td align="center" width="25%"><strong>🤖 多引擎</strong><br/>Codex · Gemini · iFlow · OpenCode · Claude Code · Qwen<br/><sub>统一适配协议</sub></td>
+<td align="center" width="25%"><strong>🤖 多引擎</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen<br/><sub>统一适配协议</sub></td>
 <td align="center" width="25%"><strong>🔄 双模式</strong><br/>全自动 &amp; 交互式执行<br/><sub>支持多轮对话</sub></td>
 <td align="center" width="25%"><strong>📦 结构化输出</strong><br/>JSON + 产物 + Bundle<br/><sub>隔离的合同驱动执行</sub></td>
 </tr>
@@ -63,7 +63,7 @@ my-skill/
 ### 设计优势
 
 - **标准化**：兼容 Open Agent Skills 生态 — 技能可跨平台移植。
-- **引擎无关**：一次编写，在任意支持的引擎上运行。同一个 Skill 可以在 Codex、Gemini、iFlow 或 OpenCode 上执行。
+- **引擎无关**：一次编写，在任意支持的引擎上运行。同一个 Skill 可以在 Codex、Gemini、OpenCode、Claude Code 或 Qwen 上执行。
 - **Schema 驱动的 I/O**：输入、参数和输出均由 JSON Schema 定义 — Runner 自动校验。
 - **隔离执行**：每次 Run 拥有独立的工作区和标准化的输入输出合同 — 不存在跨 Run 干扰。
 - **零集成安装**：将 Skill 目录放入用户目录 `skills/`（或通过 API/UI 上传）即可立即使用；内建 skills 位于 `skills_builtin/`。
@@ -279,7 +279,6 @@ graph TD
     subgraph 引擎层
         Orchestrator --> Codex[Codex Adapter]
         Orchestrator --> Gemini[Gemini Adapter]
-        Orchestrator --> IFlow[iFlow Adapter]
         Orchestrator --> OpenCode[OpenCode Adapter]
         Orchestrator --> ClaudeCode[Claude Code Adapter]
         Orchestrator --> Qwen[Qwen Adapter]
@@ -293,7 +292,6 @@ graph TD
 
     Codex --> CodexCLI[Codex CLI]
     Gemini --> GeminiCLI[Gemini CLI]
-    IFlow --> IFlowCLI[iFlow CLI]
     OpenCode --> OpenCodeCLI[OpenCode]
     ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
     Qwen --> QwenCLI[Qwen CLI]
@@ -307,7 +305,6 @@ graph TD
 |------|------|
 | **Codex** | `@openai/codex` |
 | **Gemini CLI** | `@google/gemini-cli` |
-| **iFlow CLI** | `@iflow-ai/iflow-cli` |
 | **OpenCode** | `opencode-ai` |
 | **Claude Code** | `@anthropic-ai/claude-code` |
 | **Qwen** | `@qwen-code/qwen-cli` |
@@ -329,7 +326,7 @@ graph TD
 
 ## ⚠️ 免责声明
 
-Codex、Gemini CLI、iFlow CLI 和 OpenCode 目前迭代较快，配置格式、命令行为或接口细节可能在短时间内发生变化。如果你遇到与新版 CLI 的兼容性问题，请直接 [提交 Issue](https://github.com/leike0813/Skill-Runner/issues)。
+Codex、Gemini CLI、OpenCode、Claude Code 和 Qwen 目前迭代较快，配置格式、命令行为或接口细节可能在短时间内发生变化。如果你遇到与新版 CLI 的兼容性问题，请直接 [提交 Issue](https://github.com/leike0813/Skill-Runner/issues)。
 
 ---
 

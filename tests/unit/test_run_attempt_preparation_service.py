@@ -245,6 +245,8 @@ async def test_prepare_builds_interactive_context_and_run_options(
     assert context.run_options["__attempt_number"] == 3
     assert context.run_options["__request_id"] == "req-1"
     assert context.run_options["__engine_name"] == "claude"
+    assert context.run_options["__target_output_schema_relpath"] == ".audit/contracts/target_output_schema.json"
+    assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
     assert len(orchestrator.inject_resume_calls) == 1
     assert orchestrator.inject_resume_calls[0]["request_id"] == "req-1"
     assert orchestrator.inject_resume_calls[0]["run_dir"] == run_dir

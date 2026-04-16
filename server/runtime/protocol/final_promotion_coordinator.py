@@ -10,6 +10,7 @@ from server.runtime.adapter.types import RuntimeStreamRawRef
 @dataclass(frozen=True)
 class PromotableMessage:
     message_id: str
+    message_family_id: str
     text: str
     summary: str
     details: Dict[str, Any]
@@ -63,6 +64,7 @@ def build_process_payload(
     details: Dict[str, Any] | None = None,
     text: str | None = None,
     replaces_message_id: str | None = None,
+    message_family_id: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "message_id": message_id,
@@ -70,6 +72,8 @@ def build_process_payload(
         "classification": classification,
         "details": details or {},
     }
+    family_id = message_family_id.strip() if isinstance(message_family_id, str) else ""
+    payload["message_family_id"] = family_id or message_id
     if isinstance(text, str) and text.strip():
         payload["text"] = text
     if isinstance(replaces_message_id, str) and replaces_message_id.strip():
@@ -80,20 +84,27 @@ def build_process_payload(
 class FinalPromotionCoordinator:
     """Generic, engine-agnostic process-message promotion coordinator."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, message_family_id: str | None = None) -> None:
         self._latest_candidate: PromotableMessage | None = None
         self._promoted_ids: set[str] = set()
+        normalized_family = message_family_id.strip() if isinstance(message_family_id, str) else ""
+        self._message_family_id = normalized_family or None
 
     def register_message_candidate(
         self,
         *,
         message_id: str,
+        message_family_id: str | None = None,
         text: str,
         raw_ref: RuntimeStreamRawRef | None = None,
         details: Dict[str, Any] | None = None,
     ) -> PromotableMessage:
+        family_id = message_family_id.strip() if isinstance(message_family_id, str) else ""
+        if not family_id:
+            family_id = self._message_family_id or message_id
         candidate = PromotableMessage(
             message_id=message_id,
+            message_family_id=family_id,
             text=text,
             summary=build_summary(text),
             details=dict(details or {}),
@@ -107,12 +118,14 @@ class FinalPromotionCoordinator:
         self,
         *,
         message_id: str,
+        message_family_id: str | None = None,
         text: str,
         raw_ref: RuntimeStreamRawRef | None = None,
         details: Dict[str, Any] | None = None,
     ) -> PromotableMessage:
         return self.register_message_candidate(
             message_id=message_id,
+            message_family_id=message_family_id,
             text=text,
             raw_ref=raw_ref,
             details=details,
@@ -142,6 +155,7 @@ class FinalPromotionCoordinator:
     def promoted_payload(candidate: PromotableMessage) -> dict[str, Any]:
         return build_process_payload(
             message_id=candidate.message_id,
+            message_family_id=candidate.message_family_id,
             summary=candidate.summary,
             classification="promoted",
             details={"from": candidate.classification, "to": "final"},
@@ -153,6 +167,7 @@ class FinalPromotionCoordinator:
     def final_payload(candidate: PromotableMessage) -> dict[str, Any]:
         return build_process_payload(
             message_id=candidate.message_id,
+            message_family_id=candidate.message_family_id,
             summary=candidate.summary,
             classification="final",
             details=candidate.details,

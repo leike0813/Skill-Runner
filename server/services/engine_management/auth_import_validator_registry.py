@@ -137,8 +137,6 @@ auth_import_validator_registry = AuthImportValidatorRegistry(
         "codex_auth_json": _validate_codex_auth_json,
         "gemini_google_accounts_json": _validate_gemini_accounts,
         "gemini_oauth_creds_json": _validate_gemini_oauth_creds,
-        "iflow_accounts_json": _validate_iflow_accounts,
-        "iflow_oauth_creds_json": _validate_iflow_oauth_creds,
         "opencode_auth_json": _validate_opencode_auth,
         "opencode_antigravity_accounts_json": _validate_opencode_antigravity_accounts,
         "qwen_oauth_creds_json": _validate_qwen_oauth_creds,

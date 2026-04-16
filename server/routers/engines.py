@@ -128,6 +128,8 @@ async def start_oauth_proxy_auth_session(request: Request, body: AuthSessionStar
             callback_base_url=str(request.base_url).rstrip("/"),
         )
         return AuthSessionSnapshotV2(**payload)
+    except KeyError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except EngineInteractionBusyError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:

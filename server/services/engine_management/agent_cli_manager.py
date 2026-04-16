@@ -60,10 +60,6 @@ _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
             }
         }
     },
-    "iflow": {
-        "selectedAuthType": "oauth-iflow",
-        "baseUrl": "https://apis.iflow.cn/v1",
-    },
     "opencode": {
         "$schema": "https://opencode.ai/config.json",
         "plugin": ["opencode-antigravity-auth"],
@@ -752,11 +748,6 @@ class AgentCliManager:
         if not matched:
             return False
 
-        validator = policy.settings_validator
-        if validator == "iflow_oauth_settings":
-            return self._is_iflow_settings_valid(
-                self._engine_bootstrap_target_path(profile.engine)
-            )
         return True
 
     def _engine_bootstrap_payload(self, engine: str) -> Mapping[str, object] | str:
@@ -1151,13 +1142,6 @@ class AgentCliManager:
         strategy = self._engine_profile(engine).cli_management.layout.normalize_strategy
         if strategy is None:
             return
-        if strategy == "iflow_settings_v1":
-            if not isinstance(bootstrap_payload, Mapping):
-                raise RuntimeError(
-                    "iflow_settings_v1 normalizer expects JSON bootstrap payload"
-                )
-            self._normalize_iflow_settings(bootstrap_path, bootstrap_payload)
-            return
         raise RuntimeError(f"Unknown normalize strategy: {strategy}")
 
     def _ensure_json_file(self, path: Path, payload: Mapping[str, object]) -> None:
@@ -1165,46 +1149,6 @@ class AgentCliManager:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(dict(payload), indent=2) + "\n", encoding="utf-8")
-
-    def _normalize_iflow_settings(
-        self, path: Path, defaults: Mapping[str, object]
-    ) -> None:
-        selected_auth_default = str(defaults.get("selectedAuthType") or "oauth-iflow")
-        base_url_default = str(defaults.get("baseUrl") or "https://apis.iflow.cn/v1")
-        try:
-            current = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(current, dict):
-                current = {}
-        except _IFLOW_SETTINGS_PARSE_EXCEPTIONS as exc:
-            logger.warning(
-                "Falling back to default iFlow settings: %s",
-                path,
-                extra={
-                    "component": "orchestration.agent_cli_manager",
-                    "action": "normalize_iflow_settings",
-                    "error_type": type(exc).__name__,
-                    "fallback": "default_iflow_settings",
-                },
-                exc_info=True,
-            )
-            current = {}
-
-        changed = False
-
-        selected_auth = current.get("selectedAuthType")
-        if not selected_auth or selected_auth == "iflow":
-            current["selectedAuthType"] = selected_auth_default
-            changed = True
-
-        base_url = current.get("baseUrl")
-        if not isinstance(base_url, str) or not base_url.startswith(
-            ("http://", "https://")
-        ):
-            current["baseUrl"] = base_url_default
-            changed = True
-
-        if changed:
-            path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
 
     def _detect_resume_static(self, engine: str) -> EngineResumeCapability:
         command = self.resolve_engine_command(engine)
@@ -1229,32 +1173,6 @@ class AgentCliManager:
             probe_method="command",
             detail="resume_flag_missing",
         )
-
-    def _is_iflow_settings_valid(self, path: Path) -> bool:
-        try:
-            current = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(current, dict):
-                return False
-            selected_auth = current.get("selectedAuthType")
-            base_url = current.get("baseUrl")
-            return (
-                isinstance(selected_auth, str)
-                and selected_auth == "oauth-iflow"
-                and isinstance(base_url, str)
-                and base_url.startswith(("http://", "https://"))
-            )
-        except _IFLOW_SETTINGS_PARSE_EXCEPTIONS as exc:
-            logger.debug(
-                "iFlow settings validation fallback",
-                extra={
-                    "component": "orchestration.agent_cli_manager",
-                    "action": "validate_iflow_settings",
-                    "error_type": type(exc).__name__,
-                    "fallback": "auth_ready_false",
-                },
-                exc_info=True,
-            )
-            return False
 
     def _build_global_only_path(self, base_path: str) -> str:
         if not base_path:

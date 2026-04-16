@@ -1,0 +1,33 @@
+{
+  "engine": "qwen",
+  "version": "0.14.0",
+  "models": [
+    {
+      "id": "qwen-oauth/qwen-coder-plus",
+      "display_name": "Qwen OAuth",
+      "deprecated": false,
+      "notes": "fixture",
+      "provider": "qwen-oauth",
+      "provider_id": "qwen-oauth",
+      "model": "qwen-coder-plus"
+    },
+    {
+      "id": "coding-plan-china/qwen3-coder-plus",
+      "display_name": "Coding Plan China",
+      "deprecated": false,
+      "notes": "fixture",
+      "provider": "coding-plan-china",
+      "provider_id": "coding-plan-china",
+      "model": "qwen3-coder-plus"
+    },
+    {
+      "id": "coding-plan-global/qwen3-coder-plus",
+      "display_name": "Coding Plan Global",
+      "deprecated": false,
+      "notes": "fixture",
+      "provider": "coding-plan-global",
+      "provider_id": "coding-plan-global",
+      "model": "qwen3-coder-plus"
+    }
+  ]
+}

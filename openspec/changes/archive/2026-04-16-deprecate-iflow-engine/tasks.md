@@ -1,0 +1,8 @@
+- [x] 创建 deprecate-iflow-engine change artifacts
+- [x] 从活跃引擎真源与 registry 中移除 iflow
+- [x] 为旧 run 的 `.iflow` 目录补只读兼容名单
+- [x] 从 active schema / contract 中移除 iflow
+- [x] 从 UI / e2e / engine management 可见面中移除 iflow
+- [x] 调整活跃测试并封存 iflow 专属测试
+- [x] 更新 active docs / README 中的支持引擎描述
+- [x] 跑目标测试并收口剩余回归

@@ -175,10 +175,11 @@ def test_run_observe_template_defaults_to_plain_mode_for_assistant_messages():
 
 def test_run_observe_template_supports_assistant_process_thinking_bubble() -> None:
     content = _read_template()
-    assert "/static/js/chat_thinking_core.js?v=20260405a" in content
+    assert "/static/js/chat_thinking_core.js?v=20260416b" in content
     assert "createCompatibleThinkingChatModel(chatDisplayMode)" in content
     assert "chatModel.consume(event)" in content
     assert "entry.type === \"thinking\"" in content
+    assert "entry.type === \"revision\"" in content
     assert "processTypeLabel(" in content
     assert "thinking-arrow" in content
     assert "bubble.setAttribute(\"role\", \"button\")" in content
@@ -254,6 +255,47 @@ def test_run_observe_template_uses_canonical_chat_replay_routes() -> None:
     assert "/api/runs/${requestId}/chat?cursor=${cursor}" in content
     assert "/api/runs/${requestId}/events" not in content
     assert "stream.addEventListener(\"chat_event\"" in content
+
+
+def test_run_observe_template_consumes_assistant_revision_without_rendering_plain_bubble() -> None:
+    content = _read_template()
+    assert 'kind !== "assistant_revision"' in content
+    assert 'kind === "assistant_revision"' in content
+    assert 'if (kind === "assistant_revision") {' in content
+    assert "chatModel.consume(event);" in content
+    assert "revision-bubble" in content
+    assert "chatModel.toggleRevision" in content
+
+
+def test_run_observe_revision_renders_collapsed_placeholder_only_and_expanded_body_once() -> None:
+    content = _read_template()
+    assert "const previewText = I18N.revisionCollapsedPrefix;" in content
+    assert 'if (entry.collapsed) {' in content
+    assert 'latestLine.className = "revision-latest"' in content
+    assert 'body.className = "revision-body"' in content
+    assert 'latestLine.className = "chat-plain-revision-latest"' in content
+    assert 'body.className = "chat-plain-revision-body"' in content
+
+
+def test_run_observe_revision_uses_rejected_final_reply_wording() -> None:
+    content = _read_template()
+    assert 'default="Rejected Final Reply"' in content
+    assert 'default="(collapsed)"' in content
+    assert 'default="Show rejected final reply"' in content
+    assert 'default="Hide rejected final reply"' in content
+
+
+def test_run_observe_revision_uses_plain_structure_in_plain_mode_and_has_single_bubble_title() -> None:
+    content = _read_template()
+    assert 'if (mode === "plain") {' in content
+    assert 'item.className = "chat-plain-entry"' in content
+    assert 'header.className = "chat-plain-revision-header"' in content
+    assert 'title.className = "chat-plain-role"' in content
+    assert 'bubble.className = "chat-bubble agent revision-bubble"' in content
+    revision_start = content.index('if (entry.type === "revision") {')
+    revision_end = content.index('if (entry.type === "thinking") {')
+    revision_block = content[revision_start:revision_end]
+    assert 'roleEl.className = "chat-role"' not in revision_block
 
 
 def test_run_observe_template_does_not_optimistically_append_chat_bubbles() -> None:

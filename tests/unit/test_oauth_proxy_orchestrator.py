@@ -83,15 +83,15 @@ def test_oauth_proxy_orchestrator_gemini_maps_to_auth():
     assert mgr.calls[-1][1]["method"] == "auth"
 
 
-def test_oauth_proxy_orchestrator_iflow_maps_to_auth():
+def test_oauth_proxy_orchestrator_qwen_maps_to_auth():
     mgr = _ManagerStub()
     orchestrator = OAuthProxyOrchestrator(mgr)
     started = orchestrator.start_session(
-        engine="iflow",
-        auth_method="callback",
+        engine="qwen",
+        auth_method="auth_code_or_url",
         provider_id=None,
         callback_base_url=None,
     )
-    assert started["engine"] == "iflow"
+    assert started["engine"] == "qwen"
     assert mgr.calls[-1][0] == "start"
     assert mgr.calls[-1][1]["method"] == "auth"

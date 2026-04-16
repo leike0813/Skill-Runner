@@ -39,7 +39,7 @@ class RunAttemptExecutionResult:
     adapter_stream_parser: Any
     auth_signal_snapshot: dict[str, Any] | None
     run_handle_consumer: Callable[[str], Awaitable[dict[str, Any]]]
-    live_runtime_emitter_factory: Callable[[], Any]
+    live_runtime_emitter_factory: Callable[..., Any]
 
 
 class RunAttemptExecutionService:
@@ -123,12 +123,17 @@ class RunAttemptExecutionService:
                 else None
             ),
             run_handle_consumer=run_handle_consumer,
-            live_runtime_emitter_factory=lambda: LiveRuntimeEmitterImpl(
+            live_runtime_emitter_factory=lambda **kwargs: LiveRuntimeEmitterImpl(
                 run_id=run_id,
                 run_dir=context.run_dir,
                 engine=engine_name,
                 attempt_number=context.attempt_number,
                 stream_parser=adapter_stream_parser,
                 run_handle_consumer=run_handle_consumer,
+                message_family_id=(
+                    kwargs.get("message_family_id")
+                    if isinstance(kwargs.get("message_family_id"), str)
+                    else None
+                ),
             ),
         )

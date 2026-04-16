@@ -13,6 +13,11 @@ from server.runtime.protocol.schema_registry import (
 from server.services.engine_management.engine_auth_flow_manager import engine_auth_flow_manager
 from server.services.platform import aiosqlite_compat as aiosqlite
 
+from .auth_session_durable_store import (
+    DURABLE_AUTH_SESSION_ACTIVE_STATUSES,
+    DURABLE_AUTH_SESSION_TABLE,
+    build_auth_session_scope_key,
+)
 from .run_store_database import RunStoreDatabase
 
 logger = logging.getLogger(__name__)
@@ -221,6 +226,162 @@ class RunAuthStateStore:
             )
             await conn.commit()
 
+    async def upsert_durable_auth_session(
+        self,
+        *,
+        auth_session_id: str,
+        engine: str,
+        provider_id: str | None,
+        request_id: str | None,
+        run_id: str | None,
+        source_attempt: int | None,
+        status: str,
+        payload: Dict[str, Any],
+        auth_method: str | None = None,
+        challenge_kind: str | None = None,
+        driver: str | None = None,
+        execution_mode: str | None = None,
+        transport: str | None = None,
+        input_kind: str | None = None,
+        expires_at: str | None = None,
+        last_error: str | None = None,
+        resume_ticket_id: str | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
+        await self._database.ensure_initialized()
+        now = datetime.utcnow().isoformat() + "Z"
+        created_at = str(payload.get("created_at") or now)
+        async with self._database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
+                f"""
+                INSERT OR REPLACE INTO {DURABLE_AUTH_SESSION_TABLE} (
+                    auth_session_id, engine, provider_id, scope_key, request_id, run_id,
+                    source_attempt, status, auth_method, challenge_kind, driver,
+                    execution_mode, transport, input_kind, created_at, updated_at,
+                    expires_at, last_error, resume_ticket_id, terminal_reason, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    auth_session_id,
+                    engine,
+                    provider_id,
+                    build_auth_session_scope_key(engine, provider_id),
+                    request_id,
+                    run_id,
+                    int(source_attempt) if source_attempt is not None else None,
+                    status,
+                    auth_method,
+                    challenge_kind,
+                    driver,
+                    execution_mode,
+                    transport,
+                    input_kind,
+                    created_at,
+                    now,
+                    expires_at,
+                    last_error,
+                    resume_ticket_id,
+                    terminal_reason,
+                    json.dumps(payload, sort_keys=True),
+                ),
+            )
+            await conn.commit()
+
+    async def get_durable_auth_session(self, auth_session_id: str) -> Optional[Dict[str, Any]]:
+        await self._database.ensure_initialized()
+        async with self._database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                f"SELECT * FROM {DURABLE_AUTH_SESSION_TABLE} WHERE auth_session_id = ? LIMIT 1",
+                (auth_session_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._durable_auth_session_from_row(row)
+
+    async def get_active_durable_auth_session_for_scope(
+        self,
+        *,
+        engine: str,
+        provider_id: str | None,
+    ) -> Optional[Dict[str, Any]]:
+        await self._database.ensure_initialized()
+        placeholders = ",".join("?" for _ in DURABLE_AUTH_SESSION_ACTIVE_STATUSES)
+        async with self._database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                f"""
+                SELECT *
+                FROM {DURABLE_AUTH_SESSION_TABLE}
+                WHERE scope_key = ? AND status IN ({placeholders})
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (build_auth_session_scope_key(engine, provider_id), *DURABLE_AUTH_SESSION_ACTIVE_STATUSES),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._durable_auth_session_from_row(row)
+
+    async def list_active_durable_auth_sessions_for_request(self, request_id: str) -> list[Dict[str, Any]]:
+        await self._database.ensure_initialized()
+        placeholders = ",".join("?" for _ in DURABLE_AUTH_SESSION_ACTIVE_STATUSES)
+        async with self._database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                f"""
+                SELECT *
+                FROM {DURABLE_AUTH_SESSION_TABLE}
+                WHERE request_id = ? AND status IN ({placeholders})
+                ORDER BY updated_at DESC
+                """,
+                (request_id, *DURABLE_AUTH_SESSION_ACTIVE_STATUSES),
+            )
+            rows = await cursor.fetchall()
+        return [self._durable_auth_session_from_row(row) for row in rows]
+
+    async def mark_durable_auth_session_terminal(
+        self,
+        auth_session_id: str,
+        *,
+        status: str,
+        last_error: str | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
+        existing = await self.get_durable_auth_session(auth_session_id)
+        if existing is None:
+            return
+        payload = dict(existing.get("payload") or {})
+        payload["status"] = status
+        if last_error is not None:
+            payload["error"] = last_error
+        if terminal_reason is not None:
+            payload["terminal_reason"] = terminal_reason
+        await self.upsert_durable_auth_session(
+            auth_session_id=auth_session_id,
+            engine=str(existing.get("engine") or ""),
+            provider_id=existing.get("provider_id"),
+            request_id=existing.get("request_id"),
+            run_id=existing.get("run_id"),
+            source_attempt=existing.get("source_attempt"),
+            status=status,
+            payload=payload,
+            auth_method=existing.get("auth_method"),
+            challenge_kind=existing.get("challenge_kind"),
+            driver=existing.get("driver"),
+            execution_mode=existing.get("execution_mode"),
+            transport=existing.get("transport"),
+            input_kind=existing.get("input_kind"),
+            expires_at=existing.get("expires_at"),
+            last_error=last_error if last_error is not None else existing.get("last_error"),
+            resume_ticket_id=existing.get("resume_ticket_id"),
+            terminal_reason=terminal_reason if terminal_reason is not None else existing.get("terminal_reason"),
+        )
+
     async def get_pending_auth(self, request_id: str) -> Optional[Dict[str, Any]]:
         await self._database.ensure_initialized()
         async with self._database.connect() as conn:
@@ -368,6 +529,9 @@ class RunAuthStateStore:
 
     async def get_request_id_for_auth_session(self, auth_session_id: str) -> Optional[str]:
         await self._database.ensure_initialized()
+        durable = await self.get_durable_auth_session(auth_session_id)
+        if durable is not None and isinstance(durable.get("request_id"), str):
+            return str(durable["request_id"])
         async with self._database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
@@ -393,7 +557,9 @@ class RunAuthStateStore:
         if pending_auth is not None:
             auth_session_id = pending_auth.get("auth_session_id")
             snapshot = None
+            durable = None
             if isinstance(auth_session_id, str) and auth_session_id:
+                durable = await self.get_durable_auth_session(auth_session_id)
                 try:
                     snapshot = engine_auth_flow_manager.get_session(auth_session_id)
                 except KeyError:
@@ -401,15 +567,27 @@ class RunAuthStateStore:
             created_at = (
                 snapshot.get("created_at")
                 if isinstance(snapshot, dict) and isinstance(snapshot.get("created_at"), str)
-                else pending_auth.get("created_at")
+                else (
+                    durable.get("created_at")
+                    if isinstance(durable, dict) and isinstance(durable.get("created_at"), str)
+                    else pending_auth.get("created_at")
+                )
             )
             expires_at = (
                 snapshot.get("expires_at")
                 if isinstance(snapshot, dict) and isinstance(snapshot.get("expires_at"), str)
-                else pending_auth.get("expires_at")
+                else (
+                    durable.get("expires_at")
+                    if isinstance(durable, dict) and isinstance(durable.get("expires_at"), str)
+                    else pending_auth.get("expires_at")
+                )
             )
             timed_out = False
-            status_obj = snapshot.get("status") if isinstance(snapshot, dict) else None
+            status_obj = (
+                snapshot.get("status")
+                if isinstance(snapshot, dict)
+                else (durable.get("status") if isinstance(durable, dict) else None)
+            )
             if status_obj == "expired":
                 timed_out = True
             else:
@@ -448,8 +626,19 @@ class RunAuthStateStore:
                 "last_error": (
                     snapshot.get("error")
                     if isinstance(snapshot, dict) and isinstance(snapshot.get("error"), str)
-                    else pending_auth.get("last_error")
+                    else (
+                        durable.get("last_error")
+                        if isinstance(durable, dict) and isinstance(durable.get("last_error"), str)
+                        else pending_auth.get("last_error")
+                    )
                 ),
+                "provider_id": pending_auth.get("provider_id"),
+                "transport": (
+                    snapshot.get("transport")
+                    if isinstance(snapshot, dict) and isinstance(snapshot.get("transport"), str)
+                    else (durable.get("transport") if isinstance(durable, dict) else None)
+                ),
+                "session_status": status_obj,
                 "source_attempt": pending_auth.get("source_attempt"),
                 "target_attempt": (
                     resume_ticket.get("target_attempt") if isinstance(resume_ticket, dict) else None
@@ -543,4 +732,34 @@ class RunAuthStateStore:
             "dispatched_at": row["dispatched_at"],
             "started_at": row["started_at"],
             "updated_at": str(row["updated_at"]),
+        }
+
+    def _durable_auth_session_from_row(self, row: aiosqlite.Row) -> Dict[str, Any]:
+        payload_raw = row["payload_json"]
+        try:
+            payload = json.loads(payload_raw) if isinstance(payload_raw, str) else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        return {
+            "auth_session_id": row["auth_session_id"],
+            "engine": row["engine"],
+            "provider_id": row["provider_id"],
+            "scope_key": row["scope_key"],
+            "request_id": row["request_id"],
+            "run_id": row["run_id"],
+            "source_attempt": row["source_attempt"],
+            "status": row["status"],
+            "auth_method": row["auth_method"],
+            "challenge_kind": row["challenge_kind"],
+            "driver": row["driver"],
+            "execution_mode": row["execution_mode"],
+            "transport": row["transport"],
+            "input_kind": row["input_kind"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "expires_at": row["expires_at"],
+            "last_error": row["last_error"],
+            "resume_ticket_id": row["resume_ticket_id"],
+            "terminal_reason": row["terminal_reason"],
+            "payload": payload,
         }

@@ -126,18 +126,18 @@ def test_skill_fingerprint_engine_specific_config(tmp_path):
     (skill_dir / "SKILL.md").write_text("base")
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
     (assets_dir / "gemini_settings.json").write_text(json.dumps({"model": "a"}))
-    (assets_dir / "iflow_settings.json").write_text(json.dumps({"modelName": "b"}))
+    (assets_dir / "qwen_config.json").write_text(json.dumps({"model": {"name": "b"}}))
     (assets_dir / "codex_config.toml").write_text("model = 'c'")
     (assets_dir / "opencode_config.json").write_text(json.dumps({"sandbox": "workspace-write"}))
 
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
     gemini_fp = compute_skill_fingerprint(skill, "gemini")
-    iflow_fp = compute_skill_fingerprint(skill, "iflow")
+    qwen_fp = compute_skill_fingerprint(skill, "qwen")
     codex_fp = compute_skill_fingerprint(skill, "codex")
     opencode_fp = compute_skill_fingerprint(skill, "opencode")
 
-    assert gemini_fp != iflow_fp
-    assert iflow_fp != codex_fp
+    assert gemini_fp != qwen_fp
+    assert qwen_fp != codex_fp
     assert codex_fp != opencode_fp
 
 

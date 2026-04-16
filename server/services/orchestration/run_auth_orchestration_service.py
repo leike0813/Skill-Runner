@@ -398,23 +398,36 @@ class RunAuthOrchestrationService:
                 event_type=OrchestratorEventType.AUTH_METHOD_SELECTED.value,
             )
         except EngineInteractionBusyError as exc:
-            selection_payload = self._build_method_selection(
-                engine=engine_name,
-                provider_id=provider_id,
-                available_methods=available_methods,
-                source_attempt=source_attempt,
-                last_error=str(exc),
-            )
-            await self._persist_method_selection(
+            recovered_pending_auth = await self._recover_active_pending_auth(
                 request_id=request_id,
                 run_id=resolved_run_id,
                 run_dir=run_dir,
-                selection=selection_payload,
+                engine=engine_name,
+                provider_id=provider_id,
+                auth_method=selection.value,
+                source_attempt=source_attempt,
                 run_store_backend=run_store_backend,
                 append_orchestrator_event=append_orchestrator_event,
                 update_status=update_status,
-                event_type=OrchestratorEventType.AUTH_SESSION_BUSY.value,
             )
+            if recovered_pending_auth is None:
+                selection_payload = self._build_method_selection(
+                    engine=engine_name,
+                    provider_id=provider_id,
+                    available_methods=available_methods,
+                    source_attempt=source_attempt,
+                    last_error=str(exc),
+                )
+                await self._persist_method_selection(
+                    request_id=request_id,
+                    run_id=resolved_run_id,
+                    run_dir=run_dir,
+                    selection=selection_payload,
+                    run_store_backend=run_store_backend,
+                    append_orchestrator_event=append_orchestrator_event,
+                    update_status=update_status,
+                    event_type=OrchestratorEventType.AUTH_SESSION_BUSY.value,
+                )
             return InteractionReplyResponse(
                 request_id=request_id,
                 status=RunStatus.WAITING_AUTH,
@@ -802,6 +815,12 @@ class RunAuthOrchestrationService:
             )
         )
         if ticket_dispatched:
+            await self._mark_durable_auth_session_terminal_if_supported(
+                run_store_backend=run_store_backend,
+                auth_session_id=auth_session_id,
+                status="succeeded",
+                terminal_reason="auth_completed",
+            )
             await maybe_await(run_store_backend.clear_pending_auth(request_id))
             await maybe_await(run_store_backend.clear_pending_auth_method_selection(request_id))
             await maybe_await(run_store_backend.clear_auth_resume_context(request_id))
@@ -886,6 +905,9 @@ class RunAuthOrchestrationService:
             available_methods=available_methods,
             selected_method=selected_method,
             auth_session_id=self._normalize_string(payload.get("auth_session_id")),
+            provider_id=self._normalize_string(payload.get("provider_id")),
+            transport=self._normalize_string(payload.get("transport")),
+            session_status=self._normalize_string(payload.get("session_status")),
             challenge_kind=challenge_kind,
             timeout_sec=self._positive_int_or_none(payload.get("timeout_sec")),
             created_at=self._normalize_string(payload.get("created_at")),
@@ -898,6 +920,37 @@ class RunAuthOrchestrationService:
             ticket_consumed=bool(payload.get("ticket_consumed")),
             pending_owner=self._enum_or_none(PendingOwner, payload.get("pending_owner")),
         )
+
+    async def cancel_request_auth_sessions(
+        self,
+        *,
+        request_id: str,
+        run_store_backend: Any = run_store,
+        terminal_reason: str = "run_canceled",
+    ) -> list[str]:
+        canceled_session_ids: list[str] = []
+        durable_sessions = await maybe_await(
+            run_store_backend.list_active_durable_auth_sessions_for_request(request_id)
+        )
+        for session in durable_sessions if isinstance(durable_sessions, list) else []:
+            auth_session_id = self._normalize_string(session.get("auth_session_id"))
+            if auth_session_id is None:
+                continue
+            try:
+                engine_auth_flow_manager.cancel_session(auth_session_id)
+            except KeyError:
+                pass
+            await self._mark_durable_auth_session_terminal_if_supported(
+                run_store_backend=run_store_backend,
+                auth_session_id=auth_session_id,
+                status="canceled",
+                terminal_reason=terminal_reason,
+            )
+            canceled_session_ids.append(auth_session_id)
+        await maybe_await(run_store_backend.clear_pending_auth(request_id))
+        await maybe_await(run_store_backend.clear_pending_auth_method_selection(request_id))
+        await maybe_await(run_store_backend.clear_auth_resume_context(request_id))
+        return canceled_session_ids
 
     async def reconcile_waiting_auth(
         self,
@@ -1093,6 +1146,12 @@ class RunAuthOrchestrationService:
             return False
         if not isinstance(snapshot, dict) or not self._snapshot_is_terminal_success(snapshot):
             return False
+        await self._mark_durable_auth_session_terminal_if_supported(
+            run_store_backend=run_store_backend,
+            auth_session_id=str(snapshot.get("session_id") or ""),
+            status="succeeded",
+            terminal_reason="auth_completed",
+        )
         await self.handle_callback_completion(
             snapshot=snapshot,
             append_orchestrator_event=append_orchestrator_event,
@@ -1131,6 +1190,13 @@ class RunAuthOrchestrationService:
         timed_out_payload = dict(pending_auth) if isinstance(pending_auth, dict) else None
         if isinstance(timed_out_payload, dict):
             timed_out_payload["last_error"] = reason
+        await self._mark_durable_auth_session_terminal_if_supported(
+            run_store_backend=run_store_backend,
+            auth_session_id=auth_session_id,
+            status="expired",
+            last_error=reason,
+            terminal_reason="waiting_auth_timeout",
+        )
         await maybe_await(run_store_backend.clear_pending_auth(request_id))
         await maybe_await(run_store_backend.clear_pending_auth_method_selection(request_id))
         await maybe_await(run_store_backend.clear_auth_resume_context(request_id))
@@ -1181,6 +1247,9 @@ class RunAuthOrchestrationService:
                 engine=engine,
                 provider_id=provider_id,
             ),
+            owner_request_id=request_id,
+            owner_run_id=run_id,
+            source_attempt=source_attempt,
         )
         pending_auth = self._build_pending_auth_from_snapshot(
             snapshot=snapshot,
@@ -1241,6 +1310,28 @@ class RunAuthOrchestrationService:
                 ),
             )
         )
+        await self._upsert_durable_auth_session_if_supported(
+            run_store_backend=run_store_backend,
+            auth_session_id=pending_auth.auth_session_id,
+            engine=pending_auth.engine,
+            provider_id=pending_auth.provider_id,
+            request_id=request_id,
+            run_id=run_id,
+            source_attempt=pending_auth.source_attempt,
+            status="challenge_active",
+            payload=snapshot,
+            auth_method=(
+                pending_auth.auth_method.value
+                if pending_auth.auth_method is not None
+                else None
+            ),
+            challenge_kind=pending_auth.challenge_kind.value,
+            execution_mode=self._normalize_string(snapshot.get("execution_mode")),
+            transport=self._normalize_string(snapshot.get("transport")),
+            input_kind=self._normalize_string(snapshot.get("input_kind")),
+            expires_at=self._normalize_string(snapshot.get("expires_at")),
+            last_error=self._normalize_string(snapshot.get("error")),
+        )
         await run_projection_service.write_non_terminal_projection(
             run_dir=run_dir,
             request_id=request_id,
@@ -1277,11 +1368,21 @@ class RunAuthOrchestrationService:
     ) -> PendingAuth | None:
         _ = update_status
         active_snapshot = engine_auth_flow_manager.get_active_session_snapshot()
+        active_snapshot = engine_auth_flow_manager.get_active_session_snapshot(
+            engine=engine,
+            provider_id=provider_id,
+        )
         if not bool(active_snapshot.get("active")):
             return None
         if self._normalize_string(active_snapshot.get("engine")) != engine:
             return None
         if self._normalize_string(active_snapshot.get("provider_id")) != provider_id:
+            return None
+        owner_request_id = self._normalize_string(active_snapshot.get("owner_request_id"))
+        owner_run_id = self._normalize_string(active_snapshot.get("owner_run_id"))
+        if owner_request_id is not None and owner_request_id != request_id:
+            return None
+        if owner_run_id is not None and owner_run_id != run_id:
             return None
         if self._normalize_string(active_snapshot.get("auth_method")) != self._map_auth_method_to_runtime(auth_method):
             return None
@@ -1765,6 +1866,70 @@ class RunAuthOrchestrationService:
         if normalized_instructions:
             return f"{normalized_instructions} Last error: {normalized_last_error}"
         return f"Last error: {normalized_last_error}"
+
+    async def _upsert_durable_auth_session_if_supported(
+        self,
+        *,
+        run_store_backend: Any,
+        auth_session_id: str,
+        engine: str,
+        provider_id: str | None,
+        request_id: str | None,
+        run_id: str | None,
+        source_attempt: int | None,
+        status: str,
+        payload: dict[str, Any],
+        auth_method: str | None = None,
+        challenge_kind: str | None = None,
+        execution_mode: str | None = None,
+        transport: str | None = None,
+        input_kind: str | None = None,
+        expires_at: str | None = None,
+        last_error: str | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
+        if not hasattr(run_store_backend, "upsert_durable_auth_session"):
+            return
+        await maybe_await(
+            run_store_backend.upsert_durable_auth_session(
+                auth_session_id=auth_session_id,
+                engine=engine,
+                provider_id=provider_id,
+                request_id=request_id,
+                run_id=run_id,
+                source_attempt=source_attempt,
+                status=status,
+                payload=payload,
+                auth_method=auth_method,
+                challenge_kind=challenge_kind,
+                execution_mode=execution_mode,
+                transport=transport,
+                input_kind=input_kind,
+                expires_at=expires_at,
+                last_error=last_error,
+                terminal_reason=terminal_reason,
+            )
+        )
+
+    async def _mark_durable_auth_session_terminal_if_supported(
+        self,
+        *,
+        run_store_backend: Any,
+        auth_session_id: str,
+        status: str,
+        last_error: str | None = None,
+        terminal_reason: str | None = None,
+    ) -> None:
+        if not hasattr(run_store_backend, "mark_durable_auth_session_terminal"):
+            return
+        await maybe_await(
+            run_store_backend.mark_durable_auth_session_terminal(
+                auth_session_id,
+                status=status,
+                last_error=last_error,
+                terminal_reason=terminal_reason,
+            )
+        )
 
     def _apply_last_error_to_pending_auth(
         self,

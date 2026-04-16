@@ -31,6 +31,7 @@ from .factories import (
     make_fcmp_terminal_payload,
     make_rasp_event,
 )
+from .diagnostic_warning_governance import classify_protocol_diagnostic_code
 from .final_promotion_coordinator import (
     FinalPromotionCoordinator,
     build_process_payload,
@@ -459,6 +460,11 @@ def build_rasp_events(
                         if isinstance(diagnostic_event.get("source_type"), str)
                         else None
                     ),
+                    authoritative=(
+                        diagnostic_event.get("authoritative")
+                        if isinstance(diagnostic_event.get("authoritative"), bool)
+                        else False
+                    ),
                     message=(
                         diagnostic_event.get("message")
                         if isinstance(diagnostic_event.get("message"), str)
@@ -477,17 +483,32 @@ def build_rasp_events(
     for code in parsed.get("diagnostics", []):
         if not isinstance(code, str) or not code:
             continue
+        taxonomy = classify_protocol_diagnostic_code(code)
         push(
             RuntimeEventCategory.DIAGNOSTIC,
             "diagnostic.warning",
-            data={"code": code},
+            data=make_diagnostic_warning_payload(
+                code=code,
+                severity=taxonomy.get("severity"),
+                pattern_kind=taxonomy.get("pattern_kind"),
+                source_type=taxonomy.get("source_type"),
+                authoritative=taxonomy.get("authoritative"),
+            ),
             correlation=correlation,
         )
     if source.confidence < 0.7:
+        taxonomy = classify_protocol_diagnostic_code("LOW_CONFIDENCE_PARSE")
         push(
             RuntimeEventCategory.DIAGNOSTIC,
             "diagnostic.warning",
-            data={"code": "LOW_CONFIDENCE_PARSE", "confidence": source.confidence},
+            data=make_diagnostic_warning_payload(
+                code="LOW_CONFIDENCE_PARSE",
+                severity=taxonomy.get("severity"),
+                pattern_kind=taxonomy.get("pattern_kind"),
+                source_type=taxonomy.get("source_type"),
+                authoritative=taxonomy.get("authoritative"),
+                confidence=source.confidence,
+            ),
             correlation=correlation,
         )
 
@@ -547,11 +568,15 @@ def build_rasp_events(
         push(
             RuntimeEventCategory.DIAGNOSTIC,
             "diagnostic.warning",
-            data={
-                "code": "RAW_STDERR_COALESCED",
-                "original_rows": coalesce_stats["original"],
-                "coalesced_rows": coalesce_stats["coalesced"],
-            },
+            data=make_diagnostic_warning_payload(
+                code="RAW_STDERR_COALESCED",
+                severity="warning",
+                pattern_kind="protocol_raw_coalesced",
+                source_type="protocol:raw_coalescer",
+                authoritative=False,
+                original_rows=coalesce_stats["original"],
+                coalesced_rows=coalesce_stats["coalesced"],
+            ),
             correlation=correlation,
         )
 
@@ -691,6 +716,41 @@ def translate_orchestrator_event_to_fcmp_specs(
                 updated_at=updated_at,
                 pending_interaction_id=None,
             ),
+        )
+        return specs
+
+    if type_name == OrchestratorEventType.ASSISTANT_MESSAGE_SUPERSEDED.value:
+        message_id_obj = data.get("message_id")
+        message_id = (
+            message_id_obj.strip()
+            if isinstance(message_id_obj, str) and message_id_obj.strip()
+            else None
+        )
+        if message_id is None:
+            return specs
+        family_id_obj = data.get("message_family_id")
+        family_id = (
+            family_id_obj.strip()
+            if isinstance(family_id_obj, str) and family_id_obj.strip()
+            else message_id
+        )
+        push(
+            FcmpEventType.ASSISTANT_MESSAGE_SUPERSEDED.value,
+            {
+                "message_id": message_id,
+                "message_family_id": family_id,
+                "reason": (
+                    data.get("reason")
+                    if isinstance(data.get("reason"), str)
+                    else "output_repair_started"
+                ),
+                "repair_round_index": (
+                    data.get("repair_round_index")
+                    if isinstance(data.get("repair_round_index"), int)
+                    else 1
+                ),
+                "replacement_expected": bool(data.get("replacement_expected", True)),
+            },
         )
         return specs
 
@@ -1150,6 +1210,11 @@ def build_fcmp_events(
         )
         payload: dict[str, Any] = {
             "message_id": message_id,
+            "message_family_id": (
+                event.data.get("message_family_id")
+                if isinstance(event.data.get("message_family_id"), str)
+                else message_id
+            ),
             "summary": summary or (text if isinstance(text, str) else event_type),
             "classification": classification or (
                 "final" if event_type == "agent.message.final" else event_type.split(".")[-1]
@@ -1200,7 +1265,16 @@ def build_fcmp_events(
         if not isinstance(code, str) or not code:
             continue
         payload = {"code": code}
-        for key in ("severity", "pattern_kind", "source_type", "message", "detail", "confidence", "suppressed_count"):
+        for key in (
+            "severity",
+            "pattern_kind",
+            "source_type",
+            "authoritative",
+            "message",
+            "detail",
+            "confidence",
+            "suppressed_count",
+        ):
             value = event.data.get(key)
             if value is not None:
                 payload[key] = value
@@ -1216,9 +1290,17 @@ def build_fcmp_events(
         threshold=max(1, int(suppression_threshold)),
     )
     if suppressed_count > 0:
+        taxonomy = classify_protocol_diagnostic_code("RAW_DUPLICATE_SUPPRESSED")
         push(
             FcmpEventType.DIAGNOSTIC_WARNING.value,
-            {"code": "RAW_DUPLICATE_SUPPRESSED", "suppressed_count": suppressed_count},
+            make_diagnostic_warning_payload(
+                code="RAW_DUPLICATE_SUPPRESSED",
+                severity=taxonomy.get("severity"),
+                pattern_kind=taxonomy.get("pattern_kind"),
+                source_type=taxonomy.get("source_type"),
+                authoritative=taxonomy.get("authoritative"),
+                suppressed_count=suppressed_count,
+            ),
         )
     for event in normalized_raw:
         push(
@@ -1732,12 +1814,33 @@ def build_fcmp_events(
         if type_name_obj == "diagnostic.warning":
             code_obj = row_data.get("code")
             if isinstance(code_obj, str) and code_obj:
+                confidence_obj = row_data.get("confidence")
+                suppressed_count_obj = row_data.get("suppressed_count")
                 push(
                     FcmpEventType.DIAGNOSTIC_WARNING.value,
                     make_diagnostic_warning_payload(
                         code=code_obj,
+                        severity=row_data.get("severity") if isinstance(row_data.get("severity"), str) else None,
+                        pattern_kind=(
+                            row_data.get("pattern_kind")
+                            if isinstance(row_data.get("pattern_kind"), str)
+                            else None
+                        ),
+                        source_type=(
+                            row_data.get("source_type")
+                            if isinstance(row_data.get("source_type"), str)
+                            else None
+                        ),
+                        authoritative=(
+                            row_data.get("authoritative")
+                            if isinstance(row_data.get("authoritative"), bool)
+                            else False
+                        ),
+                        message=row_data.get("message") if isinstance(row_data.get("message"), str) else None,
                         path=row_data.get("path") if isinstance(row_data.get("path"), str) else None,
                         detail=row_data.get("detail") if isinstance(row_data.get("detail"), str) else None,
+                        confidence=float(confidence_obj) if isinstance(confidence_obj, (int, float)) else None,
+                        suppressed_count=int(suppressed_count_obj) if isinstance(suppressed_count_obj, int) else None,
                     ),
                 )
 
@@ -1823,23 +1926,71 @@ def build_fcmp_events(
     if effective_status in {"failed", "canceled"}:
         if completion_state == "completed":
             if not forensic_mode:
+                taxonomy = classify_protocol_diagnostic_code("TERMINAL_STATUS_COMPLETION_CONFLICT")
                 push(
                     FcmpEventType.DIAGNOSTIC_WARNING.value,
-                    {"code": "TERMINAL_STATUS_COMPLETION_CONFLICT"},
+                    make_diagnostic_warning_payload(
+                        code="TERMINAL_STATUS_COMPLETION_CONFLICT",
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
                 )
         if not forensic_mode:
             for code in completion_diagnostics:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+                taxonomy = classify_protocol_diagnostic_code(code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
     elif effective_status == "succeeded":
         if not forensic_mode:
             for code in completion_diagnostics:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+                taxonomy = classify_protocol_diagnostic_code(code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
     elif completion_state == "interrupted" and effective_status not in {"waiting_user", "waiting_auth"}:
         if not forensic_mode:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code or "INTERRUPTED"})
+            interrupted_code = completion_reason_code or "INTERRUPTED"
+            taxonomy = classify_protocol_diagnostic_code(interrupted_code)
+            push(
+                FcmpEventType.DIAGNOSTIC_WARNING.value,
+                make_diagnostic_warning_payload(
+                    code=interrupted_code,
+                    severity=taxonomy.get("severity"),
+                    pattern_kind=taxonomy.get("pattern_kind"),
+                    source_type=taxonomy.get("source_type"),
+                    authoritative=taxonomy.get("authoritative"),
+                ),
+            )
             for code in completion_diagnostics:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
-    elif completion_state == "awaiting_user_input" or effective_status == "waiting_user":
+                taxonomy = classify_protocol_diagnostic_code(code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
+    elif completion_state in {"awaiting_user_input", "waiting_user"} or effective_status == "waiting_user":
         prompt = ""
         waiting_interaction_id: Optional[int] = pending_interaction_id
         if forensic_mode:
@@ -1876,10 +2027,30 @@ def build_fcmp_events(
         )
         if not forensic_mode:
             if completion_reason_code:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
+                taxonomy = classify_protocol_diagnostic_code(completion_reason_code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=completion_reason_code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
             for code in completion_diagnostics:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
-    elif effective_status == "waiting_auth":
+                taxonomy = classify_protocol_diagnostic_code(code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
+    elif completion_state in {"awaiting_auth", "waiting_auth"} or effective_status == "waiting_auth":
         auth_waiting_payload = pending_auth_payload or pending_auth_selection_payload
         if auth_waiting_payload is not None and not auth_required_emitted:
             auth_session_id_obj = auth_waiting_payload.get("auth_session_id")
@@ -1922,14 +2093,44 @@ def build_fcmp_events(
             )
         if not forensic_mode:
             if completion_reason_code:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": completion_reason_code})
+                taxonomy = classify_protocol_diagnostic_code(completion_reason_code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=completion_reason_code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
             for code in completion_diagnostics:
-                push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": code})
+                taxonomy = classify_protocol_diagnostic_code(code)
+                push(
+                    FcmpEventType.DIAGNOSTIC_WARNING.value,
+                    make_diagnostic_warning_payload(
+                        code=code,
+                        severity=taxonomy.get("severity"),
+                        pattern_kind=taxonomy.get("pattern_kind"),
+                        source_type=taxonomy.get("source_type"),
+                        authoritative=taxonomy.get("authoritative"),
+                    ),
+                )
     elif effective_status in {"queued", "running"} or auth_completed_emitted or auth_failed_emitted:
         pass
     else:
         if not forensic_mode:
-            push(FcmpEventType.DIAGNOSTIC_WARNING.value, {"code": "INCOMPLETE_STATE_CLASSIFICATION"})
+            taxonomy = classify_protocol_diagnostic_code("INCOMPLETE_STATE_CLASSIFICATION")
+            push(
+                FcmpEventType.DIAGNOSTIC_WARNING.value,
+                make_diagnostic_warning_payload(
+                    code="INCOMPLETE_STATE_CLASSIFICATION",
+                    severity=taxonomy.get("severity"),
+                    pattern_kind=taxonomy.get("pattern_kind"),
+                    source_type=taxonomy.get("source_type"),
+                    authoritative=taxonomy.get("authoritative"),
+                ),
+            )
     return fcmp_events
 
 

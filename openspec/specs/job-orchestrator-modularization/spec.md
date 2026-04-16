@@ -4,16 +4,12 @@
 TBD - created by archiving change refactor-job-orchestrator-god-object. Update Purpose after archive.
 ## Requirements
 ### Requirement: JobOrchestrator MUST act as a coordination layer
-The system MUST constrain `JobOrchestrator` to lifecycle coordination and delegation, instead of embedding bundle, filesystem snapshot, audit, interaction lifecycle, and restart recovery implementations in a single class.
+The system MUST constrain `JobOrchestrator` to stable lifecycle coordination and delegation instead of letting new lifecycle decomposition work reintroduce business logic into the façade.
 
-#### Scenario: Run execution delegates component responsibilities
-- **WHEN** `JobOrchestrator.run_job` processes a run
-- **THEN** it MUST delegate bundle, snapshot, audit, and interaction lifecycle operations to dedicated services
-
-#### Scenario: Trust registration canonical path moves with lifecycle
-- **WHEN** run-folder trust registration belongs to lifecycle execution
-- **THEN** tests MUST assert the lifecycle-service call site
-- **AND** the system MUST NOT move the logic back into `JobOrchestrator` only to satisfy legacy tests
+#### Scenario: stable orchestration entrypoints remain available during staged refactor
+- **WHEN** lifecycle responsibilities are extracted into dedicated orchestration services
+- **THEN** `JobOrchestrator` MUST keep stable entrypoints for `run_job`, `cancel_run`, and `recover_incomplete_runs_on_startup`
+- **AND** `run_job` MUST continue to delegate through `RunJobLifecycleService`
 
 ### Requirement: Dedicated orchestration services MUST preserve run behavior
 
@@ -521,4 +517,21 @@ provider-aware engine 的 auth orchestration MUST 优先使用 request-side `pro
 - **WHEN** orchestration 处理该回合
 - **THEN** 系统 MUST 记录显式 provider unresolved 诊断
 - **AND** MUST NOT 创建 provider 为空的 pending auth
+
+### Requirement: Lifecycle decomposition MUST proceed through staged TDD guardrails
+The system MUST decompose run lifecycle orchestration through staged, test-guarded refactor slices instead of a one-shot rewrite.
+
+#### Scenario: stage introduces a new orchestration slice
+- **WHEN** a lifecycle slice such as preparation, execution, outcome, or finalization is extracted
+- **THEN** the stage MUST land dedicated guardrail or unit tests before or alongside the implementation move
+- **AND** the stage MUST preserve the existing external run behavior
+
+### Requirement: Run-attempt preparation MUST be extracted behind a typed context
+The system MUST isolate run-attempt preparation behind a dedicated service that returns a typed preparation context for later lifecycle stages.
+
+#### Scenario: lifecycle prepares a run attempt
+- **WHEN** `RunJobLifecycleService` begins processing a run attempt
+- **THEN** it MUST delegate request/attempt/skill/input/run-options preparation to `RunAttemptPreparationService`
+- **AND** the service MUST return a `RunAttemptContext`
+- **AND** later lifecycle steps MUST consume that context instead of recomputing the same preparation fields ad hoc
 

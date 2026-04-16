@@ -36,7 +36,7 @@
 **Selected Adapter (Gemini/Codex/IFlow/OpenCode)** 接管控制权：
 
 1. **环境准备**:
-   - 将技能的 `assets/` 和 `SKILL.md` 复制/安装到运行目录 `.<engine>/skills/` 下（如 `.gemini/.codex/.iflow/.opencode`），确保执行环境隔离。
+   - 将技能的 `assets/` 和 `SKILL.md` 复制/安装到运行目录 `.<engine>/skills/` 下（如 `.gemini/.codex/.qwen/.opencode`），确保执行环境隔离。
 2. **输入解析 (Input Resolution)**:
    - 遍历 `input` Schema 的所有键。
    - **声明式 file path 解析**: 若请求体 `input.<key>` 为 file 字段提供了 `uploads/` 相对路径，则优先按该路径解析。
@@ -48,7 +48,7 @@
 4. **Prompt 生成 (Adapter Dependent)**:
    - **Gemini**: 加载 Jinja2 模板，注入上下文，渲染为 `prompt.txt`。
    - **Codex**: 融合 `engine_default -> skill default -> runtime -> enforced`，再构造 CLI 参数。
-   - **Gemini / iFlow / OpenCode**: 在运行目录写入项目级配置，统一遵循 `engine_default -> skill default -> runtime -> enforced` 合成顺序。
+   - **Gemini / Qwen / OpenCode**: 在运行目录写入项目级配置，统一遵循 `engine_default -> skill default -> runtime -> enforced` 合成顺序。
    - **OpenCode 特例**: 额外按执行模式写入 `permission.question`（`auto=deny`，`interactive=allow`）。
 
 ## 阶段四：执行 (Execution)

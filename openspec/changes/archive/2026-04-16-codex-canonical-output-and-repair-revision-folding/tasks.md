@@ -1,0 +1,6 @@
+- [x] Add OpenSpec change artifacts and delta spec for codex canonical output and repair revision folding
+- [x] Canonicalize Codex compat payloads before convergence schema validation and repair decisions
+- [x] Align the shared chat model with e2e bubble semantics and repair-family generations
+- [x] Render superseded finals as folded inline revisions instead of hiding them
+- [x] Update management UI to consume the shared folded revision model without changing e2e bubble behavior
+- [x] Add regression tests for Codex compat convergence, chat model folding, templates, and outer protocol/read-model paths

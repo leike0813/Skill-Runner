@@ -272,7 +272,7 @@ def test_harness_registers_trust_for_claude_and_bootstraps_git(tmp_path: Path, m
     assert trust_spy.remove_calls == [("claude", run_dir)]
 
 
-def test_harness_does_not_register_trust_for_iflow(tmp_path: Path, monkeypatch) -> None:
+def test_harness_rejects_deprecated_iflow_engine(tmp_path: Path, monkeypatch) -> None:
     class _TrustSpy:
         def __init__(self) -> None:
             self.register_calls: list[tuple[str, Path]] = []
@@ -293,13 +293,14 @@ def test_harness_does_not_register_trust_for_iflow(tmp_path: Path, monkeypatch) 
     runtime = _DummyHarnessRuntime(config)
     runtime.stdout = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n'
 
-    runtime.start(
-        HarnessLaunchRequest(
-            engine="iflow",
-            passthrough_args=["--json", "-p", "trust"],
-            translate_level=1,
+    with pytest.raises(HarnessError, match='Unsupported engine "iflow"'):
+        runtime.start(
+            HarnessLaunchRequest(
+                engine="iflow",
+                passthrough_args=["--json", "-p", "trust"],
+                translate_level=1,
+            )
         )
-    )
     assert trust_spy.register_calls == []
     assert trust_spy.remove_calls == []
 

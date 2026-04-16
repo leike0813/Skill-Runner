@@ -2,13 +2,13 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from server.config import config
 from server.engines.codex.auth import CodexOAuthProxySession
 from server.engines.gemini.auth import GeminiOAuthProxySession
-from server.engines.iflow.auth import IFlowOAuthProxySession
 from server.engines.opencode.auth import (
     OpencodeAuthCliSession,
     OpencodeGoogleAntigravityOAuthProxySession,
@@ -18,6 +18,7 @@ from server.engines.qwen.auth.protocol.qwen_oauth_proxy_flow import QwenOAuthSes
 from server.runtime.auth.session_lifecycle import AuthStartPlan
 from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
+from server.services.orchestration.auth_session_durable_store import DurableAuthSessionSyncStore
 from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 
 pytestmark = pytest.mark.skipif(
@@ -103,8 +104,8 @@ class _FakeCliManager:
         return {
             "codex": {"credential_state": "present" if auth_file.exists() else "missing"},
             "gemini": {"credential_state": "missing"},
-            "iflow": {"credential_state": "missing"},
             "opencode": {"credential_state": "present" if opencode_auth.exists() else "missing"},
+            "qwen": {"credential_state": "missing"},
         }
 
 
@@ -146,6 +147,63 @@ def _set_google_oauth_proxy_env(monkeypatch) -> None:
     monkeypatch.setenv(
         "SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID",
         "test-gemini-client-id.apps.googleusercontent.com",
+    )
+    monkeypatch.setenv(
+        "SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET",
+        "test-gemini-client-secret",
+    )
+    monkeypatch.setenv(
+        "SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID",
+        "test-opencode-google-client-id.apps.googleusercontent.com",
+    )
+    monkeypatch.setenv(
+        "SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_SECRET",
+        "test-opencode-google-client-secret",
+    )
+
+
+def _install_fake_session_start(monkeypatch, manager: EngineAuthFlowManager) -> None:
+    monkeypatch.setattr(manager, "_refresh_session_locked", lambda session: None)
+    monkeypatch.setattr(
+        manager._session_start_planner,  # noqa: SLF001
+        "plan_start",
+        lambda **kwargs: SimpleNamespace(
+            engine=kwargs["engine"],
+            method=kwargs.get("method", "auth"),
+            auth_method=kwargs.get("auth_method"),
+            provider_id=kwargs.get("provider_id"),
+            transport=kwargs.get("transport") or "oauth_proxy",
+        ),
+    )
+
+    def _fake_start_from_plan_locked(*, plan, session_id: str, callback_base_url=None):  # noqa: ANN001, ARG001
+        now = datetime.now(timezone.utc)
+        session = manager._new_session(  # noqa: SLF001
+            session_id=session_id,
+            engine=plan.engine,
+            method=plan.method,
+            auth_method=plan.auth_method,
+            transport=plan.transport,
+            provider_id=plan.provider_id,
+            provider_name=None,
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(minutes=15),
+            status="waiting_user",
+            input_kind="api_key",
+            output_path=None,
+            auth_url=None,
+            user_code=None,
+            driver="fake",
+            execution_mode="protocol_proxy",
+        )
+        manager._sessions[session_id] = session  # noqa: SLF001
+        return manager._to_snapshot(session)  # noqa: SLF001
+
+    monkeypatch.setattr(
+        manager._session_starter,  # noqa: SLF001
+        "start_from_plan_locked",
+        _fake_start_from_plan_locked,
     )
     monkeypatch.setenv(
         "SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET",
@@ -259,6 +317,130 @@ def test_engine_auth_flow_manager_opt_in_keeps_persistent_auth_logs(tmp_path: Pa
         assert (profile.data_dir / "engine_auth_sessions").exists()
     finally:
         _set_engine_auth_log_persistence(previous)
+
+
+def test_engine_auth_flow_manager_same_scope_blocks_cross_owner(tmp_path: Path, monkeypatch) -> None:
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, _write_script(tmp_path / "fake-auth", "exit 0")),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+        durable_store=DurableAuthSessionSyncStore(tmp_path / "runs.db"),
+    )
+    _install_fake_session_start(monkeypatch, manager)
+
+    started = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-china",
+        owner_request_id="req-1",
+        owner_run_id="run-1",
+        source_attempt=1,
+    )
+
+    with pytest.raises(EngineInteractionBusyError):
+        manager.start_session(
+            "qwen",
+            auth_method="api_key",
+            provider_id="coding-plan-china",
+            owner_request_id="req-2",
+            owner_run_id="run-2",
+            source_attempt=1,
+        )
+
+    assert started["provider_id"] == "coding-plan-china"
+
+
+def test_engine_auth_flow_manager_different_provider_can_run_concurrently(tmp_path: Path, monkeypatch) -> None:
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, _write_script(tmp_path / "fake-auth", "exit 0")),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+        durable_store=DurableAuthSessionSyncStore(tmp_path / "runs.db"),
+    )
+    _install_fake_session_start(monkeypatch, manager)
+
+    first = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-china",
+        owner_request_id="req-1",
+        owner_run_id="run-1",
+        source_attempt=1,
+    )
+    second = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-global",
+        owner_request_id="req-2",
+        owner_run_id="run-2",
+        source_attempt=1,
+    )
+
+    assert first["session_id"] != second["session_id"]
+    assert second["provider_id"] == "coding-plan-global"
+
+
+def test_engine_auth_flow_manager_same_owner_recovers_existing_session(tmp_path: Path, monkeypatch) -> None:
+    profile = _FakeProfile(tmp_path)
+    durable_store = DurableAuthSessionSyncStore(tmp_path / "runs.db")
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, _write_script(tmp_path / "fake-auth", "exit 0")),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+        durable_store=durable_store,
+    )
+    _install_fake_session_start(monkeypatch, manager)
+
+    first = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-china",
+        owner_request_id="req-1",
+        owner_run_id="run-1",
+        source_attempt=1,
+    )
+    recovered = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-china",
+        owner_request_id="req-1",
+        owner_run_id="run-1",
+        source_attempt=1,
+    )
+
+    assert recovered["session_id"] == first["session_id"]
+    durable = durable_store.get_session(first["session_id"])
+    assert durable is not None
+    assert durable["owner_request_id"] == "req-1"
+
+
+def test_engine_auth_flow_manager_cancel_marks_durable_session_terminal(tmp_path: Path, monkeypatch) -> None:
+    profile = _FakeProfile(tmp_path)
+    durable_store = DurableAuthSessionSyncStore(tmp_path / "runs.db")
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, _write_script(tmp_path / "fake-auth", "exit 0")),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+        durable_store=durable_store,
+    )
+    _install_fake_session_start(monkeypatch, manager)
+
+    started = manager.start_session(
+        "qwen",
+        auth_method="api_key",
+        provider_id="coding-plan-china",
+        owner_request_id="req-1",
+        owner_run_id="run-1",
+        source_attempt=1,
+    )
+    canceled = manager.cancel_session(started["session_id"])
+
+    assert canceled["status"] == "canceled"
+    durable = durable_store.get_session(started["session_id"])
+    assert durable is not None
+    assert durable["status"] == "canceled"
 
 
 def test_engine_auth_flow_manager_claude_callback_session_injects_run_scope_trust(
@@ -863,7 +1045,7 @@ def test_engine_auth_flow_manager_gemini_oauth_proxy_callback_state_once(tmp_pat
         assert "already been consumed" in str(exc)
 
 
-def test_engine_auth_flow_manager_iflow_oauth_proxy_manual_success(tmp_path: Path, monkeypatch):
+def test_engine_auth_flow_manager_iflow_oauth_proxy_is_unsupported(tmp_path: Path, monkeypatch):
     command_path = _write_script(tmp_path / "fake-iflow", "exit 0")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
@@ -871,56 +1053,16 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_manual_success(tmp_path: Pat
         interaction_gate=EngineInteractionGate(),
         trust_manager=_TrustSpy(),
     )
-    listener_calls = {"start": 0, "stop": 0}
-
-    def _fake_listener_start() -> str:
-        listener_calls["start"] = listener_calls["start"] + 1
-        return "http://127.0.0.1:11451/oauth2callback"
-
-    def _fake_listener_stop() -> None:
-        listener_calls["stop"] = listener_calls["stop"] + 1
-
-    monkeypatch.setattr(
-        manager,
-        "start_callback_listener",
-        lambda *, channel, callback_handler: (True, _fake_listener_start()),
-    )
-    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: _fake_listener_stop())
-    monkeypatch.setattr(
-        manager._iflow_oauth_proxy_flow,
-        "submit_input",
-        lambda *_args, **_kwargs: {"iflow_api_key_present": True, "iflow_user_name": "iflow-user"},
-    )
-    started = manager.start_session(
-        "iflow",
-        "auth",
-        transport="oauth_proxy",
-        auth_method="auth_code_or_url",
-    )
-    assert started["engine"] == "iflow"
-    assert started["transport"] == "oauth_proxy"
-    assert started["status"] == "waiting_user"
-    assert started["execution_mode"] == "protocol_proxy"
-    assert str(started["auth_url"]).startswith("https://iflow.cn/oauth?")
-    assert listener_calls["start"] == 0
-
-    runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
-    assert isinstance(runtime, IFlowOAuthProxySession)
-    assert runtime.redirect_uri == "https://iflow.cn/oauth/code-display"
-    assert "redirect=https%3A%2F%2Fiflow.cn%2Foauth%2Fcode-display" in str(started["auth_url"])
-
-    submitted = manager.input_session(
-        started["session_id"],
-        "text",
-        f"http://127.0.0.1:11451/oauth2callback?code=iflow-code&state={runtime.state}",
-    )
-    assert submitted["status"] == "succeeded"
-    assert submitted["manual_fallback_used"] is True
-    assert submitted["audit"]["callback_mode"] == "manual"
-    assert listener_calls["stop"] == 1
+    with pytest.raises(ValueError, match="Unsupported engine for auth proxy"):
+        manager.start_session(
+            "iflow",
+            "auth",
+            transport="oauth_proxy",
+            auth_method="auth_code_or_url",
+        )
 
 
-def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_state_once(tmp_path: Path, monkeypatch):
+def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_is_unsupported(tmp_path: Path, monkeypatch):
     command_path = _write_script(tmp_path / "fake-iflow", "exit 0")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
@@ -929,36 +1071,13 @@ def test_engine_auth_flow_manager_iflow_oauth_proxy_callback_state_once(tmp_path
         trust_manager=_TrustSpy(),
     )
 
-    monkeypatch.setattr(
-        manager,
-        "start_callback_listener",
-        lambda *, channel, callback_handler: (True, "http://127.0.0.1:11451/oauth2callback"),
-    )
-    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: None)
-    monkeypatch.setattr(
-        manager._iflow_oauth_proxy_flow,
-        "complete_with_code",
-        lambda **_kwargs: {"iflow_api_key_present": True, "iflow_user_name": "iflow-user"},
-    )
-    started = manager.start_session(
-        "iflow",
-        "auth",
-        transport="oauth_proxy",
-        auth_method="callback",
-    )
-    runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
-    assert isinstance(runtime, IFlowOAuthProxySession)
-
-    payload = manager.complete_callback(channel="iflow", state=runtime.state, code="callback-code")
-    assert payload["status"] == "succeeded"
-    assert payload["oauth_callback_received"] is True
-    assert payload["manual_fallback_used"] is False
-
-    try:
-        manager.complete_callback(channel="iflow", state=runtime.state, code="callback-code")
-        raise AssertionError("expected ValueError")
-    except ValueError as exc:
-        assert "already been consumed" in str(exc)
+    with pytest.raises(ValueError, match="Unsupported engine for auth proxy"):
+        manager.start_session(
+            "iflow",
+            "auth",
+            transport="oauth_proxy",
+            auth_method="callback",
+        )
 
 
 def test_engine_auth_flow_manager_respects_global_gate_conflict(tmp_path: Path):
@@ -1150,25 +1269,8 @@ sleep 0.2
     assert waiting["auth_url"] == "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc123"
 
 
-def test_engine_auth_flow_manager_iflow_submit_success(tmp_path: Path):
-    _require_pty()
-    command_path = _write_script(
-        tmp_path / "fake-iflow",
-        """
-printf 'iFlow OAuth 登录\\n'
-printf '1. 请复制以下链接并在浏览器中打开：\\n'
-printf 'https://iflow.cn/oauth?state=abc123\\n'
-printf '2. 登录您的心流账号并授权\\n'
-printf '授权码：\\n'
-printf '粘贴授权码...\\n'
-IFS= read -r _code
-printf '模型选择\\n'
-printf '按回车使用默认选择：GLM 4.7\\n'
-IFS= read -r _model
-printf '输入消息或@文件路径\\n'
-sleep 0.2
-""".strip(),
-    )
+def test_engine_auth_flow_manager_iflow_cli_delegate_is_unsupported(tmp_path: Path):
+    command_path = _write_script(tmp_path / "fake-iflow", "exit 0")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
         agent_manager=_FakeCliManager(profile, command_path),
@@ -1176,22 +1278,13 @@ sleep 0.2
         trust_manager=_TrustSpy(),
     )
 
-    started = manager.start_session(
-        "iflow",
-        "auth",
-        transport="cli_delegate",
-        auth_method="auth_code_or_url",
-    )
-    waiting = _wait_until_status(manager, started["session_id"], {"waiting_user"})
-    assert waiting["engine"] == "iflow"
-    assert waiting["status"] == "waiting_user"
-    assert str(waiting["auth_url"]).startswith("https://iflow.cn/oauth?")
-
-    submitted = manager.input_session(started["session_id"], "code", "CODE-1234")
-    assert submitted["status"] in {"code_submitted_waiting_result", "succeeded"}
-
-    final = _wait_until_status(manager, started["session_id"], {"succeeded"})
-    assert final["status"] == "succeeded"
+    with pytest.raises(ValueError, match="Unsupported engine for auth proxy"):
+        manager.start_session(
+            "iflow",
+            "auth",
+            transport="cli_delegate",
+            auth_method="auth_code_or_url",
+        )
 
 
 def test_engine_auth_flow_manager_iflow_rejects_wrong_method(tmp_path: Path):
@@ -1203,11 +1296,8 @@ def test_engine_auth_flow_manager_iflow_rejects_wrong_method(tmp_path: Path):
         trust_manager=_TrustSpy(),
     )
 
-    try:
+    with pytest.raises(ValueError, match="Unsupported engine for auth proxy"):
         manager.start_session("iflow", "auth", transport="cli_delegate", auth_method="callback")
-        raise AssertionError("expected ValueError")
-    except ValueError as exc:
-        assert "auth_code_or_url" in str(exc)
 
 
 def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):

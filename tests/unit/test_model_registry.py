@@ -44,10 +44,27 @@ def test_get_models_no_semver_match(monkeypatch):
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
         lambda _engine: "dev-build",
     )
+    monkeypatch.setattr(
+        registry,
+        "_adapter_profile",
+        lambda _engine: _FakeMultiProviderAdapterProfile(Path(__file__).resolve().parent / "fixtures_unused"),
+    )
 
-    catalog = registry.get_models("iflow", refresh=True)
+    tmp_root = Path(__file__).resolve().parent / "_model_registry_tmp"
+    if tmp_root.exists():
+        import shutil
+        shutil.rmtree(tmp_root)
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    _build_qwen_models_fixture(tmp_root)
+    monkeypatch.setattr(
+        registry,
+        "_adapter_profile",
+        lambda _engine: _FakeMultiProviderAdapterProfile(tmp_root / "qwen"),
+    )
 
-    manifest = registry._load_manifest("iflow")
+    catalog = registry.get_models("qwen", refresh=True)
+
+    manifest = registry._load_manifest("qwen")
     expected = max(
         (snap["version"] for snap in manifest["snapshots"]),
         key=registry._semver_key
@@ -236,11 +253,83 @@ def _build_models_fixture(tmp_path: Path, engine: str) -> Path:
     return engine_root
 
 
+def _build_qwen_models_fixture(tmp_path: Path) -> Path:
+    engine_root = tmp_path / "qwen"
+    engine_root.mkdir(parents=True, exist_ok=True)
+    with open(engine_root / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "engine": "qwen",
+                "snapshots": [{"version": "0.14.0", "file": "models_0.14.0.json"}],
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    with open(engine_root / "models_0.14.0.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "engine": "qwen",
+                "version": "0.14.0",
+                "models": [
+                    {
+                        "id": "qwen-oauth/qwen-coder-plus",
+                        "display_name": "Qwen OAuth",
+                        "deprecated": False,
+                        "notes": "fixture",
+                        "provider": "qwen-oauth",
+                        "provider_id": "qwen-oauth",
+                        "model": "qwen-coder-plus"
+                    },
+                    {
+                        "id": "coding-plan-china/qwen3-coder-plus",
+                        "display_name": "Coding Plan China",
+                        "deprecated": False,
+                        "notes": "fixture",
+                        "provider": "coding-plan-china",
+                        "provider_id": "coding-plan-china",
+                        "model": "qwen3-coder-plus"
+                    },
+                    {
+                        "id": "coding-plan-global/qwen3-coder-plus",
+                        "display_name": "Coding Plan Global",
+                        "deprecated": False,
+                        "notes": "fixture",
+                        "provider": "coding-plan-global",
+                        "provider_id": "coding-plan-global",
+                        "model": "qwen3-coder-plus"
+                    }
+                ],
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    return engine_root
+
+
 class _FakeAdapterProfile:
     class _ProviderContract:
         def __init__(self) -> None:
             self.multi_provider = False
             self.canonical_provider_id = "google"
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self.provider_contract = self._ProviderContract()
+
+    def resolve_manifest_path(self) -> Path:
+        return self._root / "manifest.json"
+
+    def resolve_models_root(self) -> Path:
+        return self._root
+
+
+class _FakeMultiProviderAdapterProfile:
+    class _ProviderContract:
+        def __init__(self) -> None:
+            self.multi_provider = True
+            self.canonical_provider_id = None
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -270,8 +359,14 @@ def test_get_manifest_view(monkeypatch, tmp_path: Path):
     assert view["models"][0]["id"] == "model-a"
 
 
-def test_get_manifest_view_qwen_uses_snapshot_contract(monkeypatch):
+def test_get_manifest_view_qwen_uses_snapshot_contract(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
+    _build_qwen_models_fixture(tmp_path)
+    monkeypatch.setattr(
+        registry,
+        "_adapter_profile",
+        lambda _engine: _FakeMultiProviderAdapterProfile(tmp_path / "qwen"),
+    )
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
         lambda _engine: None,

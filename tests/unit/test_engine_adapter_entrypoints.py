@@ -3,8 +3,8 @@ from __future__ import annotations
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
-from server.engines.iflow.adapter.execution_adapter import IFlowExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
+from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 
 
@@ -22,8 +22,8 @@ def test_engine_execution_adapters_build_directly() -> None:
         ClaudeExecutionAdapter(),
         CodexExecutionAdapter(),
         GeminiExecutionAdapter(),
-        IFlowExecutionAdapter(),
         OpencodeExecutionAdapter(),
+        QwenExecutionAdapter(),
     ]
     for adapter in adapters:
         assert isinstance(adapter, EngineExecutionAdapter)
