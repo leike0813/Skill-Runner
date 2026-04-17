@@ -20,10 +20,11 @@ def test_agent_output_protocol_contract_exists_and_loads() -> None:
     assert payload["version"] == 1
 
 
-def test_auto_final_contract_requires_explicit_done_marker() -> None:
+def test_auto_final_contract_declares_done_marker_as_compatibility_fallback() -> None:
     contract = auto_final_contract()
-    assert contract["required_marker"] == "__SKILL_DONE__"
-    assert contract["required_marker_value"] is True
+    assert contract["completion_protocol"] == "explicit_structured_output_or_done_signal_payload"
+    assert contract["compatibility_fallback_marker"] == "__SKILL_DONE__"
+    assert contract["compatibility_fallback_marker_value"] is True
     assert contract["output_type"] == "json_object"
 
 
@@ -73,6 +74,7 @@ def test_repair_pipeline_order_unifies_repair_and_legacy_fallbacks() -> None:
         "schema_repair_rounds",
         "legacy_lifecycle_fallback",
         "legacy_result_file_fallback",
+        "done_marker_fallback",
         "legacy_interactive_waiting_or_completion",
     ]
 

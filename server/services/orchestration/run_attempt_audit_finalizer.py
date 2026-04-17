@@ -36,6 +36,7 @@ class RunAttemptAuditFinalizer:
                 validation_warnings=inputs.outcome.warnings,
                 terminal_error_code=inputs.outcome.final_error_code,
                 options=inputs.options,
+                success_source=inputs.outcome.success_source,
                 auth_detection=inputs.outcome.auth_detection_result.as_dict(),
                 auth_session=inputs.outcome.auth_session_meta,
             )

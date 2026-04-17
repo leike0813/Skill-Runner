@@ -54,7 +54,7 @@ def test_run_observe_template_consumes_backend_ask_user_hints():
     assert 'id="prompt-card-hint"' in content
     assert 'id="prompt-card-files"' in content
     assert "ui_hints" in content
-    assert "replyTextEl.placeholder = hint || I18N.replyPlaceholder;" in content
+    assert "I18N.replyPlaceholderAlternative" in content
 
 
 def test_run_observe_template_maps_user_input_required_to_agent_semantics():
@@ -67,8 +67,33 @@ def test_run_observe_template_maps_user_input_required_to_agent_semantics():
     assert '{ label: "否", value: "否" }' in content
     assert "response: resolveInteractionActionResponse(kind, option)" in content
     assert "mode: \"interaction\"" in content
+    assert "const compactReply = kind !== \"open_text\";" in content
+    assert "setReplyComposerCompact(compactReply);" in content
+    assert "setReplyComposerVisible(true);" in content
+    assert "setReplyEnabled(interactionId > 0);" in content
     assert "successText" not in content
     assert "successKey" not in content
+
+
+def test_run_observe_template_keeps_choice_actions_and_freeform_reply_together() -> None:
+    content = _read_template()
+    prompt_start = content.index("function renderPromptCard(payload) {")
+    prompt_end = content.index("function renderAuthCard(payload) {")
+    prompt_block = content[prompt_start:prompt_end]
+    assert "if (choiceOptions.length) {" in prompt_block
+    assert "renderActionButtons(" in prompt_block
+    assert "setReplyComposerVisible(false);" not in prompt_block
+    assert "replyTextEl.placeholder = compactReply" in prompt_block
+    assert "? I18N.replyPlaceholderAlternative" in prompt_block
+    assert ": (hint || I18N.replyPlaceholder);" in prompt_block
+
+
+def test_run_observe_template_has_compact_reply_composer_mode() -> None:
+    content = _read_template()
+    assert "function setReplyComposerCompact(compact)" in content
+    assert 'replyComposerEl.classList.toggle("compact", compactMode);' in content
+    assert "replyTextEl.rows = compactMode ? 1 : 3;" in content
+    assert "#reply-composer.compact textarea" in content
 
 
 def test_run_observe_template_supports_auth_challenge_and_redacted_submission():

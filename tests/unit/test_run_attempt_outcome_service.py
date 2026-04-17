@@ -56,8 +56,19 @@ class _FakeAuditService:
     def append_orchestrator_event(self, **kwargs: Any) -> None:
         self.orchestrator_events.append(kwargs)
 
-    def contains_done_marker_in_stream(self, **_kwargs: Any) -> bool:
-        return self.done_marker_found
+    def find_done_markers(self, **_kwargs: Any) -> dict[str, Any]:
+        marker = {
+            "stream": "assistant",
+            "byte_from": 0,
+            "byte_to": 0,
+            "payload": {"__SKILL_DONE__": True, "summary": "fallback"},
+        } if self.done_marker_found else None
+        return {
+            "done_signal_found": False,
+            "done_marker_found": self.done_marker_found,
+            "done_marker_count": 1 if self.done_marker_found else 0,
+            "first_marker": marker,
+        }
 
 
 class _FakeAuthService:
@@ -246,6 +257,7 @@ async def test_resolve_success_final_branch(tmp_path: Path) -> None:
 
     assert outcome.final_status == RunStatus.SUCCEEDED
     assert outcome.output_data == {"summary": "done"}
+    assert outcome.success_source == "done_signal_payload"
     assert outcome.artifacts == ["artifacts/final.txt"]
     assert outcome.repair_level == "deterministic_generic"
     assert "OUTPUT_REPAIRED_GENERIC" in outcome.warnings
@@ -377,6 +389,27 @@ async def test_resolve_soft_completion_adds_warning(tmp_path: Path) -> None:
 
     assert outcome.final_status == RunStatus.SUCCEEDED
     assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in outcome.warnings
+    assert outcome.success_source == "structured_output_candidate"
+
+
+@pytest.mark.asyncio
+async def test_resolve_done_marker_fallback_only_after_no_structured_success_source(tmp_path: Path) -> None:
+    context = _build_context(tmp_path)
+    execution = _build_execution()
+    convergence = OutputConvergenceResult()
+    audit_service = _FakeAuditService(done_marker_found=True)
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+        audit_service=audit_service,
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.SUCCEEDED
+    assert outcome.success_source == "done_marker_fallback"
+    assert outcome.output_data == {"summary": "fallback"}
 
 
 @pytest.mark.asyncio

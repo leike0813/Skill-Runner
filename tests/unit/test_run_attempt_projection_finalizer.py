@@ -140,11 +140,13 @@ def _build_outcome(
     final_error_code: str | None = None,
     terminal_error_summary: str | None = None,
 ) -> RunAttemptResolvedOutcome:
+    success_source = "structured_output_candidate" if status == RunStatus.SUCCEEDED else None
     return RunAttemptResolvedOutcome(
         final_status=status,
         normalized_error=normalized_error,
         warnings=["WARN_A"],
         output_data={"answer": 42},
+        success_source=success_source,
         artifacts=["artifacts/out.txt"],
         repair_level="deterministic_generic",
         pending_interaction=pending_interaction,
@@ -235,12 +237,16 @@ async def test_projection_finalizer_writes_waiting_auth_projection(
     payload_key: str,
     expected_owner: PendingOwner,
 ) -> None:
-    kwargs = {
+    kwargs: dict[str, dict[str, Any] | None] = {
         "pending_auth_method_selection": None,
         "pending_auth": None,
     }
     kwargs[payload_key] = {"auth_session_id": "sess-1"}
-    outcome = _build_outcome(status=RunStatus.WAITING_AUTH, **kwargs)
+    outcome = _build_outcome(
+        status=RunStatus.WAITING_AUTH,
+        pending_auth_method_selection=kwargs["pending_auth_method_selection"],
+        pending_auth=kwargs["pending_auth"],
+    )
     finalize_input, projection, run_store, _events, _bundles = _build_finalize_input(
         tmp_path,
         outcome=outcome,
@@ -275,7 +281,10 @@ async def test_projection_finalizer_writes_success_terminal_bundle_and_cache(tmp
     assert run_store.temp_cache_entries == []
     assert len(events) == 1
     assert events[0]["type_name"] == "lifecycle.run.terminal"
-    assert events[0]["data"] == {"status": "succeeded"}
+    assert events[0]["data"] == {
+        "status": "succeeded",
+        "completion_source": "structured_output_candidate",
+    }
 
 
 @pytest.mark.asyncio

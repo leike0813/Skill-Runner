@@ -181,6 +181,7 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
 
     assert result.convergence_state == "converged"
     assert result.output_data == {"value": "fixed"}
+    assert result.success_source == "done_signal_payload"
     assert result.branch_resolved == "final"
     assert adapter.repair_run_count == 1
     repair_rows = [
@@ -239,6 +240,7 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
 
     assert result.convergence_state == "skipped"
     assert WARNING_OUTPUT_SCHEMA_REPAIR_SKIPPED_NO_SESSION_HANDLE in result.validation_warnings
+    assert result.success_source is None
     assert adapter.repair_run_count == 0
     repair_rows = [
         json.loads(line)

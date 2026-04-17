@@ -48,6 +48,7 @@ class OutputConvergenceResult:
     output_data: dict[str, Any] = field(default_factory=dict)
     has_structured_output: bool = False
     structured_output_source: str | None = None
+    success_source: str | None = None
     done_signal_found: bool = False
     schema_output_errors: list[str] = field(default_factory=list)
     repair_level: str = "none"
@@ -156,6 +157,12 @@ class RunOutputConvergenceService:
                 output_data=resolved.output_data,
                 has_structured_output=True,
                 structured_output_source=candidate.source,
+                success_source=self._resolve_success_source(
+                    has_structured_output=True,
+                    structured_output_source=candidate.source,
+                    done_signal_found=resolved.done_signal_found,
+                    branch_resolved=resolved.branch_resolved,
+                ),
                 done_signal_found=resolved.done_signal_found,
                 schema_output_errors=[],
                 repair_level=candidate.repair_level,
@@ -230,6 +237,12 @@ class RunOutputConvergenceService:
                     output_data=legacy_output_data,
                     has_structured_output=legacy_has_structured_output,
                     structured_output_source=candidate.source,
+                    success_source=self._resolve_success_source(
+                        has_structured_output=legacy_has_structured_output,
+                        structured_output_source=candidate.source,
+                        done_signal_found=legacy_done_signal_found,
+                        branch_resolved=None,
+                    ),
                     done_signal_found=legacy_done_signal_found,
                     schema_output_errors=(
                         resolved.schema_errors
@@ -270,6 +283,14 @@ class RunOutputConvergenceService:
                     fallback.has_structured_output or legacy_has_structured_output
                 ),
                 structured_output_source=fallback.structured_output_source or candidate.source,
+                success_source=self._resolve_success_source(
+                    has_structured_output=(
+                        fallback.has_structured_output or legacy_has_structured_output
+                    ),
+                    structured_output_source=fallback.structured_output_source or candidate.source,
+                    done_signal_found=(fallback.done_signal_found or legacy_done_signal_found),
+                    branch_resolved=fallback.branch_resolved,
+                ),
                 done_signal_found=(
                     fallback.done_signal_found or legacy_done_signal_found
                 ),
@@ -441,6 +462,12 @@ class RunOutputConvergenceService:
                     output_data=round_resolved.output_data,
                     has_structured_output=True,
                     structured_output_source=round_candidate.source,
+                    success_source=self._resolve_success_source(
+                        has_structured_output=True,
+                        structured_output_source=round_candidate.source,
+                        done_signal_found=round_resolved.done_signal_found,
+                        branch_resolved=round_resolved.branch_resolved,
+                    ),
                     done_signal_found=round_resolved.done_signal_found,
                     schema_output_errors=[],
                     repair_level=round_candidate.repair_level,
@@ -538,6 +565,14 @@ class RunOutputConvergenceService:
                 fallback.has_structured_output or exhausted_has_structured_output
             ),
             structured_output_source=fallback.structured_output_source or last_candidate.source,
+            success_source=self._resolve_success_source(
+                has_structured_output=(
+                    fallback.has_structured_output or exhausted_has_structured_output
+                ),
+                structured_output_source=fallback.structured_output_source or last_candidate.source,
+                done_signal_found=(fallback.done_signal_found or exhausted_done_signal_found),
+                branch_resolved=fallback.branch_resolved,
+            ),
             done_signal_found=(
                 fallback.done_signal_found or exhausted_done_signal_found
             ),
@@ -950,6 +985,31 @@ class RunOutputConvergenceService:
         output_data, done_signal_found = strip_done_marker_for_output_validation(candidate_payload)
         return output_data, done_signal_found, True
 
+    def _resolve_success_source(
+        self,
+        *,
+        has_structured_output: bool,
+        structured_output_source: str | None,
+        done_signal_found: bool,
+        branch_resolved: str | None,
+    ) -> str | None:
+        if branch_resolved != "final":
+            return None
+        normalized_source = (
+            structured_output_source.strip()
+            if isinstance(structured_output_source, str) and structured_output_source.strip()
+            else None
+        )
+        if normalized_source == "structured_output_result":
+            return "structured_output_result"
+        if normalized_source == "result_file_fallback":
+            return "result_file_fallback"
+        if has_structured_output and done_signal_found:
+            return "done_signal_payload"
+        if has_structured_output:
+            return "structured_output_candidate"
+        return None
+
     def _round_record(
         self,
         *,
@@ -1001,6 +1061,7 @@ class RunOutputConvergenceService:
         output_data: dict[str, Any],
         has_structured_output: bool,
         structured_output_source: str | None,
+        success_source: str | None,
         done_signal_found: bool,
         schema_output_errors: list[str],
         repair_level: str,
@@ -1017,6 +1078,7 @@ class RunOutputConvergenceService:
             output_data=dict(output_data),
             has_structured_output=has_structured_output,
             structured_output_source=structured_output_source,
+            success_source=success_source,
             done_signal_found=done_signal_found,
             schema_output_errors=list(schema_output_errors),
             repair_level=repair_level or "none",

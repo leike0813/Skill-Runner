@@ -36,6 +36,7 @@ StructuredOutputCliSchemaStrategy = Literal["noop", "path_schema_artifact", "inl
 StructuredOutputCompatSchemaStrategy = Literal["noop", "canonical_passthrough", "compat_translate"]
 StructuredOutputPromptContractStrategy = Literal["canonical_summary", "compat_summary"]
 StructuredOutputPayloadCanonicalizer = Literal["noop", "payload_union_object_canonicalizer"]
+StructuredOutputResultSuccessStrategy = Literal["none", "result_structured_output_field"]
 ImportValidatorName = Literal[
     "json_object",
     "codex_auth_json",
@@ -118,6 +119,7 @@ class StructuredOutputProfile:
     compat_schema_strategy: StructuredOutputCompatSchemaStrategy
     prompt_contract_strategy: StructuredOutputPromptContractStrategy
     payload_canonicalizer: StructuredOutputPayloadCanonicalizer
+    result_success_strategy: StructuredOutputResultSuccessStrategy
 
 
 @dataclass(frozen=True)
@@ -606,6 +608,10 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
             payload_canonicalizer=cast(
                 StructuredOutputPayloadCanonicalizer,
                 str(structured_output_raw.get("payload_canonicalizer", "noop")),
+            ),
+            result_success_strategy=cast(
+                StructuredOutputResultSuccessStrategy,
+                str(structured_output_raw.get("result_success_strategy", "none")),
             ),
         ),
         ui_shell=UiShellProfile(

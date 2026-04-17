@@ -111,6 +111,7 @@
     "observe_pending_input": "Pending Input Request",
     "observe_pending_method_selection": "method-selection",
     "observe_reply_placeholder": "Reply to agent...",
+    "observe_reply_placeholder_alternative": "Or enter a different request...",
     "observe_reply_shortcut": "Ctrl+Enter / Cmd+Enter to send",
     "observe_required_fields_prefix": "required_fields:",
     "observe_result_error_label": "error_message",

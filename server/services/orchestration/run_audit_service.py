@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from server.models import InteractiveErrorCode, OrchestratorEventType, RunStatus
+from server.runtime.protocol.parse_utils import extract_fenced_or_plain_json
 from server.runtime.protocol.factories import (
     make_diagnostic_warning_payload,
     make_fcmp_event,
@@ -34,6 +35,17 @@ logger = logging.getLogger(__name__)
 class RunAuditService:
     def __init__(self, snapshot_service: RunFilesystemSnapshotService | None = None):
         self.snapshot_service = snapshot_service or RunFilesystemSnapshotService()
+
+    def _extract_explicit_done_marker_payload(self, text: str) -> dict[str, Any] | None:
+        stripped = text.strip()
+        if not stripped:
+            return None
+        parsed = extract_fenced_or_plain_json(stripped)
+        if not isinstance(parsed, dict):
+            return None
+        if parsed.get("__SKILL_DONE__") is not True:
+            return None
+        return parsed
 
     def find_done_markers(
         self,
@@ -75,6 +87,9 @@ class RunAuditService:
                     text_obj = item.get("text")
                     if not isinstance(text_obj, str) or not text_obj:
                         continue
+                    explicit_payload = self._extract_explicit_done_marker_payload(text_obj)
+                    if explicit_payload is None:
+                        continue
                     raw_ref_obj = item.get("raw_ref")
                     raw_ref = raw_ref_obj if isinstance(raw_ref_obj, dict) else {}
                     marker_stream_obj = raw_ref.get("stream")
@@ -85,14 +100,14 @@ class RunAuditService:
                     )
                     marker_byte_from = raw_ref.get("byte_from")
                     marker_byte_to = raw_ref.get("byte_to")
-                    for _match in DONE_MARKER_STREAM_PATTERN.finditer(text_obj):
-                        markers.append(
-                            {
-                                "stream": marker_stream,
-                                "byte_from": marker_byte_from,
-                                "byte_to": marker_byte_to,
-                            }
-                        )
+                    markers.append(
+                        {
+                            "stream": marker_stream,
+                            "byte_from": marker_byte_from,
+                            "byte_to": marker_byte_to,
+                            "payload": explicit_payload,
+                        }
+                    )
         return {
             "done_signal_found": done_signal_found,
             "done_marker_found": bool(markers),
@@ -123,6 +138,7 @@ class RunAuditService:
         done_info: dict[str, Any],
         validation_warnings: list[str],
         terminal_error_code: str | None,
+        success_source: str | None = None,
     ) -> dict[str, Any]:
         done_signal_found = bool(done_info.get("done_signal_found"))
         done_marker_found = bool(done_info.get("done_marker_found"))
@@ -135,6 +151,12 @@ class RunAuditService:
             return {
                 "state": "completed",
                 "reason_code": "DONE_SIGNAL_FOUND",
+                "diagnostics": diagnostics,
+            }
+        if success_source == "done_marker_fallback":
+            return {
+                "state": "completed",
+                "reason_code": "DONE_MARKER_FOUND",
                 "diagnostics": diagnostics,
             }
         if status == RunStatus.WAITING_USER:
@@ -175,21 +197,9 @@ class RunAuditService:
                     "reason_code": "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER",
                     "diagnostics": diagnostics,
                 }
-            if done_marker_found:
-                return {
-                    "state": "completed",
-                    "reason_code": "DONE_MARKER_FOUND",
-                    "diagnostics": diagnostics,
-                }
             return {
                 "state": "completed",
                 "reason_code": "OUTPUT_VALIDATED",
-                "diagnostics": diagnostics,
-            }
-        if done_marker_found:
-            return {
-                "state": "completed",
-                "reason_code": "DONE_MARKER_FOUND",
                 "diagnostics": diagnostics,
             }
         if status in {RunStatus.FAILED, RunStatus.CANCELED}:
@@ -226,6 +236,7 @@ class RunAuditService:
         validation_warnings: list[str],
         terminal_error_code: str | None,
         options: dict[str, Any],
+        success_source: str | None = None,
         auth_detection: dict[str, Any] | None = None,
         auth_session: dict[str, Any] | None = None,
     ) -> None:
@@ -282,6 +293,7 @@ class RunAuditService:
             done_info=done_info,
             validation_warnings=validation_warnings,
             terminal_error_code=terminal_error_code,
+            success_source=success_source,
         )
 
         reconstruction_error = None
@@ -304,6 +316,7 @@ class RunAuditService:
             },
             "completion": {
                 **completion,
+                "source": success_source,
                 "done_signal_found": bool(done_info.get("done_signal_found")),
                 "done_marker_found": bool(done_info.get("done_marker_found")),
                 "done_marker_count": int(done_info.get("done_marker_count") or 0),

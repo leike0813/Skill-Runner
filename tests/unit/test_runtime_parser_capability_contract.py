@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 from tests.common.runtime_parser_capability_contract import (
     load_runtime_parser_capability_contract,
@@ -42,13 +43,22 @@ def test_runtime_parser_capability_contract_matches_current_engine_sources() -> 
     for engine, capability_obj in payload["engines"].items():
         source = _stream_parser_source(engine)
         profile = _adapter_profile(engine)
-        capability = capability_obj
+        capability = dict(capability_obj)
         assert _assert_turn_start_capability(source) is capability["semantic_turn_markers"]["start"]
         assert ("turn_completed" in source) is capability["semantic_turn_markers"]["complete"]
         assert ("turn_failed" in source) is capability["semantic_turn_markers"]["failed"]
         assert ("classify_engine_error_payload" in source) is capability["generic_error_governance"]
         assert ("process_events" in source) is capability["process_event_extraction"]
         assert ("structured_payloads" in source) is capability["structured_payload_extraction"]
+        structured_output_profile = cast(
+            dict[str, object],
+            profile.get("structured_output") if isinstance(profile.get("structured_output"), dict) else {},
+        )
+        has_result_success_structured_output = (
+            structured_output_profile.get("result_success_strategy")
+            == "result_structured_output_field"
+        )
+        assert has_result_success_structured_output is capability["success_result_structured_output"]
         assert ("run_handle" in source) is capability["run_handle_extraction"]
         assert ('"confidence"' in source) is capability["parser_confidence_reporting"]
         has_auth_patterns = "parser_auth_patterns" in profile and bool(profile["parser_auth_patterns"])

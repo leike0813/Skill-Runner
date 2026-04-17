@@ -137,6 +137,11 @@ def resolve_structured_output_candidate(
     execution_mode: str = "auto",
 ) -> dict[str, Any] | None:
     payload = materialize_turn_result_payload(getattr(result, "turn_result", None))
+    assistant_messages = (
+        runtime_parse_result.get("assistant_messages")
+        if isinstance(runtime_parse_result, dict)
+        else None
+    )
     if isinstance(payload, dict):
         outcome = getattr(getattr(result, "turn_result", None), "outcome", None)
         source = "turn_result_final"
@@ -144,10 +149,32 @@ def resolve_structured_output_candidate(
             source = "turn_result_ask_user"
         elif outcome == AdapterTurnOutcome.ERROR:
             source = "turn_result_error"
+        if isinstance(assistant_messages, list):
+            for item in reversed(assistant_messages):
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                parsed = (
+                    extract_interactive_assistant_json_candidate(text)
+                    if execution_mode == ExecutionMode.INTERACTIVE.value
+                    else extract_fenced_or_plain_json(text)
+                )
+                if not isinstance(parsed, dict) or parsed != payload:
+                    continue
+                details = item.get("details")
+                detail_source = (
+                    details.get("source")
+                    if isinstance(details, dict) and isinstance(details.get("source"), str)
+                    else None
+                )
+                if detail_source == "structured_output_result":
+                    source = "structured_output_result"
+                    break
         return {"payload": payload, "source": source}
     if not isinstance(runtime_parse_result, dict):
         return None
-    assistant_messages = runtime_parse_result.get("assistant_messages")
     if not isinstance(assistant_messages, list):
         return None
     for item in reversed(assistant_messages):
@@ -162,7 +189,16 @@ def resolve_structured_output_candidate(
             else extract_fenced_or_plain_json(text)
         )
         if isinstance(parsed, dict):
-            return {"payload": parsed, "source": "assistant_message_json"}
+            details = item.get("details")
+            detail_source = (
+                details.get("source")
+                if isinstance(details, dict) and isinstance(details.get("source"), str)
+                else None
+            )
+            return {
+                "payload": parsed,
+                "source": detail_source or "assistant_message_json",
+            }
     return None
 
 
@@ -223,6 +259,7 @@ class RunAttemptResolvedOutcome:
     normalized_error: dict[str, Any] | None
     warnings: list[str]
     output_data: dict[str, Any]
+    success_source: str | None
     artifacts: list[str]
     repair_level: str
     pending_interaction: dict[str, Any] | None
@@ -297,6 +334,7 @@ class RunAttemptOutcomeService:
         pending_auth: dict[str, Any] | None = None
         repair_level = getattr(result, "repair_level", None) or "none"
         has_structured_output = False
+        success_source: str | None = None
         auth_session_meta: dict[str, Any] | None = None
         turn_payload_for_completion: dict[str, Any] = {}
 
@@ -368,10 +406,32 @@ class RunAttemptOutcomeService:
         repair_level = convergence.repair_level or repair_level
         output_data = dict(convergence.output_data)
         has_structured_output = convergence.has_structured_output
+        success_source = convergence.success_source
         done_signal_found = convergence.done_signal_found
         schema_output_errors = list(convergence.schema_output_errors)
         pending_interaction_candidate = convergence.pending_interaction_candidate
         turn_payload_for_completion = dict(convergence.turn_payload_for_completion)
+        if (
+            success_source is None
+            and (
+                convergence.branch_resolved == "final"
+                or (has_structured_output and pending_interaction_candidate is None and not schema_output_errors)
+            )
+        ):
+            normalized_structured_source = (
+                convergence.structured_output_source.strip()
+                if isinstance(convergence.structured_output_source, str)
+                and convergence.structured_output_source.strip()
+                else None
+            )
+            if normalized_structured_source == "structured_output_result":
+                success_source = "structured_output_result"
+            elif normalized_structured_source == "result_file_fallback":
+                success_source = "result_file_fallback"
+            elif has_structured_output and done_signal_found:
+                success_source = "done_signal_payload"
+            elif has_structured_output:
+                success_source = "structured_output_candidate"
         for convergence_warning in convergence.validation_warnings:
             _append_validation_warning(convergence_warning)
         if (
@@ -382,18 +442,48 @@ class RunAttemptOutcomeService:
         ):
             _append_validation_warning("OUTPUT_REPAIRED_GENERIC")
 
-        done_marker_found_in_stream = inputs.audit_service.contains_done_marker_in_stream(
+        done_marker_info = inputs.audit_service.find_done_markers(
             adapter=context.adapter,
             raw_stdout=process_raw_stdout,
             raw_stderr=process_raw_stderr,
+            turn_payload=turn_payload_for_completion,
         )
+        first_done_marker_obj = done_marker_info.get("first_marker")
+        first_done_marker = first_done_marker_obj if isinstance(first_done_marker_obj, dict) else None
+        fallback_marker_payload_obj = (
+            first_done_marker.get("payload") if isinstance(first_done_marker, dict) else None
+        )
+        fallback_marker_payload = (
+            dict(fallback_marker_payload_obj)
+            if isinstance(fallback_marker_payload_obj, dict)
+            else None
+        )
+        if (
+            success_source is None
+            and isinstance(fallback_marker_payload, dict)
+            and not auth_detection_high
+            and not has_structured_output
+            and not schema_output_errors
+            and not pending_interaction_candidate
+            and not process_failure_reason
+            and int(process_exit_code or 0) == 0
+        ):
+            output_data, done_signal_found = (
+                inputs.interaction_service.strip_done_marker_for_output_validation(
+                    fallback_marker_payload
+                )
+            )
+            turn_payload_for_completion = dict(fallback_marker_payload)
+            has_structured_output = True
+            success_source = "done_marker_fallback"
+            schema_output_errors = []
         legacy_pending_interaction = inputs.interaction_service.build_default_pending_interaction(
             fallback_interaction_id=attempt_number,
         )
 
         artifacts = inputs.collect_run_artifacts(run_dir)
         artifact_errors: list[str] = []
-        if done_signal_found or (has_structured_output and pending_interaction_candidate is None):
+        if success_source is not None or (has_structured_output and pending_interaction_candidate is None):
             resolution_result = inputs.resolve_output_artifact_paths(
                 skill=skill,
                 run_dir=run_dir,
@@ -552,21 +642,18 @@ class RunAttemptOutcomeService:
                         )
             elif has_structured_output and schema_output_errors:
                 _append_validation_warning("INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID")
-                if done_marker_found_in_stream:
+                max_attempt = skill.max_attempt
+                if max_attempt is not None and attempt_number >= max_attempt:
+                    forced_failure_reason = (
+                        InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
+                    )
                     normalized_status = "failed"
+                elif context.can_persist_waiting_user:
+                    normalized_status = RunStatus.WAITING_USER.value
+                    pending_interaction = pending_interaction_candidate or legacy_pending_interaction
                 else:
-                    max_attempt = skill.max_attempt
-                    if max_attempt is not None and attempt_number >= max_attempt:
-                        forced_failure_reason = (
-                            InteractiveErrorCode.INTERACTIVE_MAX_ATTEMPT_EXCEEDED.value
-                        )
-                        normalized_status = "failed"
-                    elif context.can_persist_waiting_user:
-                        normalized_status = RunStatus.WAITING_USER.value
-                        pending_interaction = pending_interaction_candidate or legacy_pending_interaction
-                    else:
-                        forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
-                        normalized_status = "failed"
+                    forced_failure_reason = "NON_SESSION_INTERACTIVE_REPLY_UNSUPPORTED"
+                    normalized_status = "failed"
             else:
                 max_attempt = skill.max_attempt
                 if max_attempt is not None and attempt_number >= max_attempt:
@@ -680,6 +767,7 @@ class RunAttemptOutcomeService:
             normalized_error=normalized_error,
             warnings=list(warnings),
             output_data=dict(output_data),
+            success_source=success_source,
             artifacts=list(artifacts),
             repair_level=repair_level,
             pending_interaction=dict(pending_interaction) if isinstance(pending_interaction, dict) else None,

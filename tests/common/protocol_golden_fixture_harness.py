@@ -50,8 +50,19 @@ class _FakeAuditService:
     def append_orchestrator_event(self, **_kwargs: Any) -> None:
         return None
 
-    def contains_done_marker_in_stream(self, **_kwargs: Any) -> bool:
-        return self.done_marker_found
+    def find_done_markers(self, **_kwargs: Any) -> dict[str, Any]:
+        marker = {
+            "stream": "assistant",
+            "byte_from": 0,
+            "byte_to": 0,
+            "payload": {"__SKILL_DONE__": True, "summary": "fallback"},
+        } if self.done_marker_found else None
+        return {
+            "done_signal_found": False,
+            "done_marker_found": self.done_marker_found,
+            "done_marker_count": 1 if self.done_marker_found else 0,
+            "first_marker": marker,
+        }
 
 
 class _FakeAuthService:

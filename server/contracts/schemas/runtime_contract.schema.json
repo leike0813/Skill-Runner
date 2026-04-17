@@ -749,6 +749,12 @@
             "null"
           ]
         },
+        "success_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "artifacts": {
           "type": "array",
           "items": {
@@ -1212,6 +1218,10 @@
                       "failed",
                       "canceled"
                     ]
+                  },
+                  "completion_source": {
+                    "type": "string",
+                    "minLength": 1
                   },
                   "code": {
                     "type": "string",
@@ -2367,6 +2377,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "diagnostics": {
                     "type": "array",
                     "items": {
@@ -2505,7 +2519,8 @@
                     "type": "string",
                     "enum": [
                       "pending_branch",
-                      "final_branch",
+                      "structured_output_result",
+                      "structured_output_candidate",
                       "repair_fallback",
                       "raw_text"
                     ]
@@ -3063,6 +3078,10 @@
                         ]
                       },
                       "reason_code": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "completion_source": {
                         "type": "string",
                         "minLength": 1
                       },

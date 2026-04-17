@@ -73,7 +73,15 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - 同一 repair family 的可见性规则是 winner-only：进入 repair 的旧 final 一旦收到 `assistant.message.superseded`，就退出主聊天面，仅保留为折叠历史
 - 普通 engine `type:"error"` / `item.type:"error"` 必须保留 raw evidence，并额外归一化为 `diagnostic.warning`；它们不是 terminal lifecycle event 真源
 - parser capability 差异由机器可读合同 `server/contracts/invariants/runtime_parser_capabilities.yaml` 定义；测试与 mock 不应再通过实现细节猜测某个 engine 是否承诺支持某类 parser 能力
+- `result.success.structured_output` 这类“success result 直接携带 structured output”的提取链已提升为通用 adapter capability；当前 Claude 已接入，后续其他 engine 应复用同一 capability 面，而不是新增 engine-specific outcome 特判
 - `diagnostic.warning` 的稳定治理面至少包括 `severity` / `pattern_kind` / `source_type` / `authoritative`；parser 与 protocol fallback warning 默认是 `authoritative=false`
+- completion / final winner 的机器可读成功来源当前固定为：
+  - `structured_output_result`
+  - `structured_output_candidate`
+  - `done_signal_payload`
+  - `done_marker_fallback`
+- 当 structured output 被接受为最终成功来源时，不新增新的 public event type；继续复用现有 final 链，但 `assistant.message.final` 的 `display_origin` / `details.source` 必须显式体现 structured-output success
+- `done marker` 已降级为最后兜底，只允许在 structured-output / candidate / repair 路径全部失败后参与成功判定；fallback 只认显式 `__SKILL_DONE__ = true`
 
 ### 3.1 `conversation.state.changed`
 

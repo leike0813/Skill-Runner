@@ -1,8 +1,9 @@
 version: 1
 
 auto_final_contract:
-  required_marker: __SKILL_DONE__
-  required_marker_value: true
+  completion_protocol: explicit_structured_output_or_done_signal_payload
+  compatibility_fallback_marker: __SKILL_DONE__
+  compatibility_fallback_marker_value: true
   output_type: json_object
   business_validation: strip_done_marker_then_validate_output_schema
   disallow_pending_branch: true
@@ -58,6 +59,7 @@ repair_pipeline_order:
     - schema_repair_rounds
     - legacy_lifecycle_fallback
     - legacy_result_file_fallback
+    - done_marker_fallback
     - legacy_interactive_waiting_or_completion
 
 repair_event_requirements:

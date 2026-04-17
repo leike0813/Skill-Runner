@@ -111,6 +111,7 @@
     "observe_pending_input": "待处理输入请求",
     "observe_pending_method_selection": "method-selection",
     "observe_reply_placeholder": "回复给 Agent…",
+    "observe_reply_placeholder_alternative": "或输入其他要求...",
     "observe_reply_shortcut": "Ctrl+Enter / Cmd+Enter 发送",
     "observe_required_fields_prefix": "required_fields:",
     "observe_result_error_label": "error_message",

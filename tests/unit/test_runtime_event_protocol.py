@@ -762,9 +762,36 @@ def test_fcmp_assistant_final_projects_final_branch_markdown() -> None:
 
     final_event = next(event for event in fcmp_events if event.type == "assistant.message.final")
     assert final_event.data["display_format"] == "markdown"
-    assert final_event.data["display_origin"] == "final_branch"
+    assert final_event.data["display_origin"] == "structured_output_candidate"
     assert "`summary`" in final_event.data["display_text"]
     assert "__SKILL_DONE__" not in final_event.data["display_text"]
+
+
+def test_fcmp_assistant_final_preserves_structured_output_result_origin() -> None:
+    rasp_event = make_rasp_event(
+        run_id="run-final-display-result",
+        seq=1,
+        source=RuntimeEventSource(engine="claude", parser="test", confidence=1.0),
+        category=RuntimeEventCategory.AGENT,
+        type_name="agent.message.final",
+        data={
+            "message_id": "m-final-result",
+            "text": json.dumps(
+                {
+                    "__SKILL_DONE__": True,
+                    "summary": "Delivered via result.success.structured_output",
+                },
+                ensure_ascii=False,
+            ),
+            "details": {"source": "structured_output_result"},
+        },
+        attempt_number=1,
+    )
+
+    fcmp_events = build_fcmp_events([rasp_event], status="succeeded")
+
+    final_event = next(event for event in fcmp_events if event.type == "assistant.message.final")
+    assert final_event.data["display_origin"] == "structured_output_result"
 
 
 def test_translate_orchestrator_superseded_event_to_public_fcmp() -> None:

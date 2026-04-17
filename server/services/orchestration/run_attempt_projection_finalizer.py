@@ -178,6 +178,7 @@ class RunAttemptProjectionFinalizer:
             error=outcome.normalized_error,
             terminal_result={
                 "data": outcome.output_data if final_status == RunStatus.SUCCEEDED else None,
+                "success_source": outcome.success_source,
                 "artifacts": list(outcome.artifacts),
                 "repair_level": outcome.repair_level,
                 "validation_warnings": warnings,
@@ -236,6 +237,8 @@ class RunAttemptProjectionFinalizer:
             )
         elif final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
             terminal_payload: dict[str, Any] = {"status": final_status.value}
+            if isinstance(outcome.success_source, str) and outcome.success_source:
+                terminal_payload["completion_source"] = outcome.success_source
             if final_status == RunStatus.FAILED:
                 if isinstance(outcome.final_error_code, str) and outcome.final_error_code:
                     terminal_payload["code"] = outcome.final_error_code

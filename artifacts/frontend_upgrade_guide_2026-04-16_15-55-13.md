@@ -128,3 +128,17 @@ The correct historical framing is:
 - collapsed revision entries show only `（已折叠）`
 - expanded revision entries show one copy of the rejected final body
 - multiple rejected finals are not merged into one bubble
+
+## Waiting-user input strategy
+
+The e2e waiting-user surface now treats prompt-card actions as suggested shortcuts, not as the only reply path.
+
+- when `ui_hints.kind === open_text`, the reply composer keeps the existing multi-line behavior
+- when `ui_hints.kind !== open_text`, the prompt-card actions still render unchanged
+- in that non-`open_text` case, the reply composer is **not** hidden anymore
+- instead, it switches to a compact single-line visual mode
+- the compact composer uses a dedicated placeholder:
+  - `或输入其他要求...`
+  - and the localized equivalents in other languages
+- the prompt-card hint text still belongs to the card itself; it is no longer reused as the compact composer placeholder
+- freeform input still submits through the existing interaction reply payload shape; no backend protocol change is required

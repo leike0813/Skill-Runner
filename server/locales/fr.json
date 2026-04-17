@@ -102,6 +102,7 @@
     "observe_pending_input": "Demande d'entrée en attente",
     "observe_pending_method_selection": "method-selection",
     "observe_reply_placeholder": "Répondre à l'agent...",
+    "observe_reply_placeholder_alternative": "Ou saisir une autre demande...",
     "observe_reply_shortcut": "Ctrl+Enter / Cmd+Enter pour envoyer",
     "observe_required_fields_prefix": "required_fields:",
     "observe_result_error_label": "error_message",

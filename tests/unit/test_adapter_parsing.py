@@ -255,7 +255,7 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
             b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"/tmp/run","is_error":false}]},"tool_use_result":{"stdout":"/tmp/run","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false}}\n'
             b'{"type":"assistant","message":{"content":[{"name":"Bash","input":{"command":"python missing.py","description":"Failing command"},"id":"toolu_fail","type":"tool_use"}]}}\n'
             b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fail","content":"Exit code 2\\\\npython: can\'t open file","is_error":true}]},"tool_use_result":"Error: Exit code 2"}\n'
-            b'{"type":"result","subtype":"success","session_id":"e46bbf28-de7c-4ec1-9c9f-6fb45495268e","usage":{"input_tokens":12},"result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+            b'{"type":"result","subtype":"success","session_id":"e46bbf28-de7c-4ec1-9c9f-6fb45495268e","usage":{"input_tokens":12},"result":"{\\"__SKILL_DONE__\\": true, \\"ok\\": true}","structured_output":{"__SKILL_DONE__":true,"ok":true}}\n'
         ),
         stderr_raw=b"",
     )
@@ -267,7 +267,9 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
 
     messages = parsed.get("assistant_messages")
     assert isinstance(messages, list)
-    assert [item["text"] for item in messages] == ["starting"]
+    assert len(messages) == 2
+    assert messages[0]["text"] == "starting"
+    assert messages[1]["details"]["source"] == "structured_output_result"
 
     turn_markers = parsed.get("turn_markers")
     assert isinstance(turn_markers, list)
@@ -317,7 +319,9 @@ def test_claude_runtime_stream_result_echo_does_not_create_default_assistant_mes
 
     messages = parsed.get("assistant_messages")
     assert isinstance(messages, list)
-    assert [item["text"] for item in messages] == ["primary body"]
+    assert len(messages) == 2
+    assert messages[0]["text"] == "primary body"
+    assert messages[1]["details"]["source"] == "structured_output_result"
 
 
 def test_claude_runtime_stream_uses_result_text_as_fallback_only_without_body_or_structured_output():
@@ -337,19 +341,20 @@ def test_claude_runtime_stream_uses_result_text_as_fallback_only_without_body_or
     assert messages[0]["details"]["source"] == "claude_result_fallback"
 
 
-def test_claude_runtime_stream_structured_output_without_body_does_not_emit_result_fallback_message():
+def test_claude_runtime_stream_structured_output_without_body_emits_structured_output_result_message():
     adapter = ClaudeExecutionAdapter()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=(
             b'{"type":"system","subtype":"init","session_id":"claude-session-structured-only"}\n'
-            b'{"type":"result","subtype":"success","session_id":"claude-session-structured-only","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+            b'{"type":"result","subtype":"success","session_id":"claude-session-structured-only","result":"{\\"__SKILL_DONE__\\": true, \\"ok\\": true}","structured_output":{"__SKILL_DONE__":true,"ok":true}}\n'
         ),
         stderr_raw=b"",
     )
 
     messages = parsed.get("assistant_messages")
     assert isinstance(messages, list)
-    assert messages == []
+    assert len(messages) == 1
+    assert messages[0]["details"]["source"] == "structured_output_result"
 
 
 def test_claude_runtime_stream_emits_sandbox_diagnostics_without_losing_success():

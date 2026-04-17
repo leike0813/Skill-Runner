@@ -28,6 +28,7 @@ engines:
     generic_error_governance: true
     auth_signal_snapshot: true
     structured_payload_extraction: false
+    success_result_structured_output: false
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
@@ -39,6 +40,7 @@ engines:
     generic_error_governance: false
     auth_signal_snapshot: true
     structured_payload_extraction: false
+    success_result_structured_output: true
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
@@ -50,6 +52,7 @@ engines:
     generic_error_governance: false
     auth_signal_snapshot: true
     structured_payload_extraction: true
+    success_result_structured_output: false
     process_event_extraction: false
     run_handle_extraction: true
     parser_confidence_reporting: true
@@ -61,6 +64,7 @@ engines:
     generic_error_governance: false
     auth_signal_snapshot: true
     structured_payload_extraction: false
+    success_result_structured_output: false
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
@@ -72,6 +76,7 @@ engines:
     generic_error_governance: false
     auth_signal_snapshot: true
     structured_payload_extraction: false
+    success_result_structured_output: false
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true

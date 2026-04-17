@@ -134,9 +134,26 @@ Schema 文件：
   - generic error governance
   - auth signal snapshot
   - structured payload extraction
+  - success result carries structured output
   - process event extraction
   - run handle extraction
 - 后续 golden fixture / mock framework 应以该合同区分公共协议金例与 engine 专属金例。
+
+12. success source contract
+- structured-output / completion 收敛的机器可读成功来源当前固定为：
+  - `structured_output_result`
+  - `structured_output_candidate`
+  - `done_signal_payload`
+  - `done_marker_fallback`
+- `completion.reason_code` 允许保留摘要口径，但不再等价于真实业务成功来源。
+- attempt audit meta、terminal/result metadata SHOULD 通过 `completion.source`、`success_source` 或等价字段暴露机器可读真源。
+- 当 `assistant.message.final` 由 structured output 接受链驱动时，其 `display_origin` 应与成功来源保持一致；例如 `structured_output_result` / `structured_output_candidate`。
+
+13. done marker fallback contract
+- done marker 不再参与 ordinary completion precedence。
+- 只有当显式 structured-output 路径（adapter turn result、success result structured output、runtime structured candidate、canonicalization、repair）全部未能收敛成功时，才允许进入 done-marker fallback。
+- done-marker fallback 只接受显式 JSON payload 中 `__SKILL_DONE__ = true`。
+- 普通 stdout 全局扫描命中的模糊文本、code fence 回显、`__SKILL_DONE__ = false` 都不得直接判定 success。
 12. `interaction.auto_decide.timeout`
 - `interaction_id`, `resolution_mode=auto_decide_timeout`, `policy`, `accepted_at`, `timeout_sec?`
 

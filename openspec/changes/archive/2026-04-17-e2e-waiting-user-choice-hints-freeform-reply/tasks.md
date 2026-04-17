@@ -1,0 +1,5 @@
+- [x] Add OpenSpec artifacts for the e2e waiting-user freeform reply enhancement.
+- [x] Keep prompt-card choice rendering unchanged while allowing the e2e reply composer to remain available for non-`open_text` waiting-user prompts.
+- [x] Add a compact reply-composer mode and a dedicated localized placeholder for non-`open_text` waiting-user prompts.
+- [x] Update e2e semantic tests and locale coverage for the new waiting-user composer behavior.
+- [x] Update `artifacts/frontend_upgrade_guide_2026-04-16_15-55-13.md` to describe the new waiting-user input strategy.

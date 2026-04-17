@@ -41,6 +41,7 @@ class TerminalRunResult(BaseModel):
 
     status: Literal["success", "succeeded", "failed", "canceled"]
     data: Optional[Dict[str, Any]] = None
+    success_source: Optional[str] = None
     artifacts: List[str] = Field(default_factory=list)
     repair_level: str = "none"
     validation_warnings: List[str] = Field(default_factory=list)

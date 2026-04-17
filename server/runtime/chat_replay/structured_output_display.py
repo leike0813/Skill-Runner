@@ -71,9 +71,11 @@ def derive_assistant_final_display(
     *,
     text: str,
     pending_interaction: dict[str, Any] | None = None,
+    source_hint: str | None = None,
 ) -> dict[str, Any]:
     normalized_text = normalize_interaction_text(text)
     structured_payload = _extract_structured_payload(normalized_text)
+    normalized_source = source_hint.strip() if isinstance(source_hint, str) and source_hint.strip() else None
     if isinstance(structured_payload, dict):
         marker = structured_payload.get("__SKILL_DONE__")
         if marker is False:
@@ -93,7 +95,11 @@ def derive_assistant_final_display(
             return {
                 "display_text": structured_payload_to_markdown(final_payload),
                 "display_format": "markdown",
-                "display_origin": "final_branch",
+                "display_origin": (
+                    "structured_output_result"
+                    if normalized_source == "structured_output_result"
+                    else "structured_output_candidate"
+                ),
                 "structured_payload": final_payload,
             }
 

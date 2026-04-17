@@ -530,6 +530,14 @@
         background: #fff;
         font: inherit;
     }
+    #reply-composer.compact textarea {
+        min-height: 42px;
+        height: 42px;
+        max-height: 42px;
+        resize: none;
+        padding-top: 9px;
+        padding-bottom: 9px;
+    }
     .action-button-group {
         margin-top: 10px;
         display: flex;
@@ -1036,6 +1044,7 @@
     const I18N = {
         defaultInteractionPrompt: {{ t("client.observe_default_prompt", default="Please reply to continue.") | tojson }},
         replyPlaceholder: {{ t("client.observe_reply_placeholder", default="Reply to agent...") | tojson }},
+        replyPlaceholderAlternative: {{ t("client.observe_reply_placeholder_alternative", default="Or enter a different request...") | tojson }},
         sendReply: {{ t("client.observe_send_reply", default="Send Reply") | tojson }},
         roleUser: {{ t("client.observe_role_user", default="You") | tojson }},
         roleAssistant: {{ t("client.observe_role_assistant", default="Agent") | tojson }},
@@ -1858,8 +1867,15 @@
         replyComposerEl.classList.toggle("hidden", !visible);
     }
 
+    function setReplyComposerCompact(compact) {
+        const compactMode = compact === true;
+        replyComposerEl.classList.toggle("compact", compactMode);
+        replyTextEl.rows = compactMode ? 1 : 3;
+    }
+
     function resetReplyComposer() {
         clearReplyError();
+        setReplyComposerCompact(false);
         replyTextEl.placeholder = I18N.replyPlaceholder;
         replyTextEl.value = "";
         replySubmitEl.textContent = I18N.sendReply;
@@ -2416,15 +2432,18 @@
                     },
                 })),
             );
-            setReplyComposerVisible(false);
-            setReplyEnabled(false);
         } else {
             promptActionsEl.classList.add("hidden");
             promptActionsEl.textContent = "";
-            replyTextEl.placeholder = hint || I18N.replyPlaceholder;
-            setReplyComposerVisible(true);
-            setReplyEnabled(interactionId > 0);
         }
+
+        const compactReply = kind !== "open_text";
+        setReplyComposerCompact(compactReply);
+        replyTextEl.placeholder = compactReply
+            ? I18N.replyPlaceholderAlternative
+            : (hint || I18N.replyPlaceholder);
+        setReplyComposerVisible(true);
+        setReplyEnabled(interactionId > 0);
 
         if (fileSpecs.length) {
             const lines = fileSpecs.map((item) => {

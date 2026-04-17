@@ -338,11 +338,14 @@ def make_fcmp_terminal_payload(
     code: Optional[str] = None,
     message: Optional[str] = None,
     reason_code: Optional[str] = None,
+    completion_source: Optional[str] = None,
     diagnostics: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"status": status}
     if isinstance(reason_code, str) and reason_code.strip():
         payload["reason_code"] = reason_code.strip()
+    if isinstance(completion_source, str) and completion_source.strip():
+        payload["completion_source"] = completion_source.strip()
     if status in {"failed", "canceled"}:
         error: Dict[str, Any] = {
             "category": "runtime" if status == "failed" else "lifecycle",

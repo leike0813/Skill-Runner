@@ -1247,6 +1247,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                 derive_assistant_final_display(
                     text=text_obj,
                     pending_interaction=None,
+                    source_hint=(
+                        final_payload.get("details", {}).get("source")
+                        if isinstance(final_payload.get("details"), dict)
+                        else None
+                    ),
                 )
             )
         correlation: dict[str, Any] = {"publish_id": uuid.uuid4().hex}

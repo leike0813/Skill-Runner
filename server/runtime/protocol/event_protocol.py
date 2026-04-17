@@ -220,6 +220,9 @@ def build_rasp_events(
             payload: Dict[str, Any] = {"state": state}
             if isinstance(reason_code, str) and reason_code:
                 payload["reason_code"] = reason_code
+            source_obj = completion.get("source")
+            if isinstance(source_obj, str) and source_obj.strip():
+                payload["source"] = source_obj.strip()
             diagnostics = completion.get("diagnostics")
             if isinstance(diagnostics, list):
                 payload["diagnostics"] = [item for item in diagnostics if isinstance(item, str)]
@@ -379,11 +382,16 @@ def build_rasp_events(
             attempt_number=attempt_number,
             raw_ref=raw_ref_row if isinstance(raw_ref_row, dict) else None,
         )
+        details_obj = msg.get("details") if isinstance(msg, dict) else None
         candidate = promotion.register_message_candidate(
             message_id=message_id,
             text=text,
             raw_ref=raw_ref_row if isinstance(raw_ref_row, dict) else None,
-            details={"source": "build_rasp_events"},
+            details=(
+                dict(details_obj)
+                if isinstance(details_obj, dict)
+                else {"source": "build_rasp_events"}
+            ),
         )
         push(
             RuntimeEventCategory.AGENT,
@@ -1090,6 +1098,11 @@ def translate_orchestrator_event_to_fcmp_specs(
                     code=code or status.upper(),
                     reason_code=code or status.upper(),
                     message=message,
+                    completion_source=(
+                        data.get("completion_source")
+                        if isinstance(data.get("completion_source"), str)
+                        else None
+                    ),
                 ),
             ),
         )
@@ -1528,6 +1541,11 @@ def build_fcmp_events(
                 code=reason_code or status.upper(),
                 reason_code=reason_code or status.upper(),
                 message=message,
+                completion_source=(
+                    row_data.get("completion_source")
+                    if isinstance(row_data.get("completion_source"), str)
+                    else None
+                ),
                 diagnostics=completion_diagnostics,
             )
             push(
@@ -1887,6 +1905,11 @@ def build_fcmp_events(
             derive_assistant_final_display(
                 text=text_obj,
                 pending_interaction=pending_payload,
+                source_hint=(
+                    final_payload.get("details", {}).get("source")
+                    if isinstance(final_payload.get("details"), dict)
+                    else None
+                ),
             )
         )
         push(FcmpEventType.ASSISTANT_MESSAGE_FINAL.value, final_payload, raw_ref=raw_ref)
@@ -1901,6 +1924,11 @@ def build_fcmp_events(
         terminal_payload = make_fcmp_terminal_payload(
             status="succeeded",
             reason_code=completion_reason_code or "OUTPUT_VALIDATED",
+            completion_source=(
+                completion.get("source")
+                if isinstance(completion, dict) and isinstance(completion.get("source"), str)
+                else None
+            ),
             diagnostics=completion_diagnostics,
         )
     elif effective_status in {"failed", "canceled"}:
@@ -1908,6 +1936,11 @@ def build_fcmp_events(
             status=effective_status,
             code=completion_reason_code or effective_status.upper(),
             reason_code=completion_reason_code or effective_status.upper(),
+            completion_source=(
+                completion.get("source")
+                if isinstance(completion, dict) and isinstance(completion.get("source"), str)
+                else None
+            ),
             diagnostics=completion_diagnostics,
         )
     if effective_status in terminal_state_trigger_map and not terminal_state_emitted:

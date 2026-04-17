@@ -102,6 +102,7 @@
     "observe_pending_input": "保留中の入力要求",
     "observe_pending_method_selection": "method-selection",
     "observe_reply_placeholder": "Agent に返信…",
+    "observe_reply_placeholder_alternative": "または別の要望を入力...",
     "observe_reply_shortcut": "Ctrl+Enter / Cmd+Enter で送信",
     "observe_required_fields_prefix": "required_fields:",
     "observe_result_error_label": "error_message",

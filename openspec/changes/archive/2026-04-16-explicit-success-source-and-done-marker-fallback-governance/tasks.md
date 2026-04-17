@@ -1,0 +1,5 @@
+- [x] Add the change spec and machine-readable contracts for structured-output success capability, explicit success source, and done-marker fallback precedence.
+- [x] Implement generic success-result structured-output extraction plumbing, starting with Claude, without introducing engine-specific outcome special cases.
+- [x] Propagate explicit success source through convergence, outcome, audit, terminal/result payloads, and final event display metadata.
+- [x] Demote done-marker handling to true fallback-only behavior and remove its participation from ordinary completion precedence.
+- [x] Add or update tests covering Claude structured-output success, generic capability truth, done-marker fallback, and audit/result clarity.

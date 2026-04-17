@@ -62,7 +62,8 @@
     "cli_schema_strategy": "inline_schema_object",
     "compat_schema_strategy": "canonical_passthrough",
     "prompt_contract_strategy": "canonical_summary",
-    "payload_canonicalizer": "noop"
+    "payload_canonicalizer": "noop",
+    "result_success_strategy": "result_structured_output_field"
   },
   "ui_shell": {
     "command_id": "claude-tui",

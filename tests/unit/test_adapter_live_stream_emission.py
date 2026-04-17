@@ -728,7 +728,7 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     assert any(row.get("data", {}).get("text") == "draft plan" for row in reasoning_events)
 
     second_payload = (
-        '{"type":"result","subtype":"success","session_id":"session-claude-live","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+        '{"type":"result","subtype":"success","session_id":"session-claude-live","result":"{\\"__SKILL_DONE__\\": true, \\"ok\\": true}","structured_output":{"__SKILL_DONE__":true,"ok":true}}\n'
     )
     await emitter.on_stream_chunk(
         stream="stdout",
@@ -743,17 +743,26 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
     assert "assistant.command_execution" in running_fcmp_types
     assert "assistant.message.intermediate" in running_fcmp_types
     assert "assistant.message.final" in running_fcmp_types
-    assert running_fcmp_types.count("assistant.message.intermediate") == 1
+    assert running_fcmp_types.count("assistant.message.intermediate") == 2
     assert running_fcmp_types.count("assistant.message.final") == 1
     intermediate_row = next(
         row for row in running_fcmp_events if row.get("type") == "assistant.message.intermediate"
+        and row.get("data", {}).get("text") == "hello live"
+    )
+    structured_intermediate_row = next(
+        row
+        for row in running_fcmp_events
+        if row.get("type") == "assistant.message.intermediate"
+        and row.get("data", {}).get("details", {}).get("source") == "structured_output_result"
     )
     final_row = next(
         row for row in running_fcmp_events if row.get("type") == "assistant.message.final"
     )
     assert intermediate_row.get("data", {}).get("text") == "hello live"
-    assert final_row.get("data", {}).get("message_id") == intermediate_row.get("data", {}).get("message_id")
-    assert final_row.get("data", {}).get("text") == "hello live"
+    assert final_row.get("data", {}).get("message_id") == structured_intermediate_row.get("data", {}).get("message_id")
+    assert final_row.get("data", {}).get("details", {}).get("source") == "structured_output_result"
+    assert final_row.get("data", {}).get("display_origin") == "structured_output_result"
+    assert "`ok`" in final_row.get("data", {}).get("display_text", "")
     reasoning_fcmp = [
         row for row in running_fcmp["events"]
         if row.get("type") == "assistant.reasoning"
@@ -818,7 +827,7 @@ async def test_live_runtime_emitter_projects_pending_display_for_claude_final_an
     final_row = next(
         row for row in fcmp_payload["events"] if row.get("type") == "assistant.message.final"
     )
-    assert final_row["data"]["text"] == pending_text
+    assert final_row["data"]["details"]["source"] == "structured_output_result"
     assert final_row["data"]["display_text"] == "请选择下一步。"
     assert final_row["data"]["display_format"] == "plain_text"
     assert final_row["data"]["display_origin"] == "pending_branch"
@@ -895,7 +904,7 @@ async def test_live_runtime_emitter_does_not_emit_claude_result_text_when_struct
 
     payload = (
         '{"type":"system","subtype":"init","session_id":"session-claude-structured-only"}\n'
-        '{"type":"result","subtype":"success","session_id":"session-claude-structured-only","result":"{\\"ok\\": true}","structured_output":{"ok":true}}\n'
+        '{"type":"result","subtype":"success","session_id":"session-claude-structured-only","result":"{\\"__SKILL_DONE__\\": true, \\"ok\\": true}","structured_output":{"__SKILL_DONE__":true,"ok":true}}\n'
     )
     await emitter.on_stream_chunk(
         stream="stdout",
@@ -906,8 +915,11 @@ async def test_live_runtime_emitter_does_not_emit_claude_result_text_when_struct
 
     fcmp_payload = fcmp_live_journal.replay(run_id="run-live-claude-structured-only", after_seq=0)
     fcmp_types = [row.get("type") for row in fcmp_payload["events"]]
-    assert "assistant.message.intermediate" not in fcmp_types
-    assert "assistant.message.final" not in fcmp_types
+    assert "assistant.message.intermediate" in fcmp_types
+    assert "assistant.message.final" in fcmp_types
+    final_row = next(row for row in fcmp_payload["events"] if row.get("type") == "assistant.message.final")
+    assert final_row["data"]["details"]["source"] == "structured_output_result"
+    assert final_row["data"]["display_origin"] == "structured_output_result"
     rasp_payload = rasp_live_journal.replay(run_id="run-live-claude-structured-only", after_seq=0)
     rasp_types = [row.get("event", {}).get("type") for row in rasp_payload["events"]]
     assert "agent.turn_complete" in rasp_types

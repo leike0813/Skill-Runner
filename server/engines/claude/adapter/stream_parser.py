@@ -87,6 +87,37 @@ class ClaudeStreamParser:
     def _result_has_structured_output(payload: dict[str, Any]) -> bool:
         return "structured_output" in payload and payload.get("structured_output") is not None
 
+    def _structured_output_result_enabled(self) -> bool:
+        return (
+            self._adapter.profile.structured_output.result_success_strategy
+            == "result_structured_output_field"
+        )
+
+    def _build_structured_output_result_message(
+        self,
+        *,
+        payload: dict[str, Any],
+        row_raw_ref: RuntimeStreamRawRef,
+    ) -> RuntimeAssistantMessage | None:
+        if not self._structured_output_result_enabled():
+            return None
+        if str(payload.get("subtype") or "").strip().lower() != "success":
+            return None
+        structured = payload.get("structured_output")
+        if not isinstance(structured, dict):
+            return None
+        try:
+            text = json.dumps(structured, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
+        if not text.strip():
+            return None
+        return {
+            "text": text,
+            "raw_ref": row_raw_ref,
+            "details": {"source": "structured_output_result"},
+        }
+
     @classmethod
     def _should_emit_result_text_fallback(
         cls,
@@ -486,6 +517,14 @@ class ClaudeStreamParser:
                     subtype_obj = payload.get("subtype")
                     if isinstance(subtype_obj, str) and subtype_obj.strip():
                         turn_complete_data["result_subtype"] = subtype_obj.strip()
+                    structured_output_message = self._build_structured_output_result_message(
+                        payload=payload,
+                        row_raw_ref=row_raw_ref,
+                    )
+                    if structured_output_message is not None:
+                        assistant_text_seen = True
+                        assistant_messages.append(structured_output_message)
+                        self._mark_consumed(consumed_ranges, row_raw_ref)
                     text = payload.get("result")
                     if self._should_emit_result_text_fallback(
                         payload=payload,
@@ -725,6 +764,21 @@ class _ClaudeLiveSession(NdjsonLiveStreamParserSession):
             return emissions
         if payload_type == "result" and not self._turn_complete_emitted:
             self._turn_complete_emitted = True
+            structured_output_message = self._parser._build_structured_output_result_message(  # noqa: SLF001
+                payload=payload,
+                row_raw_ref=raw_ref,
+            )
+            if structured_output_message is not None:
+                self._assistant_text_seen = True
+                structured_output_emission: LiveParserEmission = {
+                    "kind": "assistant_message",
+                    "text": structured_output_message["text"],
+                    "details": structured_output_message.get("details", {}),
+                    "raw_ref": raw_ref,
+                }
+                if payload_session_id:
+                    structured_output_emission["session_id"] = payload_session_id
+                emissions.append(structured_output_emission)
             text = payload.get("result")
             if self._parser._should_emit_result_text_fallback(  # noqa: SLF001
                 payload=payload,

@@ -99,6 +99,7 @@ def _build_outcome() -> RunAttemptResolvedOutcome:
         normalized_error=None,
         warnings=["WARN_A"],
         output_data={"answer": 42},
+        success_source="structured_output_candidate",
         artifacts=[],
         repair_level="none",
         pending_interaction=None,
