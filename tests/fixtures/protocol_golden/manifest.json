@@ -14,6 +14,258 @@
       "layer": "protocol_core",
       "engine": "codex",
       "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "demo_auto_skill__claude__protocol",
+      "source_run_key": "demo_auto_skill__claude",
+      "layer": "protocol_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__claude__outcome",
+      "source_run_key": "demo_auto_skill__claude",
+      "layer": "outcome_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__codex__protocol",
+      "source_run_key": "demo_auto_skill__codex",
+      "layer": "protocol_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__codex__outcome",
+      "source_run_key": "demo_auto_skill__codex",
+      "layer": "outcome_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__gemini__protocol",
+      "source_run_key": "demo_auto_skill__gemini",
+      "layer": "protocol_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__gemini__outcome",
+      "source_run_key": "demo_auto_skill__gemini",
+      "layer": "outcome_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__opencode__protocol",
+      "source_run_key": "demo_auto_skill__opencode",
+      "layer": "protocol_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__opencode__outcome",
+      "source_run_key": "demo_auto_skill__opencode",
+      "layer": "outcome_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__qwen__protocol",
+      "source_run_key": "demo_auto_skill__qwen",
+      "layer": "protocol_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_auto_skill__qwen__outcome",
+      "source_run_key": "demo_auto_skill__qwen",
+      "layer": "outcome_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__claude__protocol",
+      "source_run_key": "demo_interactive_skill__claude",
+      "layer": "protocol_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__claude__outcome",
+      "source_run_key": "demo_interactive_skill__claude",
+      "layer": "outcome_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__codex__protocol",
+      "source_run_key": "demo_interactive_skill__codex",
+      "layer": "protocol_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__codex__outcome",
+      "source_run_key": "demo_interactive_skill__codex",
+      "layer": "outcome_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__gemini__protocol",
+      "source_run_key": "demo_interactive_skill__gemini",
+      "layer": "protocol_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__gemini__outcome",
+      "source_run_key": "demo_interactive_skill__gemini",
+      "layer": "outcome_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__opencode__protocol",
+      "source_run_key": "demo_interactive_skill__opencode",
+      "layer": "protocol_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__opencode__outcome",
+      "source_run_key": "demo_interactive_skill__opencode",
+      "layer": "outcome_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__qwen__protocol",
+      "source_run_key": "demo_interactive_skill__qwen",
+      "layer": "protocol_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "demo_interactive_skill__qwen__outcome",
+      "source_run_key": "demo_interactive_skill__qwen",
+      "layer": "outcome_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_digest__claude__protocol",
+      "source_run_key": "literature_digest__claude",
+      "layer": "protocol_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_digest__claude__outcome",
+      "source_run_key": "literature_digest__claude",
+      "layer": "outcome_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_digest__opencode__protocol",
+      "source_run_key": "literature_digest__opencode",
+      "layer": "protocol_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_digest__opencode__outcome",
+      "source_run_key": "literature_digest__opencode",
+      "layer": "outcome_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__claude__protocol",
+      "source_run_key": "literature_explainer__claude",
+      "layer": "protocol_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__claude__outcome",
+      "source_run_key": "literature_explainer__claude",
+      "layer": "outcome_core",
+      "engine": "claude",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__opencode__protocol",
+      "source_run_key": "literature_explainer__opencode",
+      "layer": "protocol_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__opencode__outcome",
+      "source_run_key": "literature_explainer__opencode",
+      "layer": "outcome_core",
+      "engine": "opencode",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__qwen__protocol",
+      "source_run_key": "literature_explainer__qwen",
+      "layer": "protocol_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "literature_explainer__qwen__outcome",
+      "source_run_key": "literature_explainer__qwen",
+      "layer": "outcome_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__codex__protocol",
+      "source_run_key": "tag_regulator__codex",
+      "layer": "protocol_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__codex__outcome",
+      "source_run_key": "tag_regulator__codex",
+      "layer": "outcome_core",
+      "engine": "codex",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__gemini__protocol",
+      "source_run_key": "tag_regulator__gemini",
+      "layer": "protocol_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__gemini__outcome",
+      "source_run_key": "tag_regulator__gemini",
+      "layer": "outcome_core",
+      "engine": "gemini",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__qwen__protocol",
+      "source_run_key": "tag_regulator__qwen",
+      "layer": "protocol_core",
+      "engine": "qwen",
+      "source": "captured_run"
+    },
+    {
+      "fixture_id": "tag_regulator__qwen__outcome",
+      "source_run_key": "tag_regulator__qwen",
+      "layer": "outcome_core",
+      "engine": "qwen",
+      "source": "captured_run"
     }
   ]
 }

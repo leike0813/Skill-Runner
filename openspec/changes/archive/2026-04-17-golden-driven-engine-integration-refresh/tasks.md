@@ -1,0 +1,7 @@
+- [x] 1.1 Add pytest-based engine integration tests driven by captured-run `protocol_core` fixtures.
+- [x] 1.2 Add pytest-based engine integration tests driven by captured-run `outcome_core` fixtures and corpus completeness checks.
+- [x] 2.1 Remove captured-run replay coverage from `tests/unit` so real captured runs live under `tests/engine_integration`.
+- [x] 2.2 Replace the legacy YAML engine integration runner with a thin pytest compatibility shim, and retire obsolete harness code.
+- [x] 2.3 Update engine integration and related test docs to reflect the golden-driven pytest model and the legacy status of YAML suites.
+- [x] 3.1 Run targeted pytest for engine integration, unit golden framework regressions, runtime protocol, and run observability.
+- [x] 3.2 Run targeted mypy for the new engine integration registry and compatibility runner, and validate the OpenSpec change.

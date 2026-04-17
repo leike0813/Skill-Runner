@@ -1,5 +1,11 @@
 # 通用测试框架设计方案 (Universal Test Framework Design)
 
+> Note:
+> 本文档保留了早期 YAML suite 驱动的测试框架设计背景。
+> 当前 `tests/engine_integration/` 已迁移到 golden-driven pytest 体系；
+> `tests/engine_integration/suites/` 现在仅保留给 E2E legacy case source 使用，
+> `harness_fixture.py` 也不再是当前 engine integration 的实现入口。
+
 ## 1. 目标与背景
 
 当前测试 (`verify_*.py`) 存在硬编码输入、验证逻辑耦合、不可复用等问题。本方案旨在设计一个**通用、数据驱动**的测试框架，实现以下目标：

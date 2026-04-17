@@ -27,3 +27,16 @@ def test_protocol_golden_fixture_loader_returns_none_for_unsupported_engine() ->
 def test_protocol_golden_fixture_loader_exposes_auth_detection_bridge_sample() -> None:
     sample = load_auth_detection_sample_bridge("codex", "openai_usage_limit_plus")
     assert "usage limit" in sample["stdout"].lower()
+
+
+def test_protocol_golden_fixture_loader_builds_captured_run_fixture() -> None:
+    fixture = load_fixture("demo_interactive_skill__codex__protocol")
+    assert fixture["source"] == "captured_run"
+    assert fixture["capture_mode"] == "whole_run"
+    assert len(fixture["attempts"]) == 3
+
+
+def test_protocol_golden_fixture_loader_builds_captured_outcome_fixture() -> None:
+    fixture = load_fixture("literature_digest__claude__outcome")
+    assert fixture["source"] == "captured_run"
+    assert fixture["expected"]["outcome"]["success_source"] == "done_signal_payload"

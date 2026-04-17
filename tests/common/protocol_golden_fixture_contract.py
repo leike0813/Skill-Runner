@@ -10,6 +10,9 @@ import jsonschema  # type: ignore[import-untyped]
 from tests.common.runtime_parser_capability_contract import (
     load_runtime_parser_capability_contract,
 )
+from tests.common.protocol_golden_fixture_extractor import (
+    build_protocol_golden_fixture_from_source_run,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -80,16 +83,26 @@ def load_protocol_golden_fixture(fixture_id: str) -> dict[str, Any]:
     if entry is None:
         raise RuntimeError(f"Unknown protocol golden fixture `{fixture_id}`")
 
+    fixture_path: Path | None = None
     relative_path_obj = entry.get("path")
-    if not isinstance(relative_path_obj, str) or not relative_path_obj.strip():
-        raise RuntimeError(f"Protocol golden fixture `{fixture_id}` has invalid manifest path")
-    fixture_path = FIXTURE_ROOT / relative_path_obj
-    if not fixture_path.exists():
-        raise RuntimeError(f"Protocol golden fixture file not found: {fixture_path}")
-
-    payload_obj = json.loads(fixture_path.read_text(encoding="utf-8"))
-    if not isinstance(payload_obj, dict):
-        raise RuntimeError(f"Protocol golden fixture `{fixture_id}` must be a mapping")
+    if isinstance(relative_path_obj, str) and relative_path_obj.strip():
+        fixture_path = FIXTURE_ROOT / relative_path_obj
+        if not fixture_path.exists():
+            raise RuntimeError(f"Protocol golden fixture file not found: {fixture_path}")
+        payload_obj = json.loads(fixture_path.read_text(encoding="utf-8"))
+        if not isinstance(payload_obj, dict):
+            raise RuntimeError(f"Protocol golden fixture `{fixture_id}` must be a mapping")
+    else:
+        source_run_key_obj = entry.get("source_run_key")
+        if not isinstance(source_run_key_obj, str) or not source_run_key_obj.strip():
+            raise RuntimeError(
+                f"Protocol golden fixture `{fixture_id}` must declare `path` or `source_run_key`"
+            )
+        payload_obj = build_protocol_golden_fixture_from_source_run(
+            fixture_id,
+            source_run_key=source_run_key_obj.strip(),
+            layer=str(entry["layer"]),
+        )
     jsonschema.validate(payload_obj, load_protocol_golden_fixture_schema())
 
     if payload_obj.get("fixture_id") != fixture_id:
@@ -100,23 +113,24 @@ def load_protocol_golden_fixture(fixture_id: str) -> dict[str, Any]:
 
     inputs = _as_mapping(payload_obj.get("inputs"), field="inputs")
     hydrated_inputs = dict(inputs)
-    for field_name, target_name in (
-        ("stdout_file", "stdout"),
-        ("stderr_file", "stderr"),
-        ("pty_output_file", "pty_output"),
-    ):
-        file_obj = inputs.get(field_name)
-        if not isinstance(file_obj, str) or not file_obj.strip():
-            continue
-        blob_path = fixture_path.parent / file_obj
-        if not blob_path.exists():
-            raise RuntimeError(f"Fixture blob `{field_name}` not found for `{fixture_id}`: {blob_path}")
-        hydrated_inputs[target_name] = _load_fixture_blob(blob_path)
+    if fixture_path is not None:
+        for field_name, target_name in (
+            ("stdout_file", "stdout"),
+            ("stderr_file", "stderr"),
+            ("pty_output_file", "pty_output"),
+        ):
+            file_obj = inputs.get(field_name)
+            if not isinstance(file_obj, str) or not file_obj.strip():
+                continue
+            blob_path = fixture_path.parent / file_obj
+            if not blob_path.exists():
+                raise RuntimeError(f"Fixture blob `{field_name}` not found for `{fixture_id}`: {blob_path}")
+            hydrated_inputs[target_name] = _load_fixture_blob(blob_path)
 
     payload = dict(payload_obj)
     payload["inputs"] = hydrated_inputs
     payload["__manifest_entry__"] = dict(entry)
-    payload["__fixture_path__"] = str(fixture_path)
+    payload["__fixture_path__"] = str(fixture_path) if fixture_path is not None else None
     return payload
 
 

@@ -62,3 +62,21 @@ def test_protocol_golden_normalizer_normalizes_outcome_mapping() -> None:
         "final_status": "waiting_auth",
         "auth_session_meta": {"provider_id": "openai"},
     }
+
+
+def test_protocol_golden_normalizer_preserves_multi_attempt_semantics() -> None:
+    normalized = normalize_outcome_result(
+        {
+            "attempts": [
+                {"attempt_number": 1, "status_hint": "waiting_user", "request_id": "req-1"},
+                {"attempt_number": 2, "status_hint": "succeeded", "request_id": "req-1"},
+            ],
+            "run_id": "run-1",
+        }
+    )
+    assert normalized == {
+        "attempts": [
+            {"attempt_number": 1, "status_hint": "waiting_user"},
+            {"attempt_number": 2, "status_hint": "succeeded"},
+        ]
+    }

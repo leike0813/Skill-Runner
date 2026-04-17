@@ -1,0 +1,7 @@
+- [x] 1.1 Extend the protocol golden fixture contract to support captured runs, capture mode, attempts, and run artifacts.
+- [x] 1.2 Add a machine-readable source-run registry for the 18 captured runs and wire manifest coverage for protocol/outcome fixtures.
+- [x] 2.1 Add captured-run extractor support for protocol_core and outcome_core fixtures, including whole-run multi-attempt handling.
+- [x] 2.2 Extend the golden fixture harness and loader to execute captured protocol/outcome fixtures through the current semantic replay path.
+- [x] 2.3 Add or update tests for contract validation, extractor coverage, loader/normalizer behavior, protocol smoke, outcome smoke, and corpus completeness.
+- [x] 3.1 Run targeted pytest for golden fixture contract, loader, normalizer, extractor, protocol smoke, and outcome smoke.
+- [x] 3.2 Run outer protocol regressions and targeted mypy for the added harness / extractor modules.

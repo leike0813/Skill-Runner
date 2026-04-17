@@ -110,6 +110,55 @@ def execute_protocol_core_fixture(
     *,
     tmp_path: Path,
 ) -> tuple[list[Any], list[Any]]:
+    if fixture.get("source") == "captured_run":
+        engine_obj = fixture.get("engine")
+        if not isinstance(engine_obj, str) or not engine_obj.strip():
+            raise RuntimeError("Captured protocol fixture requires a concrete engine")
+        rasp_events: list[Any] = []
+        fcmp_events: list[Any] = []
+        attempts_obj = fixture.get("attempts")
+        if not isinstance(attempts_obj, list) or not attempts_obj:
+            raise RuntimeError("Captured protocol fixture requires non-empty `attempts`")
+        for attempt in attempts_obj:
+            if not isinstance(attempt, dict):
+                raise RuntimeError("Captured protocol fixture attempts must be mappings")
+            attempt_number = int(attempt.get("attempt_number", 0))
+            if attempt_number <= 0:
+                raise RuntimeError("Captured protocol fixture attempts require positive `attempt_number`")
+            status_hint = str(attempt.get("status_hint", "unknown"))
+            completion_obj = attempt.get("completion")
+            completion = dict(completion_obj) if isinstance(completion_obj, dict) else None
+            pending_context_obj = attempt.get("pending_context")
+            pending_context = (
+                dict(pending_context_obj) if isinstance(pending_context_obj, dict) else None
+            )
+            stdout_text = str(attempt.get("stdout", ""))
+            stderr_text = str(attempt.get("stderr", ""))
+            pty_text = str(attempt.get("pty_output", ""))
+            attempt_rasp = build_rasp_events(
+                run_id=f"golden-{fixture['fixture_id']}",
+                engine=engine_obj,
+                attempt_number=attempt_number,
+                status=status_hint,
+                pending_interaction=pending_context,
+                stdout_path=tmp_path / f"stdout-{attempt_number}.log",
+                stderr_path=tmp_path / f"stderr-{attempt_number}.log",
+                pty_path=tmp_path / f"pty-{attempt_number}.log",
+                stdout_raw=stdout_text.encode("utf-8"),
+                stderr_raw=stderr_text.encode("utf-8"),
+                pty_raw=pty_text.encode("utf-8"),
+                completion=completion,
+            )
+            attempt_fcmp = build_fcmp_events(
+                attempt_rasp,
+                status=status_hint,
+                pending_interaction=pending_context,
+                completion=completion,
+            )
+            rasp_events.extend(attempt_rasp)
+            fcmp_events.extend(attempt_fcmp)
+        return rasp_events, fcmp_events
+
     inputs = fixture.get("inputs", {})
     run_dir = tmp_path / fixture["fixture_id"]
     logs_dir = run_dir / "logs"
@@ -215,6 +264,29 @@ async def execute_outcome_core_fixture(
     *,
     tmp_path: Path,
 ) -> Any:
+    if fixture.get("source") == "captured_run":
+        inputs = fixture.get("inputs", {})
+        result_obj = inputs.get("result")
+        result_payload = dict(result_obj) if isinstance(result_obj, dict) else {}
+        state_obj = inputs.get("state")
+        state_payload = dict(state_obj) if isinstance(state_obj, dict) else {}
+        meta_obj = inputs.get("meta")
+        meta_payload = dict(meta_obj) if isinstance(meta_obj, dict) else {}
+        completion_obj = meta_payload.get("completion")
+        completion_payload = dict(completion_obj) if isinstance(completion_obj, dict) else {}
+        return {
+            "final_status": state_payload.get("status"),
+            "result_status": result_payload.get("status"),
+            "success_source": result_payload.get("success_source"),
+            "data": result_payload.get("data"),
+            "artifacts": result_payload.get("artifacts"),
+            "repair_level": result_payload.get("repair_level"),
+            "validation_warnings": result_payload.get("validation_warnings"),
+            "error": result_payload.get("error"),
+            "completion_reason_code": completion_payload.get("reason_code"),
+            "completion_source": completion_payload.get("source"),
+        }
+
     inputs = fixture.get("inputs", {})
     context_payload = inputs.get("context")
     execution_payload = inputs.get("execution")

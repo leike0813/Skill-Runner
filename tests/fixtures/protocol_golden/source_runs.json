@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "source_run_key": "demo_auto_skill__claude",
+      "skill_id": "demo-auto-skill",
+      "engine": "claude",
+      "run_id": "86161a0c-584e-471b-a900-9783a7f79a5f",
+      "category": "demo-auto-skill",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "demo_auto_skill__codex",
+      "skill_id": "demo-auto-skill",
+      "engine": "codex",
+      "run_id": "47097c9e-6606-4c38-b6f2-7b1f97ee24fe",
+      "category": "demo-auto-skill",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "demo_auto_skill__gemini",
+      "skill_id": "demo-auto-skill",
+      "engine": "gemini",
+      "run_id": "ce2afd33-cc7e-461a-9080-392fbf686087",
+      "category": "demo-auto-skill",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "demo_auto_skill__opencode",
+      "skill_id": "demo-auto-skill",
+      "engine": "opencode",
+      "run_id": "03d06ecc-5dd4-4ba9-b1aa-3be06016b5f1",
+      "category": "demo-auto-skill",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "demo_auto_skill__qwen",
+      "skill_id": "demo-auto-skill",
+      "engine": "qwen",
+      "run_id": "b353cf8f-5a0a-4cad-a2cf-b2002f45bea5",
+      "category": "demo-auto-skill",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "demo_interactive_skill__claude",
+      "skill_id": "demo-interactive-skill",
+      "engine": "claude",
+      "run_id": "0ec8f55d-6d66-4bde-a1bb-2608067069dd",
+      "category": "demo-interactive-skill",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "demo_interactive_skill__codex",
+      "skill_id": "demo-interactive-skill",
+      "engine": "codex",
+      "run_id": "a6739adb-e431-4e21-9e2b-5090da85679e",
+      "category": "demo-interactive-skill",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "demo_interactive_skill__gemini",
+      "skill_id": "demo-interactive-skill",
+      "engine": "gemini",
+      "run_id": "3eca6be9-fdfb-40bc-acdd-607009abbf90",
+      "category": "demo-interactive-skill",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "demo_interactive_skill__opencode",
+      "skill_id": "demo-interactive-skill",
+      "engine": "opencode",
+      "run_id": "98fb3727-7f56-4cbc-b6ea-de949cf6b534",
+      "category": "demo-interactive-skill",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "demo_interactive_skill__qwen",
+      "skill_id": "demo-interactive-skill",
+      "engine": "qwen",
+      "run_id": "91cd7c34-9b56-4cfa-9602-c43c06834572",
+      "category": "demo-interactive-skill",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "literature_digest__claude",
+      "skill_id": "literature-digest",
+      "engine": "claude",
+      "run_id": "0809f2ae-b8e4-430a-92ce-278608b3be0a",
+      "category": "literature-digest",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "literature_digest__opencode",
+      "skill_id": "literature-digest",
+      "engine": "opencode",
+      "run_id": "8c873be5-be44-4495-b9e5-90df6dc681f3",
+      "category": "literature-digest",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "literature_explainer__claude",
+      "skill_id": "literature-explainer",
+      "engine": "claude",
+      "run_id": "ee2ac309-009c-4322-9ebd-7364fb24e1a3",
+      "category": "literature-explainer",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "literature_explainer__opencode",
+      "skill_id": "literature-explainer",
+      "engine": "opencode",
+      "run_id": "7ebd5ef8-7269-41cc-8b10-0b90b9397c6c",
+      "category": "literature-explainer",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "literature_explainer__qwen",
+      "skill_id": "literature-explainer",
+      "engine": "qwen",
+      "run_id": "a53959ec-40f5-450f-aa15-fbd825056059",
+      "category": "literature-explainer",
+      "capture_mode": "whole_run"
+    },
+    {
+      "source_run_key": "tag_regulator__codex",
+      "skill_id": "tag-regulator",
+      "engine": "codex",
+      "run_id": "eb5c88c3-c1b7-4c30-b7f9-480ec100403d",
+      "category": "tag-regulator",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "tag_regulator__gemini",
+      "skill_id": "tag-regulator",
+      "engine": "gemini",
+      "run_id": "e1c49605-d935-4f37-89b6-763d2cb8fd3f",
+      "category": "tag-regulator",
+      "capture_mode": "single_attempt"
+    },
+    {
+      "source_run_key": "tag_regulator__qwen",
+      "skill_id": "tag-regulator",
+      "engine": "qwen",
+      "run_id": "6d37ae77-5690-4ba8-8401-71975833dab8",
+      "category": "tag-regulator",
+      "capture_mode": "single_attempt"
+    }
+  ]
+}

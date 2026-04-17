@@ -28,6 +28,13 @@
         "outcome_core"
       ]
     },
+    "capture_mode": {
+      "type": "string",
+      "enum": [
+        "single_attempt",
+        "whole_run"
+      ]
+    },
     "engine": {
       "type": "string",
       "minLength": 1
@@ -50,6 +57,81 @@
       "additionalProperties": false,
       "properties": {
         "ignore_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "attempt_number",
+          "status_hint"
+        ],
+        "properties": {
+          "attempt_number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status_hint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "pty_output": {
+            "type": "string"
+          },
+          "completion": {
+            "type": "object"
+          },
+          "pending_context": {
+            "type": "object"
+          },
+          "meta_file": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "run_artifacts": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "result_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "meta_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fcmp_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "events_files": {
           "type": "array",
           "items": {
             "type": "string",
