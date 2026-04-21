@@ -41,9 +41,11 @@
 - [x] 修复 Claude Code 的双重终态消息问题
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
 - [x] 进一步拆分 god object，重构 run store
+- [ ] **添加 MCP 配置功能**
 - [ ] 对单元测试进行全面审查、规范化、去重
 - [ ] **全局级 sticky session 功能，实现常驻会话/管理/服务化**
 - [ ] **MCP 支持**
 - [ ] skill-to-skill
 - [ ] joint-execution
 - [ ] CI/CD流水线
+
