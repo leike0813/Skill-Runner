@@ -50,6 +50,32 @@ class CodexCommandBuilder:
             idx += 1
         return exec_flags, resume_flags
 
+    @staticmethod
+    def _replace_profile_flags(flags: list[str], profile_name: str) -> list[str]:
+        filtered: list[str] = []
+        idx = 0
+        while idx < len(flags):
+            token = flags[idx]
+            if token in {"-p", "--profile"}:
+                idx += 2
+                continue
+            if token.startswith("--profile="):
+                idx += 1
+                continue
+            filtered.append(token)
+            idx += 1
+        return [*filtered, "-p", profile_name]
+
+    def _apply_mcp_profile_override(
+        self,
+        flags: list[str],
+        options: dict[str, object],
+    ) -> list[str]:
+        raw_profile = options.get("__codex_mcp_profile_name")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            return self._replace_profile_flags(flags, raw_profile.strip())
+        return flags
+
     def build_start_with_options(
         self,
         *,
@@ -73,6 +99,7 @@ class CodexCommandBuilder:
             return [executable, *fallback_flags]
         default_flags = self._resolve_profile_flags(action="start", use_profile_defaults=profile_defaults)
         merged_flags = merge_cli_args(default_flags, [])
+        merged_flags = self._apply_mcp_profile_override(merged_flags, options)
         merged_flags.extend(
             structured_output_pipeline.build_cli_schema_args(
                 engine_name="codex",
@@ -123,6 +150,7 @@ class CodexCommandBuilder:
             return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]
         defaults = self._resolve_profile_flags(action="resume", use_profile_defaults=profile_defaults)
         merged = merge_cli_args(defaults, [])
+        merged = self._apply_mcp_profile_override(merged, options)
         merged = self._apply_landlock_flag_fallback(merged)
         exec_flags, resume_flags = self._split_exec_and_resume_flags(merged)
         return [executable, "exec", *exec_flags, "resume", *resume_flags, thread_id, prompt]

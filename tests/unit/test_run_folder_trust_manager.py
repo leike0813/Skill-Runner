@@ -3,6 +3,8 @@ from pathlib import Path
 
 import tomlkit
 
+from server.engines.claude.adapter.state_paths import active_claude_state_path
+from server.services.engine_management.runtime_profile import reset_runtime_profile_cache
 from server.services.orchestration.run_folder_trust_manager import RunFolderTrustManager
 
 
@@ -73,6 +75,29 @@ def test_claude_register_and_remove_run_folder(tmp_path):
     manager.remove_run_folder("claude", run_dir)
     payload = json.loads(claude_path.read_text(encoding="utf-8"))
     assert str(run_dir.resolve()) not in payload.get("projects", {})
+
+
+def test_claude_default_trust_path_uses_active_state(tmp_path, monkeypatch):
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / "run-claude-active"
+    run_dir.mkdir(parents=True)
+    agent_home = tmp_path / "agent_home"
+    monkeypatch.setenv("SKILL_RUNNER_AGENT_HOME", str(agent_home))
+    reset_runtime_profile_cache()
+    try:
+        manager = RunFolderTrustManager(
+            codex_config_path=tmp_path / "codex" / "config.toml",
+            gemini_trusted_path=tmp_path / "gemini" / "trustedFolders.json",
+            runs_root=runs_root,
+        )
+
+        manager.register_run_folder("claude", run_dir)
+
+        payload = json.loads(active_claude_state_path(agent_home).read_text(encoding="utf-8"))
+        assert payload["projects"][str(run_dir.resolve())]["hasTrustDialogAccepted"] is True
+        assert not (agent_home / ".claude.json").exists()
+    finally:
+        reset_runtime_profile_cache()
 
 
 def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):

@@ -56,7 +56,7 @@ def test_generate_patch_content_interactive_mode_uses_json_union_contract():
     assert "Prefer writing those final deliverables under `<cwd>/artifacts/`" in content
     assert f"`{run_dir.as_posix()}/artifacts/`" in content
     assert "Execution Mode: INTERACTIVE" in content
-    assert "Only pause for user input when the task genuinely requires it." in content
+    assert "Beyond these cases, strive to execute tasks autonomously to the greatest extent possible." in content
     assert "Do not mix the final and pending branches in the same turn." in content
     assert "Supported `ui_hints.kind` values" not in content
     assert "Pending branch example" not in content

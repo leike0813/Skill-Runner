@@ -1,7 +1,7 @@
 """Management API view models."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -224,6 +224,96 @@ class ManagementEngineCustomProviderListResponse(BaseModel):
     engine: str
     supported: bool
     providers: List[ManagementEngineCustomProvider] = Field(default_factory=list)
+
+
+class ManagementMcpAuthEnvUpsert(BaseModel):
+    """Write-only env auth item for managed MCP server upserts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    value: Optional[str] = None
+
+
+class ManagementMcpAuthHeaderUpsert(BaseModel):
+    """Write-only header auth item for managed MCP server upserts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    prefix: str = ""
+    value: Optional[str] = None
+
+
+class ManagementMcpAuthUpsert(BaseModel):
+    """Write-only auth payload for managed MCP server upserts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    env: List[ManagementMcpAuthEnvUpsert] = Field(default_factory=list)
+    headers: List[ManagementMcpAuthHeaderUpsert] = Field(default_factory=list)
+
+
+class ManagementMcpAuthEnvView(BaseModel):
+    """Masked env auth view for managed MCP servers."""
+
+    name: str
+    configured: bool
+    masked_value: str = ""
+
+
+class ManagementMcpAuthHeaderView(BaseModel):
+    """Masked header auth view for managed MCP servers."""
+
+    name: str
+    prefix: str = ""
+    configured: bool
+    masked_value: str = ""
+
+
+class ManagementMcpAuthView(BaseModel):
+    """Masked auth view for managed MCP servers."""
+
+    env: List[ManagementMcpAuthEnvView] = Field(default_factory=list)
+    headers: List[ManagementMcpAuthHeaderView] = Field(default_factory=list)
+
+
+class ManagementMcpServerUpsertRequest(BaseModel):
+    """Upsert payload for managed MCP servers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    activation: Literal["default", "declared"]
+    engines: Optional[List[str]] = None
+    unsupported_engines: List[str] = Field(default_factory=list)
+    scope: Literal["run-local", "agent-home"]
+    transport: Literal["stdio", "http", "sse"]
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    url: Optional[str] = None
+    auth: ManagementMcpAuthUpsert = Field(default_factory=ManagementMcpAuthUpsert)
+
+
+class ManagementMcpServerView(BaseModel):
+    """Masked managed MCP server view."""
+
+    id: str
+    activation: Literal["default", "declared"]
+    engines: Optional[List[str]] = None
+    unsupported_engines: List[str] = Field(default_factory=list)
+    effective_engines: List[str] = Field(default_factory=list)
+    scope: Literal["run-local", "agent-home"]
+    transport: Literal["stdio", "http", "sse"]
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    url: Optional[str] = None
+    auth: ManagementMcpAuthView = Field(default_factory=ManagementMcpAuthView)
+
+
+class ManagementMcpServerListResponse(BaseModel):
+    """List payload for managed MCP servers."""
+
+    servers: List[ManagementMcpServerView] = Field(default_factory=list)
 
 
 class ManagementEngineListResponse(BaseModel):

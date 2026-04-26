@@ -70,3 +70,55 @@ UI shell 会话配置 MUST 复用共享 config layering 能力，而不是为单
 - **THEN** 它 MUST 复用与 headless run 相同的 Claude 1M runtime override 规则
 - **AND** 最终配置 MUST 与 headless run 在 `model` / `ANTHROPIC_DEFAULT_SONNET_MODEL` / `CLAUDE_CODE_DISABLE_1M_CONTEXT` 语义上保持一致
 
+### Requirement: Governed MCP MUST be a system-generated runtime config layer
+Runtime configuration composition MUST include governed MCP renderer output as a system-generated layer. This layer MUST be merged after skill defaults and runtime overrides, and before enforced policy.
+
+#### Scenario: MCP layer participates in runtime config composition
+- **GIVEN** runtime resolves one or more governed MCP entries for a run
+- **WHEN** the engine runtime config is composed
+- **THEN** the MCP renderer output MUST be merged into the final config
+- **AND** enforced policy MUST still have higher precedence than the MCP layer
+
+#### Scenario: no governed MCP entries resolve
+- **GIVEN** runtime resolves no governed MCP entries for a run
+- **WHEN** the engine runtime config is composed
+- **THEN** MCP composition MUST be a no-op
+- **AND** existing non-MCP config layering behavior MUST remain unchanged
+
+### Requirement: User-controlled config layers MUST NOT write MCP root keys
+Skill engine config assets and request-side runtime config overrides MUST NOT directly write engine-native MCP root keys. The system MUST reject such inputs before engine launch.
+
+#### Scenario: skill config contains MCP root key
+- **WHEN** a skill engine config asset contains `mcpServers`, `mcp_servers`, or `mcp`
+- **THEN** runtime config preparation MUST reject the run before engine launch
+
+#### Scenario: runtime override contains MCP root key
+- **WHEN** request-side runtime engine override contains `mcpServers`, `mcp_servers`, or `mcp`
+- **THEN** runtime config preparation MUST reject the run before engine launch
+
+### Requirement: Default MCP MAY be scoped to agent-home
+Registry-owned default MCP entries MAY declare `scope="agent-home"` or `scope="run-local"`. Declared MCP entries MUST ignore agent-home scope and remain run-local.
+
+#### Scenario: default MCP declares agent-home scope
+- **GIVEN** a default MCP entry declares `scope="agent-home"`
+- **AND** the entry supports the current engine
+- **WHEN** runtime prepares MCP configuration
+- **THEN** the entry MAY be written to the managed agent-home configuration for that engine
+
+#### Scenario: declared MCP declares agent-home scope
+- **GIVEN** a declared MCP entry declares or inherits an agent-home-like scope
+- **WHEN** runtime resolves it for a skill
+- **THEN** the entry MUST still be applied only to the current run
+
+### Requirement: Claude governed MCP MUST bypass generic settings merge
+Claude runtime config composition SHALL resolve governed MCP entries but SHALL NOT merge the generic MCP renderer output into `run_dir/.claude/settings.json`.
+
+#### Scenario: Claude config composer resolves MCP
+- **WHEN** the Claude config composer prepares a run with governed MCP entries
+- **THEN** it MUST invoke Claude active state materialization for those entries
+- **AND** the generated `run_dir/.claude/settings.json` MUST NOT contain `mcpServers`
+
+#### Scenario: Non-Claude engines retain generic MCP layering
+- **WHEN** Gemini, Qwen, Codex, or OpenCode prepares governed MCP configuration
+- **THEN** the existing engine-native MCP rendering and layering behavior MUST remain unchanged
+

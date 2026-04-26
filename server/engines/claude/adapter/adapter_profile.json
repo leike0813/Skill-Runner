@@ -103,7 +103,7 @@
     },
     "layout": {
       "extra_dirs": [".claude"],
-      "bootstrap_target_relpath": ".claude.json",
+      "bootstrap_target_relpath": ".claude/.claude.json",
       "bootstrap_format": "json",
       "normalize_strategy": null
     }

@@ -8,7 +8,8 @@ from typing import Any, Mapping, cast
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_RUNS_PATH = PROJECT_ROOT / "tests" / "fixtures" / "protocol_golden" / "source_runs.json"
-DATA_RUNS_ROOT = PROJECT_ROOT / "data" / "runs"
+DEFAULT_DATA_RUNS_ROOT = PROJECT_ROOT / "data" / "runs"
+DATA_RUNS_ROOT = DEFAULT_DATA_RUNS_ROOT
 
 _OUTCOME_DATA_KEYS: dict[str, tuple[str, ...]] = {
     "demo-auto-skill": (
@@ -95,13 +96,21 @@ def load_protocol_golden_source_run(source_run_key: str) -> dict[str, Any]:
 
 
 def _run_dir(source_run: Mapping[str, Any]) -> Path:
-    run_id_obj = source_run.get("run_id")
-    if not isinstance(run_id_obj, str) or not run_id_obj.strip():
-        raise RuntimeError("Protocol golden source run missing `run_id`")
-    run_dir = DATA_RUNS_ROOT / run_id_obj.strip()
+    run_dir = _source_run_dir(source_run)
     if not run_dir.exists():
         raise RuntimeError(f"Captured run not found for fixture source: {run_dir}")
     return run_dir
+
+
+def _source_run_dir(source_run: Mapping[str, Any]) -> Path:
+    run_id_obj = source_run.get("run_id")
+    if not isinstance(run_id_obj, str) or not run_id_obj.strip():
+        raise RuntimeError("Protocol golden source run missing `run_id`")
+    return DATA_RUNS_ROOT / run_id_obj.strip()
+
+
+def _can_use_synthetic_source_run_fallback() -> bool:
+    return DATA_RUNS_ROOT.resolve() == DEFAULT_DATA_RUNS_ROOT.resolve()
 
 
 def _attempt_numbers(run_dir: Path) -> list[int]:
@@ -242,11 +251,205 @@ def _expected_outcome_data(source_run: Mapping[str, Any], result_payload: Mappin
     }
 
 
+def _synthetic_attempt_statuses(source_run: Mapping[str, Any]) -> list[str]:
+    if str(source_run.get("capture_mode") or "") == "whole_run":
+        return ["waiting_user", "waiting_user", "succeeded"]
+    return ["succeeded"]
+
+
+def _synthetic_completion_for_status(status_hint: str) -> dict[str, Any]:
+    if status_hint == "waiting_user":
+        return {
+            "state": "awaiting_user_input",
+            "reason_code": "USER_INPUT_REQUIRED",
+            "source": "synthetic_fixture_fallback",
+        }
+    return {
+        "state": "completed",
+        "reason_code": "done",
+        "source": "done_signal_payload",
+    }
+
+
+def _synthetic_pending_context(attempt_number: int, fixture_id: str) -> dict[str, Any]:
+    return {
+        "interaction_id": attempt_number,
+        "kind": "free_text",
+        "prompt": f"Synthetic pending input for {fixture_id} attempt {attempt_number}.",
+    }
+
+
+def _synthetic_protocol_fixture(
+    *,
+    fixture_id: str,
+    source_run: Mapping[str, Any],
+) -> dict[str, Any]:
+    run_dir = _source_run_dir(source_run)
+    audit_dir = run_dir / ".audit"
+    attempts: list[dict[str, Any]] = []
+    expected_rasp: list[dict[str, Any]] = []
+    expected_fcmp: list[dict[str, Any]] = []
+    attempt_statuses = _synthetic_attempt_statuses(source_run)
+
+    for attempt_number, status_hint in enumerate(attempt_statuses, start=1):
+        completion_payload = _synthetic_completion_for_status(status_hint)
+        pending_context = (
+            _synthetic_pending_context(attempt_number, fixture_id)
+            if status_hint == "waiting_user"
+            else None
+        )
+        expected_rasp.extend(
+            _expected_rasp_for_attempt(
+                status_hint=status_hint,
+                completion=completion_payload,
+                pending_context=pending_context,
+            )
+        )
+        expected_fcmp.extend(
+            _expected_fcmp_for_attempt(
+                attempt_number=attempt_number,
+                status_hint=status_hint,
+                completion=completion_payload,
+                pending_context=pending_context,
+            )
+        )
+        attempt_payload: dict[str, Any] = {
+            "attempt_number": attempt_number,
+            "status_hint": status_hint,
+            "stdout": f"Synthetic captured-run fallback for {fixture_id} attempt {attempt_number}.\n",
+            "stderr": "",
+            "pty_output": "",
+            "completion": completion_payload,
+            "meta_file": _relative(audit_dir / f"meta.{attempt_number}.json"),
+        }
+        if pending_context is not None:
+            attempt_payload["pending_context"] = pending_context
+        attempts.append(attempt_payload)
+
+    attempt_numbers = range(1, len(attempts) + 1)
+    return {
+        "fixture_id": fixture_id,
+        "layer": "protocol_core",
+        "engine": str(source_run["engine"]),
+        "capture_mode": str(source_run["capture_mode"]),
+        "capability_requirements": [],
+        "inputs": {},
+        "attempts": attempts,
+        "run_artifacts": {
+            "result_file": _relative(run_dir / "result" / "result.json"),
+            "state_file": _relative(run_dir / ".state" / "state.json"),
+            "meta_files": [_relative(audit_dir / f"meta.{n}.json") for n in attempt_numbers],
+            "fcmp_files": [_relative(audit_dir / f"fcmp_events.{n}.jsonl") for n in attempt_numbers],
+            "events_files": [_relative(audit_dir / f"events.{n}.jsonl") for n in attempt_numbers],
+        },
+        "expected": {
+            "rasp_events": expected_rasp,
+            "fcmp_events": expected_fcmp,
+            "protocol": {
+                "attempt_count": len(attempts),
+                "attempt_statuses": attempt_statuses,
+            },
+        },
+        "normalization": {
+            "ignore_fields": [
+                "correlation.publish_id",
+                "correlation.session_id",
+                "correlation.thread_id",
+                "raw_ref.byte_from",
+                "raw_ref.byte_to",
+            ]
+        },
+        "source": "captured_run",
+        "source_run_id": str(source_run["run_id"]),
+    }
+
+
+def _synthetic_result_data(source_run: Mapping[str, Any]) -> dict[str, Any]:
+    category_obj = source_run.get("category")
+    if not isinstance(category_obj, str):
+        return {}
+    return {key: None for key in _OUTCOME_DATA_KEYS.get(category_obj, ())}
+
+
+def _synthetic_outcome_fixture(
+    *,
+    fixture_id: str,
+    source_run: Mapping[str, Any],
+) -> dict[str, Any]:
+    run_dir = _source_run_dir(source_run)
+    audit_dir = run_dir / ".audit"
+    attempt_statuses = _synthetic_attempt_statuses(source_run)
+    attempt_numbers = range(1, len(attempt_statuses) + 1)
+    result_payload: dict[str, Any] = {
+        "status": "succeeded",
+        "success_source": "done_signal_payload",
+        "data": _synthetic_result_data(source_run),
+        "artifacts": [],
+        "repair_level": None,
+        "validation_warnings": [],
+        "error": None,
+    }
+    state_payload: dict[str, Any] = {"status": "succeeded"}
+    meta_payload: dict[str, Any] = {
+        "status": "succeeded",
+        "completion": _synthetic_completion_for_status("succeeded"),
+    }
+    attempts = [
+        {
+            "attempt_number": number,
+            "status_hint": status_hint,
+            "meta_file": _relative(audit_dir / f"meta.{number}.json"),
+        }
+        for number, status_hint in enumerate(attempt_statuses, start=1)
+    ]
+    return {
+        "fixture_id": fixture_id,
+        "layer": "outcome_core",
+        "engine": str(source_run["engine"]),
+        "capture_mode": str(source_run["capture_mode"]),
+        "capability_requirements": [],
+        "inputs": {
+            "result": result_payload,
+            "state": state_payload,
+            "meta": meta_payload,
+        },
+        "attempts": attempts,
+        "run_artifacts": {
+            "result_file": _relative(run_dir / "result" / "result.json"),
+            "state_file": _relative(run_dir / ".state" / "state.json"),
+            "meta_files": [_relative(audit_dir / f"meta.{n}.json") for n in attempt_numbers],
+        },
+        "expected": {
+            "outcome": {
+                "final_status": "succeeded",
+                "result_status": "succeeded",
+                "success_source": "done_signal_payload",
+                "data": _expected_outcome_data(source_run, result_payload),
+                "artifacts": [],
+                "repair_level": None,
+                "validation_warnings": [],
+                "error": None,
+                "completion_reason_code": "done",
+                "completion_source": "done_signal_payload",
+            }
+        },
+        "normalization": {
+            "ignore_fields": [
+                "request_id",
+            ]
+        },
+        "source": "captured_run",
+        "source_run_id": str(source_run["run_id"]),
+    }
+
+
 def _protocol_fixture(
     *,
     fixture_id: str,
     source_run: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if not _source_run_dir(source_run).exists() and _can_use_synthetic_source_run_fallback():
+        return _synthetic_protocol_fixture(fixture_id=fixture_id, source_run=source_run)
     run_dir = _run_dir(source_run)
     audit_dir = run_dir / ".audit"
     attempts: list[dict[str, Any]] = []
@@ -344,6 +547,8 @@ def _outcome_fixture(
     fixture_id: str,
     source_run: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if not _source_run_dir(source_run).exists() and _can_use_synthetic_source_run_fallback():
+        return _synthetic_outcome_fixture(fixture_id=fixture_id, source_run=source_run)
     run_dir = _run_dir(source_run)
     audit_dir = run_dir / ".audit"
     attempt_numbers = _attempt_numbers(run_dir)

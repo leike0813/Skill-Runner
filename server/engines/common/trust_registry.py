@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable, Protocol
 
 from server.services.engine_management.runtime_profile import get_runtime_profile
+from server.engines.claude.adapter.state_paths import active_claude_state_path
 from server.engines.claude.adapter.trust_folder_strategy import ClaudeTrustFolderStrategy
 from server.engines.codex.adapter.trust_folder_strategy import CodexTrustFolderStrategy
 from server.engines.gemini.adapter.trust_folder_strategy import GeminiTrustFolderStrategy
@@ -61,7 +62,7 @@ def create_default_trust_registry(
     profile = get_runtime_profile()
     codex_path = codex_config_path or (profile.agent_home / ".codex" / "config.toml")
     gemini_path = gemini_trusted_path or (profile.agent_home / ".gemini" / "trustedFolders.json")
-    claude_path = claude_config_path or (profile.agent_home / ".claude.json")
+    claude_path = claude_config_path or active_claude_state_path(profile.agent_home)
     runs_root_resolved = runs_root.resolve()
     return TrustFolderStrategyRegistry(
         _strategies={

@@ -736,3 +736,63 @@ Adapter command construction and parsed payload handling MUST delegate structure
 - **THEN** runtime MUST treat that prompt text as the full body prompt
 - **AND** runtime MUST NOT wrap it with profile default-body extra blocks
 
+### Requirement: Engine config composers MUST consume governed MCP renderer output
+Engine config composers MUST receive or compute governed MCP renderer output and merge it through the shared runtime config layering path. Engine-specific composers MUST NOT independently parse skill MCP declarations.
+
+#### Scenario: composer receives governed MCP config
+- **WHEN** an engine config composer prepares the config for a run
+- **THEN** governed MCP renderer output MUST be available as a dedicated system-generated layer
+- **AND** composer behavior MUST use the engine-native root shape produced by the renderer
+
+### Requirement: Adapter runtime MUST reject MCP bypass inputs before launch
+Adapter runtime preparation MUST fail fast when user-controlled config contains direct MCP root keys.
+
+#### Scenario: bypass key reaches adapter preparation
+- **WHEN** adapter runtime preparation sees `mcpServers`, `mcp_servers`, or `mcp` from skill defaults or runtime overrides
+- **THEN** it MUST raise a configuration error before building the engine command
+
+### Requirement: Codex adapter MUST support per-run MCP profiles
+Codex adapter runtime MUST support selecting a per-run profile when governed MCP resolution includes declared MCP entries.
+
+#### Scenario: per-run profile is selected
+- **GIVEN** governed MCP resolution for a Codex run includes declared MCP
+- **WHEN** the Codex adapter builds the start or resume command
+- **THEN** the command MUST select the per-run profile that contains those MCP entries
+
+#### Scenario: per-run profile cleanup is requested
+- **GIVEN** a Codex run used a per-run MCP profile
+- **WHEN** orchestration performs terminal cleanup
+- **THEN** it MUST invoke Codex profile cleanup for that run profile
+
+### Requirement: Engine adapters MUST consume secret-resolved governed MCP config
+Engine adapters SHALL consume MCP renderer output after runtime secret references have been resolved and SHALL keep raw MCP secrets out of skill manifests, skill config assets, runtime overrides, logs, and management responses.
+
+#### Scenario: Codex MCP config includes resolved auth
+- **WHEN** Codex runtime config composition renders a governed MCP server with auth
+- **THEN** the adapter MUST receive the auth under the Codex-native MCP root
+- **AND** declared run-local MCP behavior MUST continue to use per-run profile selection and cleanup
+
+#### Scenario: JSON MCP engines include resolved auth
+- **WHEN** Gemini, Qwen, or Claude runtime config composition renders a governed MCP server with auth
+- **THEN** the adapter MUST receive the auth under `mcpServers`
+
+#### Scenario: OpenCode MCP config includes resolved auth
+- **WHEN** OpenCode runtime config composition renders a governed MCP server with auth
+- **THEN** the adapter MUST receive the auth under `mcp`
+
+#### Scenario: Direct root bypass remains rejected
+- **WHEN** an engine adapter receives skill config or runtime override input containing a native MCP root
+- **THEN** the adapter or shared composer MUST reject that input before applying governed MCP output
+
+### Requirement: Claude adapter MUST use active state for MCP lifecycle
+The Claude adapter SHALL prepare and clean up governed MCP state using the active Claude state file derived from the runtime `CLAUDE_CONFIG_DIR`.
+
+#### Scenario: Claude run starts with run-local MCP
+- **WHEN** a Claude run resolves run-local MCP servers
+- **THEN** the adapter MUST materialize those servers into the current run project entry before launching Claude
+
+#### Scenario: Claude run reaches terminal cleanup
+- **WHEN** a Claude run used run-local MCP entries
+- **THEN** the adapter MUST attempt to remove those run-local entries during terminal cleanup
+- **AND** cleanup failure MUST NOT change the terminal run outcome
+

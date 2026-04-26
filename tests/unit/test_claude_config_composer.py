@@ -5,10 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
+from server.engines.claude.adapter.state_paths import active_claude_state_path
 from server.engines.claude.adapter.sandbox_probe import (
     ClaudeSandboxProbeResult,
     write_claude_sandbox_probe,
 )
+from server.services.mcp import McpResolution, McpServerDefinition, ResolvedMcpServer
 from server.models.skill import SkillManifest
 from server.runtime.adapter.contracts import AdapterExecutionContext
 
@@ -61,6 +63,7 @@ def test_claude_config_composer_writes_headless_run_settings_with_run_local_sand
     assert payload["env"]["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
     assert payload["env"]["CLAUDE_CODE_DISABLE_1M_CONTEXT"] == "1"
     assert payload["permissions"]["defaultMode"] == "bypassPermissions"
+    assert "AskUserQuestion" in payload["permissions"]["deny"]
     assert payload["includeGitInstructions"] is False
     assert payload["effortLevel"] == "high"
     assert payload["sandbox"]["enabled"] is True
@@ -71,6 +74,68 @@ def test_claude_config_composer_writes_headless_run_settings_with_run_local_sand
         f"//{run_dir.resolve()}",
     ]
     assert f"//{agent_home.resolve()}" in payload["sandbox"]["filesystem"]["denyWrite"]
+
+
+def test_claude_config_composer_materializes_mcp_to_active_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    adapter = ClaudeExecutionAdapter()
+    agent_home = tmp_path / "agent_home"
+    agent_home.mkdir(parents=True, exist_ok=True)
+    object.__setattr__(adapter.agent_manager.profile, "agent_home", agent_home)
+    write_claude_sandbox_probe(
+        agent_home=agent_home,
+        probe=ClaudeSandboxProbeResult(
+            declared_enabled=True,
+            available=True,
+            status="available",
+            warning_code=None,
+            message="Claude sandbox runtime probe succeeded.",
+            dependencies={"bubblewrap": True, "socat": True},
+            missing_dependencies=[],
+            checked_at="2026-04-04T00:00:00Z",
+            probe_kind="bubblewrap_smoke",
+        ),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    server = ResolvedMcpServer(
+        definition=McpServerDefinition(
+            id="demo",
+            activation="default",
+            effective_engines=("claude",),
+            scope="agent-home",
+            transport="http",
+            url="https://mcp.example/http",
+        ),
+        scope="agent-home",
+    )
+    monkeypatch.setattr(
+        "server.engines.claude.adapter.config_composer.build_mcp_config_layer",
+        lambda *, skill, engine: (
+            McpResolution(servers=(server,)),
+            {"mcpServers": {"demo": {"url": "https://mcp.example/http"}}},
+        ),
+    )
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="demo", path=skill_dir, entrypoint={}),
+        run_dir=run_dir,
+        input_data={},
+        options={},
+    )
+
+    settings_path = adapter.config_composer.compose(ctx)
+    settings_payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    active_payload = json.loads(active_claude_state_path(agent_home).read_text(encoding="utf-8"))
+
+    assert "mcpServers" not in settings_payload
+    assert active_payload["mcpServers"]["demo"] == {
+        "type": "http",
+        "url": "https://mcp.example/http",
+    }
 
 
 def test_claude_config_composer_enables_1m_context_for_official_models(

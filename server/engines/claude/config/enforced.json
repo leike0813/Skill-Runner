@@ -1,6 +1,9 @@
 {
   "includeGitInstructions": false,
   "permissions": {
+    "deny": [
+      "AskUserQuestion"
+    ],
     "defaultMode": "bypassPermissions"
   },
   "sandbox": {

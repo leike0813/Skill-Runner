@@ -1,7 +1,8 @@
 # management-api-surface Specification
 
 ## Purpose
-定义统一管理 API 面（Skill/Engine/Run 三域）的路由和操作语义。
+定义统一管理 API 面（Skill、Engine、Run、系统配置等管理域）的路由、请求响应合同、权限边界与操作语义，确保 Web UI 和外部客户端共享稳定的管理入口。
+
 ## Requirements
 ### Requirement: 系统 MUST 提供统一管理 API 面
 系统 MUST 提供前端无关的管理 API，覆盖 Skill 管理、Engine 管理、Run 管理三类资源。
@@ -505,3 +506,57 @@ The management auth contract MUST recognize `custom_provider` as a legal auth me
 - **THEN** `auth_method=custom_provider` MUST be accepted
 - **AND** it MUST remain distinct from `api_key`
 
+### Requirement: Management API MUST expose MCP server CRUD
+The management API SHALL expose global MCP server list, upsert, and delete operations under `/v1/management/mcp/servers`.
+
+#### Scenario: List MCP servers
+- **WHEN** a client calls `GET /v1/management/mcp/servers`
+- **THEN** the response MUST include all effective runtime MCP server definitions
+- **AND** auth entries MUST be represented only as configured or masked state
+
+#### Scenario: Upsert MCP server
+- **WHEN** a client calls `PUT /v1/management/mcp/servers/{server_id}` with a valid server definition
+- **THEN** the system MUST validate the definition using the MCP registry contract and engine filtering semantics
+- **AND** persist the server definition to the runtime registry
+
+#### Scenario: Delete MCP server
+- **WHEN** a client calls `DELETE /v1/management/mcp/servers/{server_id}`
+- **THEN** the system MUST remove the server from the runtime registry
+- **AND** delete secret-store entries associated with that server
+
+### Requirement: Management API MUST never echo raw MCP keys
+The management API SHALL accept raw MCP auth values only on write requests and SHALL never return those raw values in any response.
+
+#### Scenario: Upsert request contains raw key
+- **WHEN** a client upserts an MCP server with raw env or header key values
+- **THEN** the response MUST include only configured and masked auth state
+- **AND** it MUST NOT include the raw submitted value
+
+#### Scenario: List follows upsert
+- **WHEN** a client lists MCP servers after a successful key upsert
+- **THEN** the response MUST still omit all raw key values
+
+### Requirement: Management API MUST reject invalid MCP management writes
+The management API SHALL reject unknown engines, empty effective engine sets, raw secret fields in registry-shaped payloads, missing required transport fields, and missing raw values for newly introduced auth entries.
+
+#### Scenario: New auth entry has no value
+- **WHEN** a client creates an MCP auth entry that has no existing secret
+- **AND** the request does not provide a raw value
+- **THEN** the API MUST reject the write
+
+#### Scenario: Transport fields are invalid
+- **WHEN** a client submits a stdio server without command or an HTTP/SSE server without URL
+- **THEN** the API MUST reject the write
+
+### Requirement: MCP management MUST synchronize Claude agent-home MCP
+The management API SHALL synchronize Claude active state when a managed MCP server is saved or deleted as a default agent-home Claude MCP.
+
+#### Scenario: Claude agent-home MCP is saved
+- **WHEN** a client upserts an MCP server that is `activation="default"`, supports `claude`, and has `scope="agent-home"`
+- **THEN** the API MUST persist the registry entry
+- **AND** it MUST materialize that server under active state top-level `mcpServers`
+
+#### Scenario: Claude agent-home MCP is deleted
+- **WHEN** a client deletes a managed MCP server that had been materialized for Claude agent-home use
+- **THEN** the API MUST remove the managed active state entry
+- **AND** it MUST preserve unrelated Claude MCP servers

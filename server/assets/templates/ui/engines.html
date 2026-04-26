@@ -166,13 +166,20 @@
             font-weight: 600;
         }
         .provider-field input,
-        .provider-field select {
+        .provider-field select,
+        .provider-field textarea {
             width: 100%;
             padding: 8px 10px;
             border: 1px solid #d1d5db;
             border-radius: 8px;
             font: inherit;
             box-sizing: border-box;
+        }
+        .provider-field textarea {
+            min-height: 74px;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
         }
         .provider-actions {
             display: flex;
@@ -188,6 +195,86 @@
         .provider-meta {
             font-size: 12px;
             color: #6b7280;
+        }
+        .mcp-auth-list {
+            display: grid;
+            gap: 2px;
+            font-size: 12px;
+            color: #374151;
+        }
+        .mcp-mode-tabs,
+        .mcp-inline-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .mcp-mode-tabs { margin: 12px 0; }
+        .mcp-section {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+            background: #f9fafb;
+        }
+        .mcp-section h3 {
+            margin: 0 0 10px;
+            font-size: 15px;
+            color: #111827;
+        }
+        .mcp-check-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            align-items: center;
+            min-height: 38px;
+        }
+        .mcp-check-grid label {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+            font-size: 13px;
+            color: #374151;
+            font-weight: 500;
+        }
+        .mcp-auth-row {
+            display: grid;
+            grid-template-columns: minmax(130px, 1fr) minmax(100px, 1fr) minmax(150px, 1.4fr) auto;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .mcp-auth-row input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font: inherit;
+            box-sizing: border-box;
+        }
+        .mcp-preview {
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 10px;
+            min-height: 84px;
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #111827;
+        }
+        .mcp-badge {
+            display: inline-block;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 12px;
+            color: #374151;
+            background: #fff;
+            margin: 2px 4px 2px 0;
+        }
+        @media (max-width: 760px) {
+            .mcp-auth-row { grid-template-columns: 1fr; }
         }
     </style>
 {% endblock %}
@@ -276,6 +363,156 @@
                     <button id="auth-import-submit-btn" class="btn btn-primary" type="button">{{ t("ui.engines.import_submit", default="Import and Save") }}</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="card" id="mcp-config-card">
+        <h2>{{ t("ui.engines.mcp_title", default="MCP Configuration") }}</h2>
+        <div style="font-size:13px; color:#6b7280; margin-bottom:12px;">
+            {{ t("ui.engines.mcp_hint", default="Add MCP servers with a guided setup. Keys are write-only: leave key fields blank while editing to preserve existing values.") }}
+        </div>
+        <div class="mcp-mode-tabs">
+            <button id="mcp-guided-mode-btn" class="btn btn-primary" type="button">{{ t("ui.engines.mcp_guided_mode", default="Guided Setup") }}</button>
+            <button id="mcp-advanced-mode-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_advanced_mode", default="Advanced Mode") }}</button>
+            <button id="mcp-import-toggle-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_import_json", default="Paste MCP JSON") }}</button>
+            <span class="provider-meta">{{ t("ui.engines.mcp_key_preserve_hint", default="Editing: blank key fields preserve the existing secret.") }}</span>
+        </div>
+        <div id="mcp-import-panel" class="mcp-section" style="display:none;">
+            <h3>{{ t("ui.engines.mcp_import_json", default="Paste MCP JSON") }}</h3>
+            <div class="provider-field">
+                <label for="mcp-import-json">{{ t("ui.engines.mcp_import_json_label", default="Native MCP JSON") }}</label>
+                <textarea id="mcp-import-json" spellcheck="false" placeholder='{"mcpServers":{"demo":{"url":"https://mcp.example/http","headers":{"Authorization":"Bearer token"}}}}'></textarea>
+            </div>
+            <div class="provider-actions">
+                <button id="mcp-import-parse-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_import_parse", default="Preview Import") }}</button>
+            </div>
+        </div>
+        <div class="mcp-section">
+            <h3>{{ t("ui.engines.mcp_connection_step", default="Connection") }}</h3>
+            <div class="provider-grid">
+                <div class="provider-field">
+                    <label for="mcp-server-id">{{ t("ui.engines.mcp_server_id", default="Server ID") }}</label>
+                    <input id="mcp-server-id" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="provider-field">
+                    <label for="mcp-transport">{{ t("ui.engines.mcp_transport", default="Transport") }}</label>
+                    <select id="mcp-transport">
+                        <option value="stdio">{{ t("ui.engines.mcp_transport_stdio", default="stdio command") }}</option>
+                        <option value="http">{{ t("ui.engines.mcp_transport_http", default="HTTP endpoint") }}</option>
+                        <option value="sse">{{ t("ui.engines.mcp_transport_sse", default="SSE endpoint") }}</option>
+                    </select>
+                </div>
+                <div class="provider-field">
+                    <label for="mcp-command">{{ t("ui.engines.mcp_command", default="Command (stdio)") }}</label>
+                    <input id="mcp-command" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="provider-field">
+                    <label for="mcp-args">{{ t("ui.engines.mcp_args_lines", default="Arguments, one per line") }}</label>
+                    <textarea id="mcp-args" spellcheck="false" placeholder="-m&#10;my_mcp_server"></textarea>
+                </div>
+                <div class="provider-field" style="grid-column: 1 / -1;">
+                    <label for="mcp-url">{{ t("ui.engines.mcp_url", default="URL (http/sse)") }}</label>
+                    <input id="mcp-url" type="text" autocomplete="off" spellcheck="false" />
+                </div>
+            </div>
+        </div>
+        <div class="mcp-section">
+            <h3>{{ t("ui.engines.mcp_enablement_step", default="Enablement") }}</h3>
+            <div class="provider-grid">
+                <div class="provider-field">
+                    <label for="mcp-activation">{{ t("ui.engines.mcp_activation", default="Activation") }}</label>
+                    <select id="mcp-activation">
+                        <option value="declared">{{ t("ui.engines.mcp_activation_declared", default="Skill must request it (declared)") }}</option>
+                        <option value="default">{{ t("ui.engines.mcp_activation_default", default="Enabled by default") }}</option>
+                    </select>
+                </div>
+                <div class="provider-field">
+                    <label for="mcp-scope">{{ t("ui.engines.mcp_scope", default="Scope") }}</label>
+                    <select id="mcp-scope">
+                        <option value="run-local">{{ t("ui.engines.mcp_scope_run_local", default="Only current run profile (run-local)") }}</option>
+                        <option value="agent-home">{{ t("ui.engines.mcp_scope_agent_home", default="Persist in agent home") }}</option>
+                    </select>
+                </div>
+                <div class="provider-field" style="grid-column: 1 / -1;">
+                    <label>{{ t("ui.engines.mcp_engines", default="Engines") }}</label>
+                    <div id="mcp-engine-checks" class="mcp-check-grid">
+                        <label><input type="checkbox" data-mcp-engine="codex"> Codex</label>
+                        <label><input type="checkbox" data-mcp-engine="claude"> Claude</label>
+                        <label><input type="checkbox" data-mcp-engine="gemini"> Gemini</label>
+                        <label><input type="checkbox" data-mcp-engine="opencode"> OpenCode</label>
+                        <label><input type="checkbox" data-mcp-engine="qwen"> Qwen</label>
+                    </div>
+                    <div class="provider-meta">{{ t("ui.engines.mcp_engines_hint", default="Leave all unchecked to support all engines.") }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="mcp-section">
+            <h3>{{ t("ui.engines.mcp_auth_step", default="Authentication") }}</h3>
+            <div class="provider-field">
+                <label for="mcp-auth-type">{{ t("ui.engines.mcp_auth_type", default="Auth type") }}</label>
+                <select id="mcp-auth-type">
+                    <option value="none">{{ t("ui.engines.mcp_auth_none", default="No Auth") }}</option>
+                    <option value="bearer">{{ t("ui.engines.mcp_auth_bearer", default="Bearer Token") }}</option>
+                    <option value="api-key-header">{{ t("ui.engines.mcp_auth_api_key_header", default="API Key Header") }}</option>
+                    <option value="custom-header">{{ t("ui.engines.mcp_auth_custom_header", default="Custom Header") }}</option>
+                    <option value="env-token">{{ t("ui.engines.mcp_auth_env_token", default="Env Token") }}</option>
+                    <option value="advanced">{{ t("ui.engines.mcp_auth_advanced_rows", default="Advanced Auth Rows") }}</option>
+                </select>
+            </div>
+            <div id="mcp-simple-auth-panel" class="provider-grid" style="margin-top:10px;">
+                <div class="provider-field" id="mcp-header-name-field">
+                    <label for="mcp-auth-header-name">{{ t("ui.engines.mcp_auth_header_name", default="Header name") }}</label>
+                    <input id="mcp-auth-header-name" type="text" autocomplete="off" spellcheck="false" value="X-API-Key" />
+                </div>
+                <div class="provider-field" id="mcp-env-name-field">
+                    <label for="mcp-auth-env-name">{{ t("ui.engines.mcp_auth_env_name", default="Env var name") }}</label>
+                    <input id="mcp-auth-env-name" type="text" autocomplete="off" spellcheck="false" value="API_KEY" />
+                </div>
+                <div class="provider-field">
+                    <label for="mcp-auth-value">{{ t("ui.engines.mcp_auth_value", default="Key value") }}</label>
+                    <input id="mcp-auth-value" type="password" autocomplete="off" spellcheck="false" placeholder="{{ t("ui.engines.mcp_auth_value_placeholder", default="Leave blank while editing to preserve") }}" />
+                </div>
+            </div>
+            <div id="mcp-advanced-panel" style="display:none; margin-top:10px;">
+                <div class="provider-meta" style="margin-bottom:8px;">{{ t("ui.engines.mcp_advanced_auth_hint", default="Advanced mode uses structured rows. Blank values preserve configured keys while editing.") }}</div>
+                <div class="provider-field">
+                    <label>{{ t("ui.engines.mcp_env_auth", default="Env auth rows") }}</label>
+                    <div id="mcp-env-auth-rows"></div>
+                    <button id="mcp-add-env-auth-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_add_env_auth", default="Add Env Key") }}</button>
+                </div>
+                <div class="provider-field" style="margin-top:10px;">
+                    <label>{{ t("ui.engines.mcp_header_auth", default="Header auth rows") }}</label>
+                    <div id="mcp-header-auth-rows"></div>
+                    <button id="mcp-add-header-auth-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_add_header_auth", default="Add Header Key") }}</button>
+                </div>
+            </div>
+        </div>
+        <div class="mcp-section">
+            <h3>{{ t("ui.engines.mcp_preview_step", default="Preview") }}</h3>
+            <div id="mcp-preview" class="mcp-preview"></div>
+        </div>
+        <div class="provider-actions">
+            <button id="mcp-save-btn" class="btn btn-primary" type="button">{{ t("ui.engines.mcp_save", default="Save MCP Server") }}</button>
+            <button id="mcp-reset-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_reset", default="Reset Form") }}</button>
+            <button id="mcp-refresh-btn" class="btn btn-secondary" type="button">{{ t("ui.engines.mcp_refresh", default="Refresh List") }}</button>
+            <span id="mcp-status" class="provider-meta"></span>
+        </div>
+        <div id="mcp-error" class="error"></div>
+        <div class="provider-table-wrap">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>{{ t("ui.engines.mcp_server_id", default="Server ID") }}</th>
+                        <th>{{ t("ui.engines.mcp_connection", default="Connection") }}</th>
+                        <th>{{ t("ui.engines.mcp_enablement", default="Enablement") }}</th>
+                        <th>{{ t("ui.engines.mcp_engines_short", default="Engines") }}</th>
+                        <th>{{ t("ui.engines.mcp_auth", default="Auth") }}</th>
+                        <th>{{ t("ui.engines.mcp_claude_state", default="Claude State") }}</th>
+                        <th>{{ t("ui.engines.table.actions", default="Actions") }}</th>
+                    </tr>
+                </thead>
+                <tbody id="mcp-table-body"></tbody>
+            </table>
         </div>
     </div>
 
@@ -461,6 +698,31 @@
         customProvidersTuiUnsupported: {{ t("ui.engines.custom_providers_tui_unsupported", default="The current engine does not support provider-backed TUI.") | tojson }},
         customProvidersTuiStarting: {{ t("ui.engines.custom_providers_tui_starting", default="Starting provider-backed TUI...") | tojson }},
         customProvidersTuiInvalidModel: {{ t("ui.engines.custom_providers_tui_invalid_model", default="Please choose a model before starting TUI.") | tojson }},
+        mcpLoading: {{ t("ui.engines.mcp_loading", default="Loading MCP servers...") | tojson }},
+        mcpLoaded: {{ t("ui.engines.mcp_loaded", default="MCP servers loaded.") | tojson }},
+        mcpEmpty: {{ t("ui.engines.mcp_empty", default="No MCP servers configured.") | tojson }},
+        mcpFetchFailed: {{ t("ui.engines.mcp_fetch_failed", default="Failed to load MCP servers.") | tojson }},
+        mcpRequired: {{ t("ui.engines.mcp_required", default="server id, activation, scope, transport, and matching command/url fields are required.") | tojson }},
+        mcpSaving: {{ t("ui.engines.mcp_saving", default="Saving MCP server...") | tojson }},
+        mcpSaved: {{ t("ui.engines.mcp_saved", default="MCP server saved.") | tojson }},
+        mcpSaveFailed: {{ t("ui.engines.mcp_save_failed", default="Failed to save MCP server.") | tojson }},
+        mcpDeleting: {{ t("ui.engines.mcp_deleting", default="Deleting MCP server...") | tojson }},
+        mcpDeleted: {{ t("ui.engines.mcp_deleted", default="MCP server deleted.") | tojson }},
+        mcpDeleteFailed: {{ t("ui.engines.mcp_delete_failed", default="Failed to delete MCP server.") | tojson }},
+        mcpDeleteConfirm: {{ t("ui.engines.mcp_delete_confirm", default="Delete this MCP server? Associated secrets will also be removed.") | tojson }},
+        mcpConfigured: {{ t("ui.engines.mcp_configured", default="configured") | tojson }},
+        mcpNotConfigured: {{ t("ui.engines.mcp_not_configured", default="not configured") | tojson }},
+        mcpNoAuth: {{ t("ui.engines.mcp_auth_none", default="No Auth") | tojson }},
+        mcpNewServerId: {{ t("ui.engines.mcp_new_server_id", default="(new server id)") | tojson }},
+        mcpPreserveExisting: {{ t("ui.engines.mcp_preserve_existing", default="(preserve existing if configured)") | tojson }},
+        mcpBlankPreservesConfiguredKey: {{ t("ui.engines.mcp_blank_preserves_configured_key", default="blank preserves configured key") | tojson }},
+        mcpJsonMustBeObject: {{ t("ui.engines.mcp_json_must_be_object", default="MCP JSON must be an object.") | tojson }},
+        mcpJsonNoServers: {{ t("ui.engines.mcp_json_no_servers", default="MCP JSON does not contain any server objects.") | tojson }},
+        mcpImportRequiresCommand: {{ t("ui.engines.mcp_import_requires_command", default="Imported stdio MCP server requires command.") | tojson }},
+        mcpImportRequiresUrl: {{ t("ui.engines.mcp_import_requires_url", default="Imported HTTP/SSE MCP server requires url.") | tojson }},
+        mcpImportFailed: {{ t("ui.engines.mcp_import_failed", default="Failed to parse MCP JSON.") | tojson }},
+        mcpImportedReview: {{ t("ui.engines.mcp_imported_review", default="Imported MCP JSON. Review the preview, engine policy, and scope before saving.") | tojson }},
+        mcpClaudeAgentHomeDefault: {{ t("ui.engines.mcp_claude_agent_home_default", default="agent-home default") | tojson }},
         copyOk: {{ t("ui.engines.copy_ok", default="已复制") | tojson }},
         copyFailed: {{ t("ui.engines.copy_failed", default="复制失败") | tojson }},
     };
@@ -526,6 +788,38 @@
     const authImportFileListEl = document.getElementById("auth-import-file-list");
     const authImportCancelBtn = document.getElementById("auth-import-cancel-btn");
     const authImportSubmitBtn = document.getElementById("auth-import-submit-btn");
+    const mcpServerIdEl = document.getElementById("mcp-server-id");
+    const mcpActivationEl = document.getElementById("mcp-activation");
+    const mcpScopeEl = document.getElementById("mcp-scope");
+    const mcpTransportEl = document.getElementById("mcp-transport");
+    const mcpCommandEl = document.getElementById("mcp-command");
+    const mcpArgsEl = document.getElementById("mcp-args");
+    const mcpUrlEl = document.getElementById("mcp-url");
+    const mcpAuthTypeEl = document.getElementById("mcp-auth-type");
+    const mcpHeaderNameFieldEl = document.getElementById("mcp-header-name-field");
+    const mcpEnvNameFieldEl = document.getElementById("mcp-env-name-field");
+    const mcpAuthHeaderNameEl = document.getElementById("mcp-auth-header-name");
+    const mcpAuthEnvNameEl = document.getElementById("mcp-auth-env-name");
+    const mcpAuthValueEl = document.getElementById("mcp-auth-value");
+    const mcpAdvancedPanelEl = document.getElementById("mcp-advanced-panel");
+    const mcpSimpleAuthPanelEl = document.getElementById("mcp-simple-auth-panel");
+    const mcpEnvAuthRowsEl = document.getElementById("mcp-env-auth-rows");
+    const mcpHeaderAuthRowsEl = document.getElementById("mcp-header-auth-rows");
+    const mcpAddEnvAuthBtn = document.getElementById("mcp-add-env-auth-btn");
+    const mcpAddHeaderAuthBtn = document.getElementById("mcp-add-header-auth-btn");
+    const mcpGuidedModeBtn = document.getElementById("mcp-guided-mode-btn");
+    const mcpAdvancedModeBtn = document.getElementById("mcp-advanced-mode-btn");
+    const mcpImportToggleBtn = document.getElementById("mcp-import-toggle-btn");
+    const mcpImportPanelEl = document.getElementById("mcp-import-panel");
+    const mcpImportJsonEl = document.getElementById("mcp-import-json");
+    const mcpImportParseBtn = document.getElementById("mcp-import-parse-btn");
+    const mcpPreviewEl = document.getElementById("mcp-preview");
+    const mcpSaveBtn = document.getElementById("mcp-save-btn");
+    const mcpResetBtn = document.getElementById("mcp-reset-btn");
+    const mcpRefreshBtn = document.getElementById("mcp-refresh-btn");
+    const mcpStatusEl = document.getElementById("mcp-status");
+    const mcpErrorEl = document.getElementById("mcp-error");
+    const mcpTableBodyEl = document.getElementById("mcp-table-body");
     const customProviderEngineEl = document.getElementById("custom-provider-engine");
     const customProviderIdEl = document.getElementById("custom-provider-id");
     const customProviderApiKeyEl = document.getElementById("custom-provider-api-key");
@@ -550,6 +844,7 @@
     let tuiStartPending = false;
     let authMenuState = null;
     let authImportDialogState = null;
+    let mcpRows = [];
     let customProviderRows = [];
     let customProviderTuiState = null;
 
@@ -598,6 +893,521 @@
     function setCustomProviderStatus(text) {
         if (!customProviderStatusEl) return;
         customProviderStatusEl.textContent = text || "";
+    }
+
+    function showMcpError(text) {
+        if (!mcpErrorEl) return;
+        mcpErrorEl.style.display = "block";
+        mcpErrorEl.textContent = text;
+    }
+
+    function clearMcpError() {
+        if (!mcpErrorEl) return;
+        mcpErrorEl.style.display = "none";
+        mcpErrorEl.textContent = "";
+    }
+
+    function setMcpStatus(text) {
+        if (!mcpStatusEl) return;
+        mcpStatusEl.textContent = text || "";
+    }
+
+    function parseCommaList(value) {
+        return String(value || "")
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item, index, values) => item && values.indexOf(item) === index);
+    }
+
+    function parseLineList(value) {
+        return String(value || "")
+            .split("\n")
+            .map((item) => item.trim())
+            .filter((item, index, values) => item && values.indexOf(item) === index);
+    }
+
+    function selectedMcpEngines() {
+        return Array.from(document.querySelectorAll("[data-mcp-engine]"))
+            .filter((item) => item instanceof HTMLInputElement && item.checked)
+            .map((item) => item.getAttribute("data-mcp-engine"))
+            .filter(Boolean);
+    }
+
+    function setSelectedMcpEngines(engines) {
+        const selected = new Set(Array.isArray(engines) ? engines : []);
+        document.querySelectorAll("[data-mcp-engine]").forEach((item) => {
+            if (item instanceof HTMLInputElement) {
+                item.checked = selected.has(String(item.getAttribute("data-mcp-engine") || ""));
+            }
+        });
+    }
+
+    function syncMcpAuthPanels() {
+        const type = mcpAuthTypeEl ? String(mcpAuthTypeEl.value || "none") : "none";
+        const advanced = type === "advanced";
+        if (mcpAdvancedPanelEl) mcpAdvancedPanelEl.style.display = advanced ? "block" : "none";
+        if (mcpSimpleAuthPanelEl) mcpSimpleAuthPanelEl.style.display = advanced || type === "none" ? "none" : "grid";
+        if (mcpHeaderNameFieldEl) {
+            mcpHeaderNameFieldEl.style.display = ["api-key-header", "custom-header"].includes(type) ? "grid" : "none";
+        }
+        if (mcpEnvNameFieldEl) {
+            mcpEnvNameFieldEl.style.display = type === "env-token" ? "grid" : "none";
+        }
+        if (mcpAuthHeaderNameEl && type === "api-key-header" && !mcpAuthHeaderNameEl.value) {
+            mcpAuthHeaderNameEl.value = "X-API-Key";
+        }
+        if (mcpAuthHeaderNameEl && type === "custom-header" && !mcpAuthHeaderNameEl.value) {
+            mcpAuthHeaderNameEl.value = "Authorization";
+        }
+        if (mcpAuthEnvNameEl && !mcpAuthEnvNameEl.value) {
+            mcpAuthEnvNameEl.value = "API_KEY";
+        }
+        updateMcpPreview();
+    }
+
+    function createMcpAuthRow(kind, item) {
+        const row = document.createElement("div");
+        row.className = "mcp-auth-row";
+        const name = document.createElement("input");
+        name.type = "text";
+        name.placeholder = kind === "env" ? "API_KEY" : "Authorization";
+        name.value = item && item.name ? String(item.name) : "";
+        name.setAttribute("data-auth-name", "1");
+        const prefix = document.createElement("input");
+        prefix.type = "text";
+        prefix.placeholder = kind === "env" ? "not used" : "Bearer ";
+        prefix.value = item && item.prefix ? String(item.prefix) : "";
+        prefix.disabled = kind === "env";
+        prefix.setAttribute("data-auth-prefix", "1");
+        const value = document.createElement("input");
+        value.type = "password";
+        value.placeholder = I18N.mcpBlankPreservesConfiguredKey;
+        value.value = item && item.value ? String(item.value) : "";
+        value.setAttribute("data-auth-value", "1");
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "btn btn-secondary";
+        remove.textContent = {{ t("ui.common.remove", default="Remove") | tojson }};
+        remove.addEventListener("click", () => {
+            row.remove();
+            updateMcpPreview();
+        });
+        [name, prefix, value].forEach((input) => input.addEventListener("input", updateMcpPreview));
+        row.appendChild(name);
+        row.appendChild(prefix);
+        row.appendChild(value);
+        row.appendChild(remove);
+        return row;
+    }
+
+    function addMcpEnvAuthRow(item) {
+        if (!mcpEnvAuthRowsEl) return;
+        mcpEnvAuthRowsEl.appendChild(createMcpAuthRow("env", item || {}));
+    }
+
+    function addMcpHeaderAuthRow(item) {
+        if (!mcpHeaderAuthRowsEl) return;
+        mcpHeaderAuthRowsEl.appendChild(createMcpAuthRow("header", item || {}));
+    }
+
+    function readMcpAuthRows(container, kind) {
+        if (!container) return [];
+        return Array.from(container.querySelectorAll(".mcp-auth-row")).map((row) => {
+            const nameEl = row.querySelector("[data-auth-name]");
+            const prefixEl = row.querySelector("[data-auth-prefix]");
+            const valueEl = row.querySelector("[data-auth-value]");
+            const name = nameEl instanceof HTMLInputElement ? nameEl.value.trim() : "";
+            const prefix = prefixEl instanceof HTMLInputElement && kind === "header" ? prefixEl.value : "";
+            const value = valueEl instanceof HTMLInputElement ? valueEl.value : "";
+            return kind === "header" ? { name, prefix, value } : { name, value };
+        }).filter((item) => item.name);
+    }
+
+    function buildMcpAuthPayload() {
+        const type = mcpAuthTypeEl ? String(mcpAuthTypeEl.value || "none") : "none";
+        if (type === "none") return { env: [], headers: [] };
+        if (type === "bearer") {
+            return {
+                env: [],
+                headers: [{ name: "Authorization", prefix: "Bearer ", value: mcpAuthValueEl ? mcpAuthValueEl.value : "" }],
+            };
+        }
+        if (type === "api-key-header" || type === "custom-header") {
+            return {
+                env: [],
+                headers: [{
+                    name: mcpAuthHeaderNameEl ? String(mcpAuthHeaderNameEl.value || "").trim() : "",
+                    prefix: "",
+                    value: mcpAuthValueEl ? mcpAuthValueEl.value : "",
+                }].filter((item) => item.name),
+            };
+        }
+        if (type === "env-token") {
+            return {
+                env: [{
+                    name: mcpAuthEnvNameEl ? String(mcpAuthEnvNameEl.value || "").trim() : "",
+                    value: mcpAuthValueEl ? mcpAuthValueEl.value : "",
+                }].filter((item) => item.name),
+                headers: [],
+            };
+        }
+        return {
+            env: readMcpAuthRows(mcpEnvAuthRowsEl, "env"),
+            headers: readMcpAuthRows(mcpHeaderAuthRowsEl, "header"),
+        };
+    }
+
+    function resetMcpForm() {
+        if (mcpServerIdEl) mcpServerIdEl.value = "";
+        if (mcpActivationEl) mcpActivationEl.value = "declared";
+        if (mcpScopeEl) mcpScopeEl.value = "run-local";
+        if (mcpTransportEl) mcpTransportEl.value = "stdio";
+        setSelectedMcpEngines([]);
+        if (mcpCommandEl) mcpCommandEl.value = "";
+        if (mcpArgsEl) mcpArgsEl.value = "";
+        if (mcpUrlEl) mcpUrlEl.value = "";
+        if (mcpAuthTypeEl) mcpAuthTypeEl.value = "none";
+        if (mcpAuthHeaderNameEl) mcpAuthHeaderNameEl.value = "X-API-Key";
+        if (mcpAuthEnvNameEl) mcpAuthEnvNameEl.value = "API_KEY";
+        if (mcpAuthValueEl) mcpAuthValueEl.value = "";
+        if (mcpEnvAuthRowsEl) mcpEnvAuthRowsEl.innerHTML = "";
+        if (mcpHeaderAuthRowsEl) mcpHeaderAuthRowsEl.innerHTML = "";
+        syncMcpAuthPanels();
+        clearMcpError();
+        setMcpStatus("");
+    }
+
+    function buildMcpRequestPayload() {
+        const engines = selectedMcpEngines();
+        const payload = {
+            activation: mcpActivationEl ? mcpActivationEl.value : "declared",
+            scope: mcpScopeEl ? mcpScopeEl.value : "run-local",
+            transport: mcpTransportEl ? mcpTransportEl.value : "stdio",
+            unsupported_engines: [],
+            args: parseLineList(mcpArgsEl ? mcpArgsEl.value : ""),
+            auth: buildMcpAuthPayload(),
+        };
+        if (engines.length) payload.engines = engines;
+        if (payload.transport === "stdio") {
+            payload.command = mcpCommandEl ? String(mcpCommandEl.value || "").trim() : "";
+        } else {
+            payload.url = mcpUrlEl ? String(mcpUrlEl.value || "").trim() : "";
+        }
+        return payload;
+    }
+
+    function updateMcpPreview() {
+        if (!mcpPreviewEl) return;
+        const serverId = mcpServerIdEl ? String(mcpServerIdEl.value || "").trim() : "";
+        const payload = buildMcpRequestPayload();
+        const preview = {
+            id: serverId || I18N.mcpNewServerId,
+            ...payload,
+        };
+        mcpPreviewEl.textContent = JSON.stringify(preview, null, 2).replace(/"value": ""/g, `"value": "${I18N.mcpPreserveExisting}"`);
+    }
+
+    function applyMcpAuthView(auth) {
+        const envRows = auth && Array.isArray(auth.env) ? auth.env : [];
+        const headerRows = auth && Array.isArray(auth.headers) ? auth.headers : [];
+        if (mcpEnvAuthRowsEl) mcpEnvAuthRowsEl.innerHTML = "";
+        if (mcpHeaderAuthRowsEl) mcpHeaderAuthRowsEl.innerHTML = "";
+        envRows.forEach((item) => addMcpEnvAuthRow({ name: item.name || "", value: "" }));
+        headerRows.forEach((item) => addMcpHeaderAuthRow({
+            name: item.name || "",
+            prefix: item.prefix || "",
+            value: "",
+        }));
+        if (headerRows.length === 1 && String(headerRows[0].name || "").toLowerCase() === "authorization" && String(headerRows[0].prefix || "") === "Bearer ") {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "bearer";
+            if (mcpAuthValueEl) mcpAuthValueEl.value = String(headerRows[0].value || "");
+        } else if (headerRows.length === 1 && !envRows.length) {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "custom-header";
+            if (mcpAuthHeaderNameEl) mcpAuthHeaderNameEl.value = String(headerRows[0].name || "");
+            if (mcpAuthValueEl) mcpAuthValueEl.value = String(headerRows[0].value || "");
+        } else if (envRows.length === 1 && !headerRows.length) {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "env-token";
+            if (mcpAuthEnvNameEl) mcpAuthEnvNameEl.value = String(envRows[0].name || "");
+            if (mcpAuthValueEl) mcpAuthValueEl.value = String(envRows[0].value || "");
+        } else if (envRows.length || headerRows.length) {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "advanced";
+        } else if (mcpAuthTypeEl) {
+            mcpAuthTypeEl.value = "none";
+        }
+        syncMcpAuthPanels();
+    }
+
+    function populateMcpForm(row) {
+        if (!row || typeof row !== "object") return;
+        if (mcpServerIdEl) mcpServerIdEl.value = String(row.id || "");
+        if (mcpActivationEl) mcpActivationEl.value = String(row.activation || "declared");
+        if (mcpScopeEl) mcpScopeEl.value = String(row.scope || "run-local");
+        if (mcpTransportEl) mcpTransportEl.value = String(row.transport || "stdio");
+        setSelectedMcpEngines(Array.isArray(row.engines) ? row.engines : []);
+        if (mcpCommandEl) mcpCommandEl.value = String(row.command || "");
+        if (mcpArgsEl) mcpArgsEl.value = Array.isArray(row.args) ? row.args.join("\n") : "";
+        if (mcpUrlEl) mcpUrlEl.value = String(row.url || "");
+        const auth = row.auth && typeof row.auth === "object" ? row.auth : {};
+        applyMcpAuthView(auth);
+        clearMcpError();
+        setMcpStatus("");
+        updateMcpPreview();
+    }
+
+    function summarizeMcpAuth(row) {
+        const auth = row && row.auth && typeof row.auth === "object" ? row.auth : {};
+        const envRows = Array.isArray(auth.env) ? auth.env : [];
+        const headerRows = Array.isArray(auth.headers) ? auth.headers : [];
+        const parts = [];
+        headerRows.forEach((item) => {
+            const configured = item && item.configured === true ? I18N.mcpConfigured : I18N.mcpNotConfigured;
+            const prefix = item && item.prefix ? ` (${String(item.prefix).trim() || "prefix"})` : "";
+            parts.push(`header ${String(item.name || "")}${prefix}: ${configured}`);
+        });
+        envRows.forEach((item) => {
+            const configured = item && item.configured === true ? I18N.mcpConfigured : I18N.mcpNotConfigured;
+            parts.push(`env ${String(item.name || "")}: ${configured}`);
+        });
+        return parts.length ? parts.join("; ") : I18N.mcpNoAuth;
+    }
+
+    function renderMcpAuthList(row) {
+        const wrap = document.createElement("div");
+        wrap.className = "mcp-auth-list";
+        const line = document.createElement("div");
+        line.textContent = summarizeMcpAuth(row);
+        wrap.appendChild(line);
+        return wrap;
+    }
+
+    function renderMcpTable(rows) {
+        if (!mcpTableBodyEl) return;
+        mcpTableBodyEl.innerHTML = "";
+        const normalizedRows = Array.isArray(rows) ? rows : [];
+        if (!normalizedRows.length) {
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.colSpan = 7;
+            td.className = "provider-meta";
+            td.textContent = I18N.mcpEmpty;
+            tr.appendChild(td);
+            mcpTableBodyEl.appendChild(tr);
+            return;
+        }
+        normalizedRows.forEach((row) => {
+            const tr = document.createElement("tr");
+            const idTd = document.createElement("td");
+            idTd.textContent = String(row.id || "");
+            const connectionTd = document.createElement("td");
+            connectionTd.textContent = row.transport === "stdio"
+                ? `stdio: ${String(row.command || "")}`
+                : `${String(row.transport || "")}: ${String(row.url || "")}`;
+            const enablementTd = document.createElement("td");
+            enablementTd.textContent = `${String(row.activation || "")} / ${String(row.scope || "")}`;
+            const enginesTd = document.createElement("td");
+            enginesTd.textContent = Array.isArray(row.effective_engines) ? row.effective_engines.join(", ") : "";
+            const authTd = document.createElement("td");
+            authTd.appendChild(renderMcpAuthList(row));
+            const claudeTd = document.createElement("td");
+            const claudeAgentHome = row.activation === "default"
+                && row.scope === "agent-home"
+                && Array.isArray(row.effective_engines)
+                && row.effective_engines.includes("claude");
+            claudeTd.textContent = claudeAgentHome ? I18N.mcpClaudeAgentHomeDefault : "-";
+            const actionsTd = document.createElement("td");
+            const actionsWrap = document.createElement("div");
+            actionsWrap.className = "table-actions";
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "btn btn-secondary";
+            editBtn.textContent = {{ t("ui.common.edit", default="Edit") | tojson }};
+            editBtn.addEventListener("click", () => {
+                populateMcpForm(row);
+                if (mcpServerIdEl) mcpServerIdEl.focus();
+            });
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "btn btn-secondary";
+            deleteBtn.textContent = {{ t("ui.common.delete", default="Delete") | tojson }};
+            deleteBtn.addEventListener("click", async () => {
+                const serverId = String(row.id || "").trim();
+                if (!serverId) return;
+                if (!window.confirm(I18N.mcpDeleteConfirm)) return;
+                await deleteMcpServer(serverId);
+            });
+            actionsWrap.appendChild(editBtn);
+            actionsWrap.appendChild(deleteBtn);
+            actionsTd.appendChild(actionsWrap);
+            tr.appendChild(idTd);
+            tr.appendChild(connectionTd);
+            tr.appendChild(enablementTd);
+            tr.appendChild(enginesTd);
+            tr.appendChild(authTd);
+            tr.appendChild(claudeTd);
+            tr.appendChild(actionsTd);
+            mcpTableBodyEl.appendChild(tr);
+        });
+    }
+
+    function normalizeImportedMcpObject(raw) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            throw new Error(I18N.mcpJsonMustBeObject);
+        }
+        const root = raw.mcpServers || raw.mcp_servers || raw.mcp;
+        if (root && typeof root === "object" && !Array.isArray(root)) {
+            const entries = Object.entries(root).filter((entry) => entry[1] && typeof entry[1] === "object");
+            if (!entries.length) throw new Error(I18N.mcpJsonNoServers);
+            return { id: entries[0][0], server: entries[0][1] };
+        }
+        return { id: "", server: raw };
+    }
+
+    function authFromImportedServer(server) {
+        const headers = server.headers || server.http_headers || {};
+        const env = server.env || {};
+        const auth = { env: [], headers: [] };
+        if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+            Object.entries(headers).forEach(([name, value]) => {
+                const text = String(value || "");
+                if (name.toLowerCase() === "authorization" && text.startsWith("Bearer ")) {
+                    auth.headers.push({ name, prefix: "Bearer ", value: text.slice("Bearer ".length) });
+                } else {
+                    auth.headers.push({ name, prefix: "", value: text });
+                }
+            });
+        }
+        if (env && typeof env === "object" && !Array.isArray(env)) {
+            Object.entries(env).forEach(([name, value]) => {
+                auth.env.push({ name, value: String(value || "") });
+            });
+        }
+        return auth;
+    }
+
+    function populateMcpFromImport(raw) {
+        const { id, server } = normalizeImportedMcpObject(raw);
+        const imported = {
+            id: id || (mcpServerIdEl ? String(mcpServerIdEl.value || "") : ""),
+            activation: "declared",
+            scope: "run-local",
+            transport: server.type === "sse" ? "sse" : (server.url ? "http" : "stdio"),
+            command: typeof server.command === "string" ? server.command : "",
+            args: Array.isArray(server.args) ? server.args.map((item) => String(item)) : [],
+            url: typeof server.url === "string" ? server.url : "",
+            auth: authFromImportedServer(server),
+        };
+        if (imported.transport === "stdio" && !imported.command) {
+            throw new Error(I18N.mcpImportRequiresCommand);
+        }
+        if (imported.transport !== "stdio" && !imported.url) {
+            throw new Error(I18N.mcpImportRequiresUrl);
+        }
+        populateMcpForm(imported);
+        if (imported.auth.headers.length || imported.auth.env.length) {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "advanced";
+            applyMcpAuthView(imported.auth);
+        }
+        setMcpStatus(I18N.mcpImportedReview);
+    }
+
+    function parseMcpImportJson() {
+        if (!mcpImportJsonEl) return;
+        clearMcpError();
+        try {
+            const raw = JSON.parse(String(mcpImportJsonEl.value || ""));
+            populateMcpFromImport(raw);
+        } catch (err) {
+            showMcpError(err instanceof Error ? err.message : I18N.mcpImportFailed);
+        }
+    }
+
+    async function fetchMcpServers() {
+        if (!mcpTableBodyEl) return;
+        clearMcpError();
+        setMcpStatus(I18N.mcpLoading);
+        try {
+            const response = await fetch("/v1/management/mcp/servers");
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string"
+                    ? payload.detail
+                    : `HTTP ${response.status}`;
+                showMcpError(detail);
+                renderMcpTable([]);
+                return;
+            }
+            mcpRows = Array.isArray(payload.servers) ? payload.servers : [];
+            renderMcpTable(mcpRows);
+            setMcpStatus(mcpRows.length ? I18N.mcpLoaded : I18N.mcpEmpty);
+        } catch (_err) {
+            showMcpError(I18N.mcpFetchFailed);
+            renderMcpTable([]);
+        }
+    }
+
+    async function saveMcpServer() {
+        const serverId = mcpServerIdEl ? String(mcpServerIdEl.value || "").trim() : "";
+        const payload = buildMcpRequestPayload();
+        if (!serverId || !payload.activation || !payload.scope || !payload.transport) {
+            showMcpError(I18N.mcpRequired);
+            return;
+        }
+        if (payload.transport === "stdio" && !payload.command) {
+            showMcpError(I18N.mcpRequired);
+            return;
+        }
+        if (payload.transport !== "stdio" && !payload.url) {
+            showMcpError(I18N.mcpRequired);
+            return;
+        }
+        clearMcpError();
+        setMcpStatus(I18N.mcpSaving);
+        if (mcpSaveBtn) mcpSaveBtn.disabled = true;
+        try {
+            const response = await fetch(`/v1/management/mcp/servers/${encodeURIComponent(serverId)}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const responsePayload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = responsePayload && typeof responsePayload.detail === "string"
+                    ? responsePayload.detail
+                    : `HTTP ${response.status}`;
+                showMcpError(detail);
+                return;
+            }
+            populateMcpForm(responsePayload);
+            setMcpStatus(I18N.mcpSaved);
+            await fetchMcpServers();
+        } catch (_err) {
+            showMcpError(I18N.mcpSaveFailed);
+        } finally {
+            if (mcpSaveBtn) mcpSaveBtn.disabled = false;
+        }
+    }
+
+    async function deleteMcpServer(serverId) {
+        clearMcpError();
+        setMcpStatus(I18N.mcpDeleting);
+        try {
+            const response = await fetch(`/v1/management/mcp/servers/${encodeURIComponent(serverId)}`, {
+                method: "DELETE",
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail = payload && typeof payload.detail === "string"
+                    ? payload.detail
+                    : `HTTP ${response.status}`;
+                showMcpError(detail);
+                return;
+            }
+            resetMcpForm();
+            setMcpStatus(I18N.mcpDeleted);
+            await fetchMcpServers();
+        } catch (_err) {
+            showMcpError(I18N.mcpDeleteFailed);
+        }
     }
 
     function mapStatusLabel(status) {
@@ -1827,6 +2637,75 @@
             submitAuthImportDialog();
         });
     }
+    if (mcpRefreshBtn) {
+        mcpRefreshBtn.addEventListener("click", () => {
+            fetchMcpServers().catch(() => {});
+        });
+    }
+    if (mcpResetBtn) {
+        mcpResetBtn.addEventListener("click", () => {
+            resetMcpForm();
+        });
+    }
+    if (mcpSaveBtn) {
+        mcpSaveBtn.addEventListener("click", () => {
+            saveMcpServer().catch(() => {});
+        });
+    }
+    if (mcpAuthTypeEl) {
+        mcpAuthTypeEl.addEventListener("change", syncMcpAuthPanels);
+    }
+    if (mcpAddEnvAuthBtn) {
+        mcpAddEnvAuthBtn.addEventListener("click", () => {
+            addMcpEnvAuthRow();
+            updateMcpPreview();
+        });
+    }
+    if (mcpAddHeaderAuthBtn) {
+        mcpAddHeaderAuthBtn.addEventListener("click", () => {
+            addMcpHeaderAuthRow();
+            updateMcpPreview();
+        });
+    }
+    if (mcpGuidedModeBtn) {
+        mcpGuidedModeBtn.addEventListener("click", () => {
+            if (mcpAuthTypeEl && mcpAuthTypeEl.value === "advanced") mcpAuthTypeEl.value = "none";
+            syncMcpAuthPanels();
+        });
+    }
+    if (mcpAdvancedModeBtn) {
+        mcpAdvancedModeBtn.addEventListener("click", () => {
+            if (mcpAuthTypeEl) mcpAuthTypeEl.value = "advanced";
+            syncMcpAuthPanels();
+        });
+    }
+    if (mcpImportToggleBtn) {
+        mcpImportToggleBtn.addEventListener("click", () => {
+            if (!mcpImportPanelEl) return;
+            mcpImportPanelEl.style.display = mcpImportPanelEl.style.display === "none" ? "block" : "none";
+        });
+    }
+    if (mcpImportParseBtn) {
+        mcpImportParseBtn.addEventListener("click", parseMcpImportJson);
+    }
+    [
+        mcpServerIdEl,
+        mcpActivationEl,
+        mcpScopeEl,
+        mcpTransportEl,
+        mcpCommandEl,
+        mcpArgsEl,
+        mcpUrlEl,
+        mcpAuthHeaderNameEl,
+        mcpAuthEnvNameEl,
+        mcpAuthValueEl,
+    ].forEach((item) => {
+        if (item) item.addEventListener("input", updateMcpPreview);
+        if (item) item.addEventListener("change", updateMcpPreview);
+    });
+    document.querySelectorAll("[data-mcp-engine]").forEach((item) => {
+        item.addEventListener("change", updateMcpPreview);
+    });
     if (customProviderEngineEl) {
         customProviderEngineEl.addEventListener("change", () => {
             resetCustomProviderForm();
@@ -1934,6 +2813,8 @@
     applyState(currentSession);
     applyAuthState(currentAuthSession);
     updateInteractiveActionLocks();
+    resetMcpForm();
+    fetchMcpServers().catch(() => {});
     if (Array.isArray(customProviderEngines) && customProviderEngines.length && customProviderEngineEl) {
         fetchCustomProviders().catch(() => {});
     }

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.mcp import build_mcp_config_layer, validate_no_mcp_root_keys
 from server.services.skill.skill_asset_resolver import (
     load_resolved_json,
     resolve_engine_config_asset,
@@ -96,14 +97,18 @@ class OpencodeConfigComposer:
         payload = load_resolved_json(skill_config_resolution.path)
         if payload is not None:
             skill_defaults = payload
+        validate_no_mcp_root_keys(skill_defaults, source="OpenCode skill config")
         layers.append(skill_defaults)
 
         runtime_override: dict[str, Any] = {}
         if isinstance(options.get("opencode_config"), dict):
             runtime_override = options["opencode_config"]
+        validate_no_mcp_root_keys(runtime_override, source="OpenCode runtime override")
         layers.append(runtime_override)
         layers.append(self._model_overlay(options))
         layers.append(self._effort_overlay(options))
+        _, governed_mcp = build_mcp_config_layer(skill=skill, engine="opencode")
+        layers.append(governed_mcp)
 
         enforced_path = self._adapter.profile.resolve_enforced_config_path()
         layers.append(self._load_json_config(enforced_path, label="opencode enforced"))

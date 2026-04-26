@@ -39,6 +39,9 @@ from ..models import (
     ManagementSkillSchemasResponse,
     ManagementSkillSummary,
     ManagementLoggingSettingsResponse,
+    ManagementMcpServerListResponse,
+    ManagementMcpServerUpsertRequest,
+    ManagementMcpServerView,
     RecoveryState,
     RunStatus,
     SkillManifest,
@@ -51,9 +54,11 @@ from ..services.orchestration.runtime_observability_ports import install_runtime
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.orchestration.run_store import run_store
-from ..services.skill.skill_browser import list_skill_entries, resolve_skill_file_path
+from ..services.skill.skill_browser import list_skill_entries
 from ..services.skill.skill_asset_resolver import load_resolved_json, resolve_schema_asset
 from ..services.engine_management.engine_policy import resolve_skill_engine_policy
+from ..services.mcp import McpConfigError
+from ..services.mcp.management import mcp_management_service
 from ..services.platform.data_reset_service import (
     DATA_RESET_CONFIRMATION_TEXT,
     DataResetBusyError,
@@ -270,7 +275,6 @@ async def get_management_skill_schemas(skill_id: str):
     if not skill_root.exists() or not skill_root.is_dir():
         raise HTTPException(status_code=404, detail="Skill path not found")
 
-    schemas = _normalize_schemas(skill.schemas)
     return ManagementSkillSchemasResponse(
         skill_id=skill_id,
         input=_read_skill_schema_content(skill, "input"),
@@ -416,6 +420,69 @@ async def delete_management_engine_custom_provider(engine: str, provider_id: str
         raise HTTPException(status_code=422, detail=str(exc))
     _refresh_engine_models_after_custom_provider_mutation(engine)
     return {"engine": engine, "provider_id": provider_id.strip().lower(), "deleted": deleted}
+
+
+@router.get("/mcp/servers", response_model=ManagementMcpServerListResponse)
+async def list_management_mcp_servers():
+    try:
+        return mcp_management_service.list_servers()
+    except (McpConfigError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.list_mcp_servers failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "list_mcp_servers",
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/mcp/servers/{server_id}", response_model=ManagementMcpServerView)
+async def upsert_management_mcp_server(
+    server_id: str,
+    request: ManagementMcpServerUpsertRequest,
+):
+    try:
+        return mcp_management_service.upsert_server(server_id=server_id, request=request)
+    except (McpConfigError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.upsert_mcp_server failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "upsert_mcp_server",
+                "server_id": server_id,
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/mcp/servers/{server_id}")
+async def delete_management_mcp_server(server_id: str):
+    try:
+        deleted = mcp_management_service.delete_server(server_id)
+    except (McpConfigError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        logger.exception(
+            "management.delete_mcp_server failed; returning HTTP 500",
+            extra={
+                "component": "router.management",
+                "action": "delete_mcp_server",
+                "server_id": server_id,
+                "error_type": type(exc).__name__,
+                "fallback": "http_500",
+            },
+        )
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"server_id": server_id.strip(), "deleted": deleted}
 
 
 @router.get(

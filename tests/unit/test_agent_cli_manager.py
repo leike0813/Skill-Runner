@@ -6,11 +6,17 @@ from types import SimpleNamespace
 import pytest
 
 from server.config import config
+from server.engines.claude.adapter.state_paths import active_claude_state_path
 from server.engines.claude.adapter.sandbox_probe import load_claude_sandbox_probe
 from server.engines.codex.adapter.sandbox_probe import load_codex_sandbox_probe
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.agent_cli_manager import CommandResult
 from server.services.engine_management.runtime_profile import RuntimeProfile
+from server.services.mcp import (
+    clear_mcp_registry_cache,
+    mcp_secret_store,
+    write_runtime_mcp_registry_payload,
+)
 
 
 def _build_profile(tmp_path: Path) -> RuntimeProfile:
@@ -69,7 +75,7 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
 
     codex_config = manager.profile.agent_home / ".codex" / "config.toml"
     gemini_settings = manager.profile.agent_home / ".gemini" / "settings.json"
-    claude_bootstrap = manager.profile.agent_home / ".claude.json"
+    claude_bootstrap = active_claude_state_path(manager.profile.agent_home)
     claude_settings = manager.profile.agent_home / ".claude" / "settings.json"
     claude_probe = manager.profile.agent_home / ".claude" / "sandbox_probe.json"
     opencode_dir = manager.profile.agent_home / ".opencode"
@@ -93,6 +99,61 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     assert isinstance(plugins, list)
     assert any(isinstance(item, str) and item.startswith("opencode-antigravity-auth") for item in plugins)
     assert qwen_payload["general"]["enableAutoUpdate"] is False
+
+
+def test_ensure_layout_migrates_legacy_claude_state(tmp_path):
+    profile = _build_profile(tmp_path)
+    legacy_path = profile.agent_home / ".claude.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        json.dumps({"legacyKey": True, "projects": {"/tmp/demo": {"hasTrustDialogAccepted": True}}}),
+        encoding="utf-8",
+    )
+    manager = AgentCliManager(profile)
+
+    manager.ensure_layout()
+
+    active_payload = json.loads(active_claude_state_path(profile.agent_home).read_text(encoding="utf-8"))
+    assert active_payload["legacyKey"] is True
+    assert active_payload["projects"]["/tmp/demo"]["hasTrustDialogAccepted"] is True
+
+
+def test_ensure_layout_syncs_existing_claude_agent_home_mcp(tmp_path):
+    clear_mcp_registry_cache()
+    mcp_secret_store.upsert_secret("mcp.demo.header.Authorization", "test-token")
+    write_runtime_mcp_registry_payload(
+        {
+            "version": 1,
+            "servers": {
+                "demo": {
+                    "activation": "default",
+                    "engines": ["claude"],
+                    "scope": "agent-home",
+                    "transport": "http",
+                    "url": "https://mcp.example/sse",
+                    "auth": {
+                        "headers": [
+                            {
+                                "name": "Authorization",
+                                "prefix": "Bearer ",
+                                "secret_id": "mcp.demo.header.Authorization",
+                            }
+                        ]
+                    },
+                }
+            },
+        }
+    )
+    manager = AgentCliManager(_build_profile(tmp_path))
+
+    manager.ensure_layout()
+
+    payload = json.loads(active_claude_state_path(manager.profile.agent_home).read_text(encoding="utf-8"))
+    assert payload["mcpServers"]["demo"] == {
+        "headers": {"Authorization": "Bearer test-token"},
+        "type": "http",
+        "url": "https://mcp.example/sse",
+    }
 
 
 def test_default_bootstrap_engines_come_from_global_config(tmp_path: Path) -> None:

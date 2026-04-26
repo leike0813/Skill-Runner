@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,8 @@ from .command_builder import CodexCommandBuilder
 from .config_composer import CodexConfigComposer
 from .stream_parser import CodexStreamParser
 from .toml_manager import CodexConfigManager
+
+logger = logging.getLogger(__name__)
 
 
 class CodexExecutionAdapter(EngineExecutionAdapter):
@@ -77,3 +80,23 @@ class CodexExecutionAdapter(EngineExecutionAdapter):
         if not use_profile_defaults:
             return []
         return self.profile.resolve_command_defaults(action=action)
+
+    def cleanup_terminal_run_resources(
+        self,
+        *,
+        skill: Any,
+        run_dir: Path,
+        options: dict[str, Any],
+    ) -> None:
+        _ = skill, run_dir
+        profile_name = options.get("__codex_mcp_profile_name")
+        if not isinstance(profile_name, str) or not profile_name.strip():
+            return
+        try:
+            self.config_manager.remove_profile(profile_name.strip())
+        except (OSError, ValueError, TypeError):
+            logger.warning(
+                "Failed to cleanup Codex per-run MCP profile: %s",
+                profile_name,
+                exc_info=True,
+            )
