@@ -5,6 +5,12 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.mcp import (
+    McpConfigError,
+    build_mcp_config_layer,
+    codex_run_profile_name,
+    validate_no_mcp_root_keys,
+)
 from server.services.skill.skill_asset_resolver import resolve_engine_config_asset
 from .toml_manager import CodexConfigManager
 
@@ -96,6 +102,16 @@ class CodexConfigComposer:
                     logger.warning("Failed to load skill settings: %s", exc)
 
         try:
+            validate_no_mcp_root_keys(skill_defaults, source="Codex skill config")
+            codex_overrides = self.extract_codex_overrides(options)
+            validate_no_mcp_root_keys(codex_overrides, source="Codex runtime override")
+
+            mcp_resolution, mcp_layer = build_mcp_config_layer(skill=skill, engine="codex")
+            if any(server.scope == "run-local" for server in mcp_resolution.servers):
+                declared_profile_name = codex_run_profile_name(ctx.run_dir)
+                options["__codex_profile_name"] = declared_profile_name
+                options["__codex_mcp_profile_name"] = declared_profile_name
+
             profile_name_override = options.get("__codex_profile_name")
             profile_name = (
                 profile_name_override.strip()
@@ -117,8 +133,11 @@ class CodexConfigComposer:
                         setattr(config_manager, "profile_name", profile_name)
                     except (AttributeError, TypeError):
                         pass
-            codex_overrides = self.extract_codex_overrides(options)
-            fused_settings = config_manager.generate_profile_settings(skill_defaults, codex_overrides)
+            fused_settings = config_manager.generate_profile_settings(
+                skill_defaults,
+                codex_overrides,
+                governed_config=mcp_layer,
+            )
             fused_settings = self._apply_headless_sandbox_gating(fused_settings)
             active_profile_name = getattr(
                 config_manager,
@@ -137,3 +156,5 @@ class CodexConfigComposer:
             return config_manager.config_path
         except ValueError as exc:
             raise RuntimeError(f"Configuration Error: {exc}")
+        except McpConfigError as exc:
+            raise RuntimeError(f"Configuration Error: {exc}") from exc

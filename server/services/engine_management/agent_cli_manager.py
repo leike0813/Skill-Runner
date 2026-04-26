@@ -25,6 +25,7 @@ from server.engines.claude.adapter.sandbox_probe import (
     load_claude_sandbox_probe,
     write_claude_sandbox_probe,
 )
+from server.engines.claude.adapter.state_paths import ensure_claude_active_state
 from server.engines.codex.adapter.sandbox_probe import (
     CODEX_SANDBOX_DEPENDENCY_MISSING,
     CODEX_SANDBOX_DISABLED_BY_ENV,
@@ -255,10 +256,31 @@ class AgentCliManager:
                 if not bootstrap_path.exists():
                     bootstrap_path.parent.mkdir(parents=True, exist_ok=True)
                     bootstrap_path.write_text(bootstrap_payload, encoding="utf-8")
+            elif engine == "claude":
+                ensure_claude_active_state(
+                    self.profile.agent_home,
+                    bootstrap_payload=bootstrap_payload,
+                )
             else:
                 self._ensure_json_file(bootstrap_path, bootstrap_payload)
             self._apply_layout_normalizer(engine, bootstrap_path, bootstrap_payload)
             self._ensure_bootstrap_sidecars(engine)
+        self._sync_claude_agent_home_mcp()
+
+    def _sync_claude_agent_home_mcp(self) -> None:
+        try:
+            from jsonschema import ValidationError  # type: ignore[import-untyped]
+
+            from server.engines.claude.adapter.mcp_materializer import sync_claude_agent_home_mcp
+            from server.services.mcp import McpConfigError, load_mcp_registry, mcp_secret_store
+
+            sync_claude_agent_home_mcp(
+                agent_home=self.profile.agent_home,
+                registry=load_mcp_registry(),
+                secret_resolver=mcp_secret_store.get_secret,
+            )
+        except (McpConfigError, OSError, RuntimeError, TypeError, ValueError, ValidationError):
+            logger.warning("Failed to synchronize Claude agent-home MCP state", exc_info=True)
 
     def collect_status(self) -> Dict[str, EngineStatus]:
         result: Dict[str, EngineStatus] = {}

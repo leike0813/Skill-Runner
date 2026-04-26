@@ -535,6 +535,15 @@ class EngineExecutionAdapter:
     def build_subprocess_env(self, base_env: dict[str, str]) -> dict[str, str]:
         return base_env
 
+    def cleanup_terminal_run_resources(
+        self,
+        *,
+        skill: SkillManifest,
+        run_dir: Path,
+        options: dict[str, Any],
+    ) -> None:
+        _ = skill, run_dir, options
+
     async def _execute_process(
         self,
         prompt: str,
@@ -614,16 +623,19 @@ class EngineExecutionAdapter:
             normalization_reason=normalization_reason,
         )
 
-        proc = await self._create_subprocess(*command_to_execute, cwd=run_dir, env=env)
-        process_result = await self._capture_process_output(
-            proc,
-            run_dir,
-            options,
-            self.process_prefix,
-            live_runtime_emitter=live_runtime_emitter,
-        )
-        process_result.runtime_warnings.extend(runtime_warnings)
-        return process_result
+        try:
+            proc = await self._create_subprocess(*command_to_execute, cwd=run_dir, env=env)
+            process_result = await self._capture_process_output(
+                proc,
+                run_dir,
+                options,
+                self.process_prefix,
+                live_runtime_emitter=live_runtime_emitter,
+            )
+            process_result.runtime_warnings.extend(runtime_warnings)
+            return process_result
+        finally:
+            self.cleanup_terminal_run_resources(skill=skill, run_dir=run_dir, options=options)
 
     # Backward-compatible component wrappers used by existing tests and thin callers.
     def _construct_config(self, skill: SkillManifest, run_dir: Path, options: dict[str, Any]) -> Path:

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from server.engines.common.config.json_layer_config_generator import config_generator
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.mcp import McpConfigError, build_mcp_config_layer, validate_no_mcp_root_keys
 from server.services.skill.skill_asset_resolver import (
     load_resolved_json,
     resolve_engine_config_asset,
@@ -70,6 +71,7 @@ class GeminiConfigComposer:
             logger.info("Loaded skill defaults from %s", skill_config_resolution.path)
         elif skill_config_resolution.path is not None:
             logger.warning("Failed to load Gemini skill defaults: %s", skill_config_resolution.path)
+        validate_no_mcp_root_keys(skill_defaults, source="Gemini skill config")
 
         user_overrides: dict[str, object] = {}
         model_obj = options.get("runtime_model", options.get("model"))
@@ -83,6 +85,12 @@ class GeminiConfigComposer:
         runtime_engine_overrides: dict[str, object] = {}
         if isinstance(options.get("gemini_config"), dict):
             runtime_engine_overrides = options["gemini_config"]
+        validate_no_mcp_root_keys(runtime_engine_overrides, source="Gemini runtime override")
+
+        try:
+            _, governed_mcp = build_mcp_config_layer(skill=skill, engine="gemini")
+        except McpConfigError as exc:
+            raise RuntimeError(f"Configuration Error: {exc}") from exc
 
         enforced_config_path = self._adapter.profile.resolve_enforced_config_path()
         project_enforced: dict[str, object] = {}
@@ -96,7 +104,14 @@ class GeminiConfigComposer:
             except _JSON_LOAD_EXCEPTIONS:
                 logger.exception("Failed to load project enforced config")
 
-        layers = [engine_defaults, skill_defaults, user_overrides, runtime_engine_overrides, project_enforced]
+        layers = [
+            engine_defaults,
+            skill_defaults,
+            user_overrides,
+            runtime_engine_overrides,
+            governed_mcp,
+            project_enforced,
+        ]
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         schema_path = self._adapter.profile.resolve_settings_schema_path()
         if schema_path is None:

@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-runner.local/schemas/mcp_registry.schema.json",
+  "type": "object",
+  "required": ["version", "servers"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "servers": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/server"
+      },
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.-]+$"
+      }
+    }
+  },
+  "$defs": {
+    "engine": {
+      "type": "string",
+      "enum": ["codex", "claude", "gemini", "opencode", "qwen"]
+    },
+    "server": {
+      "type": "object",
+      "required": ["activation", "scope", "transport"],
+      "additionalProperties": false,
+      "properties": {
+        "activation": {
+          "type": "string",
+          "enum": ["default", "declared"]
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/engine"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "unsupported_engines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/engine"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["run-local", "agent-home"]
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["stdio", "http", "sse"]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth": {
+          "$ref": "#/$defs/auth"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "stdio"
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "required": ["command"],
+            "not": {
+              "required": ["url"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "enum": ["http", "sse"]
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "required": ["url"],
+            "not": {
+              "required": ["command"]
+            }
+          }
+        }
+      ]
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authEnv"
+          },
+          "uniqueItems": true
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authHeader"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "authEnv": {
+      "type": "object",
+      "required": ["name", "secret_id"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secret_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "authHeader": {
+      "type": "object",
+      "required": ["name", "secret_id"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "secret_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

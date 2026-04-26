@@ -9,12 +9,12 @@ import pytest
 
 fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
-from fastapi import Request
+from fastapi import Request  # noqa: E402
 
-from server.main import app
-from server.routers.ui import _build_engine_ui_metadata
-from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
-from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
+from server.main import app  # noqa: E402
+from server.routers.ui import _build_engine_ui_metadata  # noqa: E402
+from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError  # noqa: E402
+from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT  # noqa: E402
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -585,6 +585,20 @@ async def test_ui_engines_page(monkeypatch):
     assert "OAuth Proxy (oauth_proxy)" in response.text
     assert "CLI Delegate (cli_delegate)" in response.text
     assert "const authUiCapabilities = " in response.text
+    assert "MCP 配置" in response.text
+    assert 'id="mcp-config-card"' in response.text
+    assert 'id="mcp-guided-mode-btn"' in response.text
+    assert 'id="mcp-advanced-mode-btn"' in response.text
+    assert 'id="mcp-import-toggle-btn"' in response.text
+    assert 'id="mcp-auth-type"' in response.text
+    assert "Bearer Token" in response.text
+    assert "API Key Header" in response.text
+    assert "环境变量 Token" in response.text
+    assert "密钥字段留空会保留已有密钥" in response.text
+    assert "预览导入" in response.text
+    assert 'id="mcp-table-body"' in response.text
+    assert "/v1/management/mcp/servers" in response.text
+    assert "Header|Prefix|value" not in response.text
     assert "自定义 Providers" in response.text
     assert 'id="custom-provider-engine"' in response.text
     assert 'id="custom-provider-table-body"' in response.text

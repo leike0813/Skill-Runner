@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.mcp import build_mcp_config_layer, validate_no_mcp_root_keys
 from server.services.skill.skill_asset_resolver import (
     load_resolved_json,
     resolve_engine_config_asset,
@@ -128,9 +129,14 @@ class QwenConfigComposer:
             payload = load_resolved_json(settings_resolution.path)
             if payload is not None:
                 skill_defaults = payload
+        validate_no_mcp_root_keys(skill_defaults, source="Qwen skill config")
         layers.append(skill_defaults)
-        layers.append(self.extract_qwen_overrides(options))
+        runtime_overrides = self.extract_qwen_overrides(options)
+        validate_no_mcp_root_keys(runtime_overrides, source="Qwen runtime override")
+        layers.append(runtime_overrides)
         layers.append(self._model_overlay(options))
+        _, governed_mcp = build_mcp_config_layer(skill=skill, engine="qwen")
+        layers.append(governed_mcp)
         layers.append(
             self._load_json_config(
                 self._adapter.profile.resolve_enforced_config_path(),

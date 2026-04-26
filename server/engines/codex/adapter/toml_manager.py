@@ -70,11 +70,14 @@ class CodexConfigManager:
         self,
         skill_defaults: Dict[str, Any],
         runtime_config: Dict[str, Any],
+        governed_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         final_config: Dict[str, Any] = {}
         self._deep_merge(final_config, self._load_default_profile_config())
         self._deep_merge(final_config, skill_defaults)
         self._deep_merge(final_config, runtime_config)
+        if governed_config:
+            self._deep_merge(final_config, governed_config)
 
         enforced_profile, _ = self._extract_enforced_sections(self._load_enforced_config())
         self._deep_merge(final_config, enforced_profile)
@@ -203,3 +206,24 @@ class CodexConfigManager:
         if not isinstance(profiles_obj, dict):
             return {}
         return profiles_obj.get(self.profile_name, {})
+
+    def remove_profile(self, profile_name: str | None = None) -> bool:
+        if not self.config_path.exists():
+            return False
+
+        with open(self.config_path, "r", encoding="utf-8") as f:
+            doc = cast(Any, tomlkit.parse(f.read()))
+
+        profiles_obj = doc.get("profiles")
+        if not isinstance(profiles_obj, dict):
+            return False
+
+        target_profile = (profile_name or self.profile_name).strip()
+        if not target_profile or target_profile not in profiles_obj:
+            return False
+
+        del profiles_obj[target_profile]
+
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            f.write(tomlkit.dumps(doc))
+        return True

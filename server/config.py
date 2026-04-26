@@ -92,6 +92,14 @@ _C.SYSTEM.SETTINGS_BOOTSTRAP_FILE = os.path.join(
     "policy",
     "system_settings.bootstrap.json",
 )
+_C.SYSTEM.MCP_REGISTRY_FILE = os.environ.get(
+    "SKILL_RUNNER_MCP_REGISTRY_FILE",
+    os.path.join(_C.SYSTEM.DATA_DIR, "mcp_registry.json"),
+)
+_C.SYSTEM.MCP_SECRETS_FILE = os.environ.get(
+    "SKILL_RUNNER_MCP_SECRETS_FILE",
+    os.path.join(_C.SYSTEM.DATA_DIR, "mcp_secrets.json"),
+)
 
 _default_agent_cache = (
     "/opt/cache/skill-runner" if _is_container_runtime() else str(_default_local_base_dir() / "agent-cache")

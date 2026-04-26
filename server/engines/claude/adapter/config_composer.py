@@ -10,11 +10,14 @@ from typing import TYPE_CHECKING, cast
 from server.config import config
 from server.engines.common.config.json_layer_config_generator import config_generator
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.services.mcp import build_mcp_config_layer, validate_no_mcp_root_keys
+from server.services.mcp.secret_store import mcp_secret_store
 from server.services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
 from server.services.skill.skill_asset_resolver import load_resolved_json, resolve_engine_config_asset
 from .sandbox_probe import load_claude_sandbox_probe
+from .mcp_materializer import materialize_claude_mcp_resolution
 
 if TYPE_CHECKING:
     from .execution_adapter import ClaudeExecutionAdapter
@@ -236,10 +239,12 @@ class ClaudeConfigComposer:
         payload = load_resolved_json(skill_config_resolution.path)
         if payload is not None:
             skill_defaults = payload
+        validate_no_mcp_root_keys(skill_defaults, source="Claude skill config")
 
         runtime_overrides: dict[str, object] = {}
         if isinstance(options.get("claude_config"), dict):
             runtime_overrides = dict(options["claude_config"])
+        validate_no_mcp_root_keys(runtime_overrides, source="Claude runtime override")
         model_runtime_override = ClaudeModelRuntimeOverride(runtime_overrides={})
         model_obj = options.get("runtime_model")
         if not isinstance(model_obj, str) or not model_obj.strip():
@@ -265,7 +270,20 @@ class ClaudeConfigComposer:
                 logger.exception("Failed to load Claude enforced config")
 
         dynamic_enforced = self._build_dynamic_enforced_config(run_dir=run_dir)
-        layers = [engine_defaults, skill_defaults, runtime_overrides, enforced, dynamic_enforced]
+        mcp_resolution, _governed_mcp = build_mcp_config_layer(skill=skill, engine="claude")
+        materialize_claude_mcp_resolution(
+            agent_home=self._adapter.agent_manager.profile.agent_home,
+            run_dir=run_dir,
+            resolution=mcp_resolution,
+            secret_resolver=mcp_secret_store.get_secret,
+        )
+        layers = [
+            engine_defaults,
+            skill_defaults,
+            runtime_overrides,
+            enforced,
+            dynamic_enforced,
+        ]
         composed_config = self._compose_layers(layers)
         _unset_claude_env_keys(composed_config, model_runtime_override.unset_env_keys)
         composed_config = self._apply_bootstrap_sandbox_gating(composed_config=composed_config)
