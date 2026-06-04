@@ -1,8 +1,7 @@
-[submodule "skills_builtin/skill-converter-agent"]
-	path = skills_builtin/skill-converter-agent
+[submodule "skills_builtin/autoskill-converter"]
+	path = skills_builtin/autoskill-converter
 	url = https://github.com/leike0813/agent-skills
-	branch = skill/skill-converter-agent
-
+	branch = skill/autoskill-converter
 [submodule "skills_builtin/literature-digest"]
 	path = skills_builtin/literature-digest
 	url = https://github.com/leike0813/agent-skills
