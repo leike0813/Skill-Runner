@@ -179,9 +179,10 @@ FastAPI 路由定义，按 API 域划分。
 | `skills.py` | Skills API（`/v1/skills/*`） |
 | `engines.py` | Engines API（`/v1/engines/*`） |
 | `skill_packages.py` | Skill Packages API |
-| `temp_skill_runs.py` | Temp Skill Runs API |
 | `oauth_callback.py` | OAuth 回调路由 |
 | `ui.py` | 内建 Web UI 路由 |
+
+说明：临时 skill 执行不再有独立 router；当前通过 `jobs.py` 的 `/v1/jobs` + `skill_source=temp_upload` 创建，并通过 `/v1/jobs/{request_id}/upload` 上传 `skill_package`。
 
 ---
 

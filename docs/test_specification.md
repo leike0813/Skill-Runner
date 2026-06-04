@@ -81,14 +81,15 @@ bash tests/api_integration/run_api_integration_tests.sh -q tests/api_integration
 
 ### 2.4 临时 Skill 运行接口集成测试
 
-针对 `/v1/temp-skill-runs` 两步式流程的集成测试，使用 pytest + TestClient 在进程内执行。
+针对 `/v1/jobs` + `skill_source=temp_upload` 两步式流程的集成测试，使用 pytest + TestClient 在进程内执行。
 
 **覆盖范围**:
-- 创建临时请求 -> 上传临时 skill 包 -> 启动执行
+- `POST /v1/jobs` 创建 `temp_upload` 请求 -> `POST /v1/jobs/{request_id}/upload` 上传临时 skill 包 -> 启动执行
 - 状态/结果接口与 jobs 语义对齐
 - 临时 skill 不进入持久注册表（`skills_builtin/` + `skills/`）
 - 终态后临时 skill 包与解压目录清理
 - 非法临时 skill 包上传返回 400
+- 旧 `/v1/temp-skill-runs` create/upload 路由返回 404
 
 **执行命令**:
 ```bash
@@ -113,7 +114,7 @@ REST 级别 E2E 测试使用 FastAPI TestClient 在进程内执行完整 API 流
 **规则**:
 - 若 `engine` 不在 skill 的 `engines` 列表中，测试应预期失败（以 `workspace_manager` 抛错为判定）。
 - E2E 仍复用 `tests/engine_integration/suites/*.yaml` 作为 legacy case source。
-- 当 suite 配置 `skill_source=temp` 时，E2E 走 `/v1/temp-skill-runs` 两步接口。
+- 当 suite 配置 `skill_source=temp` 时，E2E 走 `/v1/jobs` 两步接口，并在 create 请求中设置 `skill_source=temp_upload`。
 
 ### 2.5 日志配置 (Logging)
 

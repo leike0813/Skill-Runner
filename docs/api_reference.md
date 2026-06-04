@@ -75,7 +75,7 @@
 
 说明：
 - 管理 API 是推荐的前端消费面。
-- 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*`、`/v1/temp-skill-runs*` 保持兼容，用于执行链路与存量调用。
+- 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*` 保持兼容，用于执行链路与存量调用；临时 skill 执行也通过 `/v1/jobs` 的 `skill_source=temp_upload` 进入。
 - `local-runtime` 接口仅在 `SKILL_RUNNER_RUNTIME_MODE=local` 下可用；非 local 模式返回 `409`。
 
 ### 本地运行租约接口
@@ -292,7 +292,7 @@
 **Query 参数**:
 - `cursor`（可选，默认 `0`）：续传游标。
 
-**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat` 和 `/v1/temp-skill-runs/{request_id}/chat` 同样可用，语义一致。
+**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat` 同样可用；临时 skill run 使用同一 Jobs API request_id。
 
 ### 结构化对话历史
 `GET /v1/management/runs/{request_id}/chat/history`
@@ -303,7 +303,7 @@
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
 - `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
 
-**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat/history` 和 `/v1/temp-skill-runs/{request_id}/chat/history` 同样可用。
+**关联接口**: 该接口在 `/v1/jobs/{request_id}/chat/history` 同样可用；临时 skill run 使用同一 Jobs API request_id。
 
 **事件 kind 说明（增量）**:
 - `assistant_process`：assistant 过程消息（由 FCMP 的 `assistant.reasoning` / `assistant.tool_call` / `assistant.command_execution` 派生）
@@ -345,7 +345,7 @@
 - `404`: `request_id` 或 run 不存在。
 
 说明：
-- 该接口仅在管理 API 提供（`/v1/jobs` 和 `/v1/temp-skill-runs` 不提供此接口）。
+- 该接口仅在管理 API 提供（`/v1/jobs` 不提供此接口）。
 - FCMP 过程事件已扩展为通用类型：`assistant.reasoning` / `assistant.tool_call` / `assistant.command_execution` / `assistant.message.promoted`（保留 `assistant.message.final`）。
 - RASP 过程事件对应为 `agent.reasoning` / `agent.tool_call` / `agent.command_execution` / `agent.message.promoted`（保留 `agent.message.final`）。
 - RASP 额外包含回合标记：`agent.turn_start` / `agent.turn_complete`（仅审计，不映射 FCMP）。
@@ -634,7 +634,7 @@
   - 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查。
   - `runtime_options.execution_mode=interactive` 时，系统会跳过缓存命中，且不会写入 `cache_entries`。
 - **Debug Bundle**: 普通 bundle 与 Debug Bundle 是两个独立下载产物；是否下载 debug 版本不再由 `runtime_options` 控制。
-- **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/temp-skill-runs`，表示终态后不立即删除临时 skill 包与解压目录。
+- **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/jobs` 的 `skill_source=temp_upload` 请求，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
 - **引擎约束**: `engine` 必须包含在 skill 的有效引擎集合中（`effective_engines = (engines 或 全量支持引擎) - unsupported_engines`），否则返回 400（`SKILL_ENGINE_UNSUPPORTED`）。
 - **模式准入约束**: 请求的 `runtime_options.execution_mode` 必须包含在 skill 的 `execution_modes` 声明中，否则返回 400（`SKILL_EXECUTION_MODE_UNSUPPORTED`）。
@@ -1194,7 +1194,7 @@
 - `POST /skills/{skill_id}/run`：提交执行（创建 run + 可选上传 zip）。
 - `GET /runs/{request_id}`：运行观测页（stdout 主对话区、stderr 独立窗口、pending/reply 交互）。
 - `GET /runs/{request_id}/result`：结果与产物展示页。
-- `GET /api/runs/{request_id}/events`：按 `run_source` 代理后端 SSE（installed:`/v1/jobs/*`，temp:`/v1/temp-skill-runs/*`）。
+- `GET /api/runs/{request_id}/events`：按 `run_source` 代理后端 SSE（installed/temp 均为 `/v1/jobs/*`，temp 由 request 的 `skill_source=temp_upload` 区分）。
 - `POST /api/runs/{request_id}/reply`：代理后端 reply。
 
 ### 页面上传安装 Skill 包
@@ -1392,14 +1392,17 @@ Query 参数：
 
 ## 3. 临时技能运行 (Temporary Skill Runs)
 
-该组接口用于“上传临时 skill 包并执行一次任务”，不会安装到持久 `skills/` 目录，也不会被 `/v1/skills` 发现。
+临时 skill 用于“上传 skill 包并执行一次任务”，不会安装到持久 `skills/` 目录，也不会被 `/v1/skills` 发现。
+
+当前实现不再提供独立的 `/v1/temp-skill-runs` create/upload API；临时 skill 与正式 skill 共用 `/v1/jobs`，通过 `skill_source=temp_upload` 区分。
 
 ### 创建临时运行请求
-`POST /v1/temp-skill-runs`
+`POST /v1/jobs`
 
-**Request Body** (`TempSkillRunCreateRequest`):
+**Request Body** (`RunCreateRequest`):
 ```json
 {
+  "skill_source": "temp_upload",
   "engine": "gemini",
   "parameter": {},
   "model": "gemini-2.5-pro",
@@ -1409,23 +1412,28 @@ Query 参数：
 }
 ```
 
-**Response** (`TempSkillRunCreateResponse`):
+说明：
+- `skill_id` 必须为空；临时 skill 的真实 id 会在上传并解析 `runner.json` 后写入 request。
+- 创建响应仅返回 `request_id`，并进入 pending upload 状态；run 会在上传步骤后创建。
+
+**Response** (`RunCreateResponse`):
 ```json
 {
   "request_id": "2fd0a860-a560-4f2d-8c91-2d1d65f6a4f1",
-  "status": "queued"
+  "cache_hit": false,
+  "status": null
 }
 ```
 
 ### 上传临时 Skill 包并启动运行
-`POST /v1/temp-skill-runs/{request_id}/upload`
+`POST /v1/jobs/{request_id}/upload`
 
 **Request**:
 - `Content-Type`: `multipart/form-data`
 - `skill_package`: 必填，临时 skill zip 包
-- `file`: 可选，输入文件 zip（与 `/v1/jobs/{request_id}/upload` 相同格式）
+- `file`: 可选，输入文件 zip（与正式 skill 文件输入上传格式相同）
 
-**Response** (`TempSkillRunUploadResponse`):
+**Response** (`RunUploadResponse`):
 ```json
 {
   "request_id": "2fd0a860-a560-4f2d-8c91-2d1d65f6a4f1",
@@ -1442,29 +1450,36 @@ Query 参数：
 - `500`: 内部错误。
 
 ### 查询临时运行状态
-`GET /v1/temp-skill-runs/{request_id}`
+`GET /v1/jobs/{request_id}`
 
-响应结构与 `GET /v1/jobs/{request_id}` 保持一致（`RequestStatusResponse`）。
+响应结构为 `RequestStatusResponse`。临时 skill 与正式 skill 使用同一个 request/run 查询入口。
 
 ### 查询临时运行结果/产物/Bundle/日志/对话/取消
-- `GET /v1/temp-skill-runs/{request_id}/result`
-- `GET /v1/temp-skill-runs/{request_id}/artifacts`
-- `GET /v1/temp-skill-runs/{request_id}/bundle`
-- `GET /v1/temp-skill-runs/{request_id}/logs`
-- `GET /v1/temp-skill-runs/{request_id}/logs/range`（支持 `stream`、`byte_from`、`byte_to`、`attempt` 参数）
-- `GET /v1/temp-skill-runs/{request_id}/events`
-- `GET /v1/temp-skill-runs/{request_id}/events/history`
-- `GET /v1/temp-skill-runs/{request_id}/chat`（SSE 对话事件流）
-- `GET /v1/temp-skill-runs/{request_id}/chat/history`（结构化对话历史）
-- `GET /v1/temp-skill-runs/{request_id}/auth/session`（鉴权会话状态查询）
-- `POST /v1/temp-skill-runs/{request_id}/cancel`
+- `GET /v1/jobs/{request_id}/result`
+- `GET /v1/jobs/{request_id}/artifacts`
+- `GET /v1/jobs/{request_id}/bundle`
+- `GET /v1/jobs/{request_id}/logs`
+- `GET /v1/jobs/{request_id}/logs/range`（支持 `stream`、`byte_from`、`byte_to`、`attempt` 参数）
+- `GET /v1/jobs/{request_id}/events`
+- `GET /v1/jobs/{request_id}/events/history`
+- `GET /v1/jobs/{request_id}/chat`（SSE 对话事件流）
+- `GET /v1/jobs/{request_id}/chat/history`（结构化对话历史）
+- `GET /v1/jobs/{request_id}/auth/session`（鉴权会话状态查询）
+- `POST /v1/jobs/{request_id}/cancel`
 
-语义与 `/v1/jobs/*` 对齐，但作用范围仅限临时 skill 的这次请求。
+这些接口与正式 skill 完全共用 Jobs API 语义，作用范围由 request 的 `skill_source=temp_upload` 决定。
 缓存策略与常规链路一致：
 - `runtime_options.execution_mode=auto` 且 `no_cache!=true`：允许 cache lookup 与 write-back。
 - `runtime_options.execution_mode=interactive`：不读 cache，也不回写 cache。
 - `runtime_options.no_cache=true`：无论模式，均禁用 cache lookup 与 write-back。
 - 临时 skill 的 auto 缓存键额外包含“上传 skill 压缩包整体哈希”，避免不同包误命中。
+
+### 已移除的旧临时 Skill API
+- `POST /v1/temp-skill-runs`
+- `POST /v1/temp-skill-runs/{request_id}/upload`
+- `/v1/temp-skill-runs/{request_id}/*`
+
+这些旧入口当前返回 `404`，新客户端必须使用 `/v1/jobs`。
 
 ### 临时 Skill 包校验规则（严格）
 - Zip 必须且只能有一个顶层目录（顶层目录名即 `skill_id`）。

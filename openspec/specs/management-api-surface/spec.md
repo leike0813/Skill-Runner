@@ -359,7 +359,7 @@ phase2 移除兼容导入层后，`/v1` 对外接口行为 MUST 保持兼容。
 - **THEN** 不出现由内部模块迁移导致的破坏性变化
 
 ### Requirement: Runtime options contract MUST use hard-cut keys
-`/v1/jobs*` 与 `/v1/temp-skill-runs*` 的 `runtime_options` MUST 采用新键集合，旧键不再兼容。
+`/v1/jobs*` 的 `runtime_options` MUST 采用新键集合，旧键不再兼容；临时 skill 执行同样通过 `/v1/jobs` 的 `skill_source=temp_upload` 适用该合同。
 
 #### Scenario: Submit request with removed runtime option keys
 - **WHEN** 客户端提交 `verbose`、`session_timeout_sec`、`interactive_wait_timeout_sec`、`hard_wait_timeout_sec`、`wait_timeout_sec` 或 `interactive_require_user_reply`

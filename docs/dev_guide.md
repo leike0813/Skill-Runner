@@ -16,7 +16,7 @@ R1. REST API 暴露 ✅
 - 分层路由：Domain API (`/v1/management/*`) + Execution API (`/v1/jobs*`、`/v1/skills*` 等) + UI Adapter (`/ui/*`)。
 
 R2. Skill 可插拔 ✅
-- Skills 以"包"形式管理：通过 `POST /v1/skill-packages/install` 上传安装，或通过 `POST /v1/temp-skill-runs` 临时上传执行。
+- Skills 以"包"形式管理：通过 `POST /v1/skill-packages/install` 上传安装，或通过 `POST /v1/jobs` + `skill_source=temp_upload` 临时上传执行。
 - Skill 包必须提供 `input.schema.json`、`parameter.schema.json`、`output.schema.json`。
 - Skill 包必须声明 `runner.json`（AutoSkill Manifest），包含引擎支持列表、执行模式、artifacts 合同等。
 - 服务端对上传包执行 meta-schema 预检。
@@ -99,7 +99,6 @@ HTTP 路由入口。
 | `engines.py` | `/v1/engines` | 引擎状态、模型列表、鉴权管理、升级 |
 | `management.py` | `/v1/management` | Domain API：skill/engine/run 管理聚合接口 |
 | `skill_packages.py` | `/v1/skill-packages` | Skill 包安装流程 |
-| `temp_skill_runs.py` | `/v1/temp-skill-runs` | 临时 skill 上传并执行 |
 | `ui.py` | `/ui` | 内建 Web UI 页面渲染 |
 | `oauth_callback.py` | `/auth/callback` | OAuth 回调端点 |
 
@@ -249,7 +248,7 @@ skill-name/
 
 ### 5.4 Skill 包安装与临时执行
 - **安装**：`POST /v1/skill-packages/install` 上传 zip/tar.gz → 解压、校验、注册到 `SkillRegistry`。
-- **临时执行**：`POST /v1/temp-skill-runs` 上传后直接创建 run，执行完成后可选清理。
+- **临时执行**：先 `POST /v1/jobs` 并设置 `skill_source=temp_upload` 创建 request，再 `POST /v1/jobs/{request_id}/upload` 上传 `skill_package` 并启动 run，执行完成后可选清理。
 - **Skill Patcher**（`server/services/skill/skill_patcher.py`）：运行时对 skill 包内容进行补丁（如注入输出约束、重定向产物路径）。
 
 ================================================================================
@@ -414,7 +413,7 @@ Artifact 索引规则：
 
 ### 分层约定
 - **Domain API**（推荐）：`/v1/management/*` — 面向任意前端，稳定 JSON 语义。
-- **Execution API**（兼容）：`/v1/jobs*`、`/v1/skills*`、`/v1/engines*`、`/v1/temp-skill-runs*`、`/v1/skill-packages*` — 保留执行链路与历史契约。
+- **Execution API**（兼容）：`/v1/jobs*`、`/v1/skills*`、`/v1/engines*`、`/v1/skill-packages*` — 保留执行链路与历史契约；临时 skill 使用 `/v1/jobs` 的 `skill_source=temp_upload`。
 - **UI Adapter**：`/ui/*` — 内建 Web UI 页面渲染与交互。
 - **OAuth Callback**：`/auth/callback` — 引擎 OAuth 回调。
 
@@ -451,7 +450,7 @@ Artifact 索引规则：
 ### Jobs API（`server/routers/jobs.py`）
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/v1/jobs` | 提交执行（skill_id/engine/parameter/model/runtime_options） |
+| POST | `/v1/jobs` | 提交执行（正式 skill 使用 `skill_source=installed` + `skill_id`；临时 skill 使用 `skill_source=temp_upload` 且不传 `skill_id`） |
 | GET | `/v1/jobs/{request_id}` | 查询状态 |
 | GET | `/v1/jobs/{request_id}/result` | 获取最终结构化结果 |
 | GET | `/v1/jobs/{request_id}/artifacts` | resolved artifact 相对路径列表 |
@@ -462,7 +461,7 @@ Artifact 索引规则：
 | GET | `/v1/jobs/{request_id}/logs/range` | 日志区间读取 |
 | GET | `/v1/jobs/{request_id}/interaction/pending` | 查询待决交互 |
 | POST | `/v1/jobs/{request_id}/interaction/reply` | 提交交互回复 |
-| POST | `/v1/jobs/{request_id}/upload` | 上传 input 文件 |
+| POST | `/v1/jobs/{request_id}/upload` | 上传 input 文件；临时 skill request 还必须上传 `skill_package` |
 | POST | `/v1/jobs/{request_id}/cancel` | 取消运行 |
 | POST | `/v1/jobs/cleanup` | 清理历史 runs 与 requests |
 
@@ -479,22 +478,11 @@ Artifact 索引规则：
 | POST | `/v1/skill-packages/install` | 上传安装 skill 包 |
 | GET | `/v1/skill-packages/{request_id}` | 安装状态查询 |
 
-### Temp Skill Runs API（`server/routers/temp_skill_runs.py`）
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/v1/temp-skill-runs` | 临时 skill 上传并创建 run |
-| POST | `/v1/temp-skill-runs/{request_id}/upload` | 上传 skill 包并启动执行 |
-| GET | `/v1/temp-skill-runs/{request_id}` | 查询状态 |
-| GET | `/v1/temp-skill-runs/{request_id}/result` | 获取结果 |
-| GET | `/v1/temp-skill-runs/{request_id}/artifacts` | resolved artifact 相对路径列表 |
-| GET | `/v1/temp-skill-runs/{request_id}/bundle` | 下载 bundle |
-| GET | `/v1/temp-skill-runs/{request_id}/logs` | 日志 |
-| GET | `/v1/temp-skill-runs/{request_id}/events` | SSE 实时流 |
-| GET | `/v1/temp-skill-runs/{request_id}/events/history` | 历史事件回放 |
-| GET | `/v1/temp-skill-runs/{request_id}/logs/range` | 日志区间读取 |
-| GET | `/v1/temp-skill-runs/{request_id}/interaction/pending` | 待决交互 |
-| POST | `/v1/temp-skill-runs/{request_id}/interaction/reply` | 交互回复 |
-| POST | `/v1/temp-skill-runs/{request_id}/cancel` | 取消 |
+### Legacy Temp Skill Runs API
+旧 `/v1/temp-skill-runs*` API 已下线，当前返回 `404`。新客户端必须使用 Jobs API：
+1. `POST /v1/jobs`，请求体设置 `"skill_source": "temp_upload"`。
+2. `POST /v1/jobs/{request_id}/upload`，multipart 中上传必填 `skill_package` 和可选输入 `file`。
+3. 后续状态、结果、日志、事件、交互与取消全部使用 `/v1/jobs/{request_id}*`。
 
 ### UI Routes（`server/routers/ui.py`）
 内建 Web UI，通过 Jinja2 模板渲染 HTML 页面。主要页面包括：

@@ -1,7 +1,7 @@
 # interactive-job-cancel-api Specification
 
 ## Purpose
-定义前端可调用的 Job 终止接口及其幂等语义。
+定义前端和外部客户端可调用的 Job 终止接口、临时 skill 在统一 Jobs API 下的取消入口、幂等响应语义以及取消后的标准终态错误合同。
 
 ## Requirements
 ### Requirement: 系统 MUST 提供前端可调用的 Job 终止接口
@@ -14,7 +14,7 @@
 - **AND** 响应包含 `request_id/run_id/status/accepted/message`
 
 #### Scenario: 终止临时 skill run
-- **WHEN** 客户端调用 `POST /v1/temp-skill-runs/{request_id}/cancel`
+- **WHEN** 客户端对 `temp_upload` request 调用 `POST /v1/jobs/{request_id}/cancel`
 - **AND** `request_id` 对应活跃 run
 - **THEN** 系统返回成功响应
 - **AND** 语义与常规 job 终止一致
@@ -37,4 +37,3 @@
 - **THEN** 最终状态为 `canceled`
 - **AND** `error.code = CANCELED_BY_USER`
 - **AND** `error.message` 明确为用户取消语义
-

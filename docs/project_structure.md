@@ -142,9 +142,7 @@ server/
 │   │   ├── skill_patch_templates.py    # 补丁模板
 │   │   ├── skill_browser.py            # Skill 浏览
 │   │   ├── skill_install_store.py      # 安装状态存储
-│   │   ├── temp_skill_run_manager.py   # 临时 Skill 运行管理
-│   │   ├── temp_skill_run_store.py     # 临时运行存储
-│   │   └── temp_skill_cleanup_manager.py # 清理管理
+│   │   └── temp_skill_run_manager.py   # 临时 Skill 包检查与 manifest 读取
 │   └── ui/                 # UI 服务
 │       ├── engine_shell_capability_provider.py # 引擎 Shell 能力提供
 │       ├── ui_auth.py             # UI 鉴权服务
@@ -156,7 +154,6 @@ server/
 │   ├── skills.py           # Skills API（/v1/skills/*）
 │   ├── engines.py          # Engines API（/v1/engines/*）
 │   ├── skill_packages.py   # Skill Packages API
-│   ├── temp_skill_runs.py  # Temp Skill Runs API
 │   ├── oauth_callback.py   # OAuth 回调
 │   └── ui.py               # 内建 UI 路由
 │

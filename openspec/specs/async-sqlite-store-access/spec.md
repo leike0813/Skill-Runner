@@ -1,7 +1,7 @@
 # async-sqlite-store-access Specification
 
 ## Purpose
-定义 SQLite store 异步化后的访问约束、调用链 await 语义和回归门禁。
+定义 SQLite store 异步化后的访问约束、调用链 await 语义、统一 Jobs API 下 installed/temp_upload 持久化行为以及防止同步 sqlite 回归的测试门禁。
 
 ## Requirements
 ### Requirement: SQLite-backed stores MUST use asynchronous aiosqlite operations
@@ -16,7 +16,7 @@ The system MUST implement SQLite-backed stores using `aiosqlite` APIs and MUST N
 The system MUST update all callsites that invoke migrated stores to use `await` end-to-end.
 
 #### Scenario: Router creates run and checks cache
-- **WHEN** `/jobs` or `/temp-skill-runs` executes request creation and cache lookup
+- **WHEN** `/jobs` executes installed or `temp_upload` request creation and cache lookup
 - **THEN** the router awaits each store call
 - **AND** request semantics and HTTP responses remain backward compatible
 

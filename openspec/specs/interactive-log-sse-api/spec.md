@@ -1,12 +1,12 @@
 # interactive-log-sse-api Specification
 
 ## Purpose
-定义 run 观测 SSE 的 FCMP 单流契约。
+定义 run 观测 SSE 的 FCMP 单流契约、实时事件传输语义、历史回放兼容策略以及临时 skill 在统一 Jobs API 下复用同一事件流的要求。
 
 ## Requirements
 
 ### Requirement: 系统 MUST 提供 FCMP 单流 SSE 接口
-系统 MUST 为 jobs 与 temp-skill-runs 提供统一 `chat_event` 业务流。
+系统 MUST 为 Jobs API 提供统一 `chat_event` 业务流；临时 skill run 也通过 `/v1/jobs` 的 `temp_upload` source 消费同一事件流。
 
 #### Scenario: 建立 Jobs 事件流
 - **WHEN** 客户端调用 `GET /v1/jobs/{request_id}/events`
@@ -15,7 +15,7 @@
 - **AND** 后续业务事件通过 `event=chat_event` 发送
 
 #### Scenario: 建立 Temp Skill 事件流
-- **WHEN** 客户端调用 `GET /v1/temp-skill-runs/{request_id}/events`
+- **WHEN** 客户端对 `temp_upload` request 调用 `GET /v1/jobs/{request_id}/events`
 - **THEN** 服务端返回 `text/event-stream`
 - **AND** 事件语义与 jobs 事件流一致
 

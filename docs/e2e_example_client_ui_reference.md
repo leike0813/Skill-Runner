@@ -14,7 +14,7 @@ Goals:
 - Service is standalone (`e2e_client/app.py`) and runs on a dedicated port.
 - Default port is `9814`.
 - `SKILL_RUNNER_E2E_CLIENT_PORT` overrides the port; invalid values fallback to `9814`.
-- Client accesses backend only through HTTP APIs (`/v1/management/*`, `/v1/jobs*`, `/v1/temp-skill-runs*`).
+- Client accesses backend only through HTTP APIs (`/v1/management/*`, `/v1/jobs*`); fixture temp-skill runs use `/v1/jobs` with `skill_source=temp_upload`.
 - Fixture skill root defaults to `tests/fixtures/skills` and can be overridden by `SKILL_RUNNER_E2E_CLIENT_FIXTURES_SKILLS_DIR`.
 
 ## 3. Navigation Structure
@@ -52,8 +52,8 @@ Primary routes:
     1. `POST /v1/jobs`
     2. Optional `POST /v1/jobs/{request_id}/upload` with generated zip
   - Fixture temp-skill source:
-    1. `POST /v1/temp-skill-runs`
-    2. `POST /v1/temp-skill-runs/{request_id}/upload` with dynamic `skill_package` zip
+    1. `POST /v1/jobs` with `skill_source=temp_upload`
+    2. `POST /v1/jobs/{request_id}/upload` with dynamic `skill_package` zip
     3. Optional input zip (`file`) uploaded in the same request
 
 ### 4.3 Run Observation

@@ -40,19 +40,17 @@ Shared wrapper environment:
 
 Covered behaviors:
 - `POST /v1/jobs` and `POST /v1/jobs/{request_id}/upload`
-- `POST /v1/temp-skill-runs` and `POST /v1/temp-skill-runs/{request_id}/upload`
+- temporary skill execution through `POST /v1/jobs` with `skill_source=temp_upload`, followed by `POST /v1/jobs/{request_id}/upload` with `skill_package`
 - `GET /v1/jobs/{request_id}` status polling
-- `GET /v1/temp-skill-runs/{request_id}` status polling
 - `GET /v1/jobs/{request_id}/result`
-- `GET /v1/temp-skill-runs/{request_id}/result`
-- `GET /v1/temp-skill-runs/{request_id}/artifacts` (列表)
+- `GET /v1/jobs/{request_id}/artifacts` (列表)
 - `GET /v1/jobs/{request_id}/bundle` (下载 bundle)
-- `GET /v1/temp-skill-runs/{request_id}/bundle` (下载 bundle)
 - `runtime_options.no_cache` with both `true` and `false`
+- legacy `POST /v1/temp-skill-runs` create/upload routes are unavailable
 
 Engine mismatch rule:
 - Installed skill (`skill_source=installed`): mismatch should be rejected at job creation.
-- Temporary skill (`skill_source=temp`): mismatch should be rejected at temp upload/start.
+- Temporary skill (`skill_source=temp` in suite config, mapped to `skill_source=temp_upload` in API): mismatch should be rejected at upload/start.
 
 Demo suites (`demo-*`) are configured with `skill_source=temp` and are uploaded
 from `tests/fixtures/skills/*` at runtime, so they do not require pre-installing
