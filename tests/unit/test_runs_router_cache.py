@@ -19,7 +19,9 @@ from server.services.platform.cache_key_builder import (
     build_input_manifest,
     compute_cache_key,
     compute_input_manifest_hash,
-    compute_skill_fingerprint
+    compute_inline_input_hash,
+    compute_skill_fingerprint,
+    compute_skill_package_hash,
 )
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
@@ -213,6 +215,39 @@ def _build_skill_package_upload(
     return UploadFile(filename="skill_package.zip", file=file_obj)
 
 
+def _create_temp_equivalent_installed_skill(
+    base_dir: Path,
+    *,
+    skill_id: str = "temp-upload-skill",
+    engine: str = "gemini",
+) -> SkillManifest:
+    skill_dir = base_dir / skill_id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    runner = {
+        "id": skill_id,
+        "engines": [engine],
+        "execution_modes": ["auto", "interactive"],
+        "schemas": {
+            "input": "assets/input.schema.json",
+            "parameter": "assets/parameter.schema.json",
+            "output": "assets/output.schema.json",
+        },
+    }
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {skill_id}\n---\n")
+    (assets_dir / "runner.json").write_text(json.dumps(runner))
+    (assets_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (assets_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
+    return SkillManifest(
+        id=skill_id,
+        path=skill_dir,
+        schemas=runner["schemas"],
+        engines=[engine],
+        execution_modes=["auto", "interactive"],
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
@@ -227,6 +262,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
     )
 
     skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
     model_name = "gemini-2.5-pro"
     cache_key = compute_cache_key(
@@ -235,7 +271,8 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options=_normalized_engine_options(engine="gemini", model=model_name),
-        input_manifest_hash=manifest_hash
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
     )
     await store.record_cache_entry(cache_key, "run-cached")
 
@@ -645,13 +682,15 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
 
     manifest_hash = _manifest_hash_for_content(temp_config_dirs, "input.txt", "hello")
     skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_package_hash = compute_skill_package_hash(skill.path)
     cache_key = compute_cache_key(
         skill_id=skill.id,
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
-        input_manifest_hash=manifest_hash
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
     )
     await store.record_cache_entry(cache_key, "run-cached")
 
@@ -701,13 +740,15 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
 
     manifest_hash = _manifest_hash_for_content(temp_config_dirs, "input.txt", "hello")
     skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_package_hash = compute_skill_package_hash(skill.path)
     cache_key = compute_cache_key(
         skill_id=skill.id,
         engine="gemini",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
-        input_manifest_hash=manifest_hash
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
     )
     await store.record_cache_entry(cache_key, "run-cached")
 
@@ -905,6 +946,112 @@ async def test_upload_temp_skill_applies_runtime_default_options(monkeypatch, te
 
 
 @pytest.mark.asyncio
+async def test_upload_temp_skill_different_inline_input_does_not_hit_cache(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+    monkeypatch.setattr(
+        jobs_router.concurrency_manager,
+        "admit_or_reject",
+        AsyncMock(return_value=True),
+    )
+
+    first = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_source=RequestSkillSource.TEMP_UPLOAD,
+            engine="gemini",
+            input={"query": "one"},
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+        ),
+        BackgroundTasks(),
+    )
+    await jobs_router.upload_file(
+        request_id=first.request_id,
+        background_tasks=BackgroundTasks(),
+        file=None,
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+    )
+    first_record = await store.get_request(first.request_id)
+    assert first_record is not None
+    await store.record_cache_entry(first_record["cache_key"], "run-cached-first")
+
+    second = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_source=RequestSkillSource.TEMP_UPLOAD,
+            engine="gemini",
+            input={"query": "two"},
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+        ),
+        BackgroundTasks(),
+    )
+    second_response = await jobs_router.upload_file(
+        request_id=second.request_id,
+        background_tasks=BackgroundTasks(),
+        file=None,
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+    )
+    second_record = await store.get_request(second.request_id)
+
+    assert second_response.cache_hit is False
+    assert second_record is not None
+    assert second_record["cache_key"] != first_record["cache_key"]
+    assert second_record["run_id"] != "run-cached-first"
+
+
+@pytest.mark.asyncio
+async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    installed_skill = _create_temp_equivalent_installed_skill(temp_config_dirs)
+    package_hash = compute_skill_package_hash(installed_skill.path)
+    manifest_hash = compute_input_manifest_hash({"files": []})
+    cache_key = compute_cache_key(
+        skill_id=installed_skill.id,
+        engine="gemini",
+        parameter={"a": 1},
+        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        input_manifest_hash=manifest_hash,
+        inline_input_hash=compute_inline_input_hash({"query": "same"}),
+        skill_package_hash=package_hash,
+    )
+    await store.record_cache_entry(cache_key, "run-installed-cached")
+
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_source=RequestSkillSource.TEMP_UPLOAD,
+            engine="gemini",
+            input={"query": "same"},
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+        ),
+        BackgroundTasks(),
+    )
+    upload_response = await jobs_router.upload_file(
+        request_id=create_response.request_id,
+        background_tasks=BackgroundTasks(),
+        file=None,
+        skill_package=_build_skill_package_upload(skill_id=installed_skill.id, engine="gemini"),
+    )
+    request_record = await store.get_request(create_response.request_id)
+
+    assert upload_response.cache_hit is True
+    assert request_record is not None
+    assert request_record["run_id"] == "run-installed-cached"
+
+
+@pytest.mark.asyncio
 async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
@@ -918,6 +1065,7 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     )
 
     skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
     cache_key = compute_cache_key(
         skill_id=skill.id,
@@ -925,7 +1073,8 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
-        input_manifest_hash=manifest_hash
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
     )
     await store.record_cache_entry(cache_key, "run-cached")
 
@@ -964,6 +1113,7 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
     )
 
     skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
     cache_key = compute_cache_key(
         skill_id=skill.id,
@@ -971,7 +1121,8 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
-        input_manifest_hash=manifest_hash
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
     )
     await store.record_cache_entry(cache_key, "run-cached")
 

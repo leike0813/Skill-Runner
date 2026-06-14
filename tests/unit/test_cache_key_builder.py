@@ -8,6 +8,7 @@ from server.services.platform.cache_key_builder import (
     compute_input_manifest_hash,
     compute_inline_input_hash,
     compute_skill_fingerprint,
+    compute_skill_package_hash,
     compute_cache_key
 )
 
@@ -204,62 +205,77 @@ def test_compute_bytes_hash_changes_with_content():
     assert compute_bytes_hash(b"one") != compute_bytes_hash(b"two")
 
 
-def test_cache_key_changes_with_temp_skill_package_hash(tmp_path):
+def test_skill_package_hash_changes_with_content_but_ignores_git_metadata(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    git_dir = skill_dir / ".git"
+    assets_dir.mkdir(parents=True)
+    git_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("v1")
+    (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
+    (git_dir / "HEAD").write_text("ignored")
+
+    original = compute_skill_package_hash(skill_dir)
+    (git_dir / "HEAD").write_text("still ignored")
+    assert compute_skill_package_hash(skill_dir) == original
+
+    (skill_dir / "SKILL.md").write_text("v2")
+    assert compute_skill_package_hash(skill_dir) != original
+
+
+def test_cache_key_changes_with_skill_package_hash(tmp_path):
     skill_dir = tmp_path / "skill"
     assets_dir = skill_dir / "assets"
     assets_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("v1")
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
-    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+    package_hash_v1 = compute_skill_package_hash(skill_dir)
+    (skill_dir / "SKILL.md").write_text("v2")
+    package_hash_v2 = compute_skill_package_hash(skill_dir)
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
     key1 = compute_cache_key(
         skill_id="demo",
         engine="gemini",
-        skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
-        temp_skill_package_hash=compute_bytes_hash(b"zip-v1"),
+        skill_package_hash=package_hash_v1,
     )
     key2 = compute_cache_key(
         skill_id="demo",
         engine="gemini",
-        skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
-        temp_skill_package_hash=compute_bytes_hash(b"zip-v2"),
+        skill_package_hash=package_hash_v2,
     )
     assert key1 != key2
 
 
-def test_cache_key_stable_with_same_temp_skill_package_hash(tmp_path):
+def test_cache_key_stable_for_installed_and_temp_with_same_package_hash(tmp_path):
     skill_dir = tmp_path / "skill"
     assets_dir = skill_dir / "assets"
     assets_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("v1")
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
-    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+    package_hash = compute_skill_package_hash(skill_dir)
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
-    package_hash = compute_bytes_hash(b"zip-v1")
     key1 = compute_cache_key(
         skill_id="demo",
         engine="gemini",
-        skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
-        temp_skill_package_hash=package_hash,
+        inline_input_hash=compute_inline_input_hash({"query": "same"}),
+        skill_package_hash=package_hash,
     )
     key2 = compute_cache_key(
         skill_id="demo",
         engine="gemini",
-        skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
-        temp_skill_package_hash=package_hash,
+        inline_input_hash=compute_inline_input_hash({"query": "same"}),
+        skill_package_hash=package_hash,
     )
     assert key1 == key2

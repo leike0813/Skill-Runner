@@ -34,6 +34,11 @@ class SkillPackageManager:
         await skill_install_store.update_running(request_id)
         try:
             skill_id, version, action = self._process_install(request_id)
+            skill = skill_registry.get_skill(skill_id)
+            if skill is not None:
+                from .skill_package_identity_service import skill_package_identity_service
+
+                await skill_package_identity_service.get_or_refresh_hash(skill)
             await skill_install_store.update_succeeded(
                 request_id=request_id,
                 skill_id=skill_id,

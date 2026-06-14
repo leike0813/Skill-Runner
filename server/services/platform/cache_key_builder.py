@@ -32,6 +32,23 @@ def _hash_file(path: Path) -> str:
     return hasher.hexdigest()
 
 
+def compute_skill_package_hash(skill_dir: Path) -> str:
+    """Compute a stable content hash for a validated skill directory."""
+    if not skill_dir.exists() or not skill_dir.is_dir():
+        return ""
+
+    entries: list[str] = []
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(skill_dir).parts
+        if ".git" in rel_parts:
+            continue
+        rel_path = "/".join(rel_parts)
+        entries.append(f"{rel_path}:{path.stat().st_size}:{_hash_file(path)}")
+    return _hash_text("\n".join(entries))
+
+
 @lru_cache(maxsize=16)
 def _load_profile(engine: str) -> AdapterProfile | None:
     profile_path = (
@@ -111,21 +128,23 @@ def compute_skill_fingerprint(skill: SkillManifest, engine: str) -> str:
 def compute_cache_key(
     skill_id: str,
     engine: str,
-    skill_fingerprint: str,
-    parameter: Dict[str, Any],
-    engine_options: Dict[str, Any],
-    input_manifest_hash: str,
+    skill_fingerprint: str = "",
+    parameter: Dict[str, Any] | None = None,
+    engine_options: Dict[str, Any] | None = None,
+    input_manifest_hash: str = "",
     inline_input_hash: str = "",
+    skill_package_hash: str = "",
     temp_skill_package_hash: str = "",
 ) -> str:
+    package_hash = skill_package_hash or skill_fingerprint
     payload = {
+        "cache_key_version": 2,
         "skill_id": skill_id,
         "engine": engine,
-        "skill_fingerprint": skill_fingerprint,
-        "parameter": parameter,
-        "engine_options": engine_options,
+        "skill_package_hash": package_hash,
+        "parameter": parameter or {},
+        "engine_options": engine_options or {},
         "input_manifest_hash": input_manifest_hash,
         "inline_input_hash": inline_input_hash,
-        "temp_skill_package_hash": temp_skill_package_hash,
     }
     return _hash_text(_stable_json_dumps(payload))

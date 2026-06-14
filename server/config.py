@@ -119,6 +119,10 @@ _C.SYSTEM.SKILLS_DIR = os.environ.get("SKILL_RUNNER_SKILLS_DIR", os.path.join(_C
 _C.SYSTEM.RUNS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "runs")
 _C.SYSTEM.REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "requests")
 _C.SYSTEM.TMP_UPLOADS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "tmp_uploads")
+_C.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = os.environ.get(
+    "TEMP_SKILL_PACKAGE_CACHE_DIR",
+    os.path.join(_C.SYSTEM.DATA_DIR, "temp_skill_package_cache"),
+)
 
 _C.SYSTEM.UV_CACHE_DIR = os.environ.get("UV_CACHE_DIR", os.path.join(_C.SYSTEM.AGENT_CACHE_DIR, "uv_cache"))
 _C.SYSTEM.UV_PROJECT_ENVIRONMENT = os.environ.get(
@@ -191,6 +195,9 @@ _C.SYSTEM.TEMP_SKILL_CLEANUP_INTERVAL_HOURS = int(
 )
 _C.SYSTEM.TEMP_SKILL_ORPHAN_RETENTION_HOURS = int(
     os.environ.get("TEMP_SKILL_ORPHAN_RETENTION_HOURS", "24")
+)
+_C.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_TTL_DAYS = int(
+    os.environ.get("TEMP_SKILL_PACKAGE_CACHE_TTL_DAYS", "30")
 )
 
 _C.SYSTEM.RUN_RETENTION_DAYS = 7

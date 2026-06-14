@@ -121,6 +121,7 @@ class RunStoreDatabase:
                     input_manifest_path TEXT,
                     input_manifest_hash TEXT,
                     skill_fingerprint TEXT,
+                    skill_package_hash TEXT,
                     cache_key TEXT,
                     request_upload_mode TEXT NOT NULL DEFAULT 'none',
                     temp_skill_package_sha256 TEXT,
@@ -167,6 +168,8 @@ class RunStoreDatabase:
                 await conn.execute(
                     "ALTER TABLE requests ADD COLUMN client_metadata_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            if "skill_package_hash" not in existing_cols:
+                await conn.execute("ALTER TABLE requests ADD COLUMN skill_package_hash TEXT")
 
             await conn.execute(
                 """
@@ -209,6 +212,31 @@ class RunStoreDatabase:
                     run_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_package_identities (
+                    skill_id TEXT PRIMARY KEY,
+                    skill_package_hash TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    skill_path TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS temp_skill_package_cache (
+                    skill_package_hash TEXT PRIMARY KEY,
+                    skill_id TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    snapshot_path TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_accessed_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
                 )
                 """
             )

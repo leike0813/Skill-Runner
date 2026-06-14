@@ -59,6 +59,7 @@ async def lifespan(_app: FastAPI):
     from .services.platform.process_supervisor import process_supervisor
     from .services.ui.ui_auth import validate_ui_basic_auth_config
     from .services.orchestration.job_orchestrator import job_orchestrator
+    from .services.skill.skill_package_identity_service import skill_package_identity_service
     from .services.engine_management.engine_model_catalog_lifecycle import (
         engine_model_catalog_lifecycle,
     )
@@ -126,6 +127,7 @@ async def lifespan(_app: FastAPI):
         logger.warning("Startup orphan process reap failed", exc_info=True)
     concurrency_manager.start()
     cache_manager.start()
+    await skill_package_identity_service.refresh_all()
     engine_status_cache_service.start()
     run_cleanup_manager.start()
     runtime_profile_mode = str(getattr(runtime_profile, "mode", "local")).strip().lower() or "local"

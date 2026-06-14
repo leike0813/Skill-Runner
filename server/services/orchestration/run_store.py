@@ -73,6 +73,7 @@ class RunStore:
         temp_skill_package_sha256: Optional[str] = None,
         temp_skill_manifest_id: Optional[str] = None,
         temp_skill_manifest_json: Optional[Dict[str, Any]] = None,
+        skill_package_hash: Optional[str] = None,
     ) -> None:
         await self._request_store.create_request(
             request_id=request_id,
@@ -89,6 +90,7 @@ class RunStore:
             temp_skill_package_sha256=temp_skill_package_sha256,
             temp_skill_manifest_id=temp_skill_manifest_id,
             temp_skill_manifest_json=temp_skill_manifest_json,
+            skill_package_hash=skill_package_hash,
         )
 
     async def update_request_manifest(
@@ -123,8 +125,20 @@ class RunStore:
     ) -> None:
         await self._request_store.update_request_engine_options(request_id, engine_options)
 
-    async def update_request_cache_key(self, request_id: str, cache_key: str, skill_fingerprint: str) -> None:
-        await self._request_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+    async def update_request_cache_key(
+        self,
+        request_id: str,
+        cache_key: str,
+        skill_fingerprint: str,
+        *,
+        skill_package_hash: str | None = None,
+    ) -> None:
+        await self._request_store.update_request_cache_key(
+            request_id,
+            cache_key,
+            skill_fingerprint,
+            skill_package_hash=skill_package_hash,
+        )
 
     async def update_request_skill_identity(
         self,
@@ -134,6 +148,7 @@ class RunStore:
         temp_skill_manifest_id: str | None = None,
         temp_skill_manifest_json: Dict[str, Any] | None = None,
         temp_skill_package_sha256: str | None = None,
+        skill_package_hash: str | None = None,
     ) -> None:
         await self._request_store.update_request_skill_identity(
             request_id,
@@ -141,6 +156,7 @@ class RunStore:
             temp_skill_manifest_id=temp_skill_manifest_id,
             temp_skill_manifest_json=temp_skill_manifest_json,
             temp_skill_package_sha256=temp_skill_package_sha256,
+            skill_package_hash=skill_package_hash,
         )
 
     async def update_request_run_id(self, request_id: str, run_id: str) -> None:
@@ -233,6 +249,55 @@ class RunStore:
 
     async def _get_cached_run(self, table: str, cache_key: str) -> Optional[str]:
         return await self._cache_store._get_cached_run(table, cache_key)
+
+    async def upsert_skill_package_identity(
+        self,
+        *,
+        skill_id: str,
+        skill_package_hash: str,
+        source: str,
+        skill_path: str,
+        manifest: Dict[str, Any],
+    ) -> None:
+        await self._cache_store.upsert_skill_package_identity(
+            skill_id=skill_id,
+            skill_package_hash=skill_package_hash,
+            source=source,
+            skill_path=skill_path,
+            manifest=manifest,
+        )
+
+    async def get_skill_package_identity(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        return await self._cache_store.get_skill_package_identity(skill_id)
+
+    async def upsert_temp_skill_package_cache(
+        self,
+        *,
+        skill_package_hash: str,
+        skill_id: str,
+        manifest: Dict[str, Any],
+        snapshot_path: str,
+        expires_at: str,
+    ) -> None:
+        await self._cache_store.upsert_temp_skill_package_cache(
+            skill_package_hash=skill_package_hash,
+            skill_id=skill_id,
+            manifest=manifest,
+            snapshot_path=snapshot_path,
+            expires_at=expires_at,
+        )
+
+    async def get_temp_skill_package_cache(self, skill_package_hash: str) -> Optional[Dict[str, Any]]:
+        return await self._cache_store.get_temp_skill_package_cache(skill_package_hash)
+
+    async def touch_temp_skill_package_cache(self, skill_package_hash: str, *, expires_at: str) -> None:
+        await self._cache_store.touch_temp_skill_package_cache(skill_package_hash, expires_at=expires_at)
+
+    async def list_expired_temp_skill_package_cache(self, *, now_iso: str) -> List[Dict[str, Any]]:
+        return await self._cache_store.list_expired_temp_skill_package_cache(now_iso=now_iso)
+
+    async def delete_temp_skill_package_cache(self, skill_package_hash: str) -> None:
+        await self._cache_store.delete_temp_skill_package_cache(skill_package_hash)
 
     async def list_runs_for_cleanup(self, retention_days: int) -> List[Dict[str, Any]]:
         return await self._recovery_state_store.list_runs_for_cleanup(retention_days)

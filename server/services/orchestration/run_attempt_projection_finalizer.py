@@ -272,15 +272,7 @@ class RunAttemptProjectionFinalizer:
             )
 
         if inputs.cache_key and final_status == RunStatus.SUCCEEDED:
-            skill_source = (
-                str((inputs.request_record or {}).get("skill_source") or "installed")
-                if isinstance(inputs.request_record, dict)
-                else "installed"
-            )
-            if skill_source == "temp_upload":
-                await inputs.run_store_backend.record_temp_cache_entry(inputs.cache_key, inputs.run_id)
-            else:
-                await inputs.run_store_backend.record_cache_entry(inputs.cache_key, inputs.run_id)
+            await inputs.run_store_backend.record_cache_entry(inputs.cache_key, inputs.run_id)
             cache_recorded = True
 
         return RunAttemptProjectionResult(

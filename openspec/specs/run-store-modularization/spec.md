@@ -30,18 +30,18 @@ The system MUST preserve the current sqlite schema, table names, column names, a
 
 ### Requirement: Dedicated persistence sub-stores MUST preserve request, run, and cache behavior
 
-The system MUST provide dedicated internal stores for request/run registry and cache persistence without changing existing outward behavior.
+The system MUST provide dedicated internal stores for request/run registry and cache persistence while supporting unified cache lookup for installed and temporary skill sources.
 
 #### Scenario: Request and run lookup remain stable
 
 - **WHEN** a request is created, bound to a run, and later queried
 - **THEN** `RunStore` MUST return the same request/run data shape as before the refactor
 
-#### Scenario: Regular and temp cache remain isolated
+#### Scenario: Regular and temp cache share namespace
 
-- **WHEN** both regular cache and temp-upload cache use the same cache key
-- **THEN** the system MUST keep those cache sources isolated
-- **AND** `get_cached_run_for_source` MUST continue selecting the correct backing store
+- **WHEN** installed and temp-upload routes compute the same v2 cache key
+- **THEN** the system MUST use the same `cache_entries` backing store
+- **AND** `get_cached_run_for_source` MUST return the same cached run regardless of source
 
 ### Requirement: Run-store tests MUST shift to subdomain ownership
 

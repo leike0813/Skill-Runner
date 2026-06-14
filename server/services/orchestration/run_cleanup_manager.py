@@ -79,6 +79,7 @@ class RunCleanupManager:
         cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
         self._cleanup_tmp_uploads(cutoff)
         self._cleanup_ui_shell_sessions(cutoff)
+        await self._cleanup_temp_skill_package_cache()
         try:
             pruned = process_lease_store.prune_closed_before(cutoff_iso=cutoff_iso)
             if pruned > 0:
@@ -134,6 +135,14 @@ class RunCleanupManager:
             removed += 1
         if removed > 0:
             logger.info("Run cleanup removed ui_shell_sessions directories=%s", removed)
+
+    async def _cleanup_temp_skill_package_cache(self) -> None:
+        try:
+            from server.services.skill.temp_skill_package_cache_service import temp_skill_package_cache_service
+
+            await temp_skill_package_cache_service.cleanup_expired()
+        except (OSError, RuntimeError, ValueError):
+            logger.warning("Temp skill package cache cleanup failed", exc_info=True)
 
 
 run_cleanup_manager = RunCleanupManager()

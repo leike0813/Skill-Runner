@@ -27,6 +27,7 @@ class RunRequestStore:
         temp_skill_package_sha256: Optional[str] = None,
         temp_skill_manifest_id: Optional[str] = None,
         temp_skill_manifest_json: Optional[Dict[str, Any]] = None,
+        skill_package_hash: Optional[str] = None,
     ) -> None:
         await self._database.ensure_initialized()
         created_at = datetime.utcnow().isoformat()
@@ -38,9 +39,10 @@ class RunRequestStore:
                     request_id, skill_id, skill_source, engine, input_json, parameter_json,
                     engine_options_json, runtime_options_json, effective_runtime_options_json,
                     client_metadata_json, request_upload_mode, temp_skill_package_sha256,
-                    temp_skill_manifest_id, temp_skill_manifest_json, status, created_at
+                    skill_package_hash, temp_skill_manifest_id, temp_skill_manifest_json,
+                    status, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
@@ -55,6 +57,7 @@ class RunRequestStore:
                     json.dumps(client_metadata or {}, sort_keys=True),
                     request_upload_mode,
                     temp_skill_package_sha256,
+                    skill_package_hash,
                     temp_skill_manifest_id,
                     (
                         json.dumps(temp_skill_manifest_json, sort_keys=True)
@@ -125,17 +128,27 @@ class RunRequestStore:
             )
             await conn.commit()
 
-    async def update_request_cache_key(self, request_id: str, cache_key: str, skill_fingerprint: str) -> None:
+    async def update_request_cache_key(
+        self,
+        request_id: str,
+        cache_key: str,
+        skill_fingerprint: str,
+        *,
+        skill_package_hash: str | None = None,
+    ) -> None:
         await self._database.ensure_initialized()
         async with self._database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             await conn.execute(
                 """
                 UPDATE requests
-                SET cache_key = ?, skill_fingerprint = ?, status = ?
+                SET cache_key = ?,
+                    skill_fingerprint = ?,
+                    skill_package_hash = COALESCE(?, skill_package_hash),
+                    status = ?
                 WHERE request_id = ?
                 """,
-                (cache_key, skill_fingerprint, "ready", request_id),
+                (cache_key, skill_fingerprint, skill_package_hash, "ready", request_id),
             )
             await conn.commit()
 
@@ -147,6 +160,7 @@ class RunRequestStore:
         temp_skill_manifest_id: str | None = None,
         temp_skill_manifest_json: Dict[str, Any] | None = None,
         temp_skill_package_sha256: str | None = None,
+        skill_package_hash: str | None = None,
     ) -> None:
         await self._database.ensure_initialized()
         async with self._database.connect() as conn:
@@ -157,7 +171,8 @@ class RunRequestStore:
                 SET skill_id = ?,
                     temp_skill_manifest_id = COALESCE(?, temp_skill_manifest_id),
                     temp_skill_manifest_json = COALESCE(?, temp_skill_manifest_json),
-                    temp_skill_package_sha256 = COALESCE(?, temp_skill_package_sha256)
+                    temp_skill_package_sha256 = COALESCE(?, temp_skill_package_sha256),
+                    skill_package_hash = COALESCE(?, skill_package_hash)
                 WHERE request_id = ?
                 """,
                 (
@@ -169,6 +184,7 @@ class RunRequestStore:
                         else None
                     ),
                     temp_skill_package_sha256,
+                    skill_package_hash,
                     request_id,
                 ),
             )

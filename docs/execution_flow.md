@@ -13,9 +13,10 @@
    - Payload: Zip 文件。
 4. **WorkspaceManager**:
    - 解压 Zip 到 `data/requests/<request_id>/uploads/`。
-   - 生成 `input_manifest.json` 并计算 cache key。
+   - 生成 `input_manifest.json` 并计算 cache key v2。
    - 缓存仅在 `execution_mode=auto` 且 `no_cache!=true` 时启用；`interactive` 不读不写缓存。
-   - 临时 skill 链路的 cache key 额外包含上传 skill 压缩包整体哈希。
+   - cache key v2 统一包含 skill id、engine、规范化 `skill_package_hash`、参数、engine options、上传文件清单哈希和 inline input 哈希。
+   - 已安装 skill 与临时上传 skill 使用同一套 `skill_package_hash` 口径；临时上传包会缓存未 patch 的规范化 snapshot，默认 30 天滑动 TTL。
    - 命中缓存则将缓存的 run 绑定到 `request_id`；未命中则创建 `data/runs/<run_id>/`。
 
 ## 阶段二：任务调度 (Orchestration)
@@ -78,3 +79,4 @@
 
 - 定时清理任务会在清理历史 run 的同时，扫描活动 run 列表并执行 stale trust 清理。
 - 仅清理 `runs` 根目录下、且不在活动集合（`queued/running`）中的 Codex/Gemini trust 条目。
+- 定时清理也会移除超过滑动 TTL 的临时 skill 包缓存 snapshot；TTL 内再次使用同一规范化包 hash 会刷新过期时间。

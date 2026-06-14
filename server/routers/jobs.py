@@ -70,6 +70,8 @@ from ..services.orchestration.run_state_service import run_state_service
 from ..services.platform.concurrency_manager import concurrency_manager
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.engine_management.engine_policy import resolve_skill_engine_policy
+from ..services.skill.skill_package_identity_service import skill_package_identity_service
+from ..services.skill.temp_skill_package_cache_service import temp_skill_package_cache_service
 from ..services.orchestration.run_execution_core import (
     build_effective_runtime_options,
     declared_execution_modes,
@@ -245,6 +247,10 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
 
         manifest_hash = compute_input_manifest_hash({"files": []})
         skill_fingerprint = compute_skill_fingerprint(skill, request.engine)
+        skill_package_hash = await skill_package_identity_service.get_or_refresh_hash(
+            skill,
+            run_store_backend=run_store,
+        )
         cache_key = compute_cache_key(
             skill_id=skill.id,
             engine=request.engine,
@@ -253,6 +259,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             engine_options=engine_opts,
             input_manifest_hash=manifest_hash,
             inline_input_hash=inline_input_hash,
+            skill_package_hash=skill_package_hash,
         )
         await run_store.update_request_manifest(
             request_id,
@@ -260,7 +267,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             manifest_hash,
             request_upload_mode="uploaded",
         )
-        await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+        await run_store.update_request_cache_key(
+            request_id,
+            cache_key,
+            skill_fingerprint,
+            skill_package_hash=skill_package_hash,
+        )
         if cache_enabled:
             cached_run = await run_store.get_cached_run_for_source(cache_key, request.skill_source.value)
             if cached_run:
@@ -838,6 +850,7 @@ async def upload_file(
             skill = None
             skill_package_bytes: bytes | None = None
             temp_skill_package_hash = ""
+            skill_package_hash = ""
             log_event(
                 logger,
                 event="upload.request.loaded",
@@ -853,21 +866,29 @@ async def upload_file(
                     raise HTTPException(status_code=422, detail="skill_package is required for temp_upload source")
                 skill_package_bytes = await skill_package.read()
                 temp_skill_package_hash = compute_bytes_hash(skill_package_bytes)
-                from server.services.skill.temp_skill_run_manager import temp_skill_run_manager
-
-                skill = await temp_skill_run_manager.inspect_skill_package(skill_package_bytes)
+                cached_package = await temp_skill_package_cache_service.prepare_package(
+                    skill_package_bytes,
+                    run_store_backend=run_store,
+                )
+                skill = cached_package.skill
+                skill_package_hash = cached_package.skill_package_hash
                 await run_store.update_request_skill_identity(
                     request_id,
                     skill_id=skill.id,
                     temp_skill_manifest_id=skill.id,
                     temp_skill_manifest_json=skill.model_dump(mode="json"),
                     temp_skill_package_sha256=temp_skill_package_hash,
+                    skill_package_hash=skill_package_hash,
                 )
                 request_record = await run_store.get_request(request_id) or request_record
             else:
                 skill = skill_registry.get_skill(request_record["skill_id"])
                 if not skill:
                     raise ValueError(f"Skill '{request_record['skill_id']}' not found")
+                skill_package_hash = await skill_package_identity_service.get_or_refresh_hash(
+                    skill,
+                    run_store_backend=run_store,
+                )
             request_runtime_options = (
                 dict(runtime_options)
                 if isinstance(runtime_options, dict)
@@ -938,8 +959,6 @@ async def upload_file(
                 )
                 skill_fingerprint = compute_skill_fingerprint(skill, request_record["engine"])
                 inline_input_hash = compute_inline_input_hash(request_record.get("input", {}))
-                if source == RequestSkillSource.TEMP_UPLOAD.value:
-                    inline_input_hash = compute_inline_input_hash({})
 
                 await run_store.update_request_manifest(
                     request_id,
@@ -964,9 +983,14 @@ async def upload_file(
                     engine_options=request_record["engine_options"],
                     input_manifest_hash=manifest_hash,
                     inline_input_hash=inline_input_hash,
-                    temp_skill_package_hash=temp_skill_package_hash,
+                    skill_package_hash=skill_package_hash,
                 )
-                await run_store.update_request_cache_key(request_id, cache_key, skill_fingerprint)
+                await run_store.update_request_cache_key(
+                    request_id,
+                    cache_key,
+                    skill_fingerprint,
+                    skill_package_hash=skill_package_hash,
+                )
                 log_event(
                     logger,
                     event="upload.cache_key.computed",
@@ -1097,10 +1121,8 @@ async def upload_file(
                     request_payload=request_record,
                 )
                 if source == RequestSkillSource.TEMP_UPLOAD.value:
-                    if skill_package_bytes is None:
-                        raise HTTPException(status_code=500, detail="missing temp skill package payload")
-                    run_folder_bootstrapper.materialize_temp_skill_package(
-                        package_bytes=skill_package_bytes,
+                    run_folder_bootstrapper.materialize_skill(
+                        skill=skill,
                         run_dir=run_dir,
                         engine_name=request_record["engine"],
                         execution_mode=execution_mode,
