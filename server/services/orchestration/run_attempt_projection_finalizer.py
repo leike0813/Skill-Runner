@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from server.models import OrchestratorEventType, PendingOwner, RunStatus
 from server.runtime.logging.structured_trace import log_event
+from server.services.orchestration.run_workspace_layout import layout_from_record
 
 from .run_attempt_execution_service import RunAttemptExecutionResult
 from .run_attempt_outcome_service import RunAttemptResolvedOutcome
@@ -35,6 +36,7 @@ class RunAttemptFinalizeInput:
     execution_mode: str
     options: dict[str, Any]
     adapter: Any | None = None
+    audit_dir: Path | None = None
 
 
 @dataclass
@@ -186,7 +188,8 @@ class RunAttemptProjectionFinalizer:
             },
             run_store_backend=inputs.run_store_backend,
         )
-        result_path = run_dir / "result" / "result.json"
+        layout = layout_from_record(inputs.request_record or {}, run_dir)
+        result_path = layout.result_path if layout is not None else run_dir / "result" / "result.json"
         await inputs.run_store_backend.update_run_status(
             inputs.run_id,
             final_status,
@@ -234,6 +237,7 @@ class RunAttemptProjectionFinalizer:
                 type_name=terminal_event_type_name,
                 data={"status": RunStatus.CANCELED.value},
                 engine_name=engine_name,
+                audit_dir=inputs.audit_dir,
             )
         elif final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
             terminal_payload: dict[str, Any] = {"status": final_status.value}
@@ -251,6 +255,7 @@ class RunAttemptProjectionFinalizer:
                 type_name=terminal_event_type_name,
                 data=terminal_payload,
                 engine_name=engine_name,
+                audit_dir=inputs.audit_dir,
             )
 
         if emit_error_run_failed_event:
@@ -269,6 +274,7 @@ class RunAttemptProjectionFinalizer:
                     "code": outcome.final_error_code or "ORCHESTRATOR_ERROR",
                 },
                 engine_name=engine_name,
+                audit_dir=inputs.audit_dir,
             )
 
         if inputs.cache_key and final_status == RunStatus.SUCCEEDED:

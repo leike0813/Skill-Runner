@@ -67,6 +67,10 @@ from ..services.orchestration.run_audit_contract_service import run_audit_contra
 from ..services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
 from ..services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from ..services.orchestration.run_state_service import run_state_service
+from ..services.orchestration.run_workspace_layout import (
+    layout_from_record,
+    workspace_output_token as build_workspace_output_token,
+)
 from ..services.platform.concurrency_manager import concurrency_manager
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.engine_management.engine_policy import resolve_skill_engine_policy
@@ -92,6 +96,61 @@ import json
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str, Any] | None:
+    workspace_obj = runtime_options.get("workspace") if isinstance(runtime_options, dict) else None
+    if not isinstance(workspace_obj, dict):
+        return None
+    mode = str(workspace_obj.get("mode") or "").strip().lower()
+    if mode != "reuse":
+        return None
+    source_request_id = str(workspace_obj.get("request_id") or "").strip()
+    if not source_request_id:
+        raise HTTPException(status_code=422, detail="runtime_options.workspace.request_id is required for reuse")
+    source_record = await maybe_await(run_store.get_request(source_request_id))
+    if not source_record:
+        raise HTTPException(status_code=404, detail="Workspace source request not found")
+    source_status = str(source_record.get("run_status") or source_record.get("status") or "").strip().lower()
+    if source_status != RunStatus.SUCCEEDED.value:
+        raise HTTPException(status_code=409, detail="Workspace source request is not succeeded")
+    source_run_id = str(source_record.get("run_id") or "").strip()
+    if not source_run_id:
+        raise HTTPException(status_code=409, detail="Workspace source request has no run")
+    source_run_dir = workspace_manager.get_run_dir(source_run_id)
+    source_layout = layout_from_record(source_record, source_run_dir)
+    if source_layout is None or not source_layout.workspace_dir.exists():
+        raise HTTPException(status_code=409, detail="Workspace source directory is unavailable")
+    output_token = str(source_record.get("workspace_output_token") or "").strip()
+    if not output_token:
+        output_token = build_workspace_output_token(
+            cache_key=str(source_record.get("cache_key") or ""),
+            result_path=str(source_record.get("result_path") or ""),
+        )
+    return {
+        "source_request_id": source_request_id,
+        "source_record": source_record,
+        "workspace_id": source_layout.workspace_id,
+        "workspace_dir": source_layout.workspace_dir,
+        "workspace_input_token": output_token,
+    }
+
+
+def _workspace_response_fields(record: dict[str, Any], run_dir: Path | None) -> dict[str, str | None]:
+    layout = layout_from_record(record, run_dir)
+    result_path = record.get("result_path")
+    input_manifest_path = record.get("run_input_manifest_path") or record.get("input_manifest_path")
+    return {
+        "workspaceDir": str(layout.workspace_dir) if layout else (str(run_dir) if run_dir else None),
+        "resultJsonPath": str(result_path) if isinstance(result_path, str) and result_path else (
+            str(layout.result_path) if layout else None
+        ),
+        "inputManifestPath": (
+            str(input_manifest_path)
+            if isinstance(input_manifest_path, str) and input_manifest_path
+            else (str(layout.input_manifest_path) if layout else None)
+        ),
+    }
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
@@ -184,6 +243,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             runtime_options=runtime_opts_for_policy,
             policy=policy,
         )
+        workspace_reuse = await _resolve_workspace_reuse(effective_runtime_opts)
         if skill is not None:
             ensure_skill_execution_mode_supported(
                 skill_id=skill.id,
@@ -260,6 +320,11 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             input_manifest_hash=manifest_hash,
             inline_input_hash=inline_input_hash,
             skill_package_hash=skill_package_hash,
+            workspace_input_token=(
+                str(workspace_reuse.get("workspace_input_token") or "")
+                if workspace_reuse is not None
+                else ""
+            ),
         )
         await run_store.update_request_manifest(
             request_id,
@@ -297,9 +362,49 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             runtime_options=effective_runtime_opts,
             client_metadata=request.client_metadata,
         )
-        run_status = workspace_manager.create_run(run_request)
+        workspace_dir = (
+            workspace_reuse.get("workspace_dir")
+            if workspace_reuse is not None
+            else None
+        )
+        run_status = workspace_manager.create_run(run_request, workspace_dir=workspace_dir)
         run_cache_key: str | None = cache_key if cache_enabled else None
-        await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+        run_dir = workspace_manager.get_run_dir(run_status.run_id)
+        if run_dir is None:
+            raise HTTPException(status_code=500, detail="Run directory not found")
+        namespace = workspace_manager.allocate_namespace(workspace_dir=run_dir, skill_id=skill.id)
+        layout_record = {
+            "run_id": run_status.run_id,
+            "skill_id": skill.id,
+            "workspace_id": (
+                str(workspace_reuse.get("workspace_id"))
+                if workspace_reuse is not None
+                else run_status.run_id
+            ),
+            "workspace_dir": str(run_dir.resolve()),
+            "workspace_namespace": namespace,
+        }
+        layout = layout_from_record(layout_record, run_dir)
+        await run_store.create_run(
+            run_status.run_id,
+            run_cache_key,
+            RunStatus.QUEUED,
+            result_path=str(layout.result_path) if layout else "",
+            workspace_id=str(layout_record["workspace_id"]),
+            workspace_dir=str(layout_record["workspace_dir"]),
+            workspace_namespace=namespace,
+            workspace_source_request_id=(
+                str(workspace_reuse.get("source_request_id"))
+                if workspace_reuse is not None
+                else None
+            ),
+            input_manifest_path=str(layout.input_manifest_path) if layout else None,
+            workspace_input_token=(
+                str(workspace_reuse.get("workspace_input_token") or "")
+                if workspace_reuse is not None
+                else None
+            ),
+        )
         await run_store.bind_request_run_id(
             request_id,
             run_status.run_id,
@@ -308,9 +413,6 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_record: dict[str, Any] | None = await maybe_await(
             run_store.get_request(request_id)
         )
-        run_dir = workspace_manager.get_run_dir(run_status.run_id)
-        if run_dir is None:
-            raise HTTPException(status_code=500, detail="Run directory not found")
         run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
@@ -332,9 +434,16 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 request_id,
                 request.engine,
             )
-            run_audit_contract_service.write_request_input_snapshot(
+            request_input_path = run_audit_contract_service.write_request_input_snapshot(
                 run_dir=run_dir,
                 request_payload=request_payload,
+                input_manifest_path=layout.input_manifest_path if layout else None,
+            )
+            await run_store.update_request_manifest(
+                request_id,
+                str(request_input_path),
+                manifest_hash,
+                request_upload_mode="uploaded",
             )
             run_folder_bootstrapper.materialize_skill(
                 skill=skill,
@@ -430,8 +539,6 @@ async def get_run_status(request_id: str):
     dispatch_payload: dict[str, Any] | None = await maybe_await(
         run_store.get_dispatch_state(request_id)
     )
-    status_file = run_dir / ".state" / "state.json"
-
     current_status = RunStatus.QUEUED
     warnings = []
     error = None
@@ -446,14 +553,6 @@ async def get_run_status(request_id: str):
         warnings = projection_payload.get("warnings", [])
         error = projection_payload.get("error")
         updated_at = projection_payload.get("updated_at")
-    elif status_file.exists():
-        import json
-        with open(status_file, 'r') as f:
-            data = json.load(f)
-            current_status = data.get("status", RunStatus.QUEUED)
-            warnings = data.get("warnings", [])
-            error = data.get("error")
-            updated_at = data.get("updated_at")
     if current_status == RunStatus.WAITING_AUTH:
         from ..services.orchestration.run_auth_orchestration_service import (
             run_auth_orchestration_service,
@@ -482,14 +581,16 @@ async def get_run_status(request_id: str):
         projection_payload = await maybe_await(run_store.get_current_projection(request_id))
         state_payload = await maybe_await(run_store.get_run_state(request_id))
         dispatch_payload = await maybe_await(run_store.get_dispatch_state(request_id))
-        if status_file.exists():
-            import json
-            with open(status_file, 'r') as f:
-                data = json.load(f)
-                current_status = data.get("status", RunStatus.QUEUED)
-                warnings = data.get("warnings", [])
-                error = data.get("error")
-                updated_at = data.get("updated_at")
+        if isinstance(state_payload, dict):
+            current_status = RunStatus(state_payload.get("status", RunStatus.QUEUED.value))
+            warnings = state_payload.get("warnings", [])
+            error = state_payload.get("error")
+            updated_at = state_payload.get("updated_at")
+        elif isinstance(projection_payload, dict):
+            current_status = RunStatus(projection_payload.get("status", RunStatus.QUEUED.value))
+            warnings = projection_payload.get("warnings", [])
+            error = projection_payload.get("error")
+            updated_at = projection_payload.get("updated_at")
             
     # Read run metadata
     skill_id = str(request_record.get("skill_id") or "unknown")
@@ -557,6 +658,7 @@ async def get_run_status(request_id: str):
         run_store.get_recovery_info(run_id)
     )
     recovered_at = _parse_datetime_utc(recovery_info.get("recovered_at"))
+    workspace_fields = _workspace_response_fields(request_record, run_dir)
 
     return RequestStatusResponse(
         request_id=request_id,
@@ -645,6 +747,9 @@ async def get_run_status(request_id: str):
                 else projection_payload.get("target_attempt") if isinstance(projection_payload, dict) else None
             )
         ),
+        workspaceDir=workspace_fields["workspaceDir"],
+        resultJsonPath=workspace_fields["resultJsonPath"],
+        inputManifestPath=workspace_fields["inputManifestPath"],
     )
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
@@ -900,6 +1005,7 @@ async def upload_file(
                     runtime_options=request_runtime_options,
                 )
             )
+            workspace_reuse = await _resolve_workspace_reuse(effective_runtime_options)
             await run_store.update_request_effective_runtime_options(
                 request_id,
                 effective_runtime_options,
@@ -984,6 +1090,11 @@ async def upload_file(
                     input_manifest_hash=manifest_hash,
                     inline_input_hash=inline_input_hash,
                     skill_package_hash=skill_package_hash,
+                    workspace_input_token=(
+                        str(workspace_reuse.get("workspace_input_token") or "")
+                        if workspace_reuse is not None
+                        else ""
+                    ),
                 )
                 await run_store.update_request_cache_key(
                     request_id,
@@ -1050,6 +1161,11 @@ async def upload_file(
                         runtime_options=effective_runtime_options,
                     ),
                     skill=skill,
+                    workspace_dir=(
+                        workspace_reuse.get("workspace_dir")
+                        if workspace_reuse is not None
+                        else None
+                    ),
                 )
                 run_id_for_log = run_status.run_id
                 log_event(
@@ -1066,7 +1182,39 @@ async def upload_file(
                     raise HTTPException(status_code=500, detail="Run directory not found")
                 _copy_tree(uploads_dir, run_dir / "uploads")
                 run_cache_key: str | None = cache_key if cache_enabled else None
-                await run_store.create_run(run_status.run_id, run_cache_key, RunStatus.QUEUED)
+                namespace = workspace_manager.allocate_namespace(workspace_dir=run_dir, skill_id=skill.id)
+                layout_record = {
+                    "run_id": run_status.run_id,
+                    "skill_id": skill.id,
+                    "workspace_id": (
+                        str(workspace_reuse.get("workspace_id"))
+                        if workspace_reuse is not None
+                        else run_status.run_id
+                    ),
+                    "workspace_dir": str(run_dir.resolve()),
+                    "workspace_namespace": namespace,
+                }
+                layout = layout_from_record(layout_record, run_dir)
+                await run_store.create_run(
+                    run_status.run_id,
+                    run_cache_key,
+                    RunStatus.QUEUED,
+                    result_path=str(layout.result_path) if layout else "",
+                    workspace_id=str(layout_record["workspace_id"]),
+                    workspace_dir=str(layout_record["workspace_dir"]),
+                    workspace_namespace=namespace,
+                    workspace_source_request_id=(
+                        str(workspace_reuse.get("source_request_id"))
+                        if workspace_reuse is not None
+                        else None
+                    ),
+                    input_manifest_path=str(layout.input_manifest_path) if layout else None,
+                    workspace_input_token=(
+                        str(workspace_reuse.get("workspace_input_token") or "")
+                        if workspace_reuse is not None
+                        else None
+                    ),
+                )
                 await run_store.bind_request_run_id(
                     request_id,
                     run_status.run_id,
@@ -1116,9 +1264,16 @@ async def upload_file(
                     run_id=run_status.run_id,
                     engine=request_record["engine"],
                 )
-                run_audit_contract_service.write_request_input_snapshot(
+                request_input_path = run_audit_contract_service.write_request_input_snapshot(
                     run_dir=run_dir,
                     request_payload=request_record,
+                    input_manifest_path=layout.input_manifest_path if layout else None,
+                )
+                await run_store.update_request_manifest(
+                    request_id,
+                    str(request_input_path),
+                    manifest_hash,
+                    request_upload_mode="uploaded",
                 )
                 if source == RequestSkillSource.TEMP_UPLOAD.value:
                     run_folder_bootstrapper.materialize_skill(

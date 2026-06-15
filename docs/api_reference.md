@@ -77,6 +77,7 @@
 - 管理 API 是推荐的前端消费面。
 - 现有 `/v1/skills*`、`/v1/engines*`、`/v1/jobs*` 保持兼容，用于执行链路与存量调用；临时 skill 执行也通过 `/v1/jobs` 的 `skill_source=temp_upload` 进入。
 - `local-runtime` 接口仅在 `SKILL_RUNNER_RUNTIME_MODE=local` 下可用；非 local 模式返回 `409`。
+- 级联执行可通过 `runtime_options.workspace = {"mode": "reuse", "request_id": "<previous-request-id>"}` 复用前序成功请求的 workspace。状态/管理详情在可用时返回 `workspaceDir`、`resultJsonPath`、`inputManifestPath`。
 
 ### 本地运行租约接口
 `GET /v1/local-runtime/status`

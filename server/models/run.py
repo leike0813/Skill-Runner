@@ -122,6 +122,9 @@ class RequestStatusResponse(BaseModel):
     resume_cause: Optional[ResumeCause] = None
     source_attempt: Optional[int] = None
     target_attempt: Optional[int] = None
+    workspaceDir: Optional[str] = None
+    resultJsonPath: Optional[str] = None
+    inputManifestPath: Optional[str] = None
 
 
 class RunResponse(BaseModel):

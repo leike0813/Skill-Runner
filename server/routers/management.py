@@ -1010,6 +1010,9 @@ async def _build_run_state_from_detail(
             else None
         ),
         interactive_reply_timeout_sec=timeout_sec,
+        workspaceDir=_coerce_str_or_none(detail.get("workspaceDir")),
+        resultJsonPath=_coerce_str_or_none(detail.get("resultJsonPath")),
+        inputManifestPath=_coerce_str_or_none(detail.get("inputManifestPath")),
     )
 
 

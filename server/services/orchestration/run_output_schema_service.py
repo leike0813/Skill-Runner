@@ -44,6 +44,7 @@ class RunOutputSchemaService:
         skill: SkillManifest,
         execution_mode: str,
         run_dir: Path,
+        input_manifest_path: Path | None = None,
     ) -> RunOutputSchemaMaterialization:
         business_schema = self._load_business_schema(skill)
         if business_schema is None:
@@ -73,6 +74,7 @@ class RunOutputSchemaService:
         self._write_json_atomic(schema_path, machine_schema)
         self._append_request_input_audit_fields(
             run_dir=run_dir,
+            input_manifest_path=input_manifest_path,
             fields={
                 REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH: schema_relpath,
             },
@@ -238,9 +240,10 @@ class RunOutputSchemaService:
         self,
         *,
         run_dir: Path,
+        input_manifest_path: Path | None = None,
         fields: dict[str, Any],
     ) -> None:
-        request_input_path = run_dir / ".audit" / "request_input.json"
+        request_input_path = input_manifest_path or run_dir / ".audit" / "request_input.json"
         if not request_input_path.exists():
             return
         try:

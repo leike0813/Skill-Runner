@@ -224,9 +224,29 @@ class RunRequestStore:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM requests WHERE request_id = ?", (request_id,))
             row = await cursor.fetchone()
+            run_row = None
+            if row and row["run_id"]:
+                run_cursor = await conn.execute("SELECT * FROM runs WHERE run_id = ?", (row["run_id"],))
+                run_row = await run_cursor.fetchone()
         if not row:
             return None
-        return self._decode_request_row(row)
+        data = self._decode_request_row(row)
+        if run_row:
+            data.update(
+                {
+                    "run_status": run_row["status"],
+                    "result_path": run_row["result_path"],
+                    "artifacts_manifest_path": run_row["artifacts_manifest_path"],
+                    "workspace_id": run_row["workspace_id"],
+                    "workspace_dir": run_row["workspace_dir"],
+                    "workspace_namespace": run_row["workspace_namespace"],
+                    "workspace_source_request_id": run_row["workspace_source_request_id"],
+                    "run_input_manifest_path": run_row["input_manifest_path"],
+                    "workspace_input_token": run_row["workspace_input_token"],
+                    "workspace_output_token": run_row["workspace_output_token"],
+                }
+            )
+        return data
 
     async def get_request_with_run(self, request_id: str) -> Optional[Dict[str, Any]]:
         await self._database.ensure_initialized()
@@ -249,7 +269,16 @@ class RunRequestStore:
                     run.created_at AS run_created_at,
                     run.recovery_state AS recovery_state,
                     run.recovered_at AS recovered_at,
-                    run.recovery_reason AS recovery_reason
+                    run.recovery_reason AS recovery_reason,
+                    run.result_path AS result_path,
+                    run.artifacts_manifest_path AS artifacts_manifest_path,
+                    run.workspace_id AS workspace_id,
+                    run.workspace_dir AS workspace_dir,
+                    run.workspace_namespace AS workspace_namespace,
+                    run.workspace_source_request_id AS workspace_source_request_id,
+                    run.input_manifest_path AS run_input_manifest_path,
+                    run.workspace_input_token AS workspace_input_token,
+                    run.workspace_output_token AS workspace_output_token
                 FROM requests req
                 LEFT JOIN runs run ON req.run_id = run.run_id
                 WHERE req.request_id = ?
@@ -408,6 +437,13 @@ class RunRegistryStore:
         status: str,
         result_path: str = "",
         artifacts_manifest_path: str = "",
+        workspace_id: str | None = None,
+        workspace_dir: str | None = None,
+        workspace_namespace: str | None = None,
+        workspace_source_request_id: str | None = None,
+        input_manifest_path: str | None = None,
+        workspace_input_token: str | None = None,
+        workspace_output_token: str | None = None,
     ) -> None:
         await self._database.ensure_initialized()
         created_at = datetime.utcnow().isoformat()
@@ -416,11 +452,28 @@ class RunRegistryStore:
             await conn.execute(
                 """
                 INSERT INTO runs (
-                    run_id, cache_key, status, cancel_requested, result_path, artifacts_manifest_path, created_at
+                    run_id, cache_key, status, cancel_requested, result_path, artifacts_manifest_path,
+                    workspace_id, workspace_dir, workspace_namespace, workspace_source_request_id,
+                    input_manifest_path, workspace_input_token, workspace_output_token, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, cache_key, status, 0, result_path, artifacts_manifest_path, created_at),
+                (
+                    run_id,
+                    cache_key,
+                    status,
+                    0,
+                    result_path,
+                    artifacts_manifest_path,
+                    workspace_id,
+                    workspace_dir,
+                    workspace_namespace,
+                    workspace_source_request_id,
+                    input_manifest_path,
+                    workspace_input_token,
+                    workspace_output_token,
+                    created_at,
+                ),
             )
             await conn.commit()
 
@@ -438,6 +491,37 @@ class RunRegistryStore:
                     "UPDATE runs SET status = ? WHERE run_id = ?",
                     (status, run_id),
                 )
+            await conn.commit()
+
+    async def update_run_workspace_metadata(
+        self,
+        run_id: str,
+        *,
+        result_path: str | None = None,
+        input_manifest_path: str | None = None,
+        workspace_output_token: str | None = None,
+    ) -> None:
+        await self._database.ensure_initialized()
+        assignments: list[str] = []
+        values: list[Any] = []
+        if result_path is not None:
+            assignments.append("result_path = ?")
+            values.append(result_path)
+        if input_manifest_path is not None:
+            assignments.append("input_manifest_path = ?")
+            values.append(input_manifest_path)
+        if workspace_output_token is not None:
+            assignments.append("workspace_output_token = ?")
+            values.append(workspace_output_token)
+        if not assignments:
+            return
+        values.append(run_id)
+        async with self._database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute(
+                f"UPDATE runs SET {', '.join(assignments)} WHERE run_id = ?",
+                tuple(values),
+            )
             await conn.commit()
 
     async def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:

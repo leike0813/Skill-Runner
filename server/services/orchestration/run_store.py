@@ -190,6 +190,13 @@ class RunStore:
         status: str,
         result_path: str = "",
         artifacts_manifest_path: str = "",
+        workspace_id: str | None = None,
+        workspace_dir: str | None = None,
+        workspace_namespace: str | None = None,
+        workspace_source_request_id: str | None = None,
+        input_manifest_path: str | None = None,
+        workspace_input_token: str | None = None,
+        workspace_output_token: str | None = None,
     ) -> None:
         await self._run_registry.create_run(
             run_id=run_id,
@@ -197,10 +204,32 @@ class RunStore:
             status=status,
             result_path=result_path,
             artifacts_manifest_path=artifacts_manifest_path,
+            workspace_id=workspace_id,
+            workspace_dir=workspace_dir,
+            workspace_namespace=workspace_namespace,
+            workspace_source_request_id=workspace_source_request_id,
+            input_manifest_path=input_manifest_path,
+            workspace_input_token=workspace_input_token,
+            workspace_output_token=workspace_output_token,
         )
 
     async def update_run_status(self, run_id: str, status: str, result_path: Optional[str] = None) -> None:
         await self._run_registry.update_run_status(run_id, status, result_path=result_path)
+
+    async def update_run_workspace_metadata(
+        self,
+        run_id: str,
+        *,
+        result_path: str | None = None,
+        input_manifest_path: str | None = None,
+        workspace_output_token: str | None = None,
+    ) -> None:
+        await self._run_registry.update_run_workspace_metadata(
+            run_id,
+            result_path=result_path,
+            input_manifest_path=input_manifest_path,
+            workspace_output_token=workspace_output_token,
+        )
 
     async def set_current_projection(self, request_id: str, projection: Dict[str, Any]) -> None:
         await self._projection_state_store.set_current_projection(request_id, projection)

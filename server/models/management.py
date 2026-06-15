@@ -343,6 +343,9 @@ class ManagementRunConversationState(BaseModel):
     error: Optional[Any] = None
     interactive_auto_reply: Optional[bool] = None
     interactive_reply_timeout_sec: Optional[int] = None
+    workspaceDir: Optional[str] = None
+    resultJsonPath: Optional[str] = None
+    inputManifestPath: Optional[str] = None
 
 
 class ManagementRunListResponse(BaseModel):

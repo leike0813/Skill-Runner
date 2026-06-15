@@ -213,9 +213,19 @@ class EngineExecutionAdapter:
     ) -> None:
         if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
-        audit_dir = run_dir / ".audit"
+        audit_dir_obj = (options or {}).get("__audit_dir")
+        audit_dir = (
+            Path(str(audit_dir_obj))
+            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
+            else run_dir / ".audit"
+        )
         audit_dir.mkdir(parents=True, exist_ok=True)
-        request_input_path = audit_dir / "request_input.json"
+        request_input_obj = (options or {}).get("__input_manifest_path")
+        request_input_path = (
+            Path(str(request_input_obj))
+            if isinstance(request_input_obj, str) and request_input_obj.strip()
+            else audit_dir / "request_input.json"
+        )
         fallback_path = audit_dir / "prompt.1.txt"
         field_name = "rendered_prompt_first_attempt"
         try:
@@ -272,9 +282,19 @@ class EngineExecutionAdapter:
     ) -> None:
         if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
-        audit_dir = run_dir / ".audit"
+        audit_dir_obj = (options or {}).get("__audit_dir")
+        audit_dir = (
+            Path(str(audit_dir_obj))
+            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
+            else run_dir / ".audit"
+        )
         audit_dir.mkdir(parents=True, exist_ok=True)
-        request_input_path = audit_dir / "request_input.json"
+        request_input_obj = (options or {}).get("__input_manifest_path")
+        request_input_path = (
+            Path(str(request_input_obj))
+            if isinstance(request_input_obj, str) and request_input_obj.strip()
+            else audit_dir / "request_input.json"
+        )
         fallback_path = audit_dir / "argv.1.json"
         payload = {
             "spawn_command_original_first_attempt": list(original_command),
@@ -765,7 +785,12 @@ class EngineExecutionAdapter:
         detection_lock = asyncio.Lock()
         attempt_number_obj = options.get("__attempt_number")
         attempt_number = attempt_number_obj if isinstance(attempt_number_obj, int) and attempt_number_obj > 0 else 1
-        audit_dir = run_dir / ".audit"
+        audit_dir_obj = options.get("__audit_dir")
+        audit_dir = (
+            Path(str(audit_dir_obj))
+            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
+            else run_dir / ".audit"
+        )
         audit_dir.mkdir(parents=True, exist_ok=True)
         stdout_log_path = audit_dir / f"stdout.{attempt_number}.log"
         stderr_log_path = audit_dir / f"stderr.{attempt_number}.log"

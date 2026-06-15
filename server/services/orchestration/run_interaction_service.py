@@ -42,6 +42,8 @@ from server.services.orchestration.run_auth_orchestration_service import (
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_store import run_store
+from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.async_compat import maybe_await
 
 logger = logging.getLogger(__name__)
@@ -53,9 +55,25 @@ class RunInteractionService:
         *,
         source_adapter: RunSourceAdapter | None,
         request_id: str,
+        run_store_backend: Any = run_store,
     ) -> tuple[dict[str, Any], Path]:
-        resolved_source = source_adapter or installed_run_source_adapter
-        return await get_request_and_run_dir(resolved_source, request_id)
+        if source_adapter is not None:
+            return await get_request_and_run_dir(source_adapter, request_id)
+        request_record = await maybe_await(run_store_backend.get_request(request_id))
+        if not request_record:
+            raise HTTPException(status_code=404, detail="Request not found")
+        run_id_obj = request_record.get("run_id")
+        if not isinstance(run_id_obj, str) or not run_id_obj:
+            raise HTTPException(status_code=404, detail="Run not found")
+        workspace_dir_obj = request_record.get("workspace_dir")
+        if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
+            workspace_dir = Path(workspace_dir_obj)
+            if workspace_dir.exists():
+                return request_record, workspace_dir
+        run_dir = workspace_manager.get_run_dir(run_id_obj)
+        if run_dir is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return request_record, run_dir
 
     async def get_pending(
         self,
@@ -67,8 +85,14 @@ class RunInteractionService:
         request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
+            run_store_backend=run_store_backend,
         )
-        status, _, _, _ = _read_run_status(run_dir)
+        status, _, _, _ = await _read_run_status_for_request(
+            run_store_backend,
+            request_id,
+            run_dir,
+            request_record,
+        )
         pending_payload = await maybe_await(run_store_backend.get_pending_interaction(request_id))
         pending_auth_method_selection_payload = await maybe_await(
             run_store_backend.get_pending_auth_method_selection(request_id)
@@ -116,10 +140,16 @@ class RunInteractionService:
     ) -> InteractionReplyResponse:
         resolved_source = source_adapter or installed_run_source_adapter
         request_record, run_dir = await self._resolve_request_and_run_dir(
-            source_adapter=resolved_source,
+            source_adapter=source_adapter,
             request_id=request_id,
+            run_store_backend=run_store_backend,
         )
-        status, warnings, _, _ = _read_run_status(run_dir)
+        status, warnings, _, _ = await _read_run_status_for_request(
+            run_store_backend,
+            request_id,
+            run_dir,
+            request_record,
+        )
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
@@ -478,10 +508,16 @@ class RunInteractionService:
         run_store_backend: Any = run_store,
     ) -> InteractionReplyResponse:
         request_record, run_dir = await self._resolve_request_and_run_dir(
-            source_adapter=installed_run_source_adapter,
+            source_adapter=None,
             request_id=request_id,
+            run_store_backend=run_store_backend,
         )
-        status, _, _, _ = _read_run_status(run_dir)
+        status, _, _, _ = await _read_run_status_for_request(
+            run_store_backend,
+            request_id,
+            run_dir,
+            request_record,
+        )
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
@@ -524,6 +560,7 @@ class RunInteractionService:
         request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
+            run_store_backend=run_store_backend,
         )
         run_id_obj = request_record.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
@@ -581,8 +618,18 @@ def _ensure_interactive_mode(request_record: dict[str, Any]) -> None:
         )
 
 
-def _read_run_status(run_dir: Path) -> tuple[RunStatus, list[Any], Any, str]:
-    status_file = run_dir / ".state" / "state.json"
+def _state_file(run_dir: Path, request_record: dict[str, Any] | None = None) -> Path:
+    layout = layout_from_record(request_record or {}, run_dir)
+    return layout.state_path if layout is not None else run_dir / ".state" / "state.json"
+
+
+def _read_run_status(
+    run_dir: Path,
+    request_record: dict[str, Any] | None = None,
+) -> tuple[RunStatus, list[Any], Any, str]:
+    status_file = _state_file(run_dir, request_record)
+    if not status_file.exists() and status_file != run_dir / ".state" / "state.json":
+        status_file = run_dir / ".state" / "state.json"
     current_status = RunStatus.QUEUED
     warnings: list[Any] = []
     error: Any = None
@@ -596,14 +643,42 @@ def _read_run_status(run_dir: Path) -> tuple[RunStatus, list[Any], Any, str]:
     return current_status, warnings, error, updated_at
 
 
+async def _read_run_status_for_request(
+    run_store_backend: Any,
+    request_id: str,
+    run_dir: Path,
+    request_record: dict[str, Any] | None = None,
+) -> tuple[RunStatus, list[Any], Any, str]:
+    file_status = _read_run_status(run_dir, request_record)
+    if file_status[0] in {RunStatus.WAITING_USER, RunStatus.WAITING_AUTH}:
+        return file_status
+    state_payload = await maybe_await(run_store_backend.get_run_state(request_id))
+    if isinstance(state_payload, dict) and isinstance(state_payload.get("status"), str):
+        return _status_tuple_from_payload(state_payload)
+    return file_status
+
+
+def _status_tuple_from_payload(payload: dict[str, Any]) -> tuple[RunStatus, list[Any], Any, str]:
+    current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
+    warnings = payload.get("warnings", [])
+    return (
+        current_status,
+        warnings if isinstance(warnings, list) else [],
+        payload.get("error"),
+        str(payload.get("updated_at") or ""),
+    )
+
+
 def _write_run_status(
     run_dir: Path,
     status: RunStatus,
     warnings: list[Any] | None = None,
     error: Any = None,
     effective_session_timeout_sec: int | None = None,
+    request_record: dict[str, Any] | None = None,
 ) -> None:
-    status_file = run_dir / ".state" / "state.json"
+    status_file = _state_file(run_dir, request_record)
+    status_file.parent.mkdir(parents=True, exist_ok=True)
     existing_timeout = None
     if status_file.exists():
         try:

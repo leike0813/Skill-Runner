@@ -135,6 +135,7 @@ def compute_cache_key(
     inline_input_hash: str = "",
     skill_package_hash: str = "",
     temp_skill_package_hash: str = "",
+    workspace_input_token: str = "",
 ) -> str:
     package_hash = skill_package_hash or skill_fingerprint
     payload = {
@@ -146,5 +147,6 @@ def compute_cache_key(
         "engine_options": engine_options or {},
         "input_manifest_hash": input_manifest_hash,
         "inline_input_hash": inline_input_hash,
+        "workspace_input_token": workspace_input_token or "",
     }
     return _hash_text(_stable_json_dumps(payload))

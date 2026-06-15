@@ -72,8 +72,9 @@ class RunServiceLogMirrorSession:
         max_bytes: int = DEFAULT_MAX_BYTES,
         backup_count: int = DEFAULT_BACKUP_COUNT,
         strict_attempt_match: bool = True,
+        audit_dir: Path | None = None,
     ) -> "RunServiceLogMirrorSession":
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         log_path = audit_dir / f"service.{attempt_number}.log"
 
@@ -114,8 +115,9 @@ class RunServiceLogMirrorSession:
         run_id: str,
         max_bytes: int = DEFAULT_MAX_BYTES,
         backup_count: int = DEFAULT_BACKUP_COUNT,
+        audit_dir: Path | None = None,
     ) -> "RunServiceLogMirrorSession":
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         log_path = audit_dir / "service.run.log"
 
@@ -158,6 +160,7 @@ class RunServiceLogMirrorSession:
         max_bytes: int = DEFAULT_MAX_BYTES,
         backup_count: int = DEFAULT_BACKUP_COUNT,
         strict_attempt_match: bool = True,
+        audit_dir: Path | None = None,
     ) -> "RunServiceLogMirrorSession":
         return cls.open_attempt_scope(
             run_dir=run_dir,
@@ -166,4 +169,5 @@ class RunServiceLogMirrorSession:
             max_bytes=max_bytes,
             backup_count=backup_count,
             strict_attempt_match=strict_attempt_match,
+            audit_dir=audit_dir,
         )

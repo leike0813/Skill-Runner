@@ -239,8 +239,9 @@ class RunAuditService:
         success_source: str | None = None,
         auth_detection: dict[str, Any] | None = None,
         auth_session: dict[str, Any] | None = None,
+        audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         suffix = f".{attempt_number}"
         meta_path = audit_dir / f"meta{suffix}.json"
@@ -449,8 +450,9 @@ class RunAuditService:
         type_name: str,
         data: dict[str, Any],
         engine_name: str | None = None,
+        audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         event_path = audit_dir / f"orchestrator_events.{attempt_number}.jsonl"
         event_seq = self.next_orchestrator_event_seq(event_path)
@@ -523,8 +525,9 @@ class RunAuditService:
         run_dir: Path,
         attempt_number: int,
         record: dict[str, Any],
+        audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         record_path = audit_dir / f"output_repair.{attempt_number}.jsonl"
         with record_path.open("a", encoding="utf-8") as fp:
@@ -564,6 +567,7 @@ class RunAuditService:
         attempt_number: int,
         schema_path: str,
         detail: str,
+        audit_dir: Path | None = None,
     ) -> None:
         self.append_orchestrator_event(
             run_dir=run_dir,
@@ -575,4 +579,5 @@ class RunAuditService:
                 path=schema_path,
                 detail=detail,
             ),
+            audit_dir=audit_dir,
         )

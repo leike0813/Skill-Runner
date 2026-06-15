@@ -54,6 +54,7 @@ from server.services.platform.run_file_filter_service import (
     normalize_relative_path,
     run_file_filter_service,
 )
+from server.runtime.workspace_layout import layout_from_record
 
 
 RUNNING_STATUSES = {"queued", "running"}
@@ -2755,8 +2756,13 @@ class RunObservabilityService:
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise ValueError("Run not found")
         run_dir = self._workspace().get_run_dir(run_id_obj)
-        run_dir_path = run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
-        status_payload = self._read_status_payload(run_dir_path) if run_dir_path.exists() else {}
+        layout = layout_from_record(record, run_dir)
+        run_dir_path = (
+            layout.workspace_dir
+            if layout is not None
+            else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+        )
+        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
         await self._reconcile_waiting_auth_if_needed(request_id, run_status)
         await self._redrive_queued_resume_if_needed(request_id, run_status)
@@ -2764,10 +2770,15 @@ class RunObservabilityService:
         if isinstance(refreshed_record, dict):
             record = refreshed_record
         run_dir = self._workspace().get_run_dir(run_id_obj)
-        run_dir_path = run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
-        status_payload = self._read_status_payload(run_dir_path) if run_dir_path.exists() else {}
+        layout = layout_from_record(record, run_dir)
+        run_dir_path = (
+            layout.workspace_dir
+            if layout is not None
+            else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+        )
+        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
-        file_state = self._build_file_state(run_dir_path)
+        file_state = self._build_file_state(run_dir_path, layout)
         entries = self._list_run_entries(run_dir_path) if run_dir_path.exists() else []
         runtime_options = record.get("runtime_options", {})
         effective_runtime_options = record.get("effective_runtime_options", runtime_options)
@@ -2791,6 +2802,17 @@ class RunObservabilityService:
             "request_id": request_id,
             "run_id": run_id_obj,
             "run_dir": str(run_dir_path),
+            "workspaceDir": str(layout.workspace_dir) if layout is not None else str(run_dir_path),
+            "resultJsonPath": (
+                str(record.get("result_path"))
+                if isinstance(record.get("result_path"), str) and record.get("result_path")
+                else str(layout.result_path) if layout else None
+            ),
+            "inputManifestPath": (
+                str(record.get("run_input_manifest_path") or record.get("input_manifest_path"))
+                if record.get("run_input_manifest_path") or record.get("input_manifest_path")
+                else str(layout.input_manifest_path) if layout else None
+            ),
             "skill_id": record.get("skill_id"),
             "engine": record.get("engine"),
             "model": self._resolve_model_from_row(record),
@@ -2884,9 +2906,14 @@ class RunObservabilityService:
             "stderr": self._tail_file(stderr_path, max_bytes=max_bytes),
         }
 
-    def _read_status_payload(self, run_dir: Path) -> Dict[str, Any]:
-        state_file = run_dir / ".state" / "state.json"
-        if state_file.exists():
+    def _read_status_payload(self, run_dir: Path, layout: Any | None = None) -> Dict[str, Any]:
+        candidates = []
+        if layout is not None:
+            candidates.append(layout.state_path)
+        candidates.append(run_dir / ".state" / "state.json")
+        for state_file in candidates:
+            if not state_file.exists():
+                continue
             try:
                 with open(state_file, "r", encoding="utf-8") as f:
                     payload = json.load(f)
@@ -2905,18 +2932,20 @@ class RunObservabilityService:
             return run_status_obj
         return "queued"
 
-    def _build_file_state(self, run_dir: Path | None) -> Dict[str, Dict[str, Any]]:
+    def _build_file_state(self, run_dir: Path | None, layout: Any | None = None) -> Dict[str, Dict[str, Any]]:
         if not run_dir:
             return {}
         latest_attempt = max(1, self._latest_attempt_number(run_dir))
-        audit_dir = run_dir / AUDIT_DIR_NAME
+        audit_dir = layout.audit_dir if layout is not None else run_dir / AUDIT_DIR_NAME
         targets = {
-            "state": run_dir / ".state" / "state.json",
-            "dispatch": run_dir / ".state" / "dispatch.json",
-            "request_input": run_dir / ".audit" / "request_input.json",
+            "state": layout.state_path if layout is not None else run_dir / ".state" / "state.json",
+            "dispatch": layout.dispatch_path if layout is not None else run_dir / ".state" / "dispatch.json",
+            "request_input": (
+                layout.input_manifest_path if layout is not None else run_dir / ".audit" / "request_input.json"
+            ),
             "stdout": audit_dir / f"stdout.{latest_attempt}.log",
             "stderr": audit_dir / f"stderr.{latest_attempt}.log",
-            "result": run_dir / "result" / "result.json",
+            "result": layout.result_path if layout is not None else run_dir / "result" / "result.json",
             "artifacts_dir": run_dir / "artifacts",
         }
         state: Dict[str, Dict[str, Any]] = {}

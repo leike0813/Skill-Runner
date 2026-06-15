@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from inspect import Parameter, signature
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from typing import cast
 
@@ -481,7 +483,22 @@ class RunAttemptOutcomeService:
             fallback_interaction_id=attempt_number,
         )
 
-        artifacts = inputs.collect_run_artifacts(run_dir)
+        result_path_obj = context.run_options.get("__result_json_path")
+        result_path = (
+            Path(str(result_path_obj))
+            if isinstance(result_path_obj, str) and result_path_obj.strip()
+            else None
+        )
+        collect_signature = signature(inputs.collect_run_artifacts)
+        collect_params = collect_signature.parameters
+        supports_result_path = "result_path" in collect_params or any(
+            param.kind == Parameter.VAR_KEYWORD for param in collect_params.values()
+        )
+        artifacts = (
+            inputs.collect_run_artifacts(run_dir, result_path=result_path)
+            if supports_result_path
+            else inputs.collect_run_artifacts(run_dir)
+        )
         artifact_errors: list[str] = []
         if success_source is not None or (has_structured_output and pending_interaction_candidate is None):
             resolution_result = inputs.resolve_output_artifact_paths(

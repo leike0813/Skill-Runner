@@ -34,6 +34,7 @@ class OptionsPolicy:
         self._validate_interactive_auto_reply(normalized)
         self._validate_timeout_values(normalized)
         self._validate_hard_timeout_seconds(normalized)
+        self._validate_workspace(normalized)
         timeout_resolution = resolve_interactive_reply_timeout(
             normalized,
             default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
@@ -108,6 +109,23 @@ class OptionsPolicy:
             raise ValueError(
                 f"runtime_options.{HARD_TIMEOUT_SECONDS_KEY} must be a positive integer"
             )
+
+    def _validate_workspace(self, runtime_options: Dict[str, Any]) -> None:
+        if "workspace" not in runtime_options:
+            return
+        value = runtime_options.get("workspace")
+        if not isinstance(value, dict):
+            raise ValueError("runtime_options.workspace must be an object")
+        mode = value.get("mode")
+        if mode is None:
+            return
+        if not isinstance(mode, str):
+            raise ValueError("runtime_options.workspace.mode must be a string")
+        if mode not in {"reuse"}:
+            raise ValueError("runtime_options.workspace.mode must be reuse")
+        request_id = value.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("runtime_options.workspace.request_id must be a non-empty string")
 
 
 options_policy = OptionsPolicy()

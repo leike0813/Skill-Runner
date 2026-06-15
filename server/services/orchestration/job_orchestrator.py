@@ -245,7 +245,13 @@ class JobOrchestrator:
             "message": "Canceled by user request",
         }
 
-    def _write_canceled_result(self, run_dir: Optional[Path], error: Dict[str, Any]) -> Optional[Path]:
+    def _write_canceled_result(
+        self,
+        run_dir: Optional[Path],
+        error: Dict[str, Any],
+        *,
+        result_path: Path | None = None,
+    ) -> Optional[Path]:
         if run_dir is None:
             return None
         result_payload: Dict[str, Any] = {
@@ -257,7 +263,7 @@ class JobOrchestrator:
             "error": error,
             "pending_interaction": None,
         }
-        result_path = run_dir / "result" / "result.json"
+        result_path = result_path or run_dir / "result" / "result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(
             json.dumps(result_payload, ensure_ascii=False, indent=2),
@@ -265,7 +271,13 @@ class JobOrchestrator:
         )
         return result_path
 
-    def _write_failed_result(self, run_dir: Optional[Path], error: Dict[str, Any]) -> Optional[Path]:
+    def _write_failed_result(
+        self,
+        run_dir: Optional[Path],
+        error: Dict[str, Any],
+        *,
+        result_path: Path | None = None,
+    ) -> Optional[Path]:
         if run_dir is None:
             return None
         result_payload: Dict[str, Any] = {
@@ -279,7 +291,7 @@ class JobOrchestrator:
             "pending_auth_method_selection": None,
             "pending_auth": None,
         }
-        result_path = run_dir / "result" / "result.json"
+        result_path = result_path or run_dir / "result" / "result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(
             json.dumps(result_payload, ensure_ascii=False, indent=2),

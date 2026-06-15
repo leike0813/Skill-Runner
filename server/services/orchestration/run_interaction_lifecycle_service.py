@@ -30,6 +30,7 @@ from server.runtime.session.statechart import (
 )
 from server.services.platform.async_compat import maybe_await
 from server.services.orchestration.run_projection_service import run_projection_service
+from server.services.orchestration.run_workspace_layout import layout_from_record
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +377,8 @@ class RunInteractionLifecycleService:
         run_dir = workspace_backend.get_run_dir(run_id)
         if run_dir is None:
             return
-        status_file = run_dir / ".state" / "state.json"
+        layout = layout_from_record(request_record, run_dir)
+        status_file = layout.state_path if layout is not None else run_dir / ".state" / "state.json"
         if not status_file.exists():
             return
         payload = json.loads(status_file.read_text(encoding="utf-8"))

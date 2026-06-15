@@ -11,6 +11,7 @@ from server.services.engine_management.engine_policy import apply_engine_policy_
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
+from server.services.orchestration.run_workspace_layout import layout_from_record
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
@@ -213,12 +214,18 @@ class RunAttemptPreparationService:
         if request_id:
             run_options["__request_id"] = request_id
         run_options["__engine_name"] = request.engine_name
+        layout = layout_from_record(request_record or {}, run_dir)
+        if layout is not None:
+            run_options["__audit_dir"] = str(layout.audit_dir)
+            run_options["__input_manifest_path"] = str(layout.input_manifest_path)
+            run_options["__result_json_path"] = str(layout.result_path)
         run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
         if not run_option_fields:
             run_output_schema_service.materialize(
                 skill=skill,
                 execution_mode=execution_mode,
                 run_dir=run_dir,
+                input_manifest_path=layout.input_manifest_path if layout is not None else None,
             )
             run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
         run_options.update(run_option_fields)

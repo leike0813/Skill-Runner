@@ -19,6 +19,7 @@ from server.models import (
 )
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
+from server.runtime.workspace_layout import layout_from_record
 from .run_source_adapter import (
     RunSourceAdapter,
     get_request_and_run_dir,
@@ -66,14 +67,14 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunResultResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
         current_status = _read_status(run_dir).value
         if current_status not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
             raise HTTPException(status_code=409, detail="terminal result not ready")
-        result_path = run_dir / "result" / "result.json"
+        result_path = _resolve_result_path(request_record, run_dir)
         if not result_path.exists():
             raise HTTPException(status_code=404, detail="Run result not found")
 
@@ -87,11 +88,11 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunArtifactsResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        result_path = run_dir / "result" / "result.json"
+        result_path = _resolve_result_path(request_record, run_dir)
         artifacts: list[str] = []
         if result_path.exists():
             payload = json.loads(result_path.read_text(encoding="utf-8"))
@@ -460,6 +461,16 @@ def _read_status(run_dir: Path) -> RunStatus:
         payload = json.loads(state_file.read_text(encoding="utf-8"))
         return RunStatus(payload.get("status", RunStatus.QUEUED.value))
     return RunStatus.QUEUED
+
+
+def _resolve_result_path(request_record: dict[str, Any], run_dir: Path) -> Path:
+    result_path_obj = request_record.get("result_path")
+    if isinstance(result_path_obj, str) and result_path_obj.strip():
+        return Path(result_path_obj)
+    layout = layout_from_record(request_record, run_dir)
+    if layout is not None and layout.result_path.exists():
+        return layout.result_path
+    return run_dir / "result" / "result.json"
 
 
 def _read_log(path: Path) -> str | None:

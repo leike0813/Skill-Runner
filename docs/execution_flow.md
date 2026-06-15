@@ -2,6 +2,10 @@
 
 本文档描述一个典型的 Skill 执行请求在系统内部的流转过程。
 
+## Workspace 复用
+
+串行多 skill 工作流可以在后续 `POST /v1/jobs` 请求中提交 `runtime_options.workspace.mode="reuse"` 和前序成功请求的 `request_id`。后续请求保留独立 logical `run_id`，但复用前序请求的物理 workspace。Runner-owned 文件写入 run record 暴露的 `resultJsonPath` 与 `inputManifestPath`，调用方不应拼接 `result/result.json`。
+
 ## 阶段一：初始化与上传 (Setup & Upload)
 
 1. **Client -> API**: 发送 `POST /v1/jobs` 创建请求。

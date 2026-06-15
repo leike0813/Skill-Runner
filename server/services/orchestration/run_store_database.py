@@ -180,6 +180,13 @@ class RunStoreDatabase:
                     cancel_requested INTEGER NOT NULL DEFAULT 0,
                     result_path TEXT,
                     artifacts_manifest_path TEXT,
+                    workspace_id TEXT,
+                    workspace_dir TEXT,
+                    workspace_namespace TEXT,
+                    workspace_source_request_id TEXT,
+                    input_manifest_path TEXT,
+                    workspace_input_token TEXT,
+                    workspace_output_token TEXT,
                     created_at TEXT NOT NULL
                 )
                 """
@@ -194,6 +201,20 @@ class RunStoreDatabase:
                 await conn.execute("ALTER TABLE runs ADD COLUMN recovered_at TEXT")
             if "recovery_reason" not in run_cols:
                 await conn.execute("ALTER TABLE runs ADD COLUMN recovery_reason TEXT")
+            if "workspace_id" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_id TEXT")
+            if "workspace_dir" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_dir TEXT")
+            if "workspace_namespace" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_namespace TEXT")
+            if "workspace_source_request_id" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_source_request_id TEXT")
+            if "input_manifest_path" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN input_manifest_path TEXT")
+            if "workspace_input_token" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_input_token TEXT")
+            if "workspace_output_token" not in run_cols:
+                await conn.execute("ALTER TABLE runs ADD COLUMN workspace_output_token TEXT")
 
             await conn.execute(
                 """

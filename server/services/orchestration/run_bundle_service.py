@@ -79,15 +79,14 @@ class RunBundleService:
         return candidates
 
     def _contract_driven_non_debug_candidates(self, run_dir: Path) -> list[Path]:
-        result_path = run_dir / "result" / "result.json"
         candidates: list[Path] = []
-        if result_path.exists():
-            candidates.append(result_path)
-        if not result_path.exists():
+        result_candidates = self._result_candidates(run_dir)
+        candidates.extend(result_candidates)
+        if not result_candidates:
             return candidates
 
         try:
-            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            payload = json.loads(result_candidates[-1].read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return candidates
         artifacts_obj = payload.get("artifacts")
@@ -112,6 +111,18 @@ class RunBundleService:
             seen.add(rel)
             unique.append(path)
         return unique
+
+    def _result_candidates(self, run_dir: Path) -> list[Path]:
+        result_root = run_dir / "result"
+        candidates: list[Path] = []
+        legacy = result_root / "result.json"
+        if legacy.exists():
+            candidates.append(legacy)
+        if result_root.exists():
+            for path in sorted(result_root.glob("*/result.json")):
+                if path.is_file():
+                    candidates.append(path)
+        return candidates
 
     def hash_file(self, path: Path) -> str:
         hasher = hashlib.sha256()

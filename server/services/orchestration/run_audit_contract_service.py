@@ -10,13 +10,19 @@ from server.models import AttemptAuditMeta, RunAuditContract
 class RunAuditContractService:
     """Initializes the canonical .audit skeleton for each attempt."""
 
-    def _contract(self, run_dir: Path, attempt_number: int) -> RunAuditContract:
-        audit_dir = run_dir / ".audit"
+    def _contract(
+        self,
+        run_dir: Path,
+        attempt_number: int,
+        audit_dir: Path | None = None,
+        request_input_path: Path | None = None,
+    ) -> RunAuditContract:
+        audit_dir = audit_dir or run_dir / ".audit"
         return RunAuditContract(
             request_id="",
             run_id=run_dir.name,
             attempt_number=attempt_number,
-            request_input_path=str(audit_dir / "request_input.json"),
+            request_input_path=str(request_input_path or audit_dir / "request_input.json"),
             run_service_log_path=str(audit_dir / "service.run.log"),
             meta_path=str(audit_dir / f"meta.{attempt_number}.json"),
             orchestrator_events_path=str(audit_dir / f"orchestrator_events.{attempt_number}.jsonl"),
@@ -41,10 +47,12 @@ class RunAuditContractService:
         *,
         run_dir: Path,
         request_payload: dict[str, object],
+        input_manifest_path: Path | None = None,
     ) -> Path:
         audit_dir = run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
-        path = audit_dir / "request_input.json"
+        path = input_manifest_path or audit_dir / "request_input.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -55,8 +63,9 @@ class RunAuditContractService:
         self,
         *,
         run_dir: Path,
+        audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
         run_service_log_path = audit_dir / "service.run.log"
         if not run_service_log_path.exists():
@@ -71,9 +80,16 @@ class RunAuditContractService:
         status: str,
         engine: str | None = None,
         skill_id: str | None = None,
+        audit_dir: Path | None = None,
+        input_manifest_path: Path | None = None,
     ) -> None:
-        contract = self._contract(run_dir, attempt_number)
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
+        contract = self._contract(
+            run_dir,
+            attempt_number,
+            audit_dir=audit_dir,
+            request_input_path=input_manifest_path,
+        )
         audit_dir.mkdir(parents=True, exist_ok=True)
 
         meta = AttemptAuditMeta(

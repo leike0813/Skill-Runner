@@ -1,6 +1,6 @@
 # Run Artifacts Contract
 
-本文档定义 `data/runs/<run_id>/` 下的 canonical 文件合同。
+本文档定义 run workspace 下的 canonical 文件合同。新 run 的逻辑 `run_id` 与物理 workspace 可以不同；当多个 skill 串行复用同一 workspace 时，runner-owned 文件必须使用 run record 中的实际路径。
 
 ## 1. 目录结构
 
@@ -10,6 +10,8 @@ data/runs/<run_id>/
 │   ├── state.json
 │   └── dispatch.json
 ├── .audit/
+│   ├── <safeSkillId>.<n>/
+│   │   └── input_manifest.json
 │   ├── request_input.json
 │   ├── meta.<attempt>.json
 │   ├── orchestrator_events.<attempt>.jsonl
@@ -30,7 +32,9 @@ data/runs/<run_id>/
 │   ├── parser_diagnostics.<attempt>.jsonl
 │   └── protocol_metrics.<attempt>.json
 ├── result/
-│   └── result.json
+│   ├── <safeSkillId>.<n>/
+│   │   └── result.json
+│   └── result.json  # legacy fallback only
 ├── artifacts/
 ├── bundle/
 ├── uploads/
@@ -82,9 +86,9 @@ dispatch phase 只允许：
 - `worker_claimed`
 - `attempt_materializing`
 
-### 2.3 `result/result.json`
+### 2.3 `resultJsonPath`
 
-唯一 terminal truth。
+新 run 的唯一 terminal truth 是 run record 暴露的 `resultJsonPath`。在复用 workspace 时，该路径形如 `result/<safeSkillId>.<n>/result.json`。
 
 只允许在以下状态存在：
 
@@ -92,7 +96,7 @@ dispatch phase 只允许：
 - `failed`
 - `canceled`
 
-该文件不再承担任何 waiting / running / queued 状态表达职责。
+`result/result.json` 仅作为历史 run 的 legacy fallback，不是新 run 的 latest alias，也不承担 waiting / running / queued 状态表达职责。
 
 ## 3. 审计文件
 

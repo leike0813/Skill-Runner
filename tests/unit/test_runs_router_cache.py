@@ -368,6 +368,108 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
 
 
 @pytest.mark.asyncio
+async def test_create_run_reuses_succeeded_request_workspace(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    source_workspace = Path(config.SYSTEM.RUNS_DIR) / "run-a"
+    (source_workspace / "result" / "demo-skill.1").mkdir(parents=True, exist_ok=True)
+    source_result = source_workspace / "result" / "demo-skill.1" / "result.json"
+    source_result.write_text('{"status":"success","data":{"ok":true}}', encoding="utf-8")
+
+    await store.create_request(
+        request_id="req-a",
+        skill_id=skill.id,
+        engine="gemini",
+        parameter={},
+        engine_options={},
+        runtime_options={},
+        input_data={},
+    )
+    await store.create_run(
+        "run-a",
+        "cache-a",
+        RunStatus.SUCCEEDED,
+        result_path=str(source_result),
+        workspace_id="run-a",
+        workspace_dir=str(source_workspace),
+        workspace_namespace="demo-skill.1",
+        workspace_output_token="token-a",
+    )
+    await store.update_request_run_id("req-a", "run-a")
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"step": 2},
+            model="gemini-2.5-pro",
+            runtime_options={
+                "no_cache": True,
+                "workspace": {"mode": "reuse", "request_id": "req-a"},
+            },
+        ),
+        background_tasks,
+    )
+
+    assert response.cache_hit is False
+    assert response.status == RunStatus.QUEUED
+    assert len(background_tasks.tasks) == 1
+
+    request_record = await store.get_request(response.request_id)
+    assert request_record is not None
+    assert request_record["workspace_id"] == "run-a"
+    assert request_record["workspace_dir"] == str(source_workspace)
+    assert request_record["workspace_namespace"] == "demo-skill.2"
+    assert request_record["workspace_source_request_id"] == "req-a"
+    assert request_record["workspace_input_token"] == "token-a"
+    assert request_record["result_path"] == str(source_workspace / "result" / "demo-skill.2" / "result.json")
+    assert (
+        request_record["run_input_manifest_path"]
+        == str(source_workspace / ".audit" / "demo-skill.2" / "input_manifest.json")
+    )
+
+    b_result_path = Path(str(request_record["result_path"]))
+    b_result_path.parent.mkdir(parents=True, exist_ok=True)
+    b_result_path.write_text('{"status":"success","data":{"ok":true}}', encoding="utf-8")
+    await store.update_run_status(request_record["run_id"], RunStatus.SUCCEEDED, str(b_result_path))
+    await store.update_run_workspace_metadata(
+        request_record["run_id"],
+        result_path=str(b_result_path),
+        workspace_output_token="token-b",
+    )
+
+    c_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"step": 3},
+            model="gemini-2.5-pro",
+            runtime_options={
+                "no_cache": True,
+                "workspace": {"mode": "reuse", "request_id": response.request_id},
+            },
+        ),
+        BackgroundTasks(),
+    )
+    c_record = await store.get_request(c_response.request_id)
+    assert c_record is not None
+    assert c_record["workspace_dir"] == str(source_workspace)
+    assert c_record["workspace_namespace"] == "demo-skill.3"
+    assert c_record["workspace_source_request_id"] == response.request_id
+    assert c_record["workspace_input_token"] == "token-b"
+
+
+@pytest.mark.asyncio
 async def test_create_run_applies_skill_runtime_default_options(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)

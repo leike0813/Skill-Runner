@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, cast
 
 from server.models import (
@@ -58,6 +59,7 @@ from server.services.orchestration.run_attempt_preparation_service import (
 from server.services.orchestration.run_attempt_projection_finalizer import (
     RunAttemptFinalizeInput,
 )
+from server.services.orchestration.run_workspace_layout import layout_from_record
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
@@ -443,6 +445,7 @@ def _build_finalize_input(
     audit_service: Any,
     build_run_bundle: Any,
     options: dict[str, Any],
+    audit_dir: Path | None = None,
 ) -> RunAttemptFinalizeInput:
     resolved_context = context or _build_fallback_attempt_context(
         request=request,
@@ -479,6 +482,7 @@ def _build_finalize_input(
         execution_mode=execution_mode,
         options=options,
         adapter=adapter,
+        audit_dir=audit_dir,
     )
 
 
@@ -586,6 +590,37 @@ class _RunJobLifecyclePipeline:
                     request_id=request_id,
                     is_interactive=is_interactive,
                 )
+            layout = layout_from_record(request_record or {}, run_dir)
+            audit_dir = layout.audit_dir if layout is not None else None
+            input_manifest_path = layout.input_manifest_path if layout is not None else None
+
+            def append_orchestrator_event(**kwargs: Any) -> None:
+                if audit_dir is not None:
+                    kwargs.setdefault("audit_dir", audit_dir)
+                orchestrator.audit_service.append_orchestrator_event(**kwargs)
+
+            def append_output_repair_record(**kwargs: Any) -> None:
+                if audit_dir is not None:
+                    kwargs.setdefault("audit_dir", audit_dir)
+                orchestrator.audit_service.append_output_repair_record(**kwargs)
+
+            def append_internal_schema_warning(**kwargs: Any) -> None:
+                if audit_dir is not None:
+                    kwargs.setdefault("audit_dir", audit_dir)
+                orchestrator.audit_service.append_internal_schema_warning(**kwargs)
+
+            def write_attempt_audit_artifacts(**kwargs: Any) -> None:
+                if audit_dir is not None:
+                    kwargs.setdefault("audit_dir", audit_dir)
+                orchestrator.audit_service.write_attempt_audit_artifacts(**kwargs)
+
+            audit_service = SimpleNamespace(
+                append_orchestrator_event=append_orchestrator_event,
+                append_output_repair_record=append_output_repair_record,
+                append_internal_schema_warning=append_internal_schema_warning,
+                write_attempt_audit_artifacts=write_attempt_audit_artifacts,
+                find_done_markers=orchestrator.audit_service.find_done_markers,
+            )
             resume_ticket_id = (
                 str(options.get("__resume_ticket_id"))
                 if isinstance(options.get("__resume_ticket_id"), str)
@@ -635,8 +670,10 @@ class _RunJobLifecyclePipeline:
                     status=RunStatus.QUEUED.value,
                     engine=engine_name,
                     skill_id=skill_id,
+                    audit_dir=audit_dir,
+                    input_manifest_path=input_manifest_path,
                 )
-            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+            run_audit_contract_service.initialize_run_audit(run_dir=run_dir, audit_dir=audit_dir)
             run_log_mirror_stack = contextlib.ExitStack()
             run_log_mirror_stack.enter_context(
                 bind_run_logging_context(
@@ -650,6 +687,7 @@ class _RunJobLifecyclePipeline:
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_id,
+                    audit_dir=audit_dir,
                 )
             )
             run_log_mirror_stack.enter_context(
@@ -657,6 +695,7 @@ class _RunJobLifecyclePipeline:
                     run_dir=run_dir,
                     run_id=run_id,
                     attempt_number=attempt_number,
+                    audit_dir=audit_dir,
                 )
             )
             logger.info(
@@ -698,7 +737,12 @@ class _RunJobLifecyclePipeline:
             auth_session_meta: Dict[str, Any] | None = None
             if await run_store.is_cancel_requested(run_id):
                 canceled_error = orchestrator._build_canceled_error()
-                result_path = orchestrator._write_canceled_result(run_dir, canceled_error)
+                layout = layout_from_record(request_record or {}, run_dir)
+                result_path = orchestrator._write_canceled_result(
+                    run_dir,
+                    canceled_error,
+                    result_path=layout.result_path if layout is not None else None,
+                )
                 orchestrator._update_status(
                     run_dir,
                     RunStatus.CANCELED,
@@ -750,7 +794,7 @@ class _RunJobLifecyclePipeline:
                     ),
                     run_store_backend=run_store,
                 )
-            orchestrator.audit_service.append_orchestrator_event(
+            append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=attempt_number,
                 category="lifecycle",
@@ -779,7 +823,7 @@ class _RunJobLifecyclePipeline:
                     resolve_custom_provider_model=_resolve_claude_custom_model,
                     run_store_backend=run_store,
                     interaction_service=orchestrator.interaction_service,
-                    audit_service=orchestrator.audit_service,
+                    audit_service=audit_service,
                     resolve_attempt_number=lambda **kwargs: resolve_attempt_number(
                         run_store_backend=run_store,
                         **kwargs,
@@ -811,7 +855,7 @@ class _RunJobLifecyclePipeline:
                         requested_model=custom_provider_model,
                         source_attempt=attempt_number,
                         run_store_backend=run_store,
-                        append_orchestrator_event=orchestrator.audit_service.append_orchestrator_event,
+                        append_orchestrator_event=append_orchestrator_event,
                     )
                     ).model_dump(mode="json")
                     final_status = RunStatus.WAITING_AUTH
@@ -893,9 +937,9 @@ class _RunJobLifecyclePipeline:
                         run_store_backend=run_store,
                         run_output_convergence_service=run_output_convergence_service,
                         auth_orchestration_service=orchestrator.auth_orchestration_service,
-                        audit_service=orchestrator.audit_service,
+                        audit_service=audit_service,
                         schema_validator_backend=schema_validator,
-                        append_orchestrator_event=orchestrator.audit_service.append_orchestrator_event,
+                        append_orchestrator_event=append_orchestrator_event,
                         update_status=orchestrator._update_status,
                         resolve_provider_id=_resolve_provider_id,
                         provider_unresolved_detail=_provider_unresolved_detail,
@@ -1019,12 +1063,13 @@ class _RunJobLifecyclePipeline:
                         fs_before_snapshot=fs_before_snapshot,
                         run_store_backend=run_store,
                         run_projection_service=run_projection_service,
-                        audit_service=orchestrator.audit_service,
+                        audit_service=audit_service,
                         build_run_bundle=orchestrator.build_run_bundle,
                         summarize_terminal_error_message=_summarize_terminal_error_message,
                         execution_mode=execution_mode,
                         options=options,
                         adapter=adapter,
+                        audit_dir=audit_dir,
                     )
                 )
 
@@ -1079,9 +1124,10 @@ class _RunJobLifecyclePipeline:
                             fs_before_snapshot=fs_before_snapshot,
                             run_store_backend=run_store,
                             run_projection_backend=run_projection_service,
-                            audit_service=orchestrator.audit_service,
+                            audit_service=audit_service,
                             build_run_bundle=orchestrator.build_run_bundle,
                             options=options,
+                            audit_dir=audit_dir,
                         ),
                         terminal_event_type_name=OrchestratorEventType.LIFECYCLE_RUN_CANCELED.value,
                         failure_error_type="RunCanceled",
@@ -1143,9 +1189,10 @@ class _RunJobLifecyclePipeline:
                             fs_before_snapshot=fs_before_snapshot,
                             run_store_backend=run_store,
                             run_projection_backend=run_projection_service,
-                            audit_service=orchestrator.audit_service,
+                            audit_service=audit_service,
                             build_run_bundle=orchestrator.build_run_bundle,
                             options=options,
+                            audit_dir=audit_dir,
                         ),
                         emit_error_run_failed_event=True,
                         failure_error_type=type(e).__name__,
@@ -1178,9 +1225,10 @@ class _RunJobLifecyclePipeline:
                             fs_before_snapshot=fs_before_snapshot,
                             run_store_backend=run_store,
                             run_projection_backend=run_projection_service,
-                            audit_service=orchestrator.audit_service,
+                            audit_service=audit_service,
                             build_run_bundle=orchestrator.build_run_bundle,
                             options=options,
+                            audit_dir=audit_dir,
                         ),
                         finished_at=datetime.utcnow(),
                     )

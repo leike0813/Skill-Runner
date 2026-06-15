@@ -39,6 +39,7 @@ class RunAttemptAuditFinalizer:
                 success_source=inputs.outcome.success_source,
                 auth_detection=inputs.outcome.auth_detection_result.as_dict(),
                 auth_session=inputs.outcome.auth_session_meta,
+                audit_dir=inputs.audit_dir,
             )
         except (OSError, RuntimeError, TypeError, ValueError):
             logger.warning(

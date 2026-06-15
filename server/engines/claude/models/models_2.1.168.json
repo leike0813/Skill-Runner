@@ -1,0 +1,40 @@
+{
+  "engine": "claude",
+  "version": "2.1.168",
+  "models": [
+    {
+      "id": "sonnet",
+      "display_name": "Claude Sonnet 4.6",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high"]
+    },
+    {
+      "id": "opus",
+      "display_name": "Claude Opus 4.8",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high", "max"]
+    },
+    {
+      "id": "sonnet[1m]",
+      "display_name": "Claude Sonnet 4.6 (1M context)",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high"]
+    },
+    {
+      "id": "opus[1m]",
+      "display_name": "Claude Opus 4.8 (1M context)",
+      "deprecated": false,
+      "notes": "pinned snapshot",
+      "supported_effort": ["low", "medium", "high", "max"]
+    },
+    {
+      "id": "haiku",
+      "display_name": "Claude Haiku 4.5",
+      "deprecated": false,
+      "notes": "pinned snapshot"
+    }
+  ]
+}

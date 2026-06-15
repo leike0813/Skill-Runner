@@ -9,6 +9,7 @@ from server.services.orchestration.request_upload_staging import (
     write_input_manifest as write_staged_input_manifest,
 )
 from server.models import RunCreateRequest, SkillManifest
+from server.services.orchestration.run_workspace_layout import safe_segment
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +94,30 @@ def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
         config.freeze()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("core-skill", "core-skill"),
+        ("topic.synthesis_finalize", "topic.synthesis_finalize"),
+        ("  literature analysis  ", "literature-analysis"),
+        ("Lin 等 / DETR", "Lin-DETR"),
+        ("***", "skill"),
+        ("", "skill"),
+    ],
+)
+def test_safe_segment_matches_workspace_namespace_rule(raw, expected):
+    assert safe_segment(raw, "skill") == expected
+
+
+def test_allocate_namespace_counts_existing_skill_namespaces(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / "result" / "core-skill.1").mkdir(parents=True)
+    (workspace / "result" / "prepare-skill.1").mkdir(parents=True)
+
+    assert workspace_manager.allocate_namespace(workspace_dir=workspace, skill_id="core-skill") == "core-skill.2"
+    assert workspace_manager.allocate_namespace(workspace_dir=workspace, skill_id="finalize skill") == "finalize-skill.1"
 
 def test_handle_upload(tmp_path):
     from server.config import config

@@ -164,6 +164,11 @@ async def get_request_and_run_dir(
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         raise HTTPException(status_code=404, detail="Run not found")
+    workspace_dir_obj = request_record.get("workspace_dir")
+    if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
+        workspace_dir = Path(workspace_dir_obj)
+        if workspace_dir.exists():
+            return request_record, workspace_dir
     run_dir = _require_workspace().get_run_dir(run_id_obj)
     if not run_dir:
         raise HTTPException(status_code=404, detail="Run not found")

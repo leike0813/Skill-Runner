@@ -28,10 +28,19 @@ class _ArtifactField:
     required: bool
 
 
-def collect_run_artifacts(run_dir: Path) -> List[str]:
-    result_path = run_dir / "result" / "result.json"
-    if result_path.exists():
-        payload = load_resolved_json(result_path)
+def collect_run_artifacts(run_dir: Path, result_path: Path | None = None) -> List[str]:
+    candidate_result_paths: list[Path] = []
+    if result_path is not None:
+        candidate_result_paths.append(result_path)
+    candidate_result_paths.append(run_dir / "result" / "result.json")
+    candidate_result_paths.extend(sorted((run_dir / "result").glob("*/result.json")))
+    seen_result_paths: set[str] = set()
+    for candidate_result_path in candidate_result_paths:
+        candidate_key = candidate_result_path.as_posix()
+        if candidate_key in seen_result_paths or not candidate_result_path.exists():
+            continue
+        seen_result_paths.add(candidate_key)
+        payload = load_resolved_json(candidate_result_path)
         if isinstance(payload, dict):
             artifacts_obj = payload.get("artifacts")
             if isinstance(artifacts_obj, list):
