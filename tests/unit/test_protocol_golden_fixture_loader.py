@@ -37,6 +37,6 @@ def test_protocol_golden_fixture_loader_builds_captured_run_fixture() -> None:
 
 
 def test_protocol_golden_fixture_loader_builds_captured_outcome_fixture() -> None:
-    fixture = load_fixture("literature_digest__claude__outcome")
+    fixture = load_fixture("literature_analysis__claude__outcome")
     assert fixture["source"] == "captured_run"
     assert fixture["expected"]["outcome"]["success_source"] == "done_signal_payload"

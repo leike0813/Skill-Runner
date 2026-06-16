@@ -13,6 +13,7 @@ from server.services.orchestration.run_folder_git_initializer import run_folder_
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
 from server.services.orchestration.run_workspace_layout import layout_from_record
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
+from server.services.platform.runtime_env_options import runtime_env_secret_service
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
 from server.services.skill.skill_registry import skill_registry
@@ -214,6 +215,25 @@ class RunAttemptPreparationService:
         if request_id:
             run_options["__request_id"] = request_id
         run_options["__engine_name"] = request.engine_name
+        effective_runtime_options = (
+            request_record.get("effective_runtime_options")
+            if isinstance(request_record, dict)
+            else None
+        )
+        runtime_options = (
+            effective_runtime_options
+            if isinstance(effective_runtime_options, dict)
+            else request_record.get("runtime_options")
+            if isinstance(request_record, dict)
+            else None
+        )
+        if request_id:
+            runtime_env = runtime_env_secret_service.load_for_runtime_options(
+                request_id=request_id,
+                runtime_options=runtime_options,
+            )
+            if runtime_env:
+                run_options["__runtime_env"] = runtime_env
         layout = layout_from_record(request_record or {}, run_dir)
         if layout is not None:
             run_options["__audit_dir"] = str(layout.audit_dir)

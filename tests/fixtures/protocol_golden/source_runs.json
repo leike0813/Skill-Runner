@@ -82,19 +82,19 @@
       "capture_mode": "whole_run"
     },
     {
-      "source_run_key": "literature_digest__claude",
-      "skill_id": "literature-digest",
+      "source_run_key": "literature_analysis__claude",
+      "skill_id": "literature-analysis",
       "engine": "claude",
       "run_id": "0809f2ae-b8e4-430a-92ce-278608b3be0a",
-      "category": "literature-digest",
+      "category": "literature-analysis",
       "capture_mode": "single_attempt"
     },
     {
-      "source_run_key": "literature_digest__opencode",
-      "skill_id": "literature-digest",
+      "source_run_key": "literature_analysis__opencode",
+      "skill_id": "literature-analysis",
       "engine": "opencode",
       "run_id": "8c873be5-be44-4495-b9e5-90df6dc681f3",
-      "category": "literature-digest",
+      "category": "literature-analysis",
       "capture_mode": "single_attempt"
     },
     {

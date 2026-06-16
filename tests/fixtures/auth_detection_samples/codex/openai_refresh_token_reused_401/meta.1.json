@@ -18,7 +18,7 @@
       "--json",
       "--skip-git-repo-check",
       "--full-auto",
-      "Execute literature-digest."
+      "Execute literature-analysis."
     ],
     "execution_mode": "auto"
   },

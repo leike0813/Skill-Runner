@@ -45,4 +45,7 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     assert env["XDG_DATA_HOME"] == str(profile.agent_home / ".local" / "share")
     assert env["XDG_STATE_HOME"] == str(profile.agent_home / ".local" / "state")
     assert env["XDG_CACHE_HOME"] == str(profile.agent_home / ".cache")
+    assert env["ZOTERO_BRIDGE_PROFILE"] == str(
+        profile.agent_cache_root / "zotero-bridge" / "bridge-profile.json"
+    )
     assert env["OPENCODE_ENABLE_EXA"] == "1"

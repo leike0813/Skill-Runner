@@ -12,6 +12,7 @@ from server.services.orchestration.run_attempt_preparation_service import (
     load_skill_from_run_dir,
 )
 from server.services.orchestration.run_job_lifecycle_service import RunJobRequest
+from server.services.platform.runtime_env_options import RuntimeEnvSecretService
 
 
 def _build_skill(tmp_path: Path) -> SkillManifest:
@@ -181,13 +182,22 @@ async def test_prepare_builds_interactive_context_and_run_options(
         "server.services.orchestration.run_attempt_preparation_service.run_folder_git_initializer.ensure_git_repo",
         lambda _run_dir: None,
     )
+    env_service = RuntimeEnvSecretService(tmp_path / "run_secrets")
+    env_service.save(request_id="req-1", env={"FOO": "secret"})
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.runtime_env_secret_service",
+        env_service,
+    )
     run_store = _FakeRunStore(
         request_record={
             "request_id": "req-1",
             "input": {"paper_path": "uploads/paper.pdf"},
             "parameter": {"topic": "llm"},
             "client_metadata": {"conversation_mode": "session"},
-            "runtime_options": {"execution_mode": "interactive"},
+            "runtime_options": {
+                "execution_mode": "interactive",
+                "env": {"FOO": {"redacted": True}},
+            },
         }
     )
     orchestrator = _FakeOrchestrator(
@@ -245,6 +255,7 @@ async def test_prepare_builds_interactive_context_and_run_options(
     assert context.run_options["__attempt_number"] == 3
     assert context.run_options["__request_id"] == "req-1"
     assert context.run_options["__engine_name"] == "claude"
+    assert context.run_options["__runtime_env"] == {"FOO": "secret"}
     assert context.run_options["__target_output_schema_relpath"] == ".audit/contracts/target_output_schema.json"
     assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
     assert len(orchestrator.inject_resume_calls) == 1

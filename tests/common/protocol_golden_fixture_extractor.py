@@ -27,7 +27,7 @@ _OUTCOME_DATA_KEYS: dict[str, tuple[str, ...]] = {
         "user_worry",
         "advise",
     ),
-    "literature-digest": (
+    "literature-analysis": (
         "digest_path",
         "references_path",
         "citation_analysis_path",

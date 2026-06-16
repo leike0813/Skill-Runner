@@ -10,7 +10,7 @@
   * gemini: 3eca6be9-fdfb-40bc-acdd-607009abbf90
   * opencode: 98fb3727-7f56-4cbc-b6ea-de949cf6b534
   * qwen: 91cd7c34-9b56-4cfa-9602-c43c06834572
-- literature-digest
+- literature-analysis
   * claude: 0809f2ae-b8e4-430a-92ce-278608b3be0a
   * opencode: 8c873be5-be44-4495-b9e5-90df6dc681f3
 - literature-explainer

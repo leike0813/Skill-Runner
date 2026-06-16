@@ -47,6 +47,9 @@ from server.services.engine_management.runtime_profile import (
     RuntimeProfile,
     get_runtime_profile,
 )
+from server.services.engine_management.zotero_bridge_cli_bundle import (
+    ensure_zotero_bridge_managed_plugin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +268,10 @@ class AgentCliManager:
                 self._ensure_json_file(bootstrap_path, bootstrap_payload)
             self._apply_layout_normalizer(engine, bootstrap_path, bootstrap_payload)
             self._ensure_bootstrap_sidecars(engine)
+        ensure_zotero_bridge_managed_plugin(
+            self.profile,
+            engines=self.supported_engines(),
+        )
         self._sync_claude_agent_home_mcp()
 
     def _sync_claude_agent_home_mcp(self) -> None:

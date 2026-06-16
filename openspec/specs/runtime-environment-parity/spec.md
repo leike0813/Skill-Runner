@@ -19,6 +19,11 @@
 - **THEN** 受管前缀与运行时目录 MUST 可由默认非 root 用户访问
 - **AND** 系统 MUST 不要求 root 写入系统级 npm、agent home 或 data 路径
 
+#### Scenario: managed plugin CLI is available on agent PATH
+- **WHEN** managed layout/bootstrap installs a plugin CLI into `<SKILL_RUNNER_NPM_PREFIX>/bin`
+- **THEN** agent subprocess environment MUST prepend the managed bin directory to PATH
+- **AND** the plugin CLI MUST be invocable by command name without a run-local shim
+
 ### Requirement: 系统 MUST 隔离 Agent 配置目录
 系统 MUST 默认使用独立的 Agent Home，避免与宿主用户默认 CLI 配置互相影响。
 

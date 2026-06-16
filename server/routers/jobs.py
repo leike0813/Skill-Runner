@@ -61,6 +61,10 @@ from ..services.platform.cache_key_builder import (
     compute_cache_key,
 )
 from ..services.platform.async_compat import maybe_await
+from ..services.platform.runtime_env_options import (
+    runtime_env_secret_service,
+    sanitize_runtime_options_env,
+)
 from ..services.orchestration.run_store import run_store
 from ..services.orchestration.run_cleanup_manager import run_cleanup_manager
 from ..services.orchestration.run_audit_contract_service import run_audit_contract_service
@@ -96,6 +100,26 @@ import json
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
+
+
+async def _cleanup_unpersisted_runtime_env_secret(request_id: str | None) -> None:
+    if not request_id:
+        return
+    with contextlib.suppress(OSError, RuntimeError, ValueError, TypeError, LookupError):
+        existing = await maybe_await(run_store.get_request(request_id))
+        if existing is None:
+            runtime_env_secret_service.delete(request_id=request_id)
+
+
+def _sanitize_and_collect_runtime_env(
+    *,
+    runtime_options: dict[str, Any],
+    effective_runtime_options: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str] | None]:
+    sanitized_runtime, raw_runtime_env = sanitize_runtime_options_env(runtime_options)
+    sanitized_effective, raw_effective_env = sanitize_runtime_options_env(effective_runtime_options)
+    raw_env = raw_effective_env or raw_runtime_env
+    return sanitized_runtime, sanitized_effective, raw_env
 
 
 async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str, Any] | None:
@@ -198,6 +222,7 @@ def _copy_tree(src: Path, dst: Path) -> None:
 
 @router.post("", response_model=RunCreateResponse)
 async def create_run(request: RunCreateRequest, background_tasks: BackgroundTasks):
+    request_id: str | None = None
     try:
         skill = None
         if request.skill_source == RequestSkillSource.INSTALLED:
@@ -252,6 +277,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             )
 
         request_id = str(uuid.uuid4())
+        runtime_opts, effective_runtime_opts, raw_runtime_env = _sanitize_and_collect_runtime_env(
+            runtime_options=runtime_opts,
+            effective_runtime_options=effective_runtime_opts,
+        )
+        if raw_runtime_env:
+            runtime_env_secret_service.save(request_id=request_id, env=raw_runtime_env)
         inline_input = request.input if isinstance(request.input, dict) else {}
         inline_input_hash = compute_inline_input_hash(inline_input)
         if skill is not None:
@@ -499,10 +530,13 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             status=run_status.status
         )
     except ValueError as e:
+        await _cleanup_unpersisted_runtime_env_secret(request_id)
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
+        await _cleanup_unpersisted_runtime_env_secret(request_id)
         raise
     except Exception as e:
+        await _cleanup_unpersisted_runtime_env_secret(request_id)
         # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
         logger.exception(
             "jobs.create_run failed; returning HTTP 500",
@@ -1004,6 +1038,9 @@ async def upload_file(
                     skill=skill,
                     runtime_options=request_runtime_options,
                 )
+            )
+            effective_runtime_options, _raw_env_unused = sanitize_runtime_options_env(
+                effective_runtime_options
             )
             workspace_reuse = await _resolve_workspace_reuse(effective_runtime_options)
             await run_store.update_request_effective_runtime_options(

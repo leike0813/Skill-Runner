@@ -2,6 +2,8 @@
 
 本文档定义 run workspace 下的 canonical 文件合同。新 run 的逻辑 `run_id` 与物理 workspace 可以不同；当多个 skill 串行复用同一 workspace 时，runner-owned 文件必须使用 run record 中的实际路径。
 
+`runtime_options.env` 的 raw value 不属于 run artifact。普通 artifact、audit、bundle 与 status/detail 响应只允许包含 redacted env projection；raw value 仅保存在 `data/run_secrets/<request_id>.env.json`。
+
 ## 1. 目录结构
 
 ```text

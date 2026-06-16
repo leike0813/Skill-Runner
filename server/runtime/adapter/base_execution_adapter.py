@@ -564,6 +564,20 @@ class EngineExecutionAdapter:
     ) -> None:
         _ = skill, run_dir, options
 
+    def _apply_runtime_env_overlay(
+        self,
+        env: dict[str, str],
+        options: dict[str, Any],
+    ) -> dict[str, str]:
+        runtime_env = options.get("__runtime_env")
+        if not isinstance(runtime_env, dict):
+            return env
+        overlaid = dict(env)
+        for key, value in runtime_env.items():
+            if isinstance(key, str) and isinstance(value, str):
+                overlaid[key] = value
+        return overlaid
+
     async def _execute_process(
         self,
         prompt: str,
@@ -594,7 +608,10 @@ class EngineExecutionAdapter:
                 options=options,
             )
 
-        env = self.build_subprocess_env(os.environ.copy())
+        env = self._apply_runtime_env_overlay(
+            self.build_subprocess_env(os.environ.copy()),
+            options,
+        )
         original_command = [str(token) for token in command]
         normalized_command, normalization_applied, normalization_reason = self._normalize_windows_npm_cmd_shim(
             original_command,

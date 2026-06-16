@@ -2,6 +2,19 @@
 
 本文件定义 Zotero 插件与 Skill Runner 的最小稳定集成协议（后端仓库交付面）。
 
+## 0) Zotero Bridge CLI 托管插件
+
+- 后端仓库通过 submodule 接入 `plugins/zotero-bridge-cli-bundle`。
+- 部署/bootstrap 会从 bundle `manifest.json` 选择当前平台的 `zotero-bridge` CLI，校验 SHA256 后安装到 `SKILL_RUNNER_NPM_PREFIX/bin`。
+- 本地部署沿用 `scripts/skill-runnerctl` 注入的 managed prefix PATH；Docker 部署沿用镜像内 `/opt/cache/skill-runner/npm/bin` PATH。
+- wrapper skill 从 bundle `skills/zotero-bridge-cli/` 同步到各 managed agent home 的全局 skill 目录，不作为 run-local skill 复制。
+- managed profile 写入 `<SKILL_RUNNER_AGENT_CACHE_DIR>/zotero-bridge/bridge-profile.json`，agent subprocess 通过 `ZOTERO_BRIDGE_PROFILE` 定位。
+- profile 不保存固定 endpoint 或 token；请求方通过 `runtime_options.env` 注入 `ZOTERO_BRIDGE_ENDPOINT`、`ZOTERO_BRIDGE_TOKEN`、`ZOTERO_BRIDGE_CONNECTION_MODE`。
+- agent 使用 PATH 上的 `zotero-bridge` 命令访问 Zotero Bridge，不依赖 run-local shim。
+- 不得打印、保存或回显 bearer token。
+
+更多部署细节见 [Zotero Bridge CLI Managed Plugin](zotero_bridge_cli_managed_plugin.md)。
+
 ## 1) 安装与版本来源
 
 - 插件应下载 **GitHub Release 固定版本**资产，不使用主分支快照。

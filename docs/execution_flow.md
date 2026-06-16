@@ -6,6 +6,10 @@
 
 串行多 skill 工作流可以在后续 `POST /v1/jobs` 请求中提交 `runtime_options.workspace.mode="reuse"` 和前序成功请求的 `request_id`。后续请求保留独立 logical `run_id`，但复用前序请求的物理 workspace。Runner-owned 文件写入 run record 暴露的 `resultJsonPath` 与 `inputManifestPath`，调用方不应拼接 `result/result.json`。
 
+## Run-local Env 注入
+
+客户端可以通过 `runtime_options.env` 为单次 run 注入局部环境变量。API 创建请求时会先校验 env，再将 raw value 写入 `data/run_secrets/<request_id>.env.json`，普通 request record 与 input manifest 只保存 redacted 投影。执行 attempt 准备阶段从 vault 重新加载 raw env，作为内部 `__runtime_env` 传给 adapter；adapter 只把它叠加到当前 subprocess env，不修改全局 `os.environ`。
+
 ## 阶段一：初始化与上传 (Setup & Upload)
 
 1. **Client -> API**: 发送 `POST /v1/jobs` 创建请求。
@@ -20,6 +24,7 @@
    - 生成 `input_manifest.json` 并计算 cache key v2。
    - 缓存仅在 `execution_mode=auto` 且 `no_cache!=true` 时启用；`interactive` 不读不写缓存。
    - cache key v2 统一包含 skill id、engine、规范化 `skill_package_hash`、参数、engine options、上传文件清单哈希和 inline input 哈希。
+   - `runtime_options.env` 不进入 cache key；若 env 会影响输出，调用方需设置 `no_cache=true`。
    - 已安装 skill 与临时上传 skill 使用同一套 `skill_package_hash` 口径；临时上传包会缓存未 patch 的规范化 snapshot，默认 30 天滑动 TTL。
    - 命中缓存则将缓存的 run 绑定到 `request_id`；未命中则创建 `data/runs/<run_id>/`。
 
@@ -42,6 +47,7 @@
 
 1. **环境准备**:
    - 将技能的 `assets/` 和 `SKILL.md` 复制/安装到运行目录 `.<engine>/skills/` 下（如 `.gemini/.codex/.qwen/.opencode`），确保执行环境隔离。
+   - 若 request 声明了 `runtime_options.env`，从 secret vault 加载 raw env；vault 缺失时 run 失败并返回 `RUNTIME_ENV_SECRET_MISSING`。
 2. **输入解析 (Input Resolution)**:
    - 遍历 `input` Schema 的所有键。
    - **声明式 file path 解析**: 若请求体 `input.<key>` 为 file 字段提供了 `uploads/` 相对路径，则优先按该路径解析。
@@ -63,6 +69,7 @@
    - Codex: `codex exec --full-auto --skip-git-repo-check --json -p skill-runner <prompt>`（不支持 landlock 时回退 `--yolo`）
    - OpenCode: `opencode run --format json --model <provider/model> <prompt>`
    - 设置工作目录为 `data/runs/<uuid>/`。
+   - 如果存在 run-local env，dependency probe、uv wrapper 与最终 adapter subprocess 使用同一份叠加后的 env。
    > **注意**: 以上命令行示例为简化展示。实际 CLI 参数由各引擎的 `adapter_profile.json` 中 `command_defaults` 驱动，并由引擎 `CommandBuilder` 动态构建。
 2. **Run Folder Trust 生命周期（Codex/Gemini）**:
    - 在真正调用 CLI 前，服务会将本次 `run_dir` 写入全局 trust 配置。

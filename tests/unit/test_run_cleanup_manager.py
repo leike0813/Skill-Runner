@@ -9,6 +9,7 @@ from server.services.orchestration.run_cleanup_manager import RunCleanupManager
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.process_lease_store import process_lease_store
+from server.services.platform.runtime_env_options import runtime_env_secret_service
 from server.models import RunCreateRequest, RunStatus, SkillManifest
 
 
@@ -79,6 +80,8 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
             runtime_options={}
         )
         await store.update_request_run_id(request_id, run_id)
+    runtime_env_secret_service.save(request_id="request-1", env={"FOO": "secret"})
+    runtime_env_secret_service.save(request_id="request-2", env={"BAR": "secret"})
 
     old_retention = config.SYSTEM.RUN_RETENTION_DAYS
     config.defrost()
@@ -104,6 +107,8 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
     assert run_running.run_id in remaining
     assert run_old.run_id not in remaining
     assert run_failed.run_id not in remaining
+    assert not (Path(config.SYSTEM.DATA_DIR) / "run_secrets" / "request-1.env.json").exists()
+    assert not (Path(config.SYSTEM.DATA_DIR) / "run_secrets" / "request-2.env.json").exists()
 
 
 @pytest.mark.asyncio
@@ -249,10 +254,12 @@ async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs
         runtime_options={}
     )
     await store.update_request_run_id(request_id, run_response.run_id)
+    runtime_env_secret_service.save(request_id=request_id, env={"FOO": "secret"})
 
     counts = await manager.clear_all()
     assert counts["runs"] >= 1
     assert counts["requests"] >= 1
+    assert not (Path(config.SYSTEM.DATA_DIR) / "run_secrets").exists()
 
     second_counts = await manager.clear_all()
     assert second_counts["runs"] == 0

@@ -7,6 +7,9 @@ from typing import Dict, Iterable
 
 from server.config import config
 
+ZOTERO_BRIDGE_PROFILE_ENV = "ZOTERO_BRIDGE_PROFILE"
+ZOTERO_BRIDGE_PROFILE_RELATIVE_PATH = Path("zotero-bridge") / "bridge-profile.json"
+
 
 def _is_container_runtime() -> bool:
     if os.path.exists("/.dockerenv"):
@@ -89,6 +92,10 @@ class RuntimeProfile:
         for target in targets:
             target.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def zotero_bridge_profile_path(self) -> Path:
+        return self.agent_cache_root / ZOTERO_BRIDGE_PROFILE_RELATIVE_PATH
+
     def build_subprocess_env(self, base_env: Dict[str, str] | None = None) -> Dict[str, str]:
         env: Dict[str, str] = dict(base_env or os.environ)
         env["SKILL_RUNNER_RUNTIME_MODE"] = self.mode
@@ -116,6 +123,7 @@ class RuntimeProfile:
         existing_path = env.get("PATH", "")
         prepend = os.pathsep.join(str(path) for path in self.managed_bin_dirs)
         env["PATH"] = f"{prepend}{os.pathsep}{existing_path}" if existing_path else prepend
+        env.setdefault(ZOTERO_BRIDGE_PROFILE_ENV, str(self.zotero_bridge_profile_path))
         forced_env = config.SYSTEM.RUNTIME_ENV.FORCED
         for key in forced_env:
             value = forced_env[key]

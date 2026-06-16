@@ -112,7 +112,7 @@ def test_qwen_parse_runtime_stream_extracts_run_handle_process_events_and_turn_m
     stdout_raw = (
         b'{"type":"system","subtype":"init","session_id":"session-qwen-live"}\n'
         b'{"type":"assistant","message":{"id":"msg-think","content":[{"type":"thinking","thinking":"draft plan"}]}}\n'
-        b'{"type":"assistant","message":{"id":"msg-skill","content":[{"type":"tool_use","id":"toolu_skill","name":"skill","input":{"skill":"literature-digest"}}]}}\n'
+        b'{"type":"assistant","message":{"id":"msg-skill","content":[{"type":"tool_use","id":"toolu_skill","name":"skill","input":{"skill":"literature-analysis"}}]}}\n'
         b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill","is_error":false}]}}\n'
         b'{"type":"assistant","message":{"id":"msg-bash","content":[{"type":"tool_use","id":"toolu_bash","name":"run_shell_command","input":{"command":"pwd","description":"Print cwd"}}]}}\n'
         b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"/tmp/run","is_error":false}]}}\n'
@@ -148,7 +148,7 @@ def test_qwen_parse_runtime_stream_extracts_run_handle_process_events_and_turn_m
         "command_execution",
     ]
     assert process_events[0]["text"] == "draft plan"
-    assert process_events[1]["summary"] == "literature-digest"
+    assert process_events[1]["summary"] == "literature-analysis"
     assert process_events[2]["details"]["item_type"] == "tool_result"
     assert process_events[3]["summary"] == "pwd"
     assert process_events[4]["details"]["is_error"] is False

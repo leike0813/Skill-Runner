@@ -17,7 +17,7 @@ from server.services.orchestration.run_skill_materialization_service import (
 from server.services.skill.skill_registry import skill_registry
 
 
-SUPPORTED_SKILLS = ("literature-digest", "literature-explainer")
+SUPPORTED_SKILLS = ("literature-analysis", "literature-explainer")
 SUPPORTED_VIEWS = ("injected", "full")
 
 

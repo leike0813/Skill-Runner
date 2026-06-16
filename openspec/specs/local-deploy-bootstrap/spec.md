@@ -44,6 +44,12 @@
 - **THEN** 服务启动后读取同一组 data/cache/agent_home 路径
 - **AND** 不出现模式错配导致的权限错误
 
+#### Scenario: Zotero Bridge uses the deployment managed prefix
+- **WHEN** 本地或 Docker bootstrap 初始化 managed layout
+- **THEN** Zotero Bridge CLI 被安装到当前 `SKILL_RUNNER_NPM_PREFIX` 对应的 bin 目录
+- **AND** wrapper skill 被安装到当前 `SKILL_RUNNER_AGENT_HOME` 下的各 agent 全局 skill 目录
+- **AND** managed profile 被安装到当前 `SKILL_RUNNER_AGENT_CACHE_DIR`
+
 ### Requirement: 部署脚本 MUST 输出可诊断错误
 部署脚本 MUST 在依赖缺失或权限不足时输出可执行的修复指引。
 

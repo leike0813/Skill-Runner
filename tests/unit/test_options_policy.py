@@ -112,3 +112,34 @@ def test_hard_timeout_seconds_must_be_positive_integer(value):
         ValueError, match="runtime_options.hard_timeout_seconds must be a positive integer"
     ):
         policy.validate_runtime_options({"hard_timeout_seconds": value})
+
+
+def test_runtime_env_allowed_and_preserved_as_local_option():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options({"env": {"FOO": "bar", "_X": ""}})
+    assert runtime_opts["env"] == {"FOO": "bar", "_X": ""}
+
+
+def test_runtime_env_redacted_projection_allowed_for_persisted_options():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options({"env": {"FOO": {"redacted": True}}})
+    assert runtime_opts["env"] == {"FOO": {"redacted": True}}
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        "bad",
+        {"lower": "value"},
+        {"1BAD": "value"},
+        {"PATH": "value"},
+        {"PYTHONPATH": "value"},
+        {"FOO": 123},
+        {"FOO": "x" * 8193},
+        {f"FOO_{idx}": "x" for idx in range(65)},
+    ],
+)
+def test_runtime_env_invalid_values_rejected(env):
+    policy = OptionsPolicy()
+    with pytest.raises(ValueError):
+        policy.validate_runtime_options({"env": env})

@@ -249,8 +249,8 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
     parsed = adapter.parse_runtime_stream(
         stdout_raw=(
             b'{"type":"system","subtype":"init","session_id":"e46bbf28-de7c-4ec1-9c9f-6fb45495268e"}\n'
-            b'{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"starting"},{"name":"Skill","input":{"skill":"literature-digest"},"id":"toolu_skill","type":"tool_use"}]}}\n'
-            b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill: literature-digest"}]},"tool_use_result":{"success":true,"commandName":"literature-digest"}}\n'
+            b'{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"starting"},{"name":"Skill","input":{"skill":"literature-analysis"},"id":"toolu_skill","type":"tool_use"}]}}\n'
+            b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill: literature-analysis"}]},"tool_use_result":{"success":true,"commandName":"literature-analysis"}}\n'
             b'{"type":"assistant","message":{"content":[{"name":"Bash","input":{"command":"pwd","description":"Print cwd"},"id":"toolu_bash","type":"tool_use"}]}}\n'
             b'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"/tmp/run","is_error":false}]},"tool_use_result":{"stdout":"/tmp/run","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false}}\n'
             b'{"type":"assistant","message":{"content":[{"name":"Bash","input":{"command":"python missing.py","description":"Failing command"},"id":"toolu_fail","type":"tool_use"}]}}\n'
@@ -288,7 +288,7 @@ def test_claude_runtime_stream_extracts_run_handle_and_semantic_process_events()
     assert process_events[0]["text"] == "hidden"
     assert parsed.get("raw_rows") == []
     assert process_events[1]["classification"] == "tool_call"
-    assert process_events[1]["summary"] == "literature-digest"
+    assert process_events[1]["summary"] == "literature-analysis"
     assert process_events[2]["classification"] == "tool_call"
     assert process_events[2]["details"]["item_type"] == "tool_result"
     assert process_events[3]["classification"] == "command_execution"

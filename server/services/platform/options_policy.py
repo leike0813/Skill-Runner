@@ -9,6 +9,7 @@ from server.runtime.session.timeout import (
     INTERACTIVE_REPLY_TIMEOUT_KEY,
     resolve_interactive_reply_timeout,
 )
+from server.services.platform.runtime_env_options import validate_runtime_env
 
 HARD_TIMEOUT_SECONDS_KEY = "hard_timeout_seconds"
 
@@ -35,6 +36,7 @@ class OptionsPolicy:
         self._validate_timeout_values(normalized)
         self._validate_hard_timeout_seconds(normalized)
         self._validate_workspace(normalized)
+        self._validate_env(normalized)
         timeout_resolution = resolve_interactive_reply_timeout(
             normalized,
             default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
@@ -126,6 +128,11 @@ class OptionsPolicy:
         request_id = value.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():
             raise ValueError("runtime_options.workspace.request_id must be a non-empty string")
+
+    def _validate_env(self, runtime_options: Dict[str, Any]) -> None:
+        if "env" not in runtime_options:
+            return
+        validate_runtime_env(runtime_options.get("env"))
 
 
 options_policy = OptionsPolicy()

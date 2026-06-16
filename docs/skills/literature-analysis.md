@@ -1,10 +1,10 @@
-# literature-digest 使用说明
+# literature-analysis 使用说明
 
-本文档说明如何通过 Skill Runner 调用 `literature-digest` skill。
+本文档说明如何通过 Skill Runner 调用 `literature-analysis` skill。
 
 ## 支持引擎
 
-`literature-digest` 仅允许以下引擎：
+`literature-analysis` 仅允许以下引擎：
 - `gemini`
 - `codex`
 - `qwen`
@@ -26,7 +26,7 @@
 ```json
 POST /v1/jobs
 {
-  "skill_id": "literature-digest",
+  "skill_id": "literature-analysis",
   "engine": "gemini",
   "parameter": {
     "language": "zh-CN"

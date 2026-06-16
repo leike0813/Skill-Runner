@@ -1063,7 +1063,7 @@ async def test_live_runtime_emitter_emits_qwen_process_events_and_single_final(t
     payload = (
         '{"type":"system","subtype":"init","session_id":"session-qwen-live"}\n'
         '{"type":"assistant","message":{"id":"msg-think","content":[{"type":"thinking","thinking":"draft plan"}]}}\n'
-        '{"type":"assistant","message":{"id":"msg-skill","content":[{"type":"tool_use","id":"toolu_skill","name":"skill","input":{"skill":"literature-digest"}}]}}\n'
+        '{"type":"assistant","message":{"id":"msg-skill","content":[{"type":"tool_use","id":"toolu_skill","name":"skill","input":{"skill":"literature-analysis"}}]}}\n'
         '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill","is_error":false}]}}\n'
         '{"type":"assistant","message":{"id":"msg-bash","content":[{"type":"tool_use","id":"toolu_bash","name":"run_shell_command","input":{"command":"pwd"}}]}}\n'
         '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"/tmp/run","is_error":false}]}}\n'

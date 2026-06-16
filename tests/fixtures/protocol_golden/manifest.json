@@ -156,29 +156,29 @@
       "source": "captured_run"
     },
     {
-      "fixture_id": "literature_digest__claude__protocol",
-      "source_run_key": "literature_digest__claude",
+      "fixture_id": "literature_analysis__claude__protocol",
+      "source_run_key": "literature_analysis__claude",
       "layer": "protocol_core",
       "engine": "claude",
       "source": "captured_run"
     },
     {
-      "fixture_id": "literature_digest__claude__outcome",
-      "source_run_key": "literature_digest__claude",
+      "fixture_id": "literature_analysis__claude__outcome",
+      "source_run_key": "literature_analysis__claude",
       "layer": "outcome_core",
       "engine": "claude",
       "source": "captured_run"
     },
     {
-      "fixture_id": "literature_digest__opencode__protocol",
-      "source_run_key": "literature_digest__opencode",
+      "fixture_id": "literature_analysis__opencode__protocol",
+      "source_run_key": "literature_analysis__opencode",
       "layer": "protocol_core",
       "engine": "opencode",
       "source": "captured_run"
     },
     {
-      "fixture_id": "literature_digest__opencode__outcome",
-      "source_run_key": "literature_digest__opencode",
+      "fixture_id": "literature_analysis__opencode__outcome",
+      "source_run_key": "literature_analysis__opencode",
       "layer": "outcome_core",
       "engine": "opencode",
       "source": "captured_run"

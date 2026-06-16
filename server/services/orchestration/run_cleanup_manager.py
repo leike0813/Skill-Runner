@@ -8,6 +8,7 @@ from server.services.orchestration.run_store import run_store
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.orchestration.run_folder_trust_manager import run_folder_trust_manager
 from server.services.platform.process_lease_store import process_lease_store
+from server.services.platform.runtime_env_options import runtime_env_secret_service
 
 
 class RunCleanupManager:
@@ -43,6 +44,7 @@ class RunCleanupManager:
         for row in candidates:
             run_id = row["run_id"]
             request_ids = await run_store.delete_run_records(run_id)
+            runtime_env_secret_service.delete_many(request_ids)
             deleted_requests += len(request_ids)
             workspace_manager.delete_run_dir(run_id)
             deleted_runs += 1
@@ -58,6 +60,7 @@ class RunCleanupManager:
     async def clear_all(self) -> dict:
         counts = await run_store.clear_all()
         workspace_manager.purge_runs_dir()
+        runtime_env_secret_service.clear_all()
         return counts
 
     async def cleanup_stale_trust_entries(self) -> None:

@@ -13,8 +13,8 @@ policy:
     pass: 0
     loop_control: 0
     return: 0
-    log: 17
-    other: 0
+    log: 16
+    other: 1
 baseline:
   server/engines/common/callbacks/server_base.py:
     total: 1
@@ -28,8 +28,8 @@ baseline:
     pass: 0
     loop_control: 0
     return: 0
-    log: 3
-    other: 0
+    log: 2
+    other: 1
   server/routers/management.py:
     total: 2
     pass: 0

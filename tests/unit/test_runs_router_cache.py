@@ -25,6 +25,7 @@ from server.services.platform.cache_key_builder import (
 )
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
+from server.services.platform.runtime_env_options import runtime_env_secret_service
 
 
 def _normalized_engine_options(*, engine: str, model: str) -> dict[str, Any]:
@@ -365,6 +366,56 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
     request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_run_runtime_env_is_redacted_and_not_in_cache_key(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    monkeypatch.setattr(jobs_router, "run_store", store)
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    first = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"env": {"FOO": "secret-a"}},
+        ),
+        BackgroundTasks(),
+    )
+    second = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="gemini",
+            parameter={"a": 1},
+            model="gemini-2.5-pro",
+            runtime_options={"env": {"FOO": "secret-b"}},
+        ),
+        BackgroundTasks(),
+    )
+
+    first_record = await store.get_request(first.request_id)
+    second_record = await store.get_request(second.request_id)
+    assert first_record is not None
+    assert second_record is not None
+    assert first_record["cache_key"] == second_record["cache_key"]
+    assert first_record["runtime_options"]["env"] == {"FOO": {"redacted": True}}
+    assert first_record["effective_runtime_options"]["env"] == {"FOO": {"redacted": True}}
+    assert runtime_env_secret_service.load(request_id=first.request_id) == {"FOO": "secret-a"}
+
+    audit_path = Path(first_record["input_manifest_path"])
+    audit_payload = audit_path.read_text(encoding="utf-8")
+    record_payload = json.dumps(first_record, sort_keys=True)
+    assert "secret-a" not in audit_payload
+    assert "secret-a" not in record_payload
 
 
 @pytest.mark.asyncio

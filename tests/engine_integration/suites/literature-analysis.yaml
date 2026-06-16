@@ -1,7 +1,7 @@
-skill_id: "literature-digest"
+skill_id: "literature-analysis"
 cases:
   - name: "Full Paper Digest"
-    description: "Verifies that the literature-digest skill correctly processes a full markdown paper and produces a digest and references."
+    description: "Verifies that the literature-analysis skill correctly processes a full markdown paper and produces a digest and references."
     inputs:
       md_path: "example_full.md"
     parameters:

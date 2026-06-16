@@ -58,6 +58,7 @@ from server.services.orchestration.run_attempt_audit_finalizer import (
     RunAttemptAuditFinalizer,
 )
 from server.services.orchestration.run_projection_service import run_projection_service
+from server.services.platform.runtime_env_options import RUNTIME_ENV_SECRET_MISSING
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
 )
@@ -512,6 +513,7 @@ class JobOrchestrator:
             InteractiveErrorCode.SESSION_RESUME_FAILED.value,
             InteractiveErrorCode.ORCHESTRATOR_RESTART_INTERRUPTED.value,
             InteractiveErrorCode.PROTOCOL_SCHEMA_VIOLATION.value,
+            RUNTIME_ENV_SECRET_MISSING,
         ):
             if text.startswith(code):
                 return {"code": code, "message": text}
