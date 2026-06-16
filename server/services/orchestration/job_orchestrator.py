@@ -342,8 +342,8 @@ class JobOrchestrator:
         except OSError:
             logger.exception("Failed to update latest_run_id")
 
-    def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
-        return self.bundle_service.build_run_bundle(run_dir=run_dir, debug=debug)
+    def build_run_bundle(self, run_dir: Path, debug: bool = False, **kwargs: Any) -> str:
+        return self.bundle_service.build_run_bundle(run_dir=run_dir, debug=debug, **kwargs)
 
     def _resolve_hard_timeout_seconds(self, options: Dict[str, Any]) -> int:
         default_timeout = int(config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS)

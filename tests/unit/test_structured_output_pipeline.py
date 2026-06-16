@@ -198,6 +198,35 @@ def test_codex_compat_translation_materializes_engine_specific_artifacts(tmp_pat
     assert "\n\n\n#### Final Branch Example" not in summary
 
 
+def test_codex_compat_translation_uses_canonical_schema_directory(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    source_relpath = _write_canonical_interactive_schema(run_dir)
+    namespaced_relpath = ".audit/demo-skill.1/contracts/target_output_schema.json"
+    namespaced_path = run_dir / namespaced_relpath
+    namespaced_path.parent.mkdir(parents=True, exist_ok=True)
+    namespaced_path.write_text(
+        (run_dir / source_relpath).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (run_dir / source_relpath).unlink()
+
+    artifacts = structured_output_pipeline.resolve_artifacts(
+        engine_name="codex",
+        run_dir=run_dir,
+        options={
+            "execution_mode": "interactive",
+            "__target_output_schema_relpath": namespaced_relpath,
+        },
+    )
+
+    expected_compat_relpath = ".audit/demo-skill.1/contracts/target_output_schema.codex_compatible.json"
+    assert artifacts.canonical_schema_relpath == namespaced_relpath
+    assert artifacts.effective_schema_relpath == expected_compat_relpath
+    assert artifacts.effective_schema_path == run_dir / expected_compat_relpath
+    assert artifacts.effective_schema_path.exists()
+    assert not (run_dir / ".audit" / "contracts" / "target_output_schema.codex_compatible.json").exists()
+
+
 def test_codex_compat_translation_handles_interactive_object_union_final_schema(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     relpath = _write_canonical_interactive_object_union_schema(run_dir)

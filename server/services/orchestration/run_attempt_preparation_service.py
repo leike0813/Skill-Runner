@@ -236,15 +236,23 @@ class RunAttemptPreparationService:
             run_options["__audit_dir"] = str(layout.audit_dir)
             run_options["__input_manifest_path"] = str(layout.input_manifest_path)
             run_options["__result_json_path"] = str(layout.result_path)
-        run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
+        audit_dir = layout.audit_dir if layout is not None else None
+        run_option_fields = run_output_schema_service.build_run_option_fields(
+            run_dir=run_dir,
+            audit_dir=audit_dir,
+        )
         if not run_option_fields:
             run_output_schema_service.materialize(
                 skill=skill,
                 execution_mode=execution_mode,
                 run_dir=run_dir,
+                audit_dir=audit_dir,
                 input_manifest_path=layout.input_manifest_path if layout is not None else None,
             )
-            run_option_fields = run_output_schema_service.build_run_option_fields(run_dir=run_dir)
+            run_option_fields = run_output_schema_service.build_run_option_fields(
+                run_dir=run_dir,
+                audit_dir=audit_dir,
+            )
         run_options.update(run_option_fields)
         if is_interactive and request_id and interactive_profile:
             await inject_interactive_resume_context(

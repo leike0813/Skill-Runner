@@ -494,7 +494,7 @@ class RunAuditService:
                 attempt_number=attempt_number,
                 ts=datetime.utcnow(),
             )
-            fcmp_event_publisher.publish(run_dir=run_dir, event=event)
+            fcmp_event_publisher.publish(run_dir=run_dir, event=event, audit_dir=audit_dir)
 
     def _resolve_orchestrator_event_engine(
         self,

@@ -291,7 +291,16 @@ class StructuredOutputPipeline:
             canonical_schema=canonical_schema,
             execution_mode=execution_mode,
         )
-        compat_schema_relpath = ".audit/contracts/target_output_schema.codex_compatible.json"
+        canonical_relpath = (
+            canonical_schema_path.relative_to(run_dir).as_posix()
+            if canonical_schema_relpath is None
+            else canonical_schema_relpath
+        )
+        compat_schema_relpath = str(
+            Path(canonical_relpath)
+            .with_name("target_output_schema.codex_compatible.json")
+            .as_posix()
+        )
         compat_schema_path = run_dir / compat_schema_relpath
         compat_schema_path.parent.mkdir(parents=True, exist_ok=True)
         compat_prompt_contract_markdown = self._build_codex_compat_prompt_contract_markdown(

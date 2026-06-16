@@ -447,7 +447,10 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_record: dict[str, Any] | None = await maybe_await(
             run_store.get_request(request_id)
         )
-        run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+        run_audit_contract_service.initialize_run_audit(
+            run_dir=run_dir,
+            audit_dir=layout.audit_dir if layout is not None else None,
+        )
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -460,6 +463,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_status.run_id,
+                    audit_dir=layout.audit_dir if layout is not None else None,
                 )
             )
             logger.info(
@@ -494,6 +498,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                     if collect_skill_run_feedback and layout is not None
                     else None
                 ),
+                audit_dir=layout.audit_dir if layout is not None else None,
+                input_manifest_path=layout.input_manifest_path if layout is not None else None,
             )
             await run_state_service.initialize_queued_state(
                 run_dir=run_dir,
@@ -1335,6 +1341,9 @@ async def upload_file(
                     run_status.run_id,
                     status=RunStatus.QUEUED.value,
                 )
+                request_record = await maybe_await(run_store.get_request(request_id))
+                if not isinstance(request_record, dict):
+                    raise HTTPException(status_code=500, detail="Request record not found")
                 log_event(
                     logger,
                     event="upload.request_run.bound",
@@ -1345,7 +1354,10 @@ async def upload_file(
                 )
             finally:
                 shutil.rmtree(stage_root, ignore_errors=True)
-            run_audit_contract_service.initialize_run_audit(run_dir=run_dir)
+            run_audit_contract_service.initialize_run_audit(
+                run_dir=run_dir,
+                audit_dir=layout.audit_dir if layout is not None else None,
+            )
             effective_execution_mode_obj = effective_runtime_options.get(
                 "execution_mode",
                 runtime_options.get("execution_mode", ExecutionMode.AUTO.value),
@@ -1368,6 +1380,7 @@ async def upload_file(
                     RunServiceLogMirrorSession.open_run_scope(
                         run_dir=run_dir,
                         run_id=run_status.run_id,
+                        audit_dir=layout.audit_dir if layout is not None else None,
                     )
                 )
                 log_event(
@@ -1407,6 +1420,8 @@ async def upload_file(
                         source=RunLocalSkillSource.TEMP_UPLOAD,
                         collect_skill_run_feedback=collect_skill_run_feedback,
                         feedback_path=feedback_path,
+                        audit_dir=layout.audit_dir if layout is not None else None,
+                        input_manifest_path=layout.input_manifest_path if layout is not None else None,
                     )
                 else:
                     run_folder_bootstrapper.materialize_skill(
@@ -1417,6 +1432,8 @@ async def upload_file(
                         source=RunLocalSkillSource.INSTALLED,
                         collect_skill_run_feedback=collect_skill_run_feedback,
                         feedback_path=feedback_path,
+                        audit_dir=layout.audit_dir if layout is not None else None,
+                        input_manifest_path=layout.input_manifest_path if layout is not None else None,
                     )
                 await run_state_service.initialize_queued_state(
                     run_dir=run_dir,

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from server.models import RunStatus
 
 
 class JobControlPort(Protocol):
-    def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
+    def build_run_bundle(self, run_dir: Path, debug: bool = False, **kwargs: Any) -> str:
         ...
 
     async def cancel_run(

@@ -289,3 +289,44 @@ async def test_capture_process_output_quarantines_unrepairable_overflow_into_sid
     raw_sidecar_text = raw_sidecar_path.read_text(encoding="utf-8")
     assert raw_sidecar_text == ("X" * 5000) + "\n"
     assert stdout_payload["raw_relpath"] == overflow_index["raw_relpath"]
+
+
+@pytest.mark.asyncio
+async def test_capture_process_output_writes_overflow_sidecar_to_namespaced_audit_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-io-chunks-overflow-namespaced"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    namespaced_audit_dir = run_dir / ".audit" / "demo-skill.1"
+    adapter = EngineExecutionAdapter()
+
+    proc = await asyncio.create_subprocess_exec(
+        "python",
+        "-c",
+        "import sys; sys.stdout.write('Y'*5000 + '\\n')",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    result = await adapter._capture_process_output(  # noqa: SLF001
+        proc=proc,
+        run_dir=run_dir,
+        options={
+            "__attempt_number": 1,
+            "__engine_name": "claude",
+            "__audit_dir": str(namespaced_audit_dir),
+        },
+        prefix="Test",
+        live_runtime_emitter=None,
+    )
+
+    assert result.exit_code == 0
+    overflow_index_path = namespaced_audit_dir / "overflow_index.1.jsonl"
+    assert overflow_index_path.exists()
+    assert not (run_dir / ".audit" / "overflow_index.1.jsonl").exists()
+    overflow_index_rows = [
+        json.loads(line)
+        for line in overflow_index_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(overflow_index_rows) == 1
+    raw_sidecar_path = run_dir / overflow_index_rows[0]["raw_relpath"]
+    assert raw_sidecar_path.exists()
+    assert raw_sidecar_path.is_relative_to(namespaced_audit_dir)

@@ -31,9 +31,10 @@ TERMINAL_STATUSES = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELED}
 ACTIVE_CANCELABLE_STATUSES = {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_AUTH}
 
 class _UnconfiguredJobControl:
-    def build_run_bundle(self, run_dir: Path, debug: bool = False):
+    def build_run_bundle(self, run_dir: Path, debug: bool = False, **kwargs: Any):
         _ = run_dir
         _ = debug
+        _ = kwargs
         raise RuntimeError("Run read facade job control port is not configured")
 
     async def cancel_run(self, **kwargs):
@@ -105,7 +106,7 @@ class RunReadFacade:
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        current_status = _read_status(run_dir).value
+        current_status = _read_status(run_dir, request_record=request_record).value
         if current_status not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
             raise HTTPException(status_code=409, detail="terminal result not ready")
         result_path = _resolve_result_path(request_record, run_dir)
@@ -146,16 +147,30 @@ class RunReadFacade:
         request_id: str,
         debug: bool,
     ) -> FileResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
+        layout = layout_from_record(request_record, run_dir)
         bundle_name = "run_bundle_debug.zip" if debug else "run_bundle.zip"
-        bundle_path = run_dir / "bundle" / bundle_name
+        bundle_path = (
+            layout.bundle_path(debug=debug)
+            if layout is not None
+            else run_dir / "bundle" / bundle_name
+        )
         if not bundle_path.exists():
             control = self._job_control()
             if hasattr(control, "build_run_bundle"):
-                control.build_run_bundle(run_dir, debug)
+                try:
+                    control.build_run_bundle(
+                        run_dir,
+                        debug,
+                        **({"layout": layout} if layout is not None else {}),
+                    )
+                except TypeError:
+                    control.build_run_bundle(run_dir, debug)
+                    if layout is not None:
+                        bundle_path = run_dir / "bundle" / bundle_name
             else:
                 # Backward-compatible fallback for legacy test doubles.
                 legacy_control = control
@@ -258,14 +273,15 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunLogsResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        latest_attempt = _latest_attempt_from_audit(run_dir)
+        layout = layout_from_record(request_record, run_dir)
+        audit_dir = layout.audit_dir if layout is not None else run_dir / ".audit"
+        latest_attempt = _latest_attempt_from_audit(run_dir, audit_dir=audit_dir)
         if latest_attempt <= 0:
             return RunLogsResponse(request_id=request_id)
-        audit_dir = run_dir / ".audit"
 
         return RunLogsResponse(
             request_id=request_id,
@@ -462,7 +478,7 @@ class RunReadFacade:
             raise HTTPException(status_code=404, detail="Run not found")
         run_id = run_id_obj
 
-        status = _read_status(run_dir)
+        status = _read_status(run_dir, request_record=request_record)
         if status in TERMINAL_STATUSES:
             return CancelResponse(
                 request_id=request_id,
@@ -497,9 +513,16 @@ class RunReadFacade:
         )
 
 
-def _read_status(run_dir: Path) -> RunStatus:
-    state_file = run_dir / ".state" / "state.json"
-    if state_file.exists():
+def _read_status(run_dir: Path, *, request_record: dict[str, Any] | None = None) -> RunStatus:
+    candidates: list[Path] = []
+    if isinstance(request_record, dict):
+        layout = layout_from_record(request_record, run_dir)
+        if layout is not None:
+            candidates.append(layout.state_path)
+    candidates.append(run_dir / ".state" / "state.json")
+    for state_file in candidates:
+        if not state_file.exists():
+            continue
         payload = json.loads(state_file.read_text(encoding="utf-8"))
         return RunStatus(payload.get("status", RunStatus.QUEUED.value))
     return RunStatus.QUEUED
@@ -521,8 +544,8 @@ def _read_log(path: Path) -> str | None:
     return None
 
 
-def _latest_attempt_from_audit(run_dir: Path) -> int:
-    audit_dir = run_dir / ".audit"
+def _latest_attempt_from_audit(run_dir: Path, *, audit_dir: Path | None = None) -> int:
+    audit_dir = audit_dir or run_dir / ".audit"
     if not audit_dir.exists() or not audit_dir.is_dir():
         return 0
     latest = 0

@@ -1,6 +1,8 @@
-import pytest
+import asyncio
 import json
 from unittest.mock import AsyncMock
+
+import pytest
 
 fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
@@ -8,6 +10,7 @@ httpx = pytest.importorskip("httpx")
 from server.main import app
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.engine_management.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
+from server.services.orchestration.run_store import RunStore
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -1294,6 +1297,40 @@ async def test_v1_jobs_missing_request_observability_still_returns_404(monkeypat
 
     chat = await _request("GET", "/v1/jobs/req-missing/chat/history")
     assert chat.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_v1_missing_request_history_polling_remains_404_and_management_responsive(
+    tmp_path,
+    monkeypatch,
+):
+    from server.runtime.observability import run_source_adapter as source_adapter_module
+
+    class _MissingWorkspace:
+        def get_run_dir(self, run_id: str):
+            _ = run_id
+            return None
+
+    local_store = RunStore(db_path=tmp_path / "runs.db")
+    assert await local_store.get_request("warmup-missing") is None
+
+    monkeypatch.setattr(source_adapter_module, "run_store", local_store)
+    monkeypatch.setattr(source_adapter_module, "workspace_manager", _MissingWorkspace())
+    monkeypatch.setattr("server.routers.management.run_store", local_store)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        paths = [
+            f"/v1/jobs/req-missing-{index}/events/history"
+            if index % 2 == 0
+            else f"/v1/jobs/req-missing-{index}/chat/history"
+            for index in range(120)
+        ]
+        responses = await asyncio.gather(*(client.get(path) for path in paths))
+        management_response = await client.get("/v1/management/runs/req-missing-management")
+
+    assert {response.status_code for response in responses} == {404}
+    assert management_response.status_code == 404
 
 
 @pytest.mark.asyncio

@@ -91,13 +91,67 @@ def _append_jsonl_sync(path: Path, row: dict[str, Any]) -> None:
         fp.write("\n")
 
 
+def _enqueue_fcmp_mirror(
+    mirror_writer: Any,
+    *,
+    run_dir: Path,
+    attempt_number: int,
+    row: dict[str, Any],
+    audit_dir: Path | None,
+) -> None:
+    enqueue = mirror_writer.enqueue
+    try:
+        signature = inspect.signature(enqueue)
+    except (TypeError, ValueError):
+        enqueue(run_dir=run_dir, attempt_number=attempt_number, row=row, audit_dir=audit_dir)
+        return
+    accepts_audit_dir = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "audit_dir"
+        for parameter in signature.parameters.values()
+    )
+    if accepts_audit_dir:
+        enqueue(run_dir=run_dir, attempt_number=attempt_number, row=row, audit_dir=audit_dir)
+    else:
+        enqueue(run_dir=run_dir, attempt_number=attempt_number, row=row)
+
+
+def _publish_chat_replay_from_fcmp(
+    *,
+    run_dir: Path,
+    row: dict[str, Any],
+    audit_dir: Path | None,
+) -> None:
+    publish_from_fcmp = chat_replay_publisher.publish_from_fcmp
+    try:
+        signature = inspect.signature(publish_from_fcmp)
+    except (TypeError, ValueError):
+        publish_from_fcmp(run_dir=run_dir, row=row, audit_dir=audit_dir)
+        return
+    accepts_audit_dir = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "audit_dir"
+        for parameter in signature.parameters.values()
+    )
+    if accepts_audit_dir:
+        publish_from_fcmp(run_dir=run_dir, row=row, audit_dir=audit_dir)
+    else:
+        publish_from_fcmp(run_dir=run_dir, row=row)
+
+
 class FcmpAuditMirrorWriter:
     def __init__(self) -> None:
         self._writers_by_path: dict[str, BufferedAsyncTextFileWriter] = {}
         self._writers_by_run: dict[str, set[BufferedAsyncTextFileWriter]] = defaultdict(set)
 
-    def _writer_for(self, *, run_dir: Path, attempt_number: int, run_id: str) -> BufferedAsyncTextFileWriter:
-        path = run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl"
+    def _writer_for(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        run_id: str,
+        audit_dir: Path | None = None,
+    ) -> BufferedAsyncTextFileWriter:
+        target_audit_dir = audit_dir or run_dir / ".audit"
+        path = target_audit_dir / f"fcmp_events.{attempt_number}.jsonl"
         key = str(path.resolve(strict=False))
         writer = self._writers_by_path.get(key)
         if writer is None:
@@ -107,15 +161,28 @@ class FcmpAuditMirrorWriter:
             audit_writer_registry.register(run_id=run_id, writer=writer)
         return writer
 
-    def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+    def enqueue(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        row: dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
+        target_audit_dir = audit_dir or run_dir / ".audit"
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            _append_jsonl_sync(run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl", row)
+            _append_jsonl_sync(target_audit_dir / f"fcmp_events.{attempt_number}.jsonl", row)
             return
-        writer = self._writer_for(run_dir=run_dir, attempt_number=attempt_number, run_id=run_id)
+        writer = self._writer_for(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            run_id=run_id,
+            audit_dir=target_audit_dir,
+        )
         writer.enqueue(f"{json.dumps(row, ensure_ascii=False)}\n")
 
     async def drain(self, *, run_id: Optional[str] = None) -> None:
@@ -133,8 +200,16 @@ class RaspAuditMirrorWriter:
         self._writers_by_path: dict[str, BufferedAsyncTextFileWriter] = {}
         self._writers_by_run: dict[str, set[BufferedAsyncTextFileWriter]] = defaultdict(set)
 
-    def _writer_for(self, *, run_dir: Path, attempt_number: int, run_id: str) -> BufferedAsyncTextFileWriter:
-        path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
+    def _writer_for(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        run_id: str,
+        audit_dir: Path | None = None,
+    ) -> BufferedAsyncTextFileWriter:
+        target_audit_dir = audit_dir or run_dir / ".audit"
+        path = target_audit_dir / f"events.{attempt_number}.jsonl"
         key = str(path.resolve(strict=False))
         writer = self._writers_by_path.get(key)
         if writer is None:
@@ -144,15 +219,28 @@ class RaspAuditMirrorWriter:
             audit_writer_registry.register(run_id=run_id, writer=writer)
         return writer
 
-    def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict[str, Any]) -> None:
+    def enqueue(
+        self,
+        *,
+        run_dir: Path,
+        attempt_number: int,
+        row: dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
+        target_audit_dir = audit_dir or run_dir / ".audit"
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            _append_jsonl_sync(run_dir / ".audit" / f"events.{attempt_number}.jsonl", row)
+            _append_jsonl_sync(target_audit_dir / f"events.{attempt_number}.jsonl", row)
             return
-        writer = self._writer_for(run_dir=run_dir, attempt_number=attempt_number, run_id=run_id)
+        writer = self._writer_for(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            run_id=run_id,
+            audit_dir=target_audit_dir,
+        )
         writer.enqueue(f"{json.dumps(row, ensure_ascii=False)}\n")
 
     async def drain(self, *, run_id: Optional[str] = None) -> None:
@@ -173,13 +261,23 @@ class FcmpEventPublisher:
         self._gate_by_run: dict[str, RuntimeEventOrderingGate] = {}
         self._buffered_rows_by_run: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
 
-    def _bootstrap_run(self, *, run_dir: Path, run_id: str) -> None:
+    def _bootstrap_run(
+        self,
+        *,
+        run_dir: Path,
+        run_id: str,
+        audit_dir: Path | None = None,
+    ) -> None:
         if run_id in self._next_seq_by_run:
             return
-        audit_dir = run_dir / ".audit"
+        audit_dir = audit_dir or run_dir / ".audit"
+        legacy_audit_dir = run_dir / ".audit"
         max_global = 0
         local_seq_by_attempt: dict[int, int] = defaultdict(int)
-        for path in sorted(audit_dir.glob("fcmp_events.*.jsonl")):
+        paths = list(sorted(audit_dir.glob("fcmp_events.*.jsonl")))
+        if audit_dir != legacy_audit_dir and not any(_read_jsonl(path) for path in paths):
+            paths.extend(sorted(legacy_audit_dir.glob("fcmp_events.*.jsonl")))
+        for path in paths:
             for row in _read_jsonl(path):
                 seq_obj = row.get("seq")
                 if isinstance(seq_obj, int):
@@ -270,7 +368,13 @@ class FcmpEventPublisher:
             prerequisites=prerequisites,
         )
 
-    def _commit_row(self, *, run_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
+    def _commit_row(
+        self,
+        *,
+        run_dir: Path,
+        row: dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> dict[str, Any]:
         run_id = str(row.get("run_id") or "")
         meta_obj = row.get("meta")
         meta = dict(meta_obj) if isinstance(meta_obj, dict) else {}
@@ -278,7 +382,7 @@ class FcmpEventPublisher:
         if not run_id:
             raise ValueError("FCMP publish requires run_id")
         attempt_number = int(meta.get("attempt") or 1)
-        self._bootstrap_run(run_dir=run_dir, run_id=run_id)
+        self._bootstrap_run(run_dir=run_dir, run_id=run_id, audit_dir=audit_dir)
         row["seq"] = self._next_seq_by_run[run_id]
         self._next_seq_by_run[run_id] += 1
         local_key = (run_id, attempt_number)
@@ -302,11 +406,23 @@ class FcmpEventPublisher:
             row=row,
             terminal=is_terminal,
         )
-        self._mirror_writer.enqueue(run_dir=run_dir, attempt_number=attempt_number, row=published)
-        chat_replay_publisher.publish_from_fcmp(run_dir=run_dir, row=published)
+        _enqueue_fcmp_mirror(
+            self._mirror_writer,
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            row=published,
+            audit_dir=audit_dir,
+        )
+        _publish_chat_replay_from_fcmp(run_dir=run_dir, row=published, audit_dir=audit_dir)
         return published
 
-    def _release_ready(self, *, run_dir: Path, run_id: str) -> list[dict[str, Any]]:
+    def _release_ready(
+        self,
+        *,
+        run_dir: Path,
+        run_id: str,
+        audit_dir: Path | None = None,
+    ) -> list[dict[str, Any]]:
         gate = self._gate_for_run(run_id)
         released_rows: list[dict[str, Any]] = []
         while True:
@@ -317,10 +433,18 @@ class FcmpEventPublisher:
                 buffered_row = self._buffered_rows_by_run[run_id].pop(candidate.publish_id, None)
                 if buffered_row is None:
                     continue
-                released_rows.append(self._commit_row(run_dir=run_dir, row=buffered_row))
+                released_rows.append(
+                    self._commit_row(run_dir=run_dir, row=buffered_row, audit_dir=audit_dir)
+                )
         return released_rows
 
-    def publish(self, *, run_dir: Path, event: ConversationEventEnvelope | dict[str, Any]) -> dict[str, Any]:
+    def publish(
+        self,
+        *,
+        run_dir: Path,
+        event: ConversationEventEnvelope | dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> dict[str, Any]:
         row = event.model_dump(mode="json") if isinstance(event, ConversationEventEnvelope) else dict(event)
         run_id = str(row.get("run_id") or "")
         if not run_id:
@@ -334,8 +458,8 @@ class FcmpEventPublisher:
         if decision.kind == "buffer":
             self._buffered_rows_by_run[run_id][candidate.publish_id] = row
             return row
-        published = self._commit_row(run_dir=run_dir, row=row)
-        self._release_ready(run_dir=run_dir, run_id=run_id)
+        published = self._commit_row(run_dir=run_dir, row=row, audit_dir=audit_dir)
+        self._release_ready(run_dir=run_dir, run_id=run_id, audit_dir=audit_dir)
         return published
 
     async def drain_mirror(self, *, run_id: Optional[str] = None) -> None:
@@ -351,16 +475,30 @@ class RaspEventPublisher:
         self._gate_by_run: dict[str, RuntimeEventOrderingGate] = {}
         self._buffered_rows_by_run: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
 
-    def _bootstrap_attempt(self, *, run_dir: Path, run_id: str, attempt_number: int) -> None:
+    def _bootstrap_attempt(
+        self,
+        *,
+        run_dir: Path,
+        run_id: str,
+        attempt_number: int,
+        audit_dir: Path | None = None,
+    ) -> None:
         key = (run_id, attempt_number)
         if key in self._next_seq_by_run_attempt:
             return
-        path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
+        target_audit_dir = audit_dir or run_dir / ".audit"
+        path = target_audit_dir / f"events.{attempt_number}.jsonl"
+        legacy_path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
         max_seq = 0
         for row in _read_jsonl(path):
             seq_obj = row.get("seq")
             if isinstance(seq_obj, int):
                 max_seq = max(max_seq, seq_obj)
+        if max_seq == 0 and path != legacy_path:
+            for row in _read_jsonl(legacy_path):
+                seq_obj = row.get("seq")
+                if isinstance(seq_obj, int):
+                    max_seq = max(max_seq, seq_obj)
         self._next_seq_by_run_attempt[key] = max_seq + 1
 
     def _gate_for_run(self, run_id: str) -> RuntimeEventOrderingGate:
@@ -390,13 +528,24 @@ class RaspEventPublisher:
             prerequisites=[],
         )
 
-    def _commit_row(self, *, run_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
+    def _commit_row(
+        self,
+        *,
+        run_dir: Path,
+        row: dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> dict[str, Any]:
         row = dict(row)
         run_id = str(row.get("run_id") or "")
         if not run_id:
             raise ValueError("RASP publish requires run_id")
         attempt_number = int(row.get("attempt_number") or 1)
-        self._bootstrap_attempt(run_dir=run_dir, run_id=run_id, attempt_number=attempt_number)
+        self._bootstrap_attempt(
+            run_dir=run_dir,
+            run_id=run_id,
+            attempt_number=attempt_number,
+            audit_dir=audit_dir,
+        )
         key = (run_id, attempt_number)
         row["seq"] = self._next_seq_by_run_attempt[key]
         self._next_seq_by_run_attempt[key] += 1
@@ -409,10 +558,22 @@ class RaspEventPublisher:
             row=row,
             terminal=str((row.get("event") or {}).get("type") or "") == "lifecycle.run.terminal",
         )
-        self._mirror_writer.enqueue(run_dir=run_dir, attempt_number=attempt_number, row=published)
+        _enqueue_fcmp_mirror(
+            self._mirror_writer,
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            row=published,
+            audit_dir=audit_dir,
+        )
         return published
 
-    def _release_ready(self, *, run_dir: Path, run_id: str) -> list[dict[str, Any]]:
+    def _release_ready(
+        self,
+        *,
+        run_dir: Path,
+        run_id: str,
+        audit_dir: Path | None = None,
+    ) -> list[dict[str, Any]]:
         gate = self._gate_for_run(run_id)
         released_rows: list[dict[str, Any]] = []
         while True:
@@ -423,10 +584,18 @@ class RaspEventPublisher:
                 buffered_row = self._buffered_rows_by_run[run_id].pop(candidate.publish_id, None)
                 if buffered_row is None:
                     continue
-                released_rows.append(self._commit_row(run_dir=run_dir, row=buffered_row))
+                released_rows.append(
+                    self._commit_row(run_dir=run_dir, row=buffered_row, audit_dir=audit_dir)
+                )
         return released_rows
 
-    def publish(self, *, run_dir: Path, event: RuntimeEventEnvelope | dict[str, Any]) -> dict[str, Any]:
+    def publish(
+        self,
+        *,
+        run_dir: Path,
+        event: RuntimeEventEnvelope | dict[str, Any],
+        audit_dir: Path | None = None,
+    ) -> dict[str, Any]:
         row = event.model_dump(mode="json") if isinstance(event, RuntimeEventEnvelope) else dict(event)
         run_id = str(row.get("run_id") or "")
         if not run_id:
@@ -440,8 +609,8 @@ class RaspEventPublisher:
         if decision.kind == "buffer":
             self._buffered_rows_by_run[run_id][candidate.publish_id] = row
             return row
-        published = self._commit_row(run_dir=run_dir, row=row)
-        self._release_ready(run_dir=run_dir, run_id=run_id)
+        published = self._commit_row(run_dir=run_dir, row=row, audit_dir=audit_dir)
+        self._release_ready(run_dir=run_dir, run_id=run_id, audit_dir=audit_dir)
         return published
 
     async def drain_mirror(self, *, run_id: Optional[str] = None) -> None:
@@ -660,9 +829,11 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         rasp_publisher: RaspEventPublisher | None = None,
         run_handle_consumer: Callable[[str], Awaitable[dict[str, Any] | None] | dict[str, Any] | None] | None = None,
         message_family_id: str | None = None,
+        audit_dir: Path | None = None,
     ) -> None:
         self._run_id = run_id
         self._run_dir = run_dir
+        self._audit_dir = audit_dir
         self._engine = engine
         self._attempt_number = attempt_number
         self._stream_parser = stream_parser
@@ -693,6 +864,20 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
         self._turn_start_emitted = False
         self._turn_complete_emitted = False
         self._turn_failed_emitted = False
+
+    def _publish_rasp(self, event: RuntimeEventEnvelope | dict[str, Any]) -> dict[str, Any]:
+        return self._rasp_publisher.publish(
+            run_dir=self._run_dir,
+            event=event,
+            audit_dir=self._audit_dir,
+        )
+
+    def _publish_fcmp(self, event: ConversationEventEnvelope | dict[str, Any]) -> dict[str, Any]:
+        return self._fcmp_publisher.publish(
+            run_dir=self._run_dir,
+            event=event,
+            audit_dir=self._audit_dir,
+        )
 
     async def on_process_started(self, *, event_ts: datetime | None = None) -> None:
         if self._engine not in {"gemini"}:
@@ -853,7 +1038,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             correlation={},
             ts=event_ts or datetime.utcnow(),
         )
-        self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
+        self._publish_rasp(event=rasp)
 
     async def _publish_emissions(
         self,
@@ -943,8 +1128,8 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     raw_ref=raw_ref,
                     ts=event_ts or datetime.utcnow(),
                 )
-                self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
-                self._fcmp_publisher.publish(run_dir=self._run_dir, event=fcmp)
+                self._publish_rasp(event=rasp)
+                self._publish_fcmp(event=fcmp)
             elif kind == "run_handle":
                 handle_id_obj = emission.get("handle_id")
                 handle_id = (
@@ -966,7 +1151,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     correlation=correlation,
                     ts=event_ts or datetime.utcnow(),
                 )
-                self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
+                self._publish_rasp(event=rasp)
                 consumer = self._run_handle_consumer
                 if callable(consumer):
                     consume_result = consumer(handle_id)
@@ -1014,8 +1199,8 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                             raw_ref=raw_ref,
                             ts=event_ts or datetime.utcnow(),
                         )
-                        self._rasp_publisher.publish(run_dir=self._run_dir, event=diag_rasp)
-                        self._fcmp_publisher.publish(run_dir=self._run_dir, event=diag_fcmp)
+                        self._publish_rasp(event=diag_rasp)
+                        self._publish_fcmp(event=diag_fcmp)
             elif kind == "process_event":
                 process_type = emission.get("process_type")
                 if process_type not in {"reasoning", "tool_call", "command_execution"}:
@@ -1075,8 +1260,8 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     raw_ref=raw_ref,
                     ts=event_ts or datetime.utcnow(),
                 )
-                self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
-                self._fcmp_publisher.publish(run_dir=self._run_dir, event=fcmp)
+                self._publish_rasp(event=rasp)
+                self._publish_fcmp(event=fcmp)
             elif kind == "turn_marker":
                 marker_obj = emission.get("marker")
                 marker = marker_obj if isinstance(marker_obj, str) else None
@@ -1156,8 +1341,8 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
                     raw_ref=raw_ref,
                     ts=event_ts or datetime.utcnow(),
                 )
-                self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
-                self._fcmp_publisher.publish(run_dir=self._run_dir, event=fcmp)
+                self._publish_rasp(event=rasp)
+                self._publish_fcmp(event=fcmp)
 
     def _emit_turn_marker(
         self,
@@ -1201,7 +1386,7 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             correlation=correlation,
             ts=event_ts or datetime.utcnow(),
         )
-        self._rasp_publisher.publish(run_dir=self._run_dir, event=rasp)
+        self._publish_rasp(event=rasp)
 
     def _add_suppressed_raw_ref(self, raw_ref_obj: RuntimeStreamRawRef) -> None:
         stream = str(raw_ref_obj.get("stream") or "stdout")
@@ -1301,10 +1486,10 @@ class LiveRuntimeEmitterImpl(LiveRuntimeEmitter):
             raw_ref=raw_ref,
             ts=event_ts or datetime.utcnow(),
         )
-        self._rasp_publisher.publish(run_dir=self._run_dir, event=promoted_rasp)
-        self._fcmp_publisher.publish(run_dir=self._run_dir, event=promoted_fcmp)
-        self._rasp_publisher.publish(run_dir=self._run_dir, event=final_rasp)
-        self._fcmp_publisher.publish(run_dir=self._run_dir, event=final_fcmp)
+        self._publish_rasp(event=promoted_rasp)
+        self._publish_fcmp(event=promoted_fcmp)
+        self._publish_rasp(event=final_rasp)
+        self._publish_fcmp(event=final_fcmp)
 
 
 fcmp_event_publisher = FcmpEventPublisher()

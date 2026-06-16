@@ -517,6 +517,56 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
 
 
 @pytest.mark.asyncio
+async def test_management_run_state_prefers_namespaced_error(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-ns-error"
+    _write_state_file(run_dir, "failed")
+    root_state_path = run_dir / ".state" / "state.json"
+    root_state = json.loads(root_state_path.read_text(encoding="utf-8"))
+    root_state["error"] = {"code": "ROOT_STALE"}
+    root_state_path.write_text(json.dumps(root_state), encoding="utf-8")
+    namespace = "demo-skill.1"
+    namespaced_state_path = run_dir / ".state" / namespace / "state.json"
+    namespaced_state_path.parent.mkdir(parents=True, exist_ok=True)
+    namespaced_state = dict(root_state)
+    namespaced_state["error"] = {"code": "NAMESPACED_CURRENT"}
+    namespaced_state_path.write_text(json.dumps(namespaced_state), encoding="utf-8")
+    input_manifest_path = run_dir / ".audit" / namespace / "input_manifest.json"
+    input_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    input_manifest_path.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "server.routers.management.run_observability_service.get_run_detail",
+        AsyncMock(
+            return_value={
+                "request_id": "req-ns-error",
+                "run_id": "run-ns-error",
+                "run_dir": str(run_dir),
+                "skill_id": "demo",
+                "engine": "codex",
+                "status": "failed",
+                "updated_at": "2026-02-16T00:00:00",
+                "poll_logs": False,
+                "entries": [],
+                "inputManifestPath": str(input_manifest_path),
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.run_store.get_auto_decision_stats",
+        AsyncMock(return_value={"auto_decision_count": 0, "last_auto_decision_at": None}),
+    )
+
+    response = await _request("GET", "/v1/management/runs/req-ns-error")
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == "NAMESPACED_CURRENT"
+
+
+@pytest.mark.asyncio
 async def test_management_run_files_and_preview(monkeypatch):
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.get_run_detail",

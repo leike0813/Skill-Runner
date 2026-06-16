@@ -917,7 +917,8 @@
 - `Content-Disposition` 文件名为 `run_bundle.zip`
 
 **说明**:
-- 普通 bundle 采用 contract-driven 语义，仅包含 `result/result.json` 与 resolved artifact 文件，以及 `bundle/manifest.json`。
+- 普通 bundle 采用 contract-driven 语义。新 run 读取当前 request 的实际 `resultJsonPath`，物理 zip/manifest 位于 `bundle/<safeSkillId>.<n>/`；旧 `result/result.json` 与 root `bundle/` 只作为 legacy fallback。
+- bundle 内容仅包含当前 run 的 result、同目录 feedback sidecar（存在时）以及该 result payload 引用的 resolved artifact 文件。
 
 ### 下载 Debug Bundle (Get Debug Bundle)
 `GET /v1/jobs/{request_id}/bundle/debug`
@@ -927,7 +928,7 @@
 - `Content-Disposition` 文件名为 `run_bundle_debug.zip`
 
 **说明**:
-- Debug Bundle 会额外包含 logs 等调试文件，并使用 `bundle/manifest_debug.json`。
+- Debug Bundle 会额外包含当前 run namespace 下的 logs/state/audit 等调试文件，并使用同 namespace 下的 `manifest_debug.json`。
 
 ### 获取 Run 文件树 (Get Run Files)
 `GET /v1/jobs/{request_id}/files`

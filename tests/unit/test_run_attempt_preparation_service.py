@@ -273,6 +273,77 @@ async def test_prepare_builds_interactive_context_and_run_options(
 
 
 @pytest.mark.asyncio
+async def test_prepare_uses_namespaced_output_schema_when_layout_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill = _build_skill(tmp_path)
+    run_dir = tmp_path / "workspace"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.run_folder_git_initializer.ensure_git_repo",
+        lambda _run_dir: None,
+    )
+    request_record = {
+        "request_id": "req-namespaced-schema",
+        "run_id": "run-namespaced-schema",
+        "skill_id": skill.id,
+        "workspace_id": "workspace-1",
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": "prep-skill.1",
+        "input_manifest_path": str(run_dir / ".audit" / "prep-skill.1" / "input_manifest.json"),
+        "input": {},
+        "parameter": {},
+        "runtime_options": {"execution_mode": "auto"},
+        "effective_runtime_options": {"execution_mode": "auto"},
+    }
+    orchestrator = _FakeOrchestrator(
+        run_store=_FakeRunStore(request_record=request_record),
+        workspace=_FakeWorkspace(run_dir),
+    )
+    request = RunJobRequest(
+        run_id="run-namespaced-schema",
+        skill_id=skill.id,
+        engine_name="claude",
+        options={},
+        skill_override=skill,
+    )
+
+    context = await RunAttemptPreparationService().prepare(
+        orchestrator=orchestrator,
+        request=request,
+        run_dir=run_dir,
+        request_record=request_record,
+        request_id="req-namespaced-schema",
+        execution_mode="auto",
+        conversation_mode="session",
+        session_capable=True,
+        is_interactive=False,
+        interactive_auto_reply=False,
+        can_wait_for_user=False,
+        can_persist_waiting_user=False,
+        interactive_profile=None,
+        attempt_number=1,
+        resolve_custom_provider_model=lambda **_kwargs: None,
+        run_store_backend=orchestrator._run_store_backend(),
+        interaction_service=orchestrator,
+        audit_service=type(
+            "_Audit",
+            (),
+            {"append_internal_schema_warning": staticmethod(lambda **_kwargs: None)},
+        )(),
+        resolve_attempt_number=orchestrator._resolve_attempt_number,
+        build_reply_prompt=lambda response: str(response),
+    )
+
+    expected_relpath = ".audit/prep-skill.1/contracts/target_output_schema.json"
+    assert context.run_options["__audit_dir"] == str(run_dir / ".audit" / "prep-skill.1")
+    assert context.run_options["__target_output_schema_relpath"] == expected_relpath
+    assert (run_dir / expected_relpath).exists()
+    assert not (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_prepare_accepts_missing_input_and_parameter_schemas(tmp_path: Path) -> None:
     skill = _build_skill(
         tmp_path,

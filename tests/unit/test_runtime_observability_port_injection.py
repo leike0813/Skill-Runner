@@ -26,11 +26,14 @@ import server.runtime.observability.run_source_adapter as source_adapter_module
 
 
 class _FakeRunStore:
-    def __init__(self, run_id: str) -> None:
+    def __init__(self, run_id: str, request_overrides: dict | None = None) -> None:
         self._run_id = run_id
+        self._request_overrides = request_overrides or {}
 
     def get_request(self, request_id: str):
-        return {"request_id": request_id, "run_id": self._run_id, "runtime_options": {}, "engine": "codex"}
+        payload = {"request_id": request_id, "run_id": self._run_id, "runtime_options": {}, "engine": "codex"}
+        payload.update(self._request_overrides)
+        return payload
 
 
 class _FakeWorkspace:
@@ -45,14 +48,17 @@ class _FakeWorkspace:
 class _FakeJobControl:
     def __init__(self) -> None:
         self.used_build_run_bundle = False
+        self.build_kwargs: dict | None = None
 
-    def build_run_bundle(self, run_dir: Path, debug: bool = False):
+    def build_run_bundle(self, run_dir: Path, debug: bool = False, **kwargs):
         self.used_build_run_bundle = True
-        bundle_dir = run_dir / "bundle"
+        self.build_kwargs = kwargs
+        layout = kwargs.get("layout")
+        bundle_dir = layout.bundle_dir if layout is not None else run_dir / "bundle"
         bundle_dir.mkdir(parents=True, exist_ok=True)
         bundle_path = bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
         bundle_path.write_bytes(b"zip")
-        return bundle_path.name
+        return bundle_path.relative_to(run_dir).as_posix()
 
     async def cancel_run(self, **_kwargs):
         return True
@@ -106,6 +112,50 @@ async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_read_facade_bundle_uses_namespaced_layout(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    run_id = "run-ns"
+    request_id = "req-ns"
+
+    fake_store = _FakeRunStore(
+        run_id,
+        {
+            "skill_id": "skill-a",
+            "workspace_id": "workspace",
+            "workspace_dir": str(workspace),
+            "workspace_namespace": "skill-a.1",
+        },
+    )
+    fake_workspace = _FakeWorkspace(workspace)
+
+    previous_source_store = source_adapter_module.run_store
+    previous_source_workspace = source_adapter_module.workspace_manager
+    previous_job_control = read_facade_module.job_control
+
+    try:
+        configure_run_source_ports(run_store_backend=fake_store, workspace_backend=fake_workspace)
+        fake_job_control = _FakeJobControl()
+        configure_run_read_facade_ports(job_control_backend=fake_job_control)
+
+        source_adapter = cast(RunSourceAdapter, InstalledRunSourceAdapter())
+        response = await RunReadFacade().get_bundle(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
+
+        assert fake_job_control.used_build_run_bundle is True
+        assert fake_job_control.build_kwargs is not None
+        assert fake_job_control.build_kwargs.get("layout") is not None
+        assert (workspace / "bundle" / "skill-a.1" / "run_bundle.zip").exists()
+        assert Path(str(response.path)) == workspace / "bundle" / "skill-a.1" / "run_bundle.zip"
+    finally:
+        source_adapter_module.run_store = previous_source_store
+        source_adapter_module.workspace_manager = previous_source_workspace
+        read_facade_module.job_control = previous_job_control
+
+
+@pytest.mark.asyncio
 async def test_run_read_facade_result_requires_terminal_projection(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-2"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -129,6 +179,44 @@ async def test_run_read_facade_result_requires_terminal_projection(tmp_path: Pat
             await RunReadFacade().get_result(source_adapter=source_adapter, request_id=request_id)
         assert excinfo.value.status_code == 409
         assert excinfo.value.detail == "terminal result not ready"
+    finally:
+        source_adapter_module.run_store = previous_source_store
+        source_adapter_module.workspace_manager = previous_source_workspace
+
+
+@pytest.mark.asyncio
+async def test_run_read_facade_result_uses_namespaced_state(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-ns-result"
+    namespace = "demo-skill.1"
+    root_state = run_dir / ".state" / "state.json"
+    root_state.parent.mkdir(parents=True, exist_ok=True)
+    root_state.write_text('{"status":"running"}', encoding="utf-8")
+    namespaced_state = run_dir / ".state" / namespace / "state.json"
+    namespaced_state.parent.mkdir(parents=True, exist_ok=True)
+    namespaced_state.write_text('{"status":"succeeded"}', encoding="utf-8")
+    result_path = run_dir / "result" / namespace / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text('{"status":"success","data":{"ok":true}}', encoding="utf-8")
+    run_id = "run-ns-result"
+    request_id = "req-ns-result"
+    fake_store = _FakeRunStore(
+        run_id,
+        request_overrides={
+            "workspace_dir": str(run_dir),
+            "workspace_namespace": namespace,
+            "result_path": str(result_path),
+        },
+    )
+    fake_workspace = _FakeWorkspace(run_dir)
+
+    previous_source_store = source_adapter_module.run_store
+    previous_source_workspace = source_adapter_module.workspace_manager
+
+    try:
+        configure_run_source_ports(run_store_backend=fake_store, workspace_backend=fake_workspace)
+        source_adapter = cast(RunSourceAdapter, InstalledRunSourceAdapter())
+        response = await RunReadFacade().get_result(source_adapter=source_adapter, request_id=request_id)
+        assert response.result["status"] == "success"
     finally:
         source_adapter_module.run_store = previous_source_store
         source_adapter_module.workspace_manager = previous_source_workspace

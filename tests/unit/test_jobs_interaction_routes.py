@@ -8,8 +8,18 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import BackgroundTasks, HTTPException
 
 from server.config import config
-from server.models import ExecutionMode, InteractionReplyRequest, RunCreateRequest, RunStatus, SkillManifest
+from server.models import (
+    AuthMethod,
+    AuthMethodSelection,
+    ExecutionMode,
+    InteractionReplyRequest,
+    InteractionReplyResponse,
+    RunCreateRequest,
+    RunStatus,
+    SkillManifest,
+)
 from server.routers import jobs as jobs_router
+import server.services.orchestration.run_interaction_service as interaction_service_module
 from server.services.orchestration.run_store import RunStore
 
 
@@ -57,7 +67,20 @@ async def _write_status(
     status: RunStatus,
 ) -> None:
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-    state_dir = run_dir / ".state"
+    request_record = await store.get_request(request_id)
+    input_manifest_path = (
+        Path(request_record["input_manifest_path"])
+        if isinstance(request_record, dict)
+        and isinstance(request_record.get("input_manifest_path"), str)
+        else None
+    )
+    if (
+        input_manifest_path is not None
+        and input_manifest_path.parent.parent.name == ".audit"
+    ):
+        state_dir = run_dir / ".state" / input_manifest_path.parent.name
+    else:
+        state_dir = run_dir / ".state"
     state_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "request_id": request_id,
@@ -322,6 +345,9 @@ async def test_reply_interaction_accepts_and_transitions_to_queued(monkeypatch, 
     assert appended_events[0]["type_name"] == "interaction.reply.accepted"
     assert appended_events[0]["attempt_number"] == 2
     assert appended_events[0]["category"] == "interaction"
+    assert appended_events[0]["audit_dir"] == (
+        Path(request_record["input_manifest_path"]).parent
+    )
     assert appended_events[0]["data"] == {
         "interaction_id": 3,
         "resolution_mode": "user_reply",
@@ -424,6 +450,69 @@ async def test_reply_interaction_appends_response_preview_for_open_text(monkeypa
     assert len(appended_events) == 1
     assert appended_events[0]["type_name"] == "interaction.reply.accepted"
     assert appended_events[0]["data"]["response_preview"] == "继续执行"
+
+
+@pytest.mark.asyncio
+async def test_auth_interaction_callbacks_write_namespaced_state_and_audit(monkeypatch, temp_config_dirs):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = request_record["run_id"]
+    assert run_id is not None
+
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_AUTH)
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    audit_dir = Path(request_record["input_manifest_path"]).parent
+    state_path = run_dir / ".state" / audit_dir.name / "state.json"
+
+    async def fake_select_auth_method(**kwargs):
+        kwargs["append_orchestrator_event"](
+            run_dir=run_dir,
+            attempt_number=1,
+            category="interaction",
+            type_name="interaction.reply.accepted",
+            data={
+                "interaction_id": 1,
+                "resolution_mode": "user_reply",
+                "accepted_at": "2026-06-17T00:00:00+00:00",
+                "response_preview": None,
+            },
+        )
+        kwargs["update_status"](
+            run_dir,
+            RunStatus.WAITING_AUTH,
+            error={"code": "AUTH_TEST_MARKER"},
+        )
+        return InteractionReplyResponse(
+            request_id=request_id,
+            status=RunStatus.WAITING_AUTH,
+            accepted=True,
+            mode="auth",
+        )
+
+    monkeypatch.setattr(
+        interaction_service_module.run_auth_orchestration_service,
+        "select_auth_method",
+        fake_select_auth_method,
+    )
+
+    response = await jobs_router.reply_interaction(
+        request_id,
+        InteractionReplyRequest(
+            interaction_id=1,
+            mode="auth",
+            response={},
+            selection=AuthMethodSelection(value=AuthMethod.API_KEY),
+        ),
+        BackgroundTasks(),
+    )
+
+    assert response.accepted is True
+    namespaced_events = audit_dir / "orchestrator_events.1.jsonl"
+    assert namespaced_events.exists()
+    assert not (run_dir / ".audit" / "orchestrator_events.1.jsonl").exists()
+    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state_payload["error"]["code"] == "AUTH_TEST_MARKER"
 
 
 @pytest.mark.asyncio

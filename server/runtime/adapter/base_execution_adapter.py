@@ -822,6 +822,7 @@ class EngineExecutionAdapter:
                 run_dir=run_dir,
                 attempt_number=attempt_number,
                 run_id=run_id,
+                audit_dir=audit_dir,
             )
             if use_ndjson_ingress_sanitizer
             else None

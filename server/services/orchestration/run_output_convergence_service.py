@@ -107,10 +107,17 @@ class RunOutputConvergenceService:
         result = initial_result
         runtime_parse_result = initial_runtime_parse_result
         validation_warnings: list[str] = []
+        audit_dir_obj = options.get("__audit_dir")
+        audit_dir = (
+            Path(str(audit_dir_obj))
+            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
+            else None
+        )
         target_schema = run_output_schema_service.resolve_target_schema(
             skill=skill,
             execution_mode=execution_mode,
             run_dir=run_dir,
+            audit_dir=audit_dir,
         )
         target_contract_mode = (
             "interactive_union"

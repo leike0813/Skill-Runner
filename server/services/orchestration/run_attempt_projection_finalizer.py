@@ -32,7 +32,7 @@ class RunAttemptFinalizeInput:
     run_store_backend: Any
     run_projection_service: Any
     audit_service: Any
-    build_run_bundle: Callable[[Path, bool], str]
+    build_run_bundle: Callable[..., str]
     summarize_terminal_error_message: Callable[[Any], str | None]
     execution_mode: str
     options: dict[str, Any]
@@ -233,8 +233,9 @@ class RunAttemptProjectionFinalizer:
             )
 
         if final_status == RunStatus.SUCCEEDED:
-            inputs.build_run_bundle(run_dir, False)
-            inputs.build_run_bundle(run_dir, True)
+            bundle_kwargs = {"layout": layout} if layout is not None else {}
+            inputs.build_run_bundle(run_dir, False, **bundle_kwargs)
+            inputs.build_run_bundle(run_dir, True, **bundle_kwargs)
             bundle_written = True
 
         if final_status == RunStatus.CANCELED:

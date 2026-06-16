@@ -1003,7 +1003,7 @@ async def _build_run_state_from_detail(
         recovered_at=_parse_datetime_or_none(detail.get("recovered_at")),
         recovery_reason=_coerce_str_or_none(detail.get("recovery_reason")),
         poll_logs=bool(detail.get("poll_logs", False)),
-        error=_read_run_error(run_dir),
+        error=_read_run_error(run_dir, detail=detail),
         interactive_auto_reply=(
             detail.get("interactive_auto_reply")
             if isinstance(detail.get("interactive_auto_reply"), bool)
@@ -1032,19 +1032,28 @@ async def _read_pending_interaction_id(request_id: str) -> int | None:
     return interaction_id
 
 
-def _read_run_error(run_dir: Path | None) -> Any:
+def _read_run_error(run_dir: Path | None, *, detail: dict[str, Any] | None = None) -> Any:
     if not run_dir:
         return None
-    state_file = run_dir / ".state" / "state.json"
-    if not state_file.exists():
-        return None
-    try:
-        payload = json.loads(state_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload.get("error")
+    candidates: list[Path] = []
+    detail_payload = detail if isinstance(detail, dict) else {}
+    input_manifest_obj = detail_payload.get("inputManifestPath")
+    if isinstance(input_manifest_obj, str) and input_manifest_obj.strip():
+        input_manifest_path = Path(input_manifest_obj)
+        namespace = input_manifest_path.parent.name
+        if namespace and input_manifest_path.parent.parent.name == ".audit":
+            candidates.append(run_dir / ".state" / namespace / "state.json")
+    candidates.append(run_dir / ".state" / "state.json")
+    for state_file in candidates:
+        if not state_file.exists():
+            continue
+        try:
+            payload = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload.get("error")
+    return None
 
 
 def _parse_run_status(raw: Any) -> RunStatus:

@@ -117,6 +117,45 @@ def test_materialize_auto_schema_artifacts_and_request_input_fields(tmp_path: Pa
     assert TARGET_OUTPUT_SCHEMA_RELPATH in materialization.prompt_contract_markdown
 
 
+def test_materialize_schema_artifacts_under_namespaced_audit_dir(tmp_path: Path) -> None:
+    skill_dir = _build_skill_dir(tmp_path)
+    skill = _build_skill_manifest(skill_dir)
+    run_dir = tmp_path / "run"
+    audit_dir = run_dir / ".audit" / "demo-skill.1"
+    input_manifest_path = audit_dir / "input_manifest.json"
+    input_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    input_manifest_path.write_text(
+        json.dumps({"request_id": "req-1"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    materialization = run_output_schema_service.materialize(
+        skill=skill,
+        execution_mode="auto",
+        run_dir=run_dir,
+        audit_dir=audit_dir,
+        input_manifest_path=input_manifest_path,
+    )
+
+    expected_relpath = ".audit/demo-skill.1/contracts/target_output_schema.json"
+    assert materialization.schema_relpath == expected_relpath
+    assert materialization.schema_path == run_dir / expected_relpath
+    assert materialization.schema_path.exists()
+    assert not (run_dir / TARGET_OUTPUT_SCHEMA_RELPATH).exists()
+
+    request_payload = json.loads(input_manifest_path.read_text(encoding="utf-8"))
+    assert request_payload[REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH] == expected_relpath
+
+    run_options = run_output_schema_service.build_run_option_fields(
+        run_dir=run_dir,
+        audit_dir=audit_dir,
+    )
+    assert run_options == {
+        RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH: expected_relpath,
+    }
+    assert expected_relpath in materialization.prompt_contract_markdown
+
+
 def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path(tmp_path: Path) -> None:
     skill_dir = _build_skill_dir(tmp_path)
     skill = _build_skill_manifest(skill_dir)

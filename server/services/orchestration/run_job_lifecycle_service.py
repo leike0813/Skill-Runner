@@ -738,19 +738,38 @@ class _RunJobLifecyclePipeline:
             if await run_store.is_cancel_requested(run_id):
                 canceled_error = orchestrator._build_canceled_error()
                 layout = layout_from_record(request_record or {}, run_dir)
-                result_path = orchestrator._write_canceled_result(
-                    run_dir,
-                    canceled_error,
-                    result_path=layout.result_path if layout is not None else None,
-                )
-                orchestrator._update_status(
-                    run_dir,
-                    RunStatus.CANCELED,
-                    error=canceled_error,
-                    effective_session_timeout_sec=(
-                        interactive_profile.session_timeout_sec if interactive_profile is not None else None
-                    ),
-                )
+                result_path = layout.result_path if layout is not None else run_dir / "result" / "result.json"
+                if request_id:
+                    await run_projection_service.write_terminal_projection(
+                        run_dir=run_dir,
+                        request_id=request_id,
+                        run_id=run_id,
+                        status=RunStatus.CANCELED,
+                        terminal_result={
+                            "data": None,
+                            "artifacts": [],
+                            "repair_level": "none",
+                            "validation_warnings": [],
+                            "error": canceled_error,
+                        },
+                        request_record=request_record,
+                        current_attempt=attempt_number,
+                        effective_session_timeout_sec=(
+                            interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                        ),
+                        error=canceled_error,
+                        run_store_backend=run_store,
+                    )
+                else:
+                    result_path = orchestrator._write_canceled_result(run_dir, canceled_error)
+                    orchestrator._update_status(
+                        run_dir,
+                        RunStatus.CANCELED,
+                        error=canceled_error,
+                        effective_session_timeout_sec=(
+                            interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                        ),
+                    )
                 await run_store.update_run_status(
                     run_id,
                     RunStatus.CANCELED,
@@ -773,13 +792,6 @@ class _RunJobLifecyclePipeline:
             current_outcome: RunAttemptResolvedOutcome | None = None
 
             # 1. Update status to RUNNING
-            orchestrator._update_status(
-                run_dir=run_dir,
-                status=RunStatus.RUNNING,
-                effective_session_timeout_sec=(
-                    interactive_profile.session_timeout_sec if interactive_profile is not None else None
-                ),
-            )
             if request_id:
                 await run_projection_service.write_non_terminal_projection(
                     run_dir=run_dir,
@@ -793,6 +805,14 @@ class _RunJobLifecyclePipeline:
                         interactive_profile.session_timeout_sec if interactive_profile is not None else None
                     ),
                     run_store_backend=run_store,
+                )
+            else:
+                orchestrator._update_status(
+                    run_dir=run_dir,
+                    status=RunStatus.RUNNING,
+                    effective_session_timeout_sec=(
+                        interactive_profile.session_timeout_sec if interactive_profile is not None else None
+                    ),
                 )
             append_orchestrator_event(
                 run_dir=run_dir,

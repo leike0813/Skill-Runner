@@ -35,13 +35,21 @@ class OverflowSidecarRecorder:
         run_dir: Path,
         attempt_number: int,
         run_id: str | None = None,
+        audit_dir: Path | None = None,
     ) -> None:
         self._run_dir = run_dir
+        self._audit_dir = audit_dir or run_dir / ".audit"
         self._attempt_number = max(1, int(attempt_number))
         self._run_id = run_id or run_dir.name
-        self._index_path = run_dir / ".audit" / f"overflow_index.{self._attempt_number}.jsonl"
+        self._index_path = self._audit_dir / f"overflow_index.{self._attempt_number}.jsonl"
         self._index_writer: BufferedAsyncTextFileWriter | None = None
         self._raw_writers: list[BufferedAsyncTextFileWriter] = []
+
+    def _relative_to_run_dir(self, path: Path) -> str:
+        try:
+            return path.relative_to(self._run_dir).as_posix()
+        except ValueError:
+            return path.as_posix()
 
     def _ensure_index_writer(self) -> BufferedAsyncTextFileWriter:
         writer = self._index_writer
@@ -59,8 +67,8 @@ class OverflowSidecarRecorder:
         initial_text: str,
     ) -> OverflowCaptureHandle:
         overflow_id = uuid.uuid4().hex
-        raw_relpath = f".audit/overflow_lines/{self._attempt_number}/{overflow_id}.ndjson"
-        raw_path = self._run_dir / raw_relpath
+        raw_path = self._audit_dir / "overflow_lines" / str(self._attempt_number) / f"{overflow_id}.ndjson"
+        raw_relpath = self._relative_to_run_dir(raw_path)
         writer = BufferedAsyncTextFileWriter(
             path=raw_path,
             max_buffered_bytes=_OVERFLOW_RAW_WRITER_MAX_BUFFERED_BYTES,

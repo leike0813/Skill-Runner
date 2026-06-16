@@ -18,6 +18,22 @@ async def test_run_store_database_initializes_requests_table(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_store_database_enables_wal_and_busy_timeout(tmp_path):
+    database = RunStoreDatabase(tmp_path / "runs.db")
+    await database.ensure_initialized()
+
+    with sqlite3.connect(database.db_path) as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+
+    async with database.connect() as conn:
+        cursor = await conn.execute("PRAGMA busy_timeout")
+        busy_timeout = (await cursor.fetchone())[0]
+
+    assert journal_mode.lower() == "wal"
+    assert busy_timeout >= 5000
+
+
+@pytest.mark.asyncio
 async def test_run_store_database_reinitializes_after_db_file_deleted(tmp_path):
     database = RunStoreDatabase(tmp_path / "runs.db")
     await database.ensure_initialized()

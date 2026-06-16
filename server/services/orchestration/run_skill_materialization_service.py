@@ -11,6 +11,7 @@ from server.runtime.adapter.common.profile_loader import (
     adapter_profile_path_for_engine,
     load_adapter_profile,
 )
+from server.runtime.adapter.common.output_schema_cli import RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH
 from server.runtime.adapter.common.prompt_builder_common import (
     render_run_execution_instructions,
     resolve_run_instruction_filename,
@@ -43,6 +44,8 @@ class RunFolderBootstrapper:
         source: RunLocalSkillSource,
         collect_skill_run_feedback: bool = False,
         feedback_path: Path | None = None,
+        audit_dir: Path | None = None,
+        input_manifest_path: Path | None = None,
     ) -> RunLocalSkillRef:
         snapshot_dir = self.snapshot_dir(run_dir=run_dir, engine_name=engine_name, skill_id=skill.id)
         self._materialize_installed_skill(
@@ -53,6 +56,8 @@ class RunFolderBootstrapper:
             execution_mode=execution_mode,
             collect_skill_run_feedback=collect_skill_run_feedback,
             feedback_path=feedback_path,
+            audit_dir=audit_dir,
+            input_manifest_path=input_manifest_path,
         )
         return RunLocalSkillRef(
             skill_id=skill.id,
@@ -71,6 +76,8 @@ class RunFolderBootstrapper:
         source: RunLocalSkillSource,
         collect_skill_run_feedback: bool = False,
         feedback_path: Path | None = None,
+        audit_dir: Path | None = None,
+        input_manifest_path: Path | None = None,
     ) -> tuple[SkillManifest, RunLocalSkillRef]:
         top_level = self._validator.inspect_zip_top_level_from_bytes(package_bytes)
         snapshot_dir = self.snapshot_dir(
@@ -121,6 +128,8 @@ class RunFolderBootstrapper:
                 execution_mode=execution_mode,
                 collect_skill_run_feedback=collect_skill_run_feedback,
                 feedback_path=feedback_path,
+                audit_dir=audit_dir,
+                input_manifest_path=input_manifest_path,
             )
             materialized = True
             return (
@@ -172,6 +181,8 @@ class RunFolderBootstrapper:
         execution_mode: str,
         collect_skill_run_feedback: bool = False,
         feedback_path: Path | None = None,
+        audit_dir: Path | None = None,
+        input_manifest_path: Path | None = None,
     ) -> None:
         if skill.path is None:
             raise RuntimeError(f"Cannot bootstrap run folder for '{skill.id}' without a source path")
@@ -190,6 +201,8 @@ class RunFolderBootstrapper:
             execution_mode=execution_mode,
             collect_skill_run_feedback=collect_skill_run_feedback,
             feedback_path=feedback_path,
+            audit_dir=audit_dir,
+            input_manifest_path=input_manifest_path,
         )
 
     def _patch_materialized_dir(
@@ -202,17 +215,30 @@ class RunFolderBootstrapper:
         execution_mode: str,
         collect_skill_run_feedback: bool = False,
         feedback_path: Path | None = None,
+        audit_dir: Path | None = None,
+        input_manifest_path: Path | None = None,
     ) -> None:
         snapshot_skill = skill.model_copy(update={"path": snapshot_dir})
         output_schema_materialization = run_output_schema_service.materialize(
             skill=snapshot_skill,
             execution_mode=execution_mode,
             run_dir=run_dir,
+            audit_dir=audit_dir,
+            input_manifest_path=input_manifest_path,
         )
         prompt_contract_markdown = structured_output_pipeline.resolve_prompt_contract_markdown(
             engine_name=engine_name,
             run_dir=run_dir,
-            options={"execution_mode": execution_mode},
+            options={
+                "execution_mode": execution_mode,
+                **(
+                    {
+                        RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH: output_schema_materialization.schema_relpath,
+                    }
+                    if output_schema_materialization.schema_relpath is not None
+                    else {}
+                ),
+            },
             canonical_prompt_contract_markdown=output_schema_materialization.prompt_contract_markdown,
         )
         skill_patcher.patch_skill_md(

@@ -183,6 +183,67 @@ class RunObservabilityService:
     def _workspace(self):
         return workspace_manager
 
+    async def _resolve_layout_for_request(self, request_id: Optional[str], run_dir: Path) -> Any | None:
+        if not request_id:
+            return None
+        try:
+            record = await maybe_await(self._run_store().get_request_with_run(request_id))
+        except (RuntimeError, ValueError, TypeError):
+            record = None
+        if not isinstance(record, dict):
+            try:
+                record = await maybe_await(self._run_store().get_request(request_id))
+            except (RuntimeError, ValueError, TypeError):
+                record = None
+        if not isinstance(record, dict):
+            return None
+        return layout_from_record(record, run_dir)
+
+    def _audit_dir_for_layout(self, run_dir: Path, layout: Any | None = None) -> Path:
+        return layout.audit_dir if layout is not None else run_dir / AUDIT_DIR_NAME
+
+    def _legacy_audit_dir(self, run_dir: Path) -> Path:
+        return run_dir / AUDIT_DIR_NAME
+
+    def _read_jsonl_with_legacy_audit_fallback(
+        self,
+        *,
+        path: Path,
+        legacy_path: Path | None = None,
+    ) -> List[Dict[str, Any]]:
+        rows = read_jsonl(path)
+        if rows or legacy_path is None or legacy_path == path:
+            return rows
+        return read_jsonl(legacy_path)
+
+    def _read_status_payload_for_layout(self, run_dir: Path, layout: Any | None = None) -> Dict[str, Any]:
+        try:
+            return self._read_status_payload(run_dir, layout)
+        except TypeError:
+            return self._read_status_payload(run_dir)
+
+    def _list_available_attempts_for_audit(
+        self,
+        run_dir: Path,
+        *,
+        audit_dir: Path | None = None,
+    ) -> List[int]:
+        try:
+            return self._list_available_attempts(run_dir, audit_dir=audit_dir)
+        except TypeError:
+            return self._list_available_attempts(run_dir)
+
+    def _latest_attempt_number_for_audit(
+        self,
+        run_dir: Path,
+        *,
+        audit_dir: Path | None = None,
+    ) -> int:
+        try:
+            return self._latest_attempt_number(run_dir, audit_dir=audit_dir)
+        except TypeError:
+            return self._latest_attempt_number(run_dir)
+
     async def _reconcile_waiting_auth_if_needed(self, request_id: str, run_status: str) -> None:
         if run_status != "waiting_auth" or not request_id or waiting_auth_reconciler is None:
             return
@@ -252,16 +313,18 @@ class RunObservabilityService:
         safe_stream = stream.strip().lower()
         if safe_stream not in {"stdout", "stderr", "pty"}:
             raise ValueError("stream must be one of: stdout, stderr, pty")
-        status_payload = self._read_status_payload(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         attempt_number = await self._resolve_attempt_number(
             request_id,
             status=status,
             run_dir=run_dir,
+            audit_dir=audit_dir,
             requested_attempt=attempt,
         )
-        audit_dir = run_dir / AUDIT_DIR_NAME
         if safe_stream == "pty":
             attempted = audit_dir / f"pty-output.{attempt_number}.log"
         else:
@@ -290,7 +353,8 @@ class RunObservabilityService:
         poll_interval_sec: float = 0.2,
         is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
-        status_payload = self._read_status_payload(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
             status = "queued"
@@ -363,7 +427,7 @@ class RunObservabilityService:
                     emitted = True
                     last_chat_event_seq = seq_obj
 
-                status_payload = self._read_status_payload(run_dir)
+                status_payload = self._read_status_payload_for_layout(run_dir, layout)
                 status_obj = status_payload.get("status")
                 current_status = status_obj if isinstance(status_obj, str) and status_obj else status
 
@@ -396,7 +460,8 @@ class RunObservabilityService:
         poll_interval_sec: float = 0.2,
         is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
-        status_payload = self._read_status_payload(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
             status = "queued"
@@ -469,7 +534,7 @@ class RunObservabilityService:
                     emitted = True
                     last_chat_seq = seq_obj
 
-                status_payload = self._read_status_payload(run_dir)
+                status_payload = self._read_status_payload_for_layout(run_dir, layout)
                 status_obj = status_payload.get("status")
                 current_status = status_obj if isinstance(status_obj, str) and status_obj else status
 
@@ -505,7 +570,9 @@ class RunObservabilityService:
         drained: List[Dict[str, Any]] = []
         deadline = time.monotonic() + max(0.1, float(drain_window_sec))
         idle_cycles = 0
-        latest_attempt_seen = self._latest_attempt_number(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        latest_attempt_seen = self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir)
         while time.monotonic() < deadline:
             protocol_payload = await self.list_event_history(
                 run_dir=run_dir,
@@ -524,7 +591,7 @@ class RunObservabilityService:
                 last_chat_event_seq = seq_obj
                 emitted = True
 
-            current_latest_attempt = self._latest_attempt_number(run_dir)
+            current_latest_attempt = self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir)
             attempt_advanced = current_latest_attempt > latest_attempt_seen
             latest_attempt_seen = current_latest_attempt
             waiting_for_expected_attempt = (
@@ -714,11 +781,17 @@ class RunObservabilityService:
         from_ts: Optional[str],
         to_ts: Optional[str],
     ) -> List[Dict[str, Any]]:
-        audit_path = run_dir / AUDIT_DIR_NAME / "chat_replay.jsonl"
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        audit_path = audit_dir / "chat_replay.jsonl"
+        legacy_audit_path = self._legacy_audit_dir(run_dir) / "chat_replay.jsonl"
         rows: List[Dict[str, Any]]
         if audit_path.exists() and audit_path.is_file():
             rows = self._filter_valid_chat_rows(
-                rows=read_jsonl(audit_path),
+                rows=self._read_jsonl_with_legacy_audit_fallback(
+                    path=audit_path,
+                    legacy_path=legacy_audit_path,
+                ),
                 context=f"chat-audit:{request_id or run_dir.name}",
             )
         else:
@@ -745,7 +818,11 @@ class RunObservabilityService:
         from_ts: Optional[str],
         to_ts: Optional[str],
     ) -> List[Dict[str, Any]]:
-        attempts = self._list_available_attempts(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
+        if not attempts and audit_dir != self._legacy_audit_dir(run_dir):
+            attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=self._legacy_audit_dir(run_dir))
         if not attempts:
             attempts = [1]
         rows: List[Dict[str, Any]] = []
@@ -858,7 +935,10 @@ class RunObservabilityService:
         if normalized_stream not in {"fcmp", "rasp", "orchestrator"}:
             raise ValueError("stream must be one of: fcmp, rasp, orchestrator")
 
-        status_payload = self._read_status_payload(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        legacy_audit_dir = self._legacy_audit_dir(run_dir)
+        status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         terminal_status = status in TERMINAL_STATUSES
@@ -866,6 +946,7 @@ class RunObservabilityService:
             request_id=request_id,
             status=status,
             run_dir=run_dir,
+            audit_dir=audit_dir,
             requested_attempt=attempt,
         )
         if self._is_running_current_attempt_protocol_request(
@@ -874,6 +955,7 @@ class RunObservabilityService:
             status=status,
             status_payload=status_payload,
             selected_attempt=selected_attempt,
+            audit_dir=audit_dir,
         ):
             fast_live_payload = self._get_live_protocol_payload(
                 run_dir=run_dir,
@@ -891,6 +973,7 @@ class RunObservabilityService:
                 limit=limit,
                 from_seq=from_seq,
                 to_seq=to_seq,
+                audit_dir=audit_dir,
             )
         live_payload: Dict[str, Any]
         live_rows: List[Dict[str, Any]]
@@ -950,7 +1033,12 @@ class RunObservabilityService:
             except (TypeError, ValueError):
                 live_ceiling = 0
         requested_from = int(from_seq) if from_seq is not None else None
-        paths = self._protocol_paths(run_dir, selected_attempt)
+        paths = self._protocol_paths(run_dir, selected_attempt, audit_dir=audit_dir)
+        legacy_paths = (
+            self._protocol_paths(run_dir, selected_attempt, audit_dir=legacy_audit_dir)
+            if legacy_audit_dir != audit_dir
+            else paths
+        )
         needs_audit = normalized_stream == "orchestrator"
         if normalized_stream in {"fcmp", "rasp"}:
             if terminal_status:
@@ -964,21 +1052,32 @@ class RunObservabilityService:
         context = f"history:{normalized_stream}:{request_id or run_dir.name}"
         rows: list[dict[str, Any]]
         if normalized_stream == "orchestrator":
-            orchestrator_rows = self._backfill_orchestrator_seq(read_jsonl(paths["orchestrator"]))
+            orchestrator_rows = self._backfill_orchestrator_seq(
+                self._read_jsonl_with_legacy_audit_fallback(
+                    path=paths["orchestrator"],
+                    legacy_path=legacy_paths["orchestrator"],
+                )
+            )
             rows = self._filter_valid_orchestrator_rows(
                 rows=orchestrator_rows,
                 context=context,
             )
         elif needs_audit:
             if normalized_stream == "fcmp":
-                self.reindex_fcmp_global_seq(run_dir)
+                self.reindex_fcmp_global_seq(run_dir, audit_dir=audit_dir)
                 rows = self._filter_valid_fcmp_rows(
-                    rows=read_jsonl(paths["fcmp"]),
+                    rows=self._read_jsonl_with_legacy_audit_fallback(
+                        path=paths["fcmp"],
+                        legacy_path=legacy_paths["fcmp"],
+                    ),
                     context=context,
                 )
             else:
                 rows = self._filter_valid_rasp_rows(
-                    rows=read_jsonl(paths["events"]),
+                    rows=self._read_jsonl_with_legacy_audit_fallback(
+                        path=paths["events"],
+                        legacy_path=legacy_paths["events"],
+                    ),
                     context=context,
                 )
         else:
@@ -1005,7 +1104,7 @@ class RunObservabilityService:
         )
         return {
             "attempt": selected_attempt,
-            "available_attempts": self._list_available_attempts(run_dir),
+            "available_attempts": self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir),
             "events": filtered,
             "source": (
                 "mixed"
@@ -1045,24 +1144,27 @@ class RunObservabilityService:
     ) -> Dict[str, Any]:
         safe_cursor = max(0, int(cursor))
         safe_limit = max(1, min(500, int(limit)))
-        status_payload = self._read_status_payload(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         runtime_attempt = await self._resolve_attempt_number(
             request_id=request_id,
             status=status,
             run_dir=run_dir,
+            audit_dir=audit_dir,
             requested_attempt=None,
         )
-        attempts = self._list_available_attempts(run_dir)
+        attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         if runtime_attempt > 0 and runtime_attempt not in attempts:
             attempts.append(runtime_attempt)
             attempts.sort()
         if not attempts:
             attempts = [runtime_attempt] if runtime_attempt > 0 else [1]
 
-        signature = self._timeline_cache_signature(run_dir=run_dir, attempts=attempts)
-        cache_key = str(run_dir.resolve(strict=False))
+        signature = self._timeline_cache_signature(run_dir=run_dir, attempts=attempts, audit_dir=audit_dir)
+        cache_key = str(audit_dir.resolve(strict=False))
         cached = self._timeline_cache.get(cache_key)
         if cached is not None and cached.get("signature") == signature:
             all_events_obj = cached.get("events")
@@ -1250,10 +1352,16 @@ class RunObservabilityService:
             "source": "mixed",
         }
 
-    def _timeline_cache_signature(self, *, run_dir: Path, attempts: list[int]) -> tuple[Any, ...]:
+    def _timeline_cache_signature(
+        self,
+        *,
+        run_dir: Path,
+        attempts: list[int],
+        audit_dir: Path | None = None,
+    ) -> tuple[Any, ...]:
         parts: list[tuple[str, int, int]] = []
         for attempt in attempts:
-            paths = self._protocol_paths(run_dir, attempt)
+            paths = self._protocol_paths(run_dir, attempt, audit_dir=audit_dir)
             for key in ("orchestrator", "events", "fcmp"):
                 path = paths[key]
                 if path.exists() and path.is_file():
@@ -1261,7 +1369,8 @@ class RunObservabilityService:
                     parts.append((path.name, int(stat.st_size), int(stat.st_mtime_ns)))
                 else:
                     parts.append((path.name, -1, -1))
-        chat_path = run_dir / AUDIT_DIR_NAME / "chat_replay.jsonl"
+        target_audit_dir = audit_dir or run_dir / AUDIT_DIR_NAME
+        chat_path = target_audit_dir / "chat_replay.jsonl"
         if chat_path.exists() and chat_path.is_file():
             stat = chat_path.stat()
             parts.append((chat_path.name, int(stat.st_size), int(stat.st_mtime_ns)))
@@ -1507,12 +1616,13 @@ class RunObservabilityService:
         status: str,
         status_payload: Dict[str, Any],
         selected_attempt: int,
+        audit_dir: Path | None = None,
     ) -> bool:
         if status not in RUNNING_STATUSES or stream not in {"fcmp", "rasp"}:
             return False
         current_attempt = self._read_expected_attempt_number(status_payload)
         if current_attempt is None or current_attempt <= 0:
-            latest_attempt = self._latest_attempt_number(run_dir)
+            latest_attempt = self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir)
             current_attempt = latest_attempt if latest_attempt > 0 else selected_attempt
         return selected_attempt == current_attempt
 
@@ -1525,6 +1635,7 @@ class RunObservabilityService:
         limit: Optional[int],
         from_seq: Optional[int],
         to_seq: Optional[int],
+        audit_dir: Path | None = None,
     ) -> Dict[str, Any]:
         live_rows_obj = live_payload.get("events")
         live_rows = live_rows_obj if isinstance(live_rows_obj, list) else []
@@ -1546,7 +1657,7 @@ class RunObservabilityService:
             live_ceiling = 0
         return {
             "attempt": selected_attempt,
-            "available_attempts": self._list_available_attempts(run_dir),
+            "available_attempts": self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir),
             "events": filtered,
             "source": "live",
             "cursor_floor": live_floor,
@@ -1608,13 +1719,13 @@ class RunObservabilityService:
                 merged[key] = row
         return sorted(merged.values(), key=self._protocol_sort_key)
 
-    def reindex_fcmp_global_seq(self, run_dir: Path) -> None:
-        attempts = self._list_available_attempts(run_dir)
+    def reindex_fcmp_global_seq(self, run_dir: Path, *, audit_dir: Path | None = None) -> None:
+        attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         if not attempts:
             return
         next_global_seq = 1
         for attempt_number in attempts:
-            path = self._protocol_paths(run_dir, attempt_number)["fcmp"]
+            path = self._protocol_paths(run_dir, attempt_number, audit_dir=audit_dir)["fcmp"]
             rows = read_jsonl(path)
             if not rows:
                 continue
@@ -1698,8 +1809,14 @@ class RunObservabilityService:
             backfilled.append(row_copy)
         return backfilled
 
-    def _protocol_paths(self, run_dir: Path, attempt_number: int) -> Dict[str, Path]:
-        audit_dir = run_dir / AUDIT_DIR_NAME
+    def _protocol_paths(
+        self,
+        run_dir: Path,
+        attempt_number: int,
+        *,
+        audit_dir: Path | None = None,
+    ) -> Dict[str, Path]:
+        audit_dir = audit_dir or run_dir / AUDIT_DIR_NAME
         suffix = f".{attempt_number}"
         return {
             "audit_dir": audit_dir,
@@ -1987,7 +2104,7 @@ class RunObservabilityService:
         if finished_at is None and replay_chunks:
             finished_at = self._parse_optional_ts(replay_chunks[-1].get("ts"))
 
-        temp_root = run_dir / AUDIT_DIR_NAME / ".strict_replay_tmp"
+        temp_root = paths["audit_dir"] / ".strict_replay_tmp"
         temp_run_dir = temp_root / f"attempt-{attempt_number}"
         temp_audit_dir = temp_run_dir / AUDIT_DIR_NAME
         temp_audit_dir.mkdir(parents=True, exist_ok=True)
@@ -1997,6 +2114,7 @@ class RunObservabilityService:
         emitter = LiveRuntimeEmitterImpl(
             run_id=run_dir.name,
             run_dir=temp_run_dir,
+            audit_dir=temp_audit_dir,
             engine=engine_name,
             attempt_number=attempt_number,
             stream_parser=stream_parser,
@@ -2082,7 +2200,7 @@ class RunObservabilityService:
                         raw_ref=None,
                         ts=ts,
                     )
-                    fcmp_publisher.publish(run_dir=temp_run_dir, event=fcmp_event)
+                    fcmp_publisher.publish(run_dir=temp_run_dir, event=fcmp_event, audit_dir=temp_audit_dir)
                 continue
             await emitter.on_stream_chunk(
                 stream=str(payload.get("stream") or "stdout"),
@@ -2138,7 +2256,7 @@ class RunObservabilityService:
         self._atomic_write_jsonl(path=paths["fcmp"], rows=fcmp_rows)
         self._atomic_write_jsonl(path=paths["diagnostics"], rows=diagnostics_rows)
         self._atomic_write_text(path=paths["metrics"], text=metrics_text)
-        self.reindex_fcmp_global_seq(run_dir)
+        self.reindex_fcmp_global_seq(run_dir, audit_dir=paths["audit_dir"])
         shutil.rmtree(temp_root, ignore_errors=True)
         return {
             "success": True,
@@ -2161,12 +2279,12 @@ class RunObservabilityService:
             return engine_obj
         return "unknown"
 
-    def _latest_attempt_number(self, run_dir: Path) -> int:
-        attempts = self._list_available_attempts(run_dir)
+    def _latest_attempt_number(self, run_dir: Path, *, audit_dir: Path | None = None) -> int:
+        attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         return attempts[-1] if attempts else 0
 
-    def _list_available_attempts(self, run_dir: Path) -> List[int]:
-        audit_dir = run_dir / AUDIT_DIR_NAME
+    def _list_available_attempts(self, run_dir: Path, *, audit_dir: Path | None = None) -> List[int]:
+        audit_dir = audit_dir or run_dir / AUDIT_DIR_NAME
         if not audit_dir.exists() or not audit_dir.is_dir():
             return []
         attempts: set[int] = set()
@@ -2192,9 +2310,10 @@ class RunObservabilityService:
         *,
         status: str,
         run_dir: Path,
+        audit_dir: Path | None = None,
         requested_attempt: Optional[int] = None,
     ) -> int:
-        available_attempts = self._list_available_attempts(run_dir)
+        available_attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         if requested_attempt is not None:
             requested_value = int(requested_attempt)
             if requested_value <= 0:
@@ -2218,7 +2337,7 @@ class RunObservabilityService:
                 execution_mode = execution_mode_obj
         if execution_mode != "interactive":
             return available_attempts[-1] if available_attempts else 1
-        latest_attempt = self._latest_attempt_number(run_dir)
+        latest_attempt = self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir)
         if status in {"waiting_user", "succeeded", "failed", "canceled"} and latest_attempt > 0:
             return latest_attempt
         interaction_count = await maybe_await(self._run_store().get_interaction_count(request_id))
@@ -2231,16 +2350,18 @@ class RunObservabilityService:
         request_id: Optional[str],
     ) -> Dict[str, Any]:
         rebuild_mode = "strict_replay"
-        attempts = self._list_available_attempts(run_dir)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         if not attempts:
             attempts = [1]
         timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
-        backup_root = run_dir / AUDIT_DIR_NAME / "rebuild_backups" / timestamp
+        backup_root = audit_dir / "rebuild_backups" / timestamp
         engine_name = await self._resolve_engine_name(request_id)
         attempt_results: list[dict[str, Any]] = []
         success = True
         for attempt_number in attempts:
-            paths = self._protocol_paths(run_dir, attempt_number)
+            paths = self._protocol_paths(run_dir, attempt_number, audit_dir=audit_dir)
             backup_attempt_dir = backup_root / f"attempt-{attempt_number}"
             self._backup_protocol_attempt_files(
                 paths=paths,
@@ -2321,14 +2442,16 @@ class RunObservabilityService:
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
         run_id = run_dir.name
         engine_name = await self._resolve_engine_name(request_id)
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
         if attempt_number is None:
             attempt_number = await self._resolve_attempt_number(
                 request_id,
                 status=status,
                 run_dir=run_dir,
+                audit_dir=audit_dir,
             )
 
-        audit_dir = run_dir / AUDIT_DIR_NAME
         attempt_meta = self._read_attempt_meta(audit_dir, attempt_number)
         attempt_status_obj = attempt_meta.get("status")
         if isinstance(attempt_status_obj, str) and attempt_status_obj:
@@ -2341,7 +2464,7 @@ class RunObservabilityService:
         attempted_stdout = audit_dir / f"stdout.{attempt_number}.log"
         attempted_stderr = audit_dir / f"stderr.{attempt_number}.log"
         attempted_pty = audit_dir / f"pty-output.{attempt_number}.log"
-        paths = self._protocol_paths(run_dir, attempt_number)
+        paths = self._protocol_paths(run_dir, attempt_number, audit_dir=audit_dir)
         stdout_path = attempted_stdout
         stderr_path = attempted_stderr
         pty_path = attempted_pty if attempted_pty.exists() else None
@@ -2372,7 +2495,7 @@ class RunObservabilityService:
             write_jsonl(paths["events"], [])
             write_jsonl(paths["fcmp"], [])
             write_jsonl(paths["diagnostics"], [warning_payload])
-            self.reindex_fcmp_global_seq(run_dir)
+            self.reindex_fcmp_global_seq(run_dir, audit_dir=audit_dir)
             paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
             paths["metrics"].write_text(
                 json.dumps(
@@ -2426,7 +2549,7 @@ class RunObservabilityService:
             attempt_status=attempt_status,
         )
         orchestrator_events = self._filter_valid_orchestrator_rows(
-            rows=read_jsonl(self._protocol_paths(run_dir, attempt_number)["orchestrator"]),
+            rows=read_jsonl(self._protocol_paths(run_dir, attempt_number, audit_dir=audit_dir)["orchestrator"]),
             context=f"materialize:{request_id or run_id}",
         )
         existing_fcmp_rows = (
@@ -2504,7 +2627,7 @@ class RunObservabilityService:
         )
         if force_rebuild or not existing_fcmp_rows:
             write_jsonl(paths["fcmp"], fcmp_rows)
-        self.reindex_fcmp_global_seq(run_dir)
+        self.reindex_fcmp_global_seq(run_dir, audit_dir=audit_dir)
         paths["metrics"].parent.mkdir(parents=True, exist_ok=True)
         paths["metrics"].write_text(
             json.dumps(metrics_payload, ensure_ascii=False, indent=2),
@@ -2708,9 +2831,19 @@ class RunObservabilityService:
                 continue
             run_id = run_id_obj
             run_dir = self._workspace().get_run_dir(run_id)
-            status_payload = self._read_status_payload(run_dir) if run_dir else {}
+            layout = layout_from_record(row, run_dir)
+            run_dir_path = (
+                layout.workspace_dir
+                if layout is not None
+                else run_dir
+            )
+            status_payload = (
+                self._read_status_payload(run_dir_path, layout)
+                if run_dir_path
+                else {}
+            )
             run_status = self._normalize_run_status(row, status_payload)
-            file_state = self._build_file_state(run_dir)
+            file_state = self._build_file_state(run_dir_path, layout)
             request_id_obj = row.get("request_id")
             request_id = request_id_obj if isinstance(request_id_obj, str) else ""
             await self._reconcile_waiting_auth_if_needed(request_id, run_status)
@@ -2720,12 +2853,22 @@ class RunObservabilityService:
                 if isinstance(refreshed_row, dict):
                     row = refreshed_row
                 run_dir = self._workspace().get_run_dir(run_id)
-                status_payload = self._read_status_payload(run_dir) if run_dir else {}
+                layout = layout_from_record(row, run_dir)
+                run_dir_path = (
+                    layout.workspace_dir
+                    if layout is not None
+                    else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id)
+                )
+                status_payload = (
+                    self._read_status_payload(run_dir_path, layout)
+                    if run_dir_path
+                    else {}
+                )
                 run_status = self._normalize_run_status(row, status_payload)
-                file_state = self._build_file_state(run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id))
+                file_state = self._build_file_state(run_dir_path, layout)
             updated_at = status_payload.get("updated_at")
             if not isinstance(updated_at, str):
-                updated_at = self._derive_updated_at(run_dir, row)
+                updated_at = self._derive_updated_at(run_dir_path, row)
             results.append(
                 {
                     "request_id": request_id_obj,
@@ -2890,9 +3033,11 @@ class RunObservabilityService:
 
     async def get_logs_tail(self, request_id: str, max_bytes: int = 64 * 1024) -> Dict[str, Any]:
         detail = await self.get_run_detail(request_id)
-        run_dir = Path(detail["run_dir"])
-        latest_attempt = max(1, self._latest_attempt_number(run_dir))
-        audit_dir = run_dir / AUDIT_DIR_NAME
+        run_id = str(detail.get("run_id") or "")
+        run_dir = self._workspace().get_run_dir(run_id) if run_id else Path(detail["run_dir"])
+        layout = await self._resolve_layout_for_request(request_id, run_dir)
+        audit_dir = self._audit_dir_for_layout(run_dir, layout)
+        latest_attempt = max(1, self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir))
         attempted_stdout = audit_dir / f"stdout.{latest_attempt}.log"
         attempted_stderr = audit_dir / f"stderr.{latest_attempt}.log"
         stdout_path = attempted_stdout
@@ -2935,8 +3080,8 @@ class RunObservabilityService:
     def _build_file_state(self, run_dir: Path | None, layout: Any | None = None) -> Dict[str, Dict[str, Any]]:
         if not run_dir:
             return {}
-        latest_attempt = max(1, self._latest_attempt_number(run_dir))
         audit_dir = layout.audit_dir if layout is not None else run_dir / AUDIT_DIR_NAME
+        latest_attempt = max(1, self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir))
         targets = {
             "state": layout.state_path if layout is not None else run_dir / ".state" / "state.json",
             "dispatch": layout.dispatch_path if layout is not None else run_dir / ".state" / "dispatch.json",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from server.runtime.protocol.live_publish import LiveRuntimeEmitterImpl
@@ -54,9 +55,16 @@ class RunAttemptExecutionService:
         run_id = context.request.run_id
         engine_name = context.request.engine_name
         adapter_stream_parser = getattr(adapter, "stream_parser", adapter)
+        audit_dir_obj = context.run_options.get("__audit_dir")
+        audit_dir = (
+            Path(str(audit_dir_obj))
+            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
+            else None
+        )
         live_runtime_emitter = LiveRuntimeEmitterImpl(
             run_id=run_id,
             run_dir=context.run_dir,
+            audit_dir=audit_dir,
             engine=engine_name,
             attempt_number=context.attempt_number,
             stream_parser=adapter_stream_parser,
@@ -126,6 +134,7 @@ class RunAttemptExecutionService:
             live_runtime_emitter_factory=lambda **kwargs: LiveRuntimeEmitterImpl(
                 run_id=run_id,
                 run_dir=context.run_dir,
+                audit_dir=audit_dir,
                 engine=engine_name,
                 attempt_number=context.attempt_number,
                 stream_parser=adapter_stream_parser,

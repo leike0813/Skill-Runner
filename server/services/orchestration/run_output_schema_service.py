@@ -44,6 +44,7 @@ class RunOutputSchemaService:
         skill: SkillManifest,
         execution_mode: str,
         run_dir: Path,
+        audit_dir: Path | None = None,
         input_manifest_path: Path | None = None,
     ) -> RunOutputSchemaMaterialization:
         business_schema = self._load_business_schema(skill)
@@ -62,7 +63,7 @@ class RunOutputSchemaService:
             if self._normalize_execution_mode(execution_mode) == "interactive"
             else final_schema
         )
-        schema_path = self._artifact_path(run_dir)
+        schema_path = self._artifact_path(run_dir, audit_dir=audit_dir)
         schema_path.parent.mkdir(parents=True, exist_ok=True)
         schema_relpath = schema_path.relative_to(run_dir).as_posix()
         prompt_contract_markdown = self.build_prompt_contract_markdown(
@@ -88,15 +89,15 @@ class RunOutputSchemaService:
             prompt_contract_markdown=prompt_contract_markdown,
         )
 
-    def build_run_option_fields(self, *, run_dir: Path) -> dict[str, str]:
-        schema_path = self._artifact_path(run_dir)
+    def build_run_option_fields(self, *, run_dir: Path, audit_dir: Path | None = None) -> dict[str, str]:
+        schema_path = self._artifact_path(run_dir, audit_dir=audit_dir)
         fields: dict[str, str] = {}
         if schema_path.exists():
             fields[RUN_OPTION_TARGET_OUTPUT_SCHEMA_RELPATH] = schema_path.relative_to(run_dir).as_posix()
         return fields
 
-    def load_machine_schema(self, *, run_dir: Path) -> dict[str, Any] | None:
-        schema_path = self._artifact_path(run_dir)
+    def load_machine_schema(self, *, run_dir: Path, audit_dir: Path | None = None) -> dict[str, Any] | None:
+        schema_path = self._artifact_path(run_dir, audit_dir=audit_dir)
         if not schema_path.exists():
             return None
         try:
@@ -136,8 +137,9 @@ class RunOutputSchemaService:
         skill: SkillManifest,
         execution_mode: str,
         run_dir: Path,
+        audit_dir: Path | None = None,
     ) -> dict[str, Any] | None:
-        materialized = self.load_machine_schema(run_dir=run_dir)
+        materialized = self.load_machine_schema(run_dir=run_dir, audit_dir=audit_dir)
         if isinstance(materialized, dict):
             return materialized
         business_schema = self._load_business_schema(skill)
@@ -304,7 +306,9 @@ class RunOutputSchemaService:
                 exc_info=True,
             )
 
-    def _artifact_path(self, run_dir: Path) -> Path:
+    def _artifact_path(self, run_dir: Path, audit_dir: Path | None = None) -> Path:
+        if audit_dir is not None:
+            return audit_dir / "contracts" / "target_output_schema.json"
         return run_dir / TARGET_OUTPUT_SCHEMA_RELPATH
 
     def _normalize_execution_mode(self, execution_mode: str) -> str:

@@ -53,3 +53,30 @@ def test_chat_replay_publisher_bootstraps_seq_from_audit(tmp_path: Path) -> None
     assert published["seq"] == 5
     payload = chat_replay_live_journal.replay(run_id="run-chat-publisher", after_seq=0)
     assert payload["events"][-1]["text"] == "new"
+
+
+def test_chat_replay_publisher_writes_to_namespaced_audit_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-chat-namespaced"
+    audit_dir = run_dir / ".audit" / "demo-skill.1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    chat_replay_live_journal.clear("run-chat-namespaced")
+    publisher = ChatReplayPublisher()
+
+    publisher.publish(
+        run_dir=run_dir,
+        audit_dir=audit_dir,
+        event={
+            "protocol_version": "chat-replay/1.0",
+            "seq": 0,
+            "run_id": "run-chat-namespaced",
+            "attempt": 1,
+            "role": "assistant",
+            "kind": "assistant_final",
+            "text": "done",
+            "created_at": "2026-03-04T10:05:00Z",
+            "correlation": {},
+        },
+    )
+
+    assert (audit_dir / "chat_replay.jsonl").exists()
+    assert not (run_dir / ".audit" / "chat_replay.jsonl").exists()

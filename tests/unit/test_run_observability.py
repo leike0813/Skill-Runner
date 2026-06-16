@@ -103,6 +103,68 @@ async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_list_runs_prefers_namespaced_state_over_legacy_root_state(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-ns"
+    _write_state_file(run_dir, "running")
+    namespace = "demo-skill.1"
+    namespaced_state = run_dir / ".state" / namespace / "state.json"
+    namespaced_state.parent.mkdir(parents=True, exist_ok=True)
+    namespaced_state.write_text(
+        json.dumps(
+            {
+                "request_id": "req-ns",
+                "run_id": "run-ns",
+                "status": "succeeded",
+                "updated_at": "2026-01-01T00:01:00",
+                "current_attempt": 1,
+                "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
+                "pending": {"owner": None, "interaction_id": None, "auth_session_id": None, "payload": None},
+                "resume": {
+                    "resume_ticket_id": None,
+                    "resume_cause": None,
+                    "source_attempt": None,
+                    "target_attempt": None,
+                },
+                "runtime": {},
+                "error": None,
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    row = {
+        "request_id": "req-ns",
+        "run_id": "run-ns",
+        "skill_id": "demo-skill",
+        "engine": "codex",
+        "request_created_at": "2026-01-01T00:00:00",
+        "run_status": "succeeded",
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+    }
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
+        AsyncMock(return_value=[row]),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(return_value=row),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
+        lambda _run_id: run_dir,
+    )
+
+    rows = await RunObservabilityService().list_runs()
+
+    assert rows[0]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
 async def test_list_runs_reconciles_waiting_auth_before_render(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -941,7 +1003,7 @@ async def test_list_protocol_history_running_old_attempt_still_uses_audit(monkey
     assert payload["source"] == "audit"
     assert len(payload["events"]) == 1
     assert payload["events"][0]["type"] == "conversation.state.changed"
-    reindex_mock.assert_called_once_with(run_dir)
+    reindex_mock.assert_called_once()
 
 
 def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:

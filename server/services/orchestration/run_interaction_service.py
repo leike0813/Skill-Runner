@@ -154,6 +154,13 @@ class RunInteractionService:
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
             raise HTTPException(status_code=404, detail="Run not found")
+        layout = layout_from_record(request_record, run_dir)
+        audit_dir = layout.audit_dir if layout is not None else None
+        append_orchestrator_event = _append_orchestrator_event_for_request(
+            request_record=request_record,
+            run_dir=run_dir,
+        )
+        update_status = _update_status_for_request(request_record=request_record)
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -166,6 +173,7 @@ class RunInteractionService:
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_id,
+                    audit_dir=audit_dir,
                 )
             )
             logger.info(
@@ -206,8 +214,8 @@ class RunInteractionService:
                         selection=request.selection,
                         background_tasks=background_tasks,
                         run_store_backend=run_store_backend,
-                        append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
-                        update_status=job_orchestrator._update_status,
+                        append_orchestrator_event=append_orchestrator_event,
+                        update_status=update_status,
                         resume_run_job=job_orchestrator.run_job,
                     )
                 if request.submission is None or request.auth_session_id is None:
@@ -219,8 +227,8 @@ class RunInteractionService:
                     auth_session_id=request.auth_session_id,
                     background_tasks=background_tasks,
                     run_store_backend=run_store_backend,
-                    append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
-                    update_status=job_orchestrator._update_status,
+                    append_orchestrator_event=append_orchestrator_event,
+                    update_status=update_status,
                     resume_run_job=job_orchestrator.run_job,
                 )
 
@@ -458,7 +466,7 @@ class RunInteractionService:
                 run_store_backend=run_store_backend,
             )
             accepted_at = datetime.now().astimezone().isoformat()
-            job_orchestrator.audit_service.append_orchestrator_event(
+            append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=source_attempt + 1,
                 category="interaction",
@@ -524,6 +532,8 @@ class RunInteractionService:
             raise HTTPException(status_code=404, detail="Run not found")
         if status != RunStatus.WAITING_AUTH:
             raise HTTPException(status_code=409, detail="Run is not waiting for auth")
+        layout = layout_from_record(request_record, run_dir)
+        audit_dir = layout.audit_dir if layout is not None else None
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -536,6 +546,7 @@ class RunInteractionService:
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_id,
+                    audit_dir=audit_dir,
                 )
             )
             return await run_auth_orchestration_service.submit_auth_import(
@@ -545,8 +556,11 @@ class RunInteractionService:
                 files=files,
                 background_tasks=background_tasks,
                 run_store_backend=run_store_backend,
-                append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
-                update_status=job_orchestrator._update_status,
+                append_orchestrator_event=_append_orchestrator_event_for_request(
+                    request_record=request_record,
+                    run_dir=run_dir,
+                ),
+                update_status=_update_status_for_request(request_record=request_record),
                 resume_run_job=job_orchestrator.run_job,
             )
 
@@ -566,6 +580,8 @@ class RunInteractionService:
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
             raise HTTPException(status_code=404, detail="Run not found")
+        layout = layout_from_record(request_record, run_dir)
+        audit_dir = layout.audit_dir if layout is not None else None
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -578,6 +594,7 @@ class RunInteractionService:
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_id,
+                    audit_dir=audit_dir,
                 )
             )
             logger.info(
@@ -587,8 +604,11 @@ class RunInteractionService:
             )
             response = await run_auth_orchestration_service.get_auth_session_status(
                 request_id=request_id,
-                append_orchestrator_event=job_orchestrator.audit_service.append_orchestrator_event,
-                update_status=job_orchestrator._update_status,
+                append_orchestrator_event=_append_orchestrator_event_for_request(
+                    request_record=request_record,
+                    run_dir=run_dir,
+                ),
+                update_status=_update_status_for_request(request_record=request_record),
                 resume_run_job=job_orchestrator.run_job,
                 run_store_backend=run_store_backend,
             )
@@ -621,6 +641,69 @@ def _ensure_interactive_mode(request_record: dict[str, Any]) -> None:
 def _state_file(run_dir: Path, request_record: dict[str, Any] | None = None) -> Path:
     layout = layout_from_record(request_record or {}, run_dir)
     return layout.state_path if layout is not None else run_dir / ".state" / "state.json"
+
+
+def _append_orchestrator_event_for_request(
+    *,
+    request_record: dict[str, Any],
+    run_dir: Path,
+) -> Any:
+    layout = layout_from_record(request_record, run_dir)
+    audit_dir = layout.audit_dir if layout is not None else None
+
+    def append_orchestrator_event(**kwargs: Any) -> None:
+        if audit_dir is not None:
+            kwargs.setdefault("audit_dir", audit_dir)
+        job_orchestrator.audit_service.append_orchestrator_event(**kwargs)
+
+    return append_orchestrator_event
+
+
+def _update_status_for_request(*, request_record: dict[str, Any]) -> Any:
+    def update_status(
+        run_dir: Path,
+        status: RunStatus,
+        error: dict[str, Any] | None = None,
+        warnings: list[str] | None = None,
+        effective_session_timeout_sec: int | None = None,
+    ) -> None:
+        layout = layout_from_record(request_record, run_dir)
+        if layout is None:
+            job_orchestrator._update_status(
+                run_dir,
+                status,
+                error=error,
+                warnings=warnings,
+                effective_session_timeout_sec=effective_session_timeout_sec,
+            )
+            return
+        state_file = layout.state_path
+        status_data: dict[str, Any] = {}
+        if state_file.exists():
+            try:
+                loaded = json.loads(state_file.read_text(encoding="utf-8"))
+                status_data = loaded if isinstance(loaded, dict) else {}
+            except (OSError, ValueError, TypeError):
+                status_data = {}
+        runtime_obj = status_data.get("runtime")
+        runtime_payload: dict[str, Any] = dict(runtime_obj) if isinstance(runtime_obj, dict) else {}
+        runtime_payload["effective_session_timeout_sec"] = effective_session_timeout_sec
+        status_data.update(
+            {
+                "status": status.value if isinstance(status, RunStatus) else str(status),
+                "updated_at": str(datetime.now()),
+                "error": error,
+                "warnings": warnings or [],
+                "runtime": runtime_payload,
+            }
+        )
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(
+            json.dumps(status_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return update_status
 
 
 def _read_run_status(

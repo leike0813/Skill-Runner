@@ -5,19 +5,34 @@ import json
 import zipfile
 from pathlib import Path
 
+from server.runtime.workspace_layout import RunWorkspaceLayout
 from server.services.platform.run_file_filter_service import run_file_filter_service
 
 SKILL_RUN_FEEDBACK_FILENAME = "_skill_run_feedback.md"
 
 
 class RunBundleService:
-    def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
-        bundle_dir = run_dir / "bundle"
+    def build_run_bundle(
+        self,
+        run_dir: Path,
+        debug: bool = False,
+        *,
+        layout: RunWorkspaceLayout | None = None,
+    ) -> str:
+        if layout is not None:
+            run_dir = layout.workspace_dir
+        bundle_dir = layout.bundle_dir if layout is not None else run_dir / "bundle"
         bundle_dir.mkdir(parents=True, exist_ok=True)
-        bundle_filename = "run_bundle_debug.zip" if debug else "run_bundle.zip"
-        bundle_path = bundle_dir / bundle_filename
-        manifest_filename = "manifest_debug.json" if debug else "manifest.json"
-        manifest_path = bundle_dir / manifest_filename
+        bundle_path = (
+            layout.bundle_path(debug=debug)
+            if layout is not None
+            else bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
+        )
+        manifest_path = (
+            layout.bundle_manifest_path(debug=debug)
+            if layout is not None
+            else bundle_dir / ("manifest_debug.json" if debug else "manifest.json")
+        )
 
         entries: list[dict[str, object]] = []
         bundle_candidates = self.bundle_candidates(
@@ -25,6 +40,7 @@ class RunBundleService:
             debug=debug,
             bundle_path=bundle_path,
             manifest_path=manifest_path,
+            layout=layout,
         )
         for path in bundle_candidates:
             if not path.is_file():
@@ -60,60 +76,81 @@ class RunBundleService:
         debug: bool,
         bundle_path: Path,
         manifest_path: Path,
+        layout: RunWorkspaceLayout | None = None,
     ) -> list[Path]:
         if debug:
-            candidates = []
-            for path in run_dir.rglob("*"):
-                if not path.is_file():
-                    continue
-                rel_path = path.relative_to(run_dir).as_posix()
-                if run_file_filter_service.include_in_debug_bundle(rel_path):
-                    candidates.append(path)
+            if layout is not None:
+                candidates = self._contract_driven_debug_candidates(run_dir, layout)
+            else:
+                candidates = []
+                for path in run_dir.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    rel_path = path.relative_to(run_dir).as_posix()
+                    if run_file_filter_service.include_in_debug_bundle(rel_path):
+                        candidates.append(path)
         else:
-            candidates = self._contract_driven_non_debug_candidates(run_dir)
+            candidates = self._contract_driven_non_debug_candidates(
+                run_dir,
+                result_path=layout.result_path if layout is not None else None,
+            )
 
-        bundle_dir = run_dir / "bundle"
+        bundle_root = run_dir / "bundle"
         candidates = [
             path
             for path in candidates
-            if path != bundle_path and path != manifest_path and path.parent != bundle_dir
+            if path != bundle_path
+            and path != manifest_path
+            and not self._is_relative_to(path, bundle_root)
         ]
         return candidates
 
-    def _contract_driven_non_debug_candidates(self, run_dir: Path) -> list[Path]:
+    def _contract_driven_non_debug_candidates(
+        self,
+        run_dir: Path,
+        *,
+        result_path: Path | None = None,
+    ) -> list[Path]:
         candidates: list[Path] = []
-        result_candidates = self._result_candidates(run_dir)
+        if result_path is not None:
+            result_candidates = [result_path] if result_path.exists() else []
+        else:
+            result_candidates = self._result_candidates(run_dir)
         candidates.extend(result_candidates)
         candidates.extend(self._feedback_sidecar_candidates(result_candidates))
         if not result_candidates:
             return candidates
 
-        try:
-            payload = json.loads(result_candidates[-1].read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            return candidates
-        artifacts_obj = payload.get("artifacts")
-        if not isinstance(artifacts_obj, list):
-            return candidates
-        for rel_path in artifacts_obj:
-            if not isinstance(rel_path, str) or not rel_path.strip():
+        candidates.extend(
+            self._artifact_candidates_from_result(run_dir, result_candidates[-1])
+        )
+        return self._dedupe_candidates(run_dir, candidates)
+
+    def _contract_driven_debug_candidates(
+        self,
+        run_dir: Path,
+        layout: RunWorkspaceLayout,
+    ) -> list[Path]:
+        candidates: list[Path] = []
+        for root in (
+            layout.result_path.parent,
+            layout.audit_dir,
+            layout.state_path.parent,
+        ):
+            if not root.exists():
                 continue
-            path = (run_dir / rel_path.strip()).resolve()
-            try:
-                path.relative_to(run_dir.resolve())
-            except ValueError:
-                continue
-            if path.exists() and path.is_file():
-                candidates.append(path)
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for path in candidates:
-            rel = path.relative_to(run_dir).as_posix()
-            if rel in seen:
-                continue
-            seen.add(rel)
-            unique.append(path)
-        return unique
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                rel_path = path.relative_to(run_dir).as_posix()
+                if run_file_filter_service.include_in_debug_bundle(rel_path):
+                    candidates.append(path)
+
+        if layout.result_path.exists():
+            candidates.extend(
+                self._artifact_candidates_from_result(run_dir, layout.result_path)
+            )
+        return self._dedupe_candidates(run_dir, candidates)
 
     def _feedback_sidecar_candidates(self, result_candidates: list[Path]) -> list[Path]:
         candidates: list[Path] = []
@@ -143,6 +180,50 @@ class RunBundleService:
                 if path.is_file():
                     candidates.append(path)
         return candidates
+
+    def _artifact_candidates_from_result(
+        self,
+        run_dir: Path,
+        result_path: Path,
+    ) -> list[Path]:
+        candidates: list[Path] = []
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return candidates
+        artifacts_obj = payload.get("artifacts")
+        if not isinstance(artifacts_obj, list):
+            return candidates
+        run_dir_resolved = run_dir.resolve()
+        for rel_path in artifacts_obj:
+            if not isinstance(rel_path, str) or not rel_path.strip():
+                continue
+            path = (run_dir / rel_path.strip()).resolve()
+            try:
+                path.relative_to(run_dir_resolved)
+            except ValueError:
+                continue
+            if path.exists() and path.is_file():
+                candidates.append(path)
+        return candidates
+
+    def _dedupe_candidates(self, run_dir: Path, candidates: list[Path]) -> list[Path]:
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            rel = path.relative_to(run_dir).as_posix()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            unique.append(path)
+        return unique
+
+    def _is_relative_to(self, path: Path, parent: Path) -> bool:
+        try:
+            path.relative_to(parent)
+        except ValueError:
+            return False
+        return True
 
     def hash_file(self, path: Path) -> str:
         hasher = hashlib.sha256()

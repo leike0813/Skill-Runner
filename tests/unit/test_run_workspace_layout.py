@@ -32,6 +32,11 @@ def test_layout_from_record_uses_persisted_workspace_metadata(tmp_path):
     assert layout.workspace_dir == workspace
     assert layout.result_path == workspace / "result" / "skill-b.2" / "result.json"
     assert layout.input_manifest_path == workspace / ".audit" / "skill-b.2" / "input_manifest.json"
+    assert layout.bundle_dir == workspace / "bundle" / "skill-b.2"
+    assert layout.bundle_path() == workspace / "bundle" / "skill-b.2" / "run_bundle.zip"
+    assert layout.bundle_path(debug=True) == workspace / "bundle" / "skill-b.2" / "run_bundle_debug.zip"
+    assert layout.bundle_manifest_path() == workspace / "bundle" / "skill-b.2" / "manifest.json"
+    assert layout.bundle_manifest_path(debug=True) == workspace / "bundle" / "skill-b.2" / "manifest_debug.json"
 
 
 @pytest.mark.asyncio
@@ -107,5 +112,50 @@ async def test_run_state_service_writes_namespaced_state_when_layout_exists(tmp_
 
     assert (workspace / ".state" / "skill-b.1" / "state.json").exists()
     assert (workspace / ".state" / "skill-b.1" / "dispatch.json").exists()
+    assert not (workspace / ".state" / "state.json").exists()
+    assert not (workspace / ".state" / "dispatch.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_run_state_service_refetches_layout_for_stale_request_record(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    await store.create_request(
+        request_id="req-stale",
+        skill_id="skill-stale",
+        engine="codex",
+        parameter={},
+        engine_options={},
+        runtime_options={},
+        input_data={},
+    )
+    await store.create_run(
+        "run-stale",
+        "cache-stale",
+        RunStatus.QUEUED,
+        workspace_id="workspace-stale",
+        workspace_dir=str(workspace),
+        workspace_namespace="skill-stale.1",
+        input_manifest_path=str(workspace / ".audit" / "skill-stale.1" / "input_manifest.json"),
+    )
+    await store.bind_request_run_id("req-stale", "run-stale", status=RunStatus.QUEUED.value)
+
+    await run_state_service.initialize_queued_state(
+        run_dir=workspace,
+        request_id="req-stale",
+        run_id="run-stale",
+        request_record={
+            "request_id": "req-stale",
+            "run_id": "run-stale",
+            "skill_id": "skill-stale",
+            "runtime_options": {},
+            "effective_runtime_options": {},
+        },
+        run_store_backend=store,
+    )
+
+    assert (workspace / ".state" / "skill-stale.1" / "state.json").exists()
+    assert (workspace / ".state" / "skill-stale.1" / "dispatch.json").exists()
     assert not (workspace / ".state" / "state.json").exists()
     assert not (workspace / ".state" / "dispatch.json").exists()

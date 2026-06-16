@@ -287,6 +287,10 @@ class RunStateService:
         request_record: Dict[str, Any] | None = None,
         run_store_backend: Any = run_store,
     ) -> Dict[str, Any]:
+        if request_record is None or self._layout(request_record, run_dir) is None:
+            fetched_request_record = await self._get_request_record(run_store_backend, request_id)
+            if fetched_request_record is not None:
+                request_record = fetched_request_record
         updated_at = datetime.utcnow()
         state_model = RunStateEnvelope(
             request_id=request_id,

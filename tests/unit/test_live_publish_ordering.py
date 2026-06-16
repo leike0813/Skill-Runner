@@ -5,8 +5,16 @@ from pathlib import Path
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
+from server.models import RuntimeEventCategory, RuntimeEventSource
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
-from server.runtime.protocol.live_publish import FcmpEventPublisher, RaspAuditMirrorWriter, fcmp_event_publisher
+from server.runtime.observability.rasp_live_journal import rasp_live_journal
+from server.runtime.protocol.factories import make_rasp_event
+from server.runtime.protocol.live_publish import (
+    FcmpEventPublisher,
+    RaspAuditMirrorWriter,
+    RaspEventPublisher,
+    fcmp_event_publisher,
+)
 from server.services.orchestration.job_orchestrator import JobOrchestrator
 
 
@@ -30,6 +38,52 @@ def _fcmp_row(*, run_id: str, type_name: str, data: dict, correlation: dict | No
         "correlation": correlation or {},
         "raw_ref": None,
     }
+
+
+def test_live_publish_writes_protocol_mirrors_to_namespaced_audit_dir(tmp_path: Path) -> None:
+    run_id = "run-namespaced-live"
+    run_dir = tmp_path / run_id
+    audit_dir = run_dir / ".audit" / "demo-skill.1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear(run_id)
+    rasp_live_journal.clear(run_id)
+
+    fcmp_publisher = FcmpEventPublisher()
+    rasp_publisher = RaspEventPublisher()
+    fcmp_publisher.publish(
+        run_dir=run_dir,
+        audit_dir=audit_dir,
+        event=_fcmp_row(
+            run_id=run_id,
+            type_name="assistant.message.intermediate",
+            data={
+                "message_id": "m-1",
+                "summary": "hello",
+                "classification": "intermediate",
+                "details": {"source": "test"},
+                "text": "hello",
+            },
+        ),
+    )
+    rasp_publisher.publish(
+        run_dir=run_dir,
+        audit_dir=audit_dir,
+        event=make_rasp_event(
+            run_id=run_id,
+            seq=1,
+            source=RuntimeEventSource(engine="codex", parser="test", confidence=1.0),
+            category=RuntimeEventCategory.LIFECYCLE,
+            type_name="lifecycle.run.terminal",
+            data={"status": "succeeded"},
+            attempt_number=1,
+            ts=datetime.utcnow(),
+        ),
+    )
+
+    assert (audit_dir / "fcmp_events.1.jsonl").exists()
+    assert (audit_dir / "events.1.jsonl").exists()
+    assert not (run_dir / ".audit" / "fcmp_events.1.jsonl").exists()
+    assert not (run_dir / ".audit" / "events.1.jsonl").exists()
 
 
 def test_fcmp_publisher_buffers_challenge_until_method_selection_is_published(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@ import json
 import zipfile
 from pathlib import Path
 
+from server.runtime.workspace_layout import RunWorkspaceLayout
 from server.services.orchestration.job_orchestrator import JobOrchestrator
 
 
@@ -122,3 +123,130 @@ def test_build_run_bundle_public_api_writes_bundle(tmp_path):
     orchestrator = JobOrchestrator()
     public_rel = orchestrator.build_run_bundle(run_dir, debug=False)
     assert (run_dir / public_rel).exists()
+
+
+def test_build_run_bundle_with_layout_isolates_namespaced_results(tmp_path):
+    workspace = tmp_path / "workspace"
+    artifact_a = workspace / "artifacts" / "a.txt"
+    artifact_b = workspace / "artifacts" / "b.txt"
+    result_a = workspace / "result" / "skill-a.1"
+    result_b = workspace / "result" / "skill-b.1"
+    result_a.mkdir(parents=True)
+    result_b.mkdir(parents=True)
+    artifact_a.parent.mkdir(parents=True)
+    artifact_a.write_text("artifact-a", encoding="utf-8")
+    artifact_b.write_text("artifact-b", encoding="utf-8")
+    (result_a / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/a.txt"]}',
+        encoding="utf-8",
+    )
+    (result_a / "_skill_run_feedback.md").write_text("feedback-a", encoding="utf-8")
+    (result_b / "result.json").write_text(
+        '{"status":"success","artifacts":["artifacts/b.txt"]}',
+        encoding="utf-8",
+    )
+    (result_b / "_skill_run_feedback.md").write_text("feedback-b", encoding="utf-8")
+
+    layout_a = RunWorkspaceLayout(
+        workspace_id="workspace",
+        workspace_dir=workspace,
+        namespace="skill-a.1",
+    )
+    layout_b = RunWorkspaceLayout(
+        workspace_id="workspace",
+        workspace_dir=workspace,
+        namespace="skill-b.1",
+    )
+
+    orchestrator = JobOrchestrator()
+    bundle_a_rel = orchestrator.build_run_bundle(workspace, debug=False, layout=layout_a)
+    bundle_b_rel = orchestrator.build_run_bundle(workspace, debug=False, layout=layout_b)
+
+    assert bundle_a_rel == "bundle/skill-a.1/run_bundle.zip"
+    assert bundle_b_rel == "bundle/skill-b.1/run_bundle.zip"
+    assert (workspace / bundle_a_rel).exists()
+    assert (workspace / bundle_b_rel).exists()
+
+    with zipfile.ZipFile(workspace / bundle_a_rel, "r") as zf:
+        entries_a = set(zf.namelist())
+    with zipfile.ZipFile(workspace / bundle_b_rel, "r") as zf:
+        entries_b = set(zf.namelist())
+
+    assert "bundle/skill-a.1/manifest.json" in entries_a
+    assert "result/skill-a.1/result.json" in entries_a
+    assert "result/skill-a.1/_skill_run_feedback.md" in entries_a
+    assert "artifacts/a.txt" in entries_a
+    assert "result/skill-b.1/result.json" not in entries_a
+    assert "artifacts/b.txt" not in entries_a
+
+    assert "bundle/skill-b.1/manifest.json" in entries_b
+    assert "result/skill-b.1/result.json" in entries_b
+    assert "result/skill-b.1/_skill_run_feedback.md" in entries_b
+    assert "artifacts/b.txt" in entries_b
+    assert "result/skill-a.1/result.json" not in entries_b
+    assert "artifacts/a.txt" not in entries_b
+
+
+def test_debug_bundle_with_layout_isolates_namespaced_run_owned_files(tmp_path):
+    workspace = tmp_path / "workspace"
+    for namespace in ("skill-a.1", "skill-b.1"):
+        (workspace / "result" / namespace).mkdir(parents=True)
+        (workspace / ".audit" / namespace).mkdir(parents=True)
+        (workspace / ".state" / namespace).mkdir(parents=True)
+        (workspace / "result" / namespace / "result.json").write_text(
+            '{"status":"success","artifacts":[]}',
+            encoding="utf-8",
+        )
+        (workspace / ".audit" / namespace / "stdout.1.log").write_text(
+            f"stdout-{namespace}",
+            encoding="utf-8",
+        )
+        (workspace / ".state" / namespace / "state.json").write_text(
+            '{"status":"succeeded"}',
+            encoding="utf-8",
+        )
+
+    layout_a = RunWorkspaceLayout(
+        workspace_id="workspace",
+        workspace_dir=workspace,
+        namespace="skill-a.1",
+    )
+
+    orchestrator = JobOrchestrator()
+    bundle_rel = orchestrator.build_run_bundle(workspace, debug=True, layout=layout_a)
+
+    assert bundle_rel == "bundle/skill-a.1/run_bundle_debug.zip"
+    with zipfile.ZipFile(workspace / bundle_rel, "r") as zf:
+        entries = set(zf.namelist())
+
+    assert "bundle/skill-a.1/manifest_debug.json" in entries
+    assert "result/skill-a.1/result.json" in entries
+    assert ".audit/skill-a.1/stdout.1.log" in entries
+    assert ".state/skill-a.1/state.json" in entries
+    assert "result/skill-b.1/result.json" not in entries
+    assert ".audit/skill-b.1/stdout.1.log" not in entries
+    assert ".state/skill-b.1/state.json" not in entries
+
+
+def test_build_run_bundle_with_layout_missing_result_does_not_fallback_to_other_namespaces(tmp_path):
+    workspace = tmp_path / "workspace"
+    other_result = workspace / "result" / "skill-b.1"
+    other_result.mkdir(parents=True)
+    (other_result / "result.json").write_text(
+        '{"status":"success","artifacts":[]}',
+        encoding="utf-8",
+    )
+    layout_a = RunWorkspaceLayout(
+        workspace_id="workspace",
+        workspace_dir=workspace,
+        namespace="skill-a.1",
+    )
+
+    orchestrator = JobOrchestrator()
+    bundle_rel = orchestrator.build_run_bundle(workspace, debug=False, layout=layout_a)
+
+    with zipfile.ZipFile(workspace / bundle_rel, "r") as zf:
+        entries = set(zf.namelist())
+
+    assert "bundle/skill-a.1/manifest.json" in entries
+    assert "result/skill-b.1/result.json" not in entries

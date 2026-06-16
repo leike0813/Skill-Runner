@@ -79,15 +79,22 @@ class RunStoreSchemaMigration:
 
 
 class RunStoreDatabase:
-    def __init__(self, db_path: Path, *, schema_migration: RunStoreSchemaMigration | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        schema_migration: RunStoreSchemaMigration | None = None,
+        max_concurrent_connections: int = 16,
+    ) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_lock = asyncio.Lock()
         self._initialized = False
         self._schema_migration = schema_migration or RunStoreSchemaMigration()
+        self._connection_semaphore = asyncio.Semaphore(max_concurrent_connections)
 
     def connect(self):
-        return aiosqlite.connect(str(self.db_path))
+        return aiosqlite.connect(str(self.db_path), semaphore=self._connection_semaphore)
 
     async def ensure_initialized(self) -> None:
         if self._initialized and not self.db_path.exists():
@@ -105,6 +112,9 @@ class RunStoreDatabase:
     async def init_db(self) -> None:
         async with self.connect() as conn:
             conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.execute("PRAGMA busy_timeout = 5000")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS requests (

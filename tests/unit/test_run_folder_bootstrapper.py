@@ -108,6 +108,7 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    audit_dir = run_dir / ".audit" / "demo-skill.1"
 
     manifest, ref = run_folder_bootstrapper.materialize_temp_skill_package(
         package_bytes=package_bytes.getvalue(),
@@ -116,14 +117,18 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
         execution_mode="interactive",
         source=RunLocalSkillSource.TEMP_UPLOAD,
         collect_skill_run_feedback=True,
+        audit_dir=audit_dir,
+        input_manifest_path=audit_dir / "input_manifest.json",
     )
 
     assert manifest.path == ref.snapshot_dir
     assert (ref.snapshot_dir / "assets" / "runner.json").exists()
-    assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
-    assert not (run_dir / ".audit" / "contracts" / "target_output_schema.md").exists()
+    assert (audit_dir / "contracts" / "target_output_schema.json").exists()
+    assert not (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
+    assert not (audit_dir / "contracts" / "target_output_schema.md").exists()
     assert (run_dir / "AGENTS.md").exists()
     content = (ref.snapshot_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert ".audit/demo-skill.1/contracts/target_output_schema" in content
     assert (
         f"`{(run_dir / 'result' / 'demo-skill.1' / '_skill_run_feedback.md').as_posix()}`"
         in content

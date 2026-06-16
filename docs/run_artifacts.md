@@ -39,6 +39,11 @@ data/runs/<run_id>/
 │   └── result.json  # legacy fallback only
 ├── artifacts/
 ├── bundle/
+│   └── <safeSkillId>.<n>/
+│       ├── manifest.json
+│       ├── manifest_debug.json
+│       ├── run_bundle.zip
+│       └── run_bundle_debug.zip
 ├── uploads/
 └── .<engine>/skills/<skill_id>/...
 ```
@@ -255,6 +260,15 @@ run 产出的文件型成果。
 ### 4.4 `bundle/`
 
 可下载的 run bundle 及 manifest。
+
+新 request-bound run 使用 run-owned namespace：
+
+- `bundle/<safeSkillId>.<n>/run_bundle.zip`
+- `bundle/<safeSkillId>.<n>/run_bundle_debug.zip`
+- `bundle/<safeSkillId>.<n>/manifest.json`
+- `bundle/<safeSkillId>.<n>/manifest_debug.json`
+
+旧路径 `bundle/run_bundle.zip`、`bundle/run_bundle_debug.zip`、`bundle/manifest*.json` 仅作为 legacy fallback 使用。普通 bundle 只包含当前 run 的实际 `resultJsonPath`、同目录 feedback sidecar（存在时）以及该 result payload 引用的 artifacts。
 
 ## 5. Single Writer 约束
 
