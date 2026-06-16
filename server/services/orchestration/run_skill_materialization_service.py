@@ -18,6 +18,7 @@ from server.runtime.adapter.common.prompt_builder_common import (
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
+from server.services.orchestration.run_workspace_layout import layout_from_record
 from server.services.skill.skill_package_validator import SkillPackageValidator
 from server.services.skill.skill_patcher import skill_patcher
 from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
@@ -40,6 +41,8 @@ class RunFolderBootstrapper:
         engine_name: str,
         execution_mode: str,
         source: RunLocalSkillSource,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | None = None,
     ) -> RunLocalSkillRef:
         snapshot_dir = self.snapshot_dir(run_dir=run_dir, engine_name=engine_name, skill_id=skill.id)
         self._materialize_installed_skill(
@@ -48,6 +51,8 @@ class RunFolderBootstrapper:
             snapshot_dir=snapshot_dir,
             engine_name=engine_name,
             execution_mode=execution_mode,
+            collect_skill_run_feedback=collect_skill_run_feedback,
+            feedback_path=feedback_path,
         )
         return RunLocalSkillRef(
             skill_id=skill.id,
@@ -64,6 +69,8 @@ class RunFolderBootstrapper:
         engine_name: str,
         execution_mode: str,
         source: RunLocalSkillSource,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | None = None,
     ) -> tuple[SkillManifest, RunLocalSkillRef]:
         top_level = self._validator.inspect_zip_top_level_from_bytes(package_bytes)
         snapshot_dir = self.snapshot_dir(
@@ -112,6 +119,8 @@ class RunFolderBootstrapper:
                 snapshot_dir=snapshot_dir,
                 engine_name=engine_name,
                 execution_mode=execution_mode,
+                collect_skill_run_feedback=collect_skill_run_feedback,
+                feedback_path=feedback_path,
             )
             materialized = True
             return (
@@ -161,6 +170,8 @@ class RunFolderBootstrapper:
         snapshot_dir: Path,
         engine_name: str,
         execution_mode: str,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | None = None,
     ) -> None:
         if skill.path is None:
             raise RuntimeError(f"Cannot bootstrap run folder for '{skill.id}' without a source path")
@@ -177,6 +188,8 @@ class RunFolderBootstrapper:
             snapshot_dir=snapshot_dir,
             engine_name=engine_name,
             execution_mode=execution_mode,
+            collect_skill_run_feedback=collect_skill_run_feedback,
+            feedback_path=feedback_path,
         )
 
     def _patch_materialized_dir(
@@ -187,6 +200,8 @@ class RunFolderBootstrapper:
         snapshot_dir: Path,
         engine_name: str,
         execution_mode: str,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | None = None,
     ) -> None:
         snapshot_skill = skill.model_copy(update={"path": snapshot_dir})
         output_schema_materialization = run_output_schema_service.materialize(
@@ -206,6 +221,12 @@ class RunFolderBootstrapper:
             run_dir=run_dir,
             execution_mode=execution_mode,
             output_contract_details_markdown=prompt_contract_markdown,
+            collect_skill_run_feedback=collect_skill_run_feedback,
+            feedback_path=(
+                feedback_path or self._feedback_path(run_dir=run_dir, skill_id=skill.id)
+                if collect_skill_run_feedback
+                else None
+            ),
         )
         self._materialize_run_execution_instructions(
             run_dir=run_dir,
@@ -237,5 +258,22 @@ class RunFolderBootstrapper:
             raise ValueError(f"Unsafe zip entry path: {clean_name}")
         if entry.parts and entry.parts[0].endswith(":"):
             raise ValueError(f"Unsafe zip entry path: {clean_name}")
+
+    def _result_json_path(self, *, run_dir: Path, skill_id: str) -> Path:
+        layout = layout_from_record(
+            {
+                "run_id": run_dir.name,
+                "skill_id": skill_id,
+                "workspace_id": run_dir.name,
+                "workspace_dir": str(run_dir),
+            },
+            run_dir,
+        )
+        if layout is not None:
+            return layout.result_path
+        return run_dir / "result" / "result.json"
+
+    def _feedback_path(self, *, run_dir: Path, skill_id: str) -> Path:
+        return self._result_json_path(run_dir=run_dir, skill_id=skill_id).parent / "_skill_run_feedback.md"
 
 run_folder_bootstrapper = RunFolderBootstrapper()

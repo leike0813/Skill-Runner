@@ -40,7 +40,17 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[i
 from fastapi.responses import JSONResponse, Response  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
-from .routers import skills, jobs, engines, management, local_runtime, oauth_callback, skill_packages, ui
+from .routers import (
+    engines,
+    jobs,
+    local_runtime,
+    management,
+    oauth_callback,
+    runtime_network,
+    skill_packages,
+    skills,
+    ui,
+)
 from .services.engine_management.runtime_profile import get_runtime_profile
 from .i18n import SUPPORTED_LANGUAGES, get_language, get_translator
 
@@ -231,6 +241,7 @@ v1_router.include_router(jobs.router)
 v1_router.include_router(engines.router)
 v1_router.include_router(management.router)
 v1_router.include_router(local_runtime.router)
+v1_router.include_router(runtime_network.router)
 v1_router.include_router(skill_packages.router)
 app.include_router(v1_router)
 app.include_router(ui.router)

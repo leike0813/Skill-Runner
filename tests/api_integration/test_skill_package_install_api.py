@@ -15,7 +15,13 @@ from server.main import app
 from server.services.skill.skill_install_store import SkillInstallStore
 
 
-def _build_skill_zip(skill_id: str, version: str) -> bytes:
+def _build_skill_zip(
+    skill_id: str,
+    version: str,
+    *,
+    include_input_schema: bool = True,
+    include_parameter_schema: bool = True,
+) -> bytes:
     runner = {
         "id": skill_id,
         "version": version,
@@ -55,8 +61,10 @@ def _build_skill_zip(skill_id: str, version: str) -> bytes:
     with zipfile.ZipFile(buff, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{skill_id}/SKILL.md", skill_md)
         zf.writestr(f"{skill_id}/assets/runner.json", json.dumps(runner))
-        zf.writestr(f"{skill_id}/assets/input.schema.json", json.dumps(input_schema))
-        zf.writestr(f"{skill_id}/assets/parameter.schema.json", json.dumps(parameter_schema))
+        if include_input_schema:
+            zf.writestr(f"{skill_id}/assets/input.schema.json", json.dumps(input_schema))
+        if include_parameter_schema:
+            zf.writestr(f"{skill_id}/assets/parameter.schema.json", json.dumps(parameter_schema))
         zf.writestr(f"{skill_id}/assets/output.schema.json", json.dumps(output_schema))
     return buff.getvalue()
 
@@ -204,6 +212,29 @@ async def test_install_new_skill_and_discoverable(isolated_skill_install_env):
     skill_res = await _request("GET", f"/v1/skills/{skill_id}")
     assert skill_res.status_code == 200
     assert skill_res.json()["id"] == skill_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "zip_kwargs",
+    [
+        {"include_input_schema": False},
+        {"include_parameter_schema": False},
+    ],
+)
+async def test_install_accepts_missing_optional_schema(isolated_skill_install_env, zip_kwargs):
+    skill_id = "demo-upload-optional-schema"
+    upload = _build_skill_zip(skill_id, "1.0.0", **zip_kwargs)
+    res = await _request(
+        "POST",
+        "/v1/skill-packages/install",
+        files={"file": ("skill.zip", upload, "application/zip")}
+    )
+    assert res.status_code == 200
+
+    status = await _wait_install_status(res.json()["request_id"])
+    assert status["status"] == "succeeded"
+    assert status["skill_id"] == skill_id
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, List
 
+from jinja2 import Template
 from pydantic import ValidationError
 
 from server.models import ManifestArtifact
@@ -17,6 +18,7 @@ from .skill_patch_templates import (
     MODE_INTERACTIVE_TEMPLATE,
     OUTPUT_FORMAT_CONTRACT_TEMPLATE,
     RUNTIME_ENFORCEMENT_TEMPLATE,
+    SKILL_RUN_FEEDBACK_TEMPLATE,
     SkillPatchModule,
     SkillPatchTemplate,
     load_template_content,
@@ -28,6 +30,7 @@ MODE_AUTO_PATCH_MARKER = MODE_AUTO_TEMPLATE.marker
 MODE_INTERACTIVE_PATCH_MARKER = MODE_INTERACTIVE_TEMPLATE.marker
 RUNTIME_ENFORCEMENT_MARKER = RUNTIME_ENFORCEMENT_TEMPLATE.marker
 OUTPUT_FORMAT_CONTRACT_MARKER = OUTPUT_FORMAT_CONTRACT_TEMPLATE.marker
+SKILL_RUN_FEEDBACK_MARKER = SKILL_RUN_FEEDBACK_TEMPLATE.marker
 
 _PATCH_SKILL_MD_EXCEPTIONS = (
     OSError,
@@ -67,6 +70,19 @@ class SkillPatcher:
     def _load_template(self, template: SkillPatchTemplate) -> str:
         return load_template_content(template)
 
+    def _render_feedback_patch(self, *, feedback_path: Path | str | None = None) -> str:
+        if feedback_path is None:
+            raise ValueError("feedback_path is required when skill run feedback is enabled")
+        rendered_path = (
+            feedback_path.as_posix()
+            if isinstance(feedback_path, Path)
+            else str(feedback_path).strip()
+        )
+        if not rendered_path:
+            raise ValueError("feedback_path is required when skill run feedback is enabled")
+        template = self._load_template(SKILL_RUN_FEEDBACK_TEMPLATE)
+        return Template(template).render(feedback_path=rendered_path).strip()
+
     def _render_artifact_patch(
         self,
         artifacts: List[ManifestArtifact],
@@ -98,6 +114,8 @@ class SkillPatcher:
         run_dir: Path | None = None,
         execution_mode: str = "auto",
         output_contract_details_markdown: str | None = None,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | str | None = None,
     ) -> List[SkillPatchSection]:
         mode = self._normalize_execution_mode(execution_mode)
         plan: List[SkillPatchSection] = []
@@ -145,6 +163,14 @@ class SkillPatcher:
                 content=self._load_template(mode_template),
             )
         )
+        if collect_skill_run_feedback:
+            plan.append(
+                SkillPatchSection(
+                    module=SkillPatchModule.SKILL_RUN_FEEDBACK.value,
+                    marker=SKILL_RUN_FEEDBACK_MARKER,
+                    content=self._render_feedback_patch(feedback_path=feedback_path),
+                )
+            )
         return plan
 
     def generate_patch_content(
@@ -153,12 +179,16 @@ class SkillPatcher:
         run_dir: Path | None = None,
         execution_mode: str = "auto",
         output_contract_details_markdown: str | None = None,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | str | None = None,
     ) -> str:
         plan = self.build_patch_plan(
             artifacts=self._coerce_artifacts(artifacts),
             run_dir=run_dir,
             execution_mode=execution_mode,
             output_contract_details_markdown=output_contract_details_markdown,
+            collect_skill_run_feedback=collect_skill_run_feedback,
+            feedback_path=feedback_path,
         )
         return "\n\n".join(section.content.strip() for section in plan if section.content.strip())
 
@@ -179,6 +209,8 @@ class SkillPatcher:
         run_dir: Path | None = None,
         execution_mode: str = "auto",
         output_contract_details_markdown: str | None = None,
+        collect_skill_run_feedback: bool = False,
+        feedback_path: Path | str | None = None,
     ) -> bool:
         skill_md_path = skill_dir / "SKILL.md"
         if not skill_md_path.exists():
@@ -192,6 +224,8 @@ class SkillPatcher:
                 run_dir=run_dir,
                 execution_mode=execution_mode,
                 output_contract_details_markdown=output_contract_details_markdown,
+                collect_skill_run_feedback=collect_skill_run_feedback,
+                feedback_path=feedback_path,
             ):
                 updated = self._append_patch_if_missing(updated, section.content, section.marker)
             if updated == current:

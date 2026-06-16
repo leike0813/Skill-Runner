@@ -40,13 +40,33 @@ async def test_run_request_store_get_request_by_run_id(tmp_path):
         runtime_options={},
         input_data={"foo": "bar"},
     )
-    await run_store.create_run("run-1", None, "queued")
+    await run_store.create_run(
+        "run-1",
+        None,
+        "queued",
+        result_path="/tmp/workspace/result/skill.2/result.json",
+        workspace_id="workspace-1",
+        workspace_dir="/tmp/workspace",
+        workspace_namespace="skill.2",
+        workspace_source_request_id="req-0",
+        input_manifest_path="/tmp/workspace/.audit/skill.2/input_manifest.json",
+        workspace_input_token="input-token",
+        workspace_output_token="output-token",
+    )
     await request_store.update_request_run_id("req-1", "run-1")
 
     request = await request_store.get_request_by_run_id("run-1")
     assert request is not None
     assert request["request_id"] == "req-1"
     assert request["input"]["foo"] == "bar"
+    assert request["result_path"] == "/tmp/workspace/result/skill.2/result.json"
+    assert request["workspace_id"] == "workspace-1"
+    assert request["workspace_dir"] == "/tmp/workspace"
+    assert request["workspace_namespace"] == "skill.2"
+    assert request["workspace_source_request_id"] == "req-0"
+    assert request["run_input_manifest_path"] == "/tmp/workspace/.audit/skill.2/input_manifest.json"
+    assert request["workspace_input_token"] == "input-token"
+    assert request["workspace_output_token"] == "output-token"
 
 
 @pytest.mark.asyncio

@@ -150,6 +150,34 @@ def test_cache_key_changes_with_workspace_input_token(tmp_path):
     assert key1 != key2
 
 
+def test_cache_key_changes_only_when_skill_run_feedback_enabled():
+    base_key = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+    )
+    false_key = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        collect_skill_run_feedback=False,
+    )
+    true_key = compute_cache_key(
+        skill_id="demo",
+        engine="gemini",
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        collect_skill_run_feedback=True,
+    )
+    assert false_key == base_key
+    assert true_key != base_key
+
+
 def test_skill_fingerprint_engine_specific_config(tmp_path):
     skill_dir = tmp_path / "skill"
     assets_dir = skill_dir / "assets"

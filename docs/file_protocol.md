@@ -65,6 +65,7 @@
     - `qwen` -> `assets/qwen_config.json`
     - `opencode` -> `assets/opencode_config.json`
 - schema 声明失败会 warning；engine config 声明失败仅后台日志，不做用户可见 warning。
+- `output` schema 必须可解析；`input` / `parameter` schema 可选，缺失时跳过对应校验。
 - `runtime.default_options` 为可选 skill 默认运行参数声明：
   - 仅白名单 runtime option 键会生效；
   - 请求体 `runtime_options` 同名键优先覆盖 skill 默认值；
@@ -74,6 +75,7 @@
 
 ### 3.1 `input.schema.json`
 
+- 可选；存在时用于校验业务输入并构建输入上下文。
 - 顶层应为 `type: "object"`。
 - 每个属性可用 `x-input-source` 指定来源：
   - `file`（默认）
@@ -98,12 +100,15 @@
 
 ### 3.2 `parameter.schema.json`
 
+- 可选；存在时用于校验 `parameter` payload。
 - 顶层应为 `type: "object"`。
-- 用于校验 `parameter` payload。
 
 ### 3.3 `output.schema.json`
 
+- 必需；用于结构化输出校验、run-scoped output schema materialization 与 artifact 推断。
 - 顶层应为 `type: "object"`。
+- 多种业务结果形态应写成顶层 object union：`{"type": "object", "oneOf": [...]}` 或 `{"type": "object", "anyOf": [...]}`。
+- object union 建议每个分支使用同一个 `const` discriminator 字段，例如 `kind`。
 - 支持在属性上声明：
   - `x-type: "artifact"` 或 `x-type: "file"`
   - 可选 `x-role`

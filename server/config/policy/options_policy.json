@@ -6,6 +6,7 @@
     "interactive_reply_timeout_sec",
     "hard_timeout_seconds",
     "workspace",
-    "env"
+    "env",
+    "collect_skill_run_feedback"
   ]
 }

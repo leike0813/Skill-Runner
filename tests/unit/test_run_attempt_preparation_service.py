@@ -15,43 +15,52 @@ from server.services.orchestration.run_job_lifecycle_service import RunJobReques
 from server.services.platform.runtime_env_options import RuntimeEnvSecretService
 
 
-def _build_skill(tmp_path: Path) -> SkillManifest:
+def _build_skill(
+    tmp_path: Path,
+    *,
+    include_input_schema: bool = True,
+    include_parameter_schema: bool = True,
+    include_output_schema: bool = True,
+) -> SkillManifest:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "input.schema.json").write_text(
-        json.dumps(
-            {
-                "type": "object",
-                "properties": {"paper_path": {"type": "string"}},
-                "additionalProperties": False,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (skill_dir / "parameter.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {}, "additionalProperties": True}),
-        encoding="utf-8",
-    )
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps(
-            {
-                "type": "object",
-                "properties": {"value": {"type": "string"}},
-                "required": ["value"],
-                "additionalProperties": False,
-            }
-        ),
-        encoding="utf-8",
-    )
+    schemas: dict[str, str] = {}
+    if include_input_schema:
+        (skill_dir / "input.schema.json").write_text(
+            json.dumps(
+                {
+                    "type": "object",
+                    "properties": {"paper_path": {"type": "string"}},
+                    "additionalProperties": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        schemas["input"] = "input.schema.json"
+    if include_parameter_schema:
+        (skill_dir / "parameter.schema.json").write_text(
+            json.dumps({"type": "object", "properties": {}, "additionalProperties": True}),
+            encoding="utf-8",
+        )
+        schemas["parameter"] = "parameter.schema.json"
+    if include_output_schema:
+        (skill_dir / "output.schema.json").write_text(
+            json.dumps(
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        schemas["output"] = "output.schema.json"
     return SkillManifest(
         id="prep-skill",
         path=skill_dir,
         execution_modes=["interactive"],
-        schemas={
-            "input": "input.schema.json",
-            "parameter": "parameter.schema.json",
-            "output": "output.schema.json",
-        },
+        schemas=schemas,
     )
 
 
@@ -261,6 +270,116 @@ async def test_prepare_builds_interactive_context_and_run_options(
     assert len(orchestrator.inject_resume_calls) == 1
     assert orchestrator.inject_resume_calls[0]["request_id"] == "req-1"
     assert orchestrator.inject_resume_calls[0]["run_dir"] == run_dir
+
+
+@pytest.mark.asyncio
+async def test_prepare_accepts_missing_input_and_parameter_schemas(tmp_path: Path) -> None:
+    skill = _build_skill(
+        tmp_path,
+        include_input_schema=False,
+        include_parameter_schema=False,
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    orchestrator = _FakeOrchestrator(
+        run_store=_FakeRunStore(
+            request_record={
+                "request_id": "req-optional-schema",
+                "input": {"ignored": "value"},
+                "parameter": {"ignored": True},
+            }
+        ),
+        workspace=_FakeWorkspace(run_dir),
+    )
+    request = RunJobRequest(
+        run_id="run-optional-schema",
+        skill_id=skill.id,
+        engine_name="claude",
+        options={},
+        skill_override=skill,
+    )
+
+    context = await RunAttemptPreparationService().prepare(
+        orchestrator=orchestrator,
+        request=request,
+        run_dir=run_dir,
+        request_record=orchestrator._run_store.request_record,
+        request_id="req-optional-schema",
+        execution_mode="auto",
+        conversation_mode="session",
+        session_capable=True,
+        is_interactive=False,
+        interactive_auto_reply=False,
+        can_wait_for_user=False,
+        can_persist_waiting_user=False,
+        interactive_profile=None,
+        attempt_number=1,
+        resolve_custom_provider_model=lambda **_kwargs: None,
+        run_store_backend=orchestrator._run_store_backend(),
+        interaction_service=orchestrator,
+        audit_service=type(
+            "_Audit",
+            (),
+            {"append_internal_schema_warning": staticmethod(lambda **_kwargs: None)},
+        )(),
+        resolve_attempt_number=orchestrator._resolve_attempt_number,
+        build_reply_prompt=lambda response: str(response),
+    )
+
+    assert context.skill.id == skill.id
+    assert context.run_options["__target_output_schema_relpath"] == ".audit/contracts/target_output_schema.json"
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejects_missing_output_schema(tmp_path: Path) -> None:
+    skill = _build_skill(tmp_path, include_output_schema=False)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    orchestrator = _FakeOrchestrator(
+        run_store=_FakeRunStore(
+            request_record={
+                "request_id": "req-missing-output-schema",
+                "input": {},
+                "parameter": {},
+            }
+        ),
+        workspace=_FakeWorkspace(run_dir),
+    )
+    request = RunJobRequest(
+        run_id="run-missing-output-schema",
+        skill_id=skill.id,
+        engine_name="claude",
+        options={},
+        skill_override=skill,
+    )
+
+    with pytest.raises(ValueError, match="output"):
+        await RunAttemptPreparationService().prepare(
+            orchestrator=orchestrator,
+            request=request,
+            run_dir=run_dir,
+            request_record=orchestrator._run_store.request_record,
+            request_id="req-missing-output-schema",
+            execution_mode="auto",
+            conversation_mode="session",
+            session_capable=True,
+            is_interactive=False,
+            interactive_auto_reply=False,
+            can_wait_for_user=False,
+            can_persist_waiting_user=False,
+            interactive_profile=None,
+            attempt_number=1,
+            resolve_custom_provider_model=lambda **_kwargs: None,
+            run_store_backend=orchestrator._run_store_backend(),
+            interaction_service=orchestrator,
+            audit_service=type(
+                "_Audit",
+                (),
+                {"append_internal_schema_warning": staticmethod(lambda **_kwargs: None)},
+            )(),
+            resolve_attempt_number=orchestrator._resolve_attempt_number,
+            build_reply_prompt=lambda response: str(response),
+        )
 
 
 @pytest.mark.asyncio

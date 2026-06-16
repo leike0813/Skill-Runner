@@ -593,7 +593,7 @@ class RunAttemptOutcomeService:
             and context.custom_provider_model is not None
             and request_id
             and context.session_capable
-            and (forced_failure_reason is not None or getattr(result, "exit_code", 0) != 0)
+            and forced_failure_reason == "AUTH_REQUIRED"
         ):
             pending_auth = (
                 await inputs.auth_orchestration_service.create_custom_provider_pending_auth(

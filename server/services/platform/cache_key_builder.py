@@ -136,6 +136,7 @@ def compute_cache_key(
     skill_package_hash: str = "",
     temp_skill_package_hash: str = "",
     workspace_input_token: str = "",
+    collect_skill_run_feedback: bool = False,
 ) -> str:
     package_hash = skill_package_hash or skill_fingerprint
     payload = {
@@ -149,4 +150,6 @@ def compute_cache_key(
         "inline_input_hash": inline_input_hash,
         "workspace_input_token": workspace_input_token or "",
     }
+    if collect_skill_run_feedback:
+        payload["skill_run_feedback"] = "collect_v1"
     return _hash_text(_stable_json_dumps(payload))

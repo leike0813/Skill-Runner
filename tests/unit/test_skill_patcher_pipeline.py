@@ -12,8 +12,20 @@ from server.services.skill.skill_patcher import (
     OUTPUT_FORMAT_CONTRACT_MARKER,
     RUNTIME_ENFORCEMENT_MARKER,
     ARTIFACT_PATCH_MARKER,
+    SKILL_RUN_FEEDBACK_MARKER,
     SkillPatcher,
 )
+
+def _expected_skill_run_feedback_patch(feedback_path: str) -> str:
+    return f"""## Skill Run Feedback Sidecar
+
+After the original skill task has completed successfully, write a short Markdown feedback note to:
+
+`{feedback_path}`
+
+Do not create this file when the task fails, is canceled, or is still waiting for user input. Do not add this file to `result.json` or to any output schema.
+
+The note is free-form Markdown for future skill maintenance. Focus on issues encountered during this run, ambiguous instructions, missing context, fragile steps, tooling problems, and concrete suggestions for improving the skill."""
 
 
 def _output_contract_details_markdown() -> str:
@@ -97,6 +109,47 @@ def test_patch_plan_order_is_stable_for_all_modules():
     ]
 
 
+def test_feedback_patch_is_optional_exact_and_last():
+    patcher = SkillPatcher()
+    feedback_path = "/tmp/demo-run/result/demo-skill.2/_skill_run_feedback.md"
+    disabled_plan = patcher.build_patch_plan(
+        artifacts=[],
+        run_dir=Path("/tmp/demo-run"),
+        execution_mode="auto",
+        output_contract_details_markdown=None,
+    )
+    assert SKILL_RUN_FEEDBACK_MARKER not in [item.marker for item in disabled_plan]
+
+    enabled_plan = patcher.build_patch_plan(
+        artifacts=[],
+        run_dir=Path("/tmp/demo-run"),
+        execution_mode="auto",
+        output_contract_details_markdown=None,
+        collect_skill_run_feedback=True,
+        feedback_path=feedback_path,
+    )
+    assert [item.marker for item in enabled_plan] == [
+        RUNTIME_ENFORCEMENT_MARKER,
+        OUTPUT_FORMAT_CONTRACT_MARKER,
+        MODE_AUTO_PATCH_MARKER,
+        SKILL_RUN_FEEDBACK_MARKER,
+    ]
+    assert enabled_plan[-1].content == _expected_skill_run_feedback_patch(feedback_path)
+
+
+def test_feedback_patch_requires_explicit_feedback_path():
+    patcher = SkillPatcher()
+
+    with pytest.raises(ValueError, match="feedback_path is required"):
+        patcher.build_patch_plan(
+            artifacts=[],
+            run_dir=Path("/tmp/demo-run"),
+            execution_mode="auto",
+            output_contract_details_markdown=None,
+            collect_skill_run_feedback=True,
+        )
+
+
 def test_patch_skill_md_is_idempotent_with_pipeline(tmp_path: Path):
     patcher = SkillPatcher()
     skill_dir = tmp_path / "skill"
@@ -124,6 +177,39 @@ def test_patch_skill_md_is_idempotent_with_pipeline(tmp_path: Path):
     assert changed_1 is True
     assert changed_2 is False
     assert content_once == content_twice
+
+
+def test_feedback_patch_is_idempotent_and_at_skill_md_tail(tmp_path: Path):
+    patcher = SkillPatcher()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text("# Skill\n", encoding="utf-8")
+    feedback_path = tmp_path / "run" / "result" / "demo-skill.2" / "_skill_run_feedback.md"
+
+    changed_1 = patcher.patch_skill_md(
+        skill_dir=skill_dir,
+        artifacts=[],
+        run_dir=tmp_path / "run",
+        execution_mode="auto",
+        collect_skill_run_feedback=True,
+        feedback_path=feedback_path,
+    )
+    changed_2 = patcher.patch_skill_md(
+        skill_dir=skill_dir,
+        artifacts=[],
+        run_dir=tmp_path / "run",
+        execution_mode="auto",
+        collect_skill_run_feedback=True,
+        feedback_path=feedback_path,
+    )
+    content = skill_md.read_text(encoding="utf-8")
+    assert changed_1 is True
+    assert changed_2 is False
+    assert content.rstrip().endswith(
+        _expected_skill_run_feedback_patch(feedback_path.as_posix())
+    )
+    assert content.count(SKILL_RUN_FEEDBACK_MARKER) == 1
 
 
 def test_build_patch_plan_missing_template_fails_fast():

@@ -28,6 +28,26 @@
 
 ---
 
+## Runtime Network 诊断
+
+- `GET /v1/runtime/network/client-address`：返回 backend 在当前 HTTP 请求上看到的调用方 IP。
+
+`GET /v1/runtime/network/client-address`
+
+**Response**:
+```json
+{
+  "client_ip": "203.0.113.10"
+}
+```
+
+说明：
+- `client_ip` 来自 backend/ASGI request peer address。
+- 该端点不解析 `X-Forwarded-For`、`Forwarded` 等转发头；反向代理部署若需要可信真实客户端 IP，应在代理或 ASGI server 边界统一配置。
+- 插件可用该地址构造 backend 回连本机插件服务的 endpoint。
+
+---
+
 ## 0. 管理 API（Management，推荐）
 <a id="management-api-recommended"></a>
 
@@ -540,9 +560,10 @@
     - `opencode` -> `assets/opencode_config.json`
   - 若声明和 fallback 都不存在：视为“未提供 skill-specific engine config”，不阻断运行
 - `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
+  - `output` schema 必须可解析；`input` / `parameter` schema 可选，缺失时跳过对应校验；
   - `input.schema.json` 的 `x-input-source` 仅允许 `file` / `inline`；
   - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`；
-  - 三个 schema 需满足对象型 JSON Schema 基本结构约束。
+  - 所有解析到的 schema 均需满足对象型 JSON Schema 基本结构约束。
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json.engines` 为可选字段；缺失时默认按系统支持的全部引擎处理。
 - `runner.json.unsupported_engines` 为可选字段；用于声明显式不支持引擎。
@@ -604,7 +625,7 @@
   - 顶层 `input` 用于传递业务输入（可为 string/array/object）。
   - 对 `input.schema.json` 中 `x-input-source=inline` 的字段，值直接来自请求体 `input`。
   - 对 `x-input-source=file`（或未声明，默认 file）的字段，值也在请求体 `input` 中显式提交，但值必须是 `uploads/` 根下相对路径（例如 `papers/a.pdf`）。
-- **参数分离**: API 请求体中的 `parameter` 字段仅用于传递 `parameter.schema.json` 中定义的数值或配置。
+- **参数分离**: API 请求体中的 `parameter` 字段用于传递配置参数；若 skill 提供 `parameter.schema.json`，则按该 schema 校验。
 - **模型字段**:
   - 新标准写法为 `provider_id + model + effort`。
   - `model` 为顶层字段，先通过 `GET /v1/engines/{engine}/models` 获取可用模型列表。
@@ -671,6 +692,7 @@
 {
   "request_id": "d290f1ee-6c54-4b01-90e6-...",
   "status": "waiting_user",
+  "observability_ready": true,
   "skill_id": "demo-prime-number",
   "engine": "gemini",
   "model": "gemini-3.1-pro-preview",
@@ -705,6 +727,8 @@
   "error": null
 }
 ```
+
+`observability_ready=false` 表示后端已接受该 `request_id`，但 run workspace 与事件/对话投影尚未可读。此时状态接口返回 `status=queued`，客户端可以继续轮询；`404` 仅表示 `request_id` 不存在。
 
 说明：
 - `waiting_user` 为非终态，客户端应按 pending/reply 流程推进，而不是直接结束。
@@ -997,6 +1021,19 @@
 
 按区间拉取 FCMP 历史，适用于断线补偿与复盘。
 
+若 `request_id` 已存在但尚未绑定 run，接口返回空历史：
+
+```json
+{
+  "request_id": "d290f1ee-...",
+  "count": 0,
+  "events": [],
+  "source": "pre_observable",
+  "cursor_floor": 0,
+  "cursor_ceiling": 0
+}
+```
+
 **Query 参数**:
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
 - `from_ts` / `to_ts`（可选）：按时间区间拉取（ISO8601）
@@ -1084,6 +1121,8 @@
 
 返回 `text/event-stream`，用于实时消费对话事件（与管理 API 的 `chat` 语义一致）。
 
+若 `request_id` 已存在但尚未绑定 run，接口仍返回 `200 text/event-stream`，并只发送轻量 pre-observable keepalive。客户端应继续重连或轮询。
+
 **Query 参数**:
 - `cursor`（可选，默认 `0`）：续传游标。
 
@@ -1091,6 +1130,8 @@
 `GET /v1/jobs/{request_id}/chat/history`
 
 按区间拉取对话历史。
+
+若 `request_id` 已存在但尚未绑定 run，接口返回与 `/events/history` 相同形态的空历史，`source=pre_observable`。
 
 **Query 参数**:
 - `from_seq` / `to_seq`（可选）：按序号区间拉取
@@ -1491,7 +1532,8 @@ Query 参数：
 - 必须包含并可解析：
   - `SKILL.md`
   - `assets/runner.json`
-  - `runner.json.schemas` 指向的 `input` / `parameter` / `output` 三个 schema 文件
+  - `runner.json.schemas.output` 或固定 fallback `assets/output.schema.json`
+- `input` / `parameter` schema 可选；若存在则执行对应 meta-schema 与运行时 payload 校验。
 - 身份一致性：顶层目录名、`runner.json.id`、`SKILL.md` frontmatter `name` 必须一致。
 - 元数据约束：`runner.json.engines` 可选、`runner.json.unsupported_engines` 可选；若同时声明则不允许重复且计算后的有效引擎集合必须非空。`runner.json.artifacts` 可选（若提供需为数组）。
 - 包大小限制：受 `TEMP_SKILL_PACKAGE_MAX_BYTES` 控制（默认 20MB）。

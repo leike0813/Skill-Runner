@@ -38,6 +38,13 @@ class StructuredOutputArtifacts:
     effective_prompt_contract_markdown: str
 
 
+@dataclass(frozen=True)
+class _ObjectUnionInfo:
+    keyword: str
+    branches: tuple[dict[str, Any], ...]
+    discriminator: str | None
+
+
 class StructuredOutputPipeline:
     def resolve_artifacts(
         self,
@@ -361,9 +368,17 @@ class StructuredOutputPipeline:
                 final_branch = branch
             elif marker_const is False:
                 pending_branch = branch
-        return final_branch or canonical_schema, pending_branch
+        if final_branch is not None and pending_branch is not None:
+            return final_branch, pending_branch
+        return canonical_schema, None
 
     def _translate_object_properties(self, schema: dict[str, Any]) -> dict[str, Any]:
+        object_union = self._extract_object_union_info(schema)
+        if object_union is not None and object_union.discriminator is not None:
+            return self._translate_object_union_properties(
+                schema,
+                object_union=object_union,
+            )
         properties_obj = schema.get("properties")
         properties = properties_obj if isinstance(properties_obj, dict) else {}
         required_obj = schema.get("required")
@@ -391,6 +406,176 @@ class StructuredOutputPipeline:
                 "description": "Completion marker.",
             }
         return translated
+
+    def _extract_object_union_info(
+        self,
+        schema: dict[str, Any],
+    ) -> _ObjectUnionInfo | None:
+        if schema.get("type") != "object":
+            return None
+        for keyword in ("oneOf", "anyOf"):
+            branches_obj = schema.get(keyword)
+            if not isinstance(branches_obj, list) or len(branches_obj) < 2:
+                continue
+            branches = tuple(
+                branch
+                for branch in branches_obj
+                if isinstance(branch, dict)
+                and (
+                    branch.get("type") == "object"
+                    or isinstance(branch.get("properties"), dict)
+                )
+            )
+            if len(branches) < 2:
+                continue
+            return _ObjectUnionInfo(
+                keyword=keyword,
+                branches=branches,
+                discriminator=self._detect_const_discriminator(branches),
+            )
+        return None
+
+    def _detect_const_discriminator(
+        self,
+        branches: tuple[dict[str, Any], ...],
+    ) -> str | None:
+        if len(branches) < 2:
+            return None
+        first_properties_obj = branches[0].get("properties")
+        first_properties = first_properties_obj if isinstance(first_properties_obj, dict) else {}
+        candidate_names = [
+            field_name
+            for field_name in first_properties
+            if isinstance(field_name, str) and field_name != "__SKILL_DONE__"
+        ]
+        valid_candidates: list[str] = []
+        for field_name in candidate_names:
+            const_values: list[Any] = []
+            for branch in branches:
+                properties_obj = branch.get("properties")
+                properties = properties_obj if isinstance(properties_obj, dict) else {}
+                field_schema = properties.get(field_name)
+                if not isinstance(field_schema, dict) or "const" not in field_schema:
+                    break
+                const_values.append(field_schema.get("const"))
+            else:
+                if len(const_values) == len(branches) and len({json.dumps(value, sort_keys=True) for value in const_values}) == len(branches):
+                    valid_candidates.append(field_name)
+        if "kind" in valid_candidates:
+            return "kind"
+        return valid_candidates[0] if valid_candidates else None
+
+    def _translate_object_union_properties(
+        self,
+        schema: dict[str, Any],
+        *,
+        object_union: _ObjectUnionInfo,
+    ) -> dict[str, Any]:
+        root_without_union = {
+            key: value
+            for key, value in schema.items()
+            if key not in {"oneOf", "anyOf"}
+        }
+        translated = self._translate_object_properties(root_without_union)
+        discriminator = object_union.discriminator
+        branch_field_order: list[str] = []
+        branch_field_schemas: dict[str, list[dict[str, Any]]] = {}
+        branch_field_required: dict[str, list[bool]] = {}
+        discriminator_values: list[Any] = []
+
+        for branch in object_union.branches:
+            properties_obj = branch.get("properties")
+            properties = properties_obj if isinstance(properties_obj, dict) else {}
+            required_obj = branch.get("required")
+            required = {
+                item for item in required_obj
+                if isinstance(item, str)
+            } if isinstance(required_obj, list) else set()
+            discriminator_schema = properties.get(discriminator)
+            if isinstance(discriminator_schema, dict):
+                discriminator_values.append(discriminator_schema.get("const"))
+            for field_name, field_schema in properties.items():
+                if not isinstance(field_name, str):
+                    continue
+                if field_name not in branch_field_order:
+                    branch_field_order.append(field_name)
+                schema_dict = field_schema if isinstance(field_schema, dict) else {}
+                branch_field_schemas.setdefault(field_name, []).append(schema_dict)
+                branch_field_required.setdefault(field_name, []).append(field_name in required)
+
+        for field_name in branch_field_order:
+            if field_name == "__SKILL_DONE__":
+                translated[field_name] = {
+                    "type": "boolean",
+                    "description": "Completion marker.",
+                }
+                continue
+            if field_name == discriminator:
+                translated[field_name] = self._translate_discriminator_schema(
+                    field_name=field_name,
+                    values=discriminator_values,
+                    schemas=branch_field_schemas.get(field_name, []),
+                )
+                continue
+
+            translated_schema = self._merge_translated_branch_field_schemas(
+                branch_field_schemas.get(field_name, [])
+            )
+            field_presence_count = len(branch_field_schemas.get(field_name, []))
+            required_flags = branch_field_required.get(field_name, [])
+            if field_presence_count < len(object_union.branches) or not all(required_flags):
+                translated_schema = self._nullable_schema(translated_schema)
+            translated[field_name] = translated_schema
+
+        if "__SKILL_DONE__" not in translated:
+            translated["__SKILL_DONE__"] = {
+                "type": "boolean",
+                "description": "Completion marker.",
+            }
+        return translated
+
+    def _translate_discriminator_schema(
+        self,
+        *,
+        field_name: str,
+        values: list[Any],
+        schemas: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        translated = self._merge_translated_branch_field_schemas(schemas)
+        translated.pop("const", None)
+        translated["enum"] = values
+        if "type" not in translated:
+            translated["type"] = "string"
+        translated["description"] = str(
+            translated.get("description") or f"Discriminator selecting the {field_name} output branch."
+        )
+        return translated
+
+    def _merge_translated_branch_field_schemas(
+        self,
+        schemas: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        translated_options = [
+            self._translate_schema(schema)
+            for schema in schemas
+            if isinstance(schema, dict)
+        ]
+        translated_options = [schema for schema in translated_options if schema]
+        if not translated_options:
+            return {"type": "string", "description": "String value."}
+        first = translated_options[0]
+        if all(option == first for option in translated_options):
+            return deepcopy(first)
+        if all(option.get("type") == "string" and isinstance(option.get("enum"), list) for option in translated_options):
+            enum_values: list[Any] = []
+            for option in translated_options:
+                for value in option.get("enum", []):
+                    if value not in enum_values:
+                        enum_values.append(value)
+            merged = deepcopy(first)
+            merged["enum"] = enum_values
+            return merged
+        return {"anyOf": [deepcopy(option) for option in translated_options]}
 
     def _build_pending_compat_properties(self, pending_schema: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -628,7 +813,12 @@ class StructuredOutputPipeline:
         canonical_final_branch: dict[str, Any],
         execution_mode: str,
     ) -> dict[str, Any]:
-        example = build_schema_example_payload(canonical_final_branch)
+        example_schema = self._codex_example_schema(canonical_final_branch)
+        example = build_schema_example_payload(example_schema)
+        discriminator_example = self._codex_example_discriminator_value(canonical_final_branch)
+        if discriminator_example is not None:
+            field_name, value = discriminator_example
+            example[field_name] = value
         compat_properties_obj = compat_schema.get("properties")
         compat_properties = compat_properties_obj if isinstance(compat_properties_obj, dict) else {}
         for field_name in compat_properties:
@@ -647,6 +837,71 @@ class StructuredOutputPipeline:
             example["message"] = None
             example["ui_hints"] = None
         return example
+
+    def _codex_example_schema(self, canonical_final_branch: dict[str, Any]) -> dict[str, Any]:
+        object_union = self._extract_object_union_info(canonical_final_branch)
+        if object_union is None or object_union.discriminator is None:
+            return canonical_final_branch
+        branch = object_union.branches[0]
+        merged = {
+            key: deepcopy(value)
+            for key, value in canonical_final_branch.items()
+            if key not in {"oneOf", "anyOf"}
+        }
+        root_properties_obj = merged.get("properties")
+        root_properties = root_properties_obj if isinstance(root_properties_obj, dict) else {}
+        branch_properties_obj = branch.get("properties")
+        branch_properties = branch_properties_obj if isinstance(branch_properties_obj, dict) else {}
+        merged["properties"] = {
+            **deepcopy(root_properties),
+            **deepcopy(branch_properties),
+        }
+        for field_schema in merged["properties"].values():
+            if isinstance(field_schema, dict) and "const" in field_schema and "type" not in field_schema:
+                const_value = field_schema.get("const")
+                inferred_type = self._json_type_name(const_value)
+                if inferred_type is not None:
+                    field_schema["type"] = inferred_type
+        root_required_obj = merged.get("required")
+        root_required = [
+            item for item in root_required_obj
+            if isinstance(item, str)
+        ] if isinstance(root_required_obj, list) else []
+        branch_required_obj = branch.get("required")
+        branch_required = [
+            item for item in branch_required_obj
+            if isinstance(item, str)
+        ] if isinstance(branch_required_obj, list) else []
+        merged["required"] = list(dict.fromkeys([*root_required, *branch_required]))
+        return merged
+
+    def _codex_example_discriminator_value(
+        self,
+        canonical_final_branch: dict[str, Any],
+    ) -> tuple[str, Any] | None:
+        object_union = self._extract_object_union_info(canonical_final_branch)
+        if object_union is None or object_union.discriminator is None:
+            return None
+        branch = object_union.branches[0]
+        properties_obj = branch.get("properties")
+        properties = properties_obj if isinstance(properties_obj, dict) else {}
+        discriminator_schema = properties.get(object_union.discriminator)
+        if not isinstance(discriminator_schema, dict) or "const" not in discriminator_schema:
+            return None
+        return object_union.discriminator, discriminator_schema.get("const")
+
+    def _json_type_name(self, value: Any) -> str | None:
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, int):
+            return "integer"
+        if isinstance(value, float):
+            return "number"
+        if value is None:
+            return "null"
+        return None
 
     def _load_ui_hints_contract(self) -> dict[str, Any]:
         fallback = {
@@ -700,6 +955,22 @@ class StructuredOutputPipeline:
         payload: dict[str, Any],
         schema: dict[str, Any],
     ) -> dict[str, Any]:
+        selected_union_branch = self._select_object_union_branch(
+            payload=payload,
+            schema=schema,
+        )
+        if selected_union_branch is not None:
+            root_schema = {
+                key: value
+                for key, value in schema.items()
+                if key not in {"oneOf", "anyOf"}
+            }
+            projected = self._project_payload_against_schema(payload, root_schema)
+            projected.update(
+                self._project_payload_against_schema(payload, selected_union_branch)
+            )
+            return projected
+
         properties_obj = schema.get("properties")
         properties = properties_obj if isinstance(properties_obj, dict) else {}
         projected: dict[str, Any] = {}
@@ -737,6 +1008,27 @@ class StructuredOutputPipeline:
             else:
                 projected.append(item)
         return projected
+
+    def _select_object_union_branch(
+        self,
+        *,
+        payload: dict[str, Any],
+        schema: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        object_union = self._extract_object_union_info(schema)
+        if object_union is None or object_union.discriminator is None:
+            return None
+        discriminator_value = payload.get(object_union.discriminator)
+        for branch in object_union.branches:
+            properties_obj = branch.get("properties")
+            properties = properties_obj if isinstance(properties_obj, dict) else {}
+            discriminator_schema = properties.get(object_union.discriminator)
+            if (
+                isinstance(discriminator_schema, dict)
+                and discriminator_schema.get("const") == discriminator_value
+            ):
+                return branch
+        return None
 
     def _schema_allows_null(self, schema: dict[str, Any]) -> bool:
         raw_type = schema.get("type")

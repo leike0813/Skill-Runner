@@ -188,6 +188,35 @@ def test_run_folder_validator_common_accepts_minimal_execution_contract(tmp_path
     assert result == skill_dir.resolve()
 
 
+def test_run_folder_validator_common_accepts_output_only_schema_contract(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("# Demo", encoding="utf-8")
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": "demo",
+                "version": "1.0.0",
+                "execution_modes": ["interactive"],
+                "schemas": {
+                    "output": "assets/output.schema.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (assets_dir / "output.schema.json").write_text('{"type":"object"}', encoding="utf-8")
+    skill = SkillManifest(id="demo", path=skill_dir)
+    config_path = tmp_path / ".engine" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
+
+    result = validate_run_folder_contract(skill=skill, config_path=config_path)
+    assert result == skill_dir.resolve()
+
+
 def test_run_folder_validator_common_rejects_missing_schema_file(tmp_path: Path) -> None:
     skill_dir = tmp_path / "skill"
     assets_dir = skill_dir / "assets"
@@ -200,16 +229,12 @@ def test_run_folder_validator_common_rejects_missing_schema_file(tmp_path: Path)
                 "version": "1.0.0",
                 "execution_modes": ["interactive"],
                 "schemas": {
-                    "input": "assets/input.schema.json",
-                    "parameter": "assets/parameter.schema.json",
                     "output": "assets/output.schema.json",
                 },
             }
         ),
         encoding="utf-8",
     )
-    (assets_dir / "input.schema.json").write_text('{"type":"object"}', encoding="utf-8")
-    (assets_dir / "parameter.schema.json").write_text('{"type":"object"}', encoding="utf-8")
     config_path = tmp_path / ".engine" / "config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text("{}", encoding="utf-8")

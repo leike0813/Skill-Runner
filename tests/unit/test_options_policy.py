@@ -120,6 +120,22 @@ def test_runtime_env_allowed_and_preserved_as_local_option():
     assert runtime_opts["env"] == {"FOO": "bar", "_X": ""}
 
 
+def test_collect_skill_run_feedback_boolean_allowed_and_preserved():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options({"collect_skill_run_feedback": True})
+    assert runtime_opts["collect_skill_run_feedback"] is True
+
+
+@pytest.mark.parametrize("value", ["true", 1, 0, None])
+def test_collect_skill_run_feedback_must_be_boolean(value):
+    policy = OptionsPolicy()
+    with pytest.raises(
+        ValueError,
+        match="runtime_options.collect_skill_run_feedback must be a boolean",
+    ):
+        policy.validate_runtime_options({"collect_skill_run_feedback": value})
+
+
 def test_runtime_env_redacted_projection_allowed_for_persisted_options():
     policy = OptionsPolicy()
     runtime_opts = policy.validate_runtime_options({"env": {"FOO": {"redacted": True}}})

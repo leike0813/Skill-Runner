@@ -15,6 +15,7 @@ from .run_attempt_outcome_service import RunAttemptResolvedOutcome
 from .run_attempt_preparation_service import RunAttemptContext
 
 logger = logging.getLogger(__name__)
+SKILL_RUN_FEEDBACK_FILENAME = "_skill_run_feedback.md"
 
 
 @dataclass
@@ -209,6 +210,13 @@ class RunAttemptProjectionFinalizer:
                 engine=engine_name,
                 error_code=outcome.final_error_code,
             )
+            self._diagnose_skill_run_feedback_sidecar(
+                result_path=result_path,
+                request_id=inputs.request_id,
+                run_id=inputs.run_id,
+                attempt_number=attempt_number,
+                engine_name=engine_name,
+            )
         else:
             log_event(
                 logger,
@@ -287,4 +295,87 @@ class RunAttemptProjectionFinalizer:
             final_status=final_status,
             bundle_written=bundle_written,
             cache_recorded=cache_recorded,
+        )
+
+    def _diagnose_skill_run_feedback_sidecar(
+        self,
+        *,
+        result_path: Path,
+        request_id: str | None,
+        run_id: str,
+        attempt_number: int,
+        engine_name: str,
+    ) -> None:
+        sidecar_path = result_path.parent / SKILL_RUN_FEEDBACK_FILENAME
+        try:
+            if not sidecar_path.exists():
+                log_event(
+                    logger,
+                    event="skill_run_feedback.sidecar_missing",
+                    phase="run_lifecycle",
+                    outcome="missing",
+                    level=logging.INFO,
+                    request_id=request_id,
+                    run_id=run_id,
+                    attempt=attempt_number,
+                    engine=engine_name,
+                    path=str(sidecar_path),
+                )
+                return
+            if not sidecar_path.is_file():
+                log_event(
+                    logger,
+                    event="skill_run_feedback.sidecar_not_file",
+                    phase="run_lifecycle",
+                    outcome="warning",
+                    level=logging.WARNING,
+                    request_id=request_id,
+                    run_id=run_id,
+                    attempt=attempt_number,
+                    engine=engine_name,
+                    path=str(sidecar_path),
+                )
+                return
+            content = sidecar_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            log_event(
+                logger,
+                event="skill_run_feedback.sidecar_unreadable",
+                phase="run_lifecycle",
+                outcome="warning",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=run_id,
+                attempt=attempt_number,
+                engine=engine_name,
+                path=str(sidecar_path),
+                error_type=type(exc).__name__,
+            )
+            return
+        if not content.strip():
+            log_event(
+                logger,
+                event="skill_run_feedback.sidecar_empty",
+                phase="run_lifecycle",
+                outcome="warning",
+                level=logging.WARNING,
+                request_id=request_id,
+                run_id=run_id,
+                attempt=attempt_number,
+                engine=engine_name,
+                path=str(sidecar_path),
+            )
+            return
+        log_event(
+            logger,
+            event="skill_run_feedback.sidecar_collected",
+            phase="run_lifecycle",
+            outcome="ok",
+            level=logging.INFO,
+            request_id=request_id,
+            run_id=run_id,
+            attempt=attempt_number,
+            engine=engine_name,
+            path=str(sidecar_path),
+            size=len(content.encode("utf-8")),
         )

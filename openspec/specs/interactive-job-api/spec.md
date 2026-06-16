@@ -1040,3 +1040,45 @@ The job API SHALL accept `runtime_options.env` as an object whose keys are envir
 - **THEN** they compute the same cache key
 - **AND** callers that require env-sensitive output isolation MUST use `runtime_options.no_cache=true`
 
+### Requirement: Job create MUST accept skill run feedback runtime option
+
+The job API SHALL accept `runtime_options.collect_skill_run_feedback` as an optional boolean that enables run-local skill feedback collection.
+
+#### Scenario: feedback option omitted
+- **WHEN** a client omits `runtime_options.collect_skill_run_feedback`
+- **THEN** the system treats feedback collection as disabled
+- **AND** existing runtime options remain unchanged
+
+#### Scenario: feedback option enabled
+- **WHEN** a client submits `runtime_options.collect_skill_run_feedback=true`
+- **THEN** the system validates the value as a boolean
+- **AND** the created run is eligible for feedback patch injection
+- **AND** the cache key differs from otherwise identical default/false requests
+
+#### Scenario: feedback option rejects non-boolean values
+- **WHEN** a client submits a non-boolean `runtime_options.collect_skill_run_feedback`
+- **THEN** the request is rejected by runtime option validation
+
+### Requirement: Job observability reads MUST tolerate pre-observable requests
+After a job request has been accepted, the system MUST tolerate clients polling status, event, and chat endpoints before a run has been bound.
+
+#### Scenario: Status for pre-observable request
+- **GIVEN** a request exists
+- **AND** no `run_id` has been bound yet
+- **WHEN** the client calls `GET /v1/jobs/{request_id}`
+- **THEN** the system returns `status=queued`
+- **AND** `observability_ready=false`
+
+#### Scenario: History for pre-observable request
+- **GIVEN** a request exists
+- **AND** no `run_id` has been bound yet
+- **WHEN** the client calls `/events/history` or `/chat/history`
+- **THEN** the system returns `200`
+- **AND** the response contains no events
+- **AND** `source=pre_observable`
+
+#### Scenario: Missing request remains not found
+- **GIVEN** no request exists for the supplied `request_id`
+- **WHEN** the client calls a status, event, or chat endpoint
+- **THEN** the system returns `404`
+

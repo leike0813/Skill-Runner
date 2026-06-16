@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -285,6 +286,119 @@ async def test_projection_finalizer_writes_success_terminal_bundle_and_cache(tmp
         "status": "succeeded",
         "completion_source": "structured_output_candidate",
     }
+
+
+@pytest.mark.asyncio
+async def test_projection_finalizer_uses_namespaced_result_path_from_request_record(tmp_path: Path) -> None:
+    outcome = _build_outcome(status=RunStatus.SUCCEEDED)
+    run_dir = tmp_path / "run"
+    request_record = {
+        "skill_source": "installed",
+        "run_id": "run-1",
+        "skill_id": "demo-skill",
+        "workspace_id": "run-1",
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": "demo-skill.2",
+    }
+    finalize_input, projection, run_store, _events, _bundles = _build_finalize_input(
+        tmp_path,
+        outcome=outcome,
+        request_record=request_record,
+    )
+
+    result = await RunAttemptProjectionFinalizer().finalize(inputs=finalize_input)
+
+    expected_path = finalize_input.context.run_dir / "result" / "demo-skill.2" / "result.json"
+    assert result.result_path == expected_path
+    assert projection.terminal_calls[0]["request_record"] == request_record
+    assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(expected_path))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("feedback_text", "expected_event"),
+    [
+        ("Useful note", "skill_run_feedback.sidecar_collected"),
+        ("", "skill_run_feedback.sidecar_empty"),
+    ],
+)
+async def test_projection_finalizer_feedback_sidecar_diagnostics_do_not_change_success(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    feedback_text: str,
+    expected_event: str,
+) -> None:
+    outcome = _build_outcome(status=RunStatus.SUCCEEDED)
+    finalize_input, _projection, run_store, _events, bundles = _build_finalize_input(
+        tmp_path,
+        outcome=outcome,
+        cache_key="cache-1",
+    )
+    sidecar = finalize_input.context.run_dir / "result" / "_skill_run_feedback.md"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(feedback_text, encoding="utf-8")
+
+    with caplog.at_level(logging.INFO):
+        result = await RunAttemptProjectionFinalizer().finalize(inputs=finalize_input)
+
+    assert result.final_status == RunStatus.SUCCEEDED
+    assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
+    assert bundles.calls == [
+        (finalize_input.context.run_dir, False),
+        (finalize_input.context.run_dir, True),
+    ]
+    assert run_store.cache_entries == [("cache-1", "run-1")]
+    assert expected_event in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_projection_finalizer_missing_feedback_sidecar_does_not_change_success(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outcome = _build_outcome(status=RunStatus.SUCCEEDED)
+    finalize_input, _projection, run_store, _events, _bundles = _build_finalize_input(
+        tmp_path,
+        outcome=outcome,
+    )
+
+    with caplog.at_level(logging.INFO):
+        result = await RunAttemptProjectionFinalizer().finalize(inputs=finalize_input)
+
+    assert result.final_status == RunStatus.SUCCEEDED
+    assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
+    assert "skill_run_feedback.sidecar_missing" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_projection_finalizer_unreadable_feedback_sidecar_does_not_change_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    outcome = _build_outcome(status=RunStatus.SUCCEEDED)
+    finalize_input, _projection, run_store, _events, _bundles = _build_finalize_input(
+        tmp_path,
+        outcome=outcome,
+    )
+    sidecar = finalize_input.context.run_dir / "result" / "_skill_run_feedback.md"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("note", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _raise_for_feedback(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.name == "_skill_run_feedback.md":
+            raise OSError("blocked")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_feedback)
+
+    with caplog.at_level(logging.WARNING):
+        result = await RunAttemptProjectionFinalizer().finalize(inputs=finalize_input)
+
+    assert result.final_status == RunStatus.SUCCEEDED
+    assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
+    assert "skill_run_feedback.sidecar_unreadable" in caplog.text
 
 
 @pytest.mark.asyncio

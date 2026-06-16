@@ -125,6 +125,7 @@ class RequestStatusResponse(BaseModel):
     workspaceDir: Optional[str] = None
     resultJsonPath: Optional[str] = None
     inputManifestPath: Optional[str] = None
+    observability_ready: bool = True
 
 
 class RunResponse(BaseModel):

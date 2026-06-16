@@ -17,7 +17,7 @@ R1. REST API 暴露 ✅
 
 R2. Skill 可插拔 ✅
 - Skills 以"包"形式管理：通过 `POST /v1/skill-packages/install` 上传安装，或通过 `POST /v1/jobs` + `skill_source=temp_upload` 临时上传执行。
-- Skill 包必须提供 `input.schema.json`、`parameter.schema.json`、`output.schema.json`。
+- Skill 包必须提供 `output.schema.json`；`input.schema.json`、`parameter.schema.json` 可选。
 - Skill 包必须声明 `runner.json`（AutoSkill Manifest），包含引擎支持列表、执行模式、artifacts 合同等。
 - 服务端对上传包执行 meta-schema 预检。
 
@@ -31,6 +31,7 @@ R3. 多引擎支持 ✅（当前活跃引擎全部落地）
 
 R4. 输出稳定性：验证 + 规范化 ✅
 - 输出校验使用 output.schema.json + jsonschema；不合法时进入解析/规范化链。
+- output schema 顶层保持 object 合同；业务 union 使用 `type: object` + `oneOf`/`anyOf`，并优先使用 `kind` 这类 `const` discriminator。
 - 详见 §7。
 
 R5. Artifacts 一等公民 ✅
@@ -180,8 +181,8 @@ skill-name/
 ├── SKILL.md
 ├── assets/
 │   ├── runner.json              # 必需：AutoSkill Manifest（见 5.3）
-│   ├── input.schema.json        # 必需：文件输入 JSON Schema
-│   ├── parameter.schema.json    # 必需：参数 JSON Schema
+│   ├── input.schema.json        # 可选：文件/inline 输入 JSON Schema
+│   ├── parameter.schema.json    # 可选：参数 JSON Schema
 │   ├── output.schema.json       # 必需：输出 JSON Schema
 │   ├── codex_config.toml        # 可选：Codex CLI 推荐配置
 │   ├── gemini_settings.json     # 可选：Gemini CLI 推荐配置
@@ -236,6 +237,7 @@ skill-name/
     - `assets/input.schema.json`
     - `assets/parameter.schema.json`
     - `assets/output.schema.json`
+  - `output` schema 必须可解析；`input` / `parameter` schema 可选。
 - `engine_configs` 是可选的引擎级配置覆盖入口：
   - 优先使用 `runner.json.engine_configs.<engine>`
   - 缺省/空值/非法/文件缺失时回退到固定文件名：
@@ -301,6 +303,7 @@ _parse_output(raw_stdout) → AdapterTurnResult
 **CodexAdapter**：
 - 使用 `codex exec --json` 执行；支持 `--resume` 恢复 interactive 会话。
 - Session Handle 来源：首条 `thread.started.thread_id`。
+- Structured output transport schema 由 canonical output schema 派生；discriminated object union 会展平成 Codex 可消费的单个 object schema，并在运行时按 discriminator 回投影到 canonical branch。
 
 **GeminiAdapter**：
 - Skill 目录复制到 `run_dir/.gemini/skills/<skill_id>`。

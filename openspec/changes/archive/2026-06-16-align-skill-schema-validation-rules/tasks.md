@@ -1,0 +1,6 @@
+- [x] 1. Create OpenSpec artifacts for the schema rule alignment.
+- [x] 2. Update package validation so only `output` schema is required.
+- [x] 3. Update runtime preparation so only `output` schema is a hard prerequisite.
+- [x] 4. Update docs that still describe `input/parameter/output` as all required.
+- [x] 5. Add and update unit/API tests for optional input/parameter schemas and required output schema.
+- [x] 6. Run targeted pytest and `openspec validate align-skill-schema-validation-rules --strict`.

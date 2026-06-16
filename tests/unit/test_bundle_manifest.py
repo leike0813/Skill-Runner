@@ -68,6 +68,48 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
         assert "uploads/input.txt" not in entries
 
 
+def test_bundle_manifest_includes_namespaced_feedback_sidecar(tmp_path):
+    run_dir = tmp_path / "run"
+    result_dir = run_dir / "result" / "demo-skill.1"
+    result_dir.mkdir(parents=True)
+    (result_dir / "result.json").write_text(
+        '{"status":"success","artifacts":[]}',
+        encoding="utf-8",
+    )
+    (result_dir / "_skill_run_feedback.md").write_text("feedback", encoding="utf-8")
+
+    orchestrator = JobOrchestrator()
+    bundle_rel = orchestrator.build_run_bundle(run_dir, debug=False)
+
+    with zipfile.ZipFile(run_dir / bundle_rel, "r") as zf:
+        entries = set(zf.namelist())
+        payload = json.loads(zf.read("result/demo-skill.1/result.json").decode("utf-8"))
+
+    assert "result/demo-skill.1/result.json" in entries
+    assert "result/demo-skill.1/_skill_run_feedback.md" in entries
+    assert "_skill_run_feedback.md" not in payload.get("artifacts", [])
+
+
+def test_bundle_manifest_includes_legacy_feedback_sidecar(tmp_path):
+    run_dir = tmp_path / "run"
+    result_dir = run_dir / "result"
+    result_dir.mkdir(parents=True)
+    (result_dir / "result.json").write_text(
+        '{"status":"success","artifacts":[]}',
+        encoding="utf-8",
+    )
+    (result_dir / "_skill_run_feedback.md").write_text("feedback", encoding="utf-8")
+
+    orchestrator = JobOrchestrator()
+    bundle_rel = orchestrator.build_run_bundle(run_dir, debug=False)
+
+    with zipfile.ZipFile(run_dir / bundle_rel, "r") as zf:
+        entries = set(zf.namelist())
+
+    assert "result/result.json" in entries
+    assert "result/_skill_run_feedback.md" in entries
+
+
 def test_build_run_bundle_public_api_writes_bundle(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "artifacts").mkdir(parents=True)

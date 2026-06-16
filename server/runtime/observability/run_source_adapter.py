@@ -156,6 +156,19 @@ async def get_request_and_run_dir(
     source_adapter: RunSourceAdapter,
     request_id: str,
 ) -> tuple[Dict[str, Any], Path]:
+    request_record, run_dir = await get_request_and_optional_run_dir(
+        source_adapter,
+        request_id,
+    )
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return request_record, run_dir
+
+
+async def get_request_and_optional_run_dir(
+    source_adapter: RunSourceAdapter,
+    request_id: str,
+) -> tuple[Dict[str, Any], Path | None]:
     request_record: Dict[str, Any] | None = await maybe_await(
         source_adapter.get_request(request_id)
     )
@@ -163,7 +176,7 @@ async def get_request_and_run_dir(
         raise HTTPException(status_code=404, detail="Request not found")
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
-        raise HTTPException(status_code=404, detail="Run not found")
+        return request_record, None
     workspace_dir_obj = request_record.get("workspace_dir")
     if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
         workspace_dir = Path(workspace_dir_obj)

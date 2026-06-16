@@ -23,6 +23,7 @@ from server.runtime.workspace_layout import layout_from_record
 from .run_source_adapter import (
     RunSourceAdapter,
     get_request_and_run_dir,
+    get_request_and_optional_run_dir,
     installed_run_source_adapter,
 )
 
@@ -60,6 +61,39 @@ class RunReadFacade:
     ) -> tuple[dict[str, Any], Path]:
         resolved_source = source_adapter or installed_run_source_adapter
         return await get_request_and_run_dir(resolved_source, request_id)
+
+    async def _resolve_request_and_optional_run_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+    ) -> tuple[dict[str, Any], Path | None]:
+        resolved_source = source_adapter or installed_run_source_adapter
+        return await get_request_and_optional_run_dir(resolved_source, request_id)
+
+    def _preobservable_history_payload(self, *, request_id: str) -> dict[str, Any]:
+        return {
+            "request_id": request_id,
+            "count": 0,
+            "events": [],
+            "source": "pre_observable",
+            "cursor_floor": 0,
+            "cursor_ceiling": 0,
+        }
+
+    def _preobservable_sse_response(self) -> StreamingResponse:
+        async def _event_stream():
+            yield ": pre_observable\n\n"
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     async def get_result(
         self,
@@ -248,10 +282,12 @@ class RunReadFacade:
         request: Request,
         cursor: int = 0,
     ) -> StreamingResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        _request_record, run_dir = await self._resolve_request_and_optional_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
+        if run_dir is None:
+            return self._preobservable_sse_response()
 
         async def _event_stream():
             async for item in run_observability_service.iter_sse_events(
@@ -283,10 +319,12 @@ class RunReadFacade:
         request: Request,
         cursor: int = 0,
     ) -> StreamingResponse:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        _request_record, run_dir = await self._resolve_request_and_optional_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
+        if run_dir is None:
+            return self._preobservable_sse_response()
 
         async def _event_stream():
             async for item in run_observability_service.iter_chat_events(
@@ -320,10 +358,12 @@ class RunReadFacade:
         from_ts: str | None,
         to_ts: str | None,
     ) -> dict[str, Any]:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        _request_record, run_dir = await self._resolve_request_and_optional_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
+        if run_dir is None:
+            return self._preobservable_history_payload(request_id=request_id)
         payload = await run_observability_service.get_event_history_payload(
             run_dir=run_dir,
             request_id=request_id,
@@ -353,10 +393,12 @@ class RunReadFacade:
         from_ts: str | None,
         to_ts: str | None,
     ) -> dict[str, Any]:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        _request_record, run_dir = await self._resolve_request_and_optional_run_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
+        if run_dir is None:
+            return self._preobservable_history_payload(request_id=request_id)
         payload = await run_observability_service.get_chat_history_payload(
             run_dir=run_dir,
             request_id=request_id,

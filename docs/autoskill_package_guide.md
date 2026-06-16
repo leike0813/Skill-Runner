@@ -7,7 +7,7 @@
 ### 1.1 定义
 
 AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。  
-它不仅包含 `SKILL.md` 的行为描述，还必须提供机器可校验的执行合同（输入、参数、输出、artifact 约束）。
+它不仅包含 `SKILL.md` 的行为描述，还必须提供机器可校验的输出合同；输入与参数合同可选提供。
 
 ### 1.2 与普通 Open Agent Skills 包的区别
 
@@ -31,9 +31,9 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
   SKILL.md
   assets/
     runner.json
-    input.schema.json
-    parameter.schema.json
-    output.schema.json
+    input.schema.json       # 可选
+    parameter.schema.json   # 可选
+    output.schema.json      # 必需
 ```
 
 建议附加：
@@ -93,9 +93,11 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 
 详细规则见 `docs/file_protocol.md`，这里给出关键约束：
 
-- `input.schema.json`：定义业务输入；支持 `file`（上传文件路径）与 `inline`（请求体 JSON 值）两类来源。
-- `parameter.schema.json`：定义标量配置参数（string/number/bool 等）。
-- `output.schema.json`：定义结构化输出与 artifact 字段。
+- `input.schema.json`：可选，定义业务输入；支持 `file`（上传文件路径）与 `inline`（请求体 JSON 值）两类来源。
+- `parameter.schema.json`：可选，定义标量配置参数（string/number/bool 等）。
+- `output.schema.json`：必需，定义结构化输出与 artifact 字段。
+- `output.schema.json` 顶层必须是 `type: "object"`；需要成功、取消等多种结果形态时，在顶层 object 内使用 `oneOf` 或 `anyOf` 分支。
+- union 输出建议使用稳定 discriminator，例如每个分支都声明 `kind: {"const": "..."}`。
 
 ### Artifact 字段规范
 
@@ -158,15 +160,15 @@ interactive 模式关键约束：
    将交互式模糊描述改为可自动执行的步骤，并显式要求返回结构化 JSON。
 
 4. 编写三类 schema  
-   - `input.schema.json`：定义业务输入（可混合 file 与 inline）
-   - `parameter.schema.json`：只放配置参数
-   - `output.schema.json`：放结构化输出与 artifact 定义
+   - `input.schema.json`：可选，定义业务输入（可混合 file 与 inline）
+   - `parameter.schema.json`：可选，只放配置参数
+   - `output.schema.json`：必需，放结构化输出与 artifact 定义
 
 5. 编写 `runner.json`  
    声明 `engines`、schema 路径、版本等；若最终结果由脚本强制落盘，也在这里声明 `entrypoint.result_json_filename`。
 
 6. 做本地校验  
-   检查身份一致性、schema 文件存在性、字段 required 合理性、artifact 是否可实际产出。
+   检查身份一致性、output schema 文件存在性、字段 required 合理性、artifact 是否可实际产出。
 
 7. 用小样本试跑  
    在最小输入下先跑通一次，确认输出 JSON 与 artifact 都符合 schema。
@@ -225,10 +227,10 @@ interactive 模式关键约束：
 ## 5. 最小检查清单（提交前）
 
 - [ ] 顶层目录、`runner.id`、`SKILL.md` name 三者一致
-- [ ] `SKILL.md`、`runner.json`、三类 schema 均存在
+- [ ] `SKILL.md`、`runner.json`、`output.schema.json` 存在；`input.schema.json` / `parameter.schema.json` 按需提供
 - [ ] `runner.json.execution_modes` 非空
 - [ ] `runner.json.engines` 非空或缺失（缺失按全量引擎处理）
-- [ ] `runner.json.schemas` 若声明，则路径有效；若未声明，固定 fallback 文件存在
+- [ ] `runner.json.schemas.output` 若声明则路径有效；若未声明，固定 fallback 文件存在
 - [ ] `runner.json.engine_configs` 若声明，则路径有效；否则确认固定 fallback 或可接受地缺省
 - [ ] `output.schema.json` 对 artifact 字段已标注 `x-type: "artifact"`
 - [ ] 必填字段可被真实执行路径产出

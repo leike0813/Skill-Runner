@@ -92,6 +92,8 @@ def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Pat
         run_dir=run_dir,
         execution_mode="interactive",
         output_contract_details_markdown="### Output Contract Details\n\nCodex compat summary",
+        collect_skill_run_feedback=False,
+        feedback_path=None,
     )
 
 
@@ -113,6 +115,7 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
         engine_name="codex",
         execution_mode="interactive",
         source=RunLocalSkillSource.TEMP_UPLOAD,
+        collect_skill_run_feedback=True,
     )
 
     assert manifest.path == ref.snapshot_dir
@@ -120,3 +123,54 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
     assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
     assert not (run_dir / ".audit" / "contracts" / "target_output_schema.md").exists()
     assert (run_dir / "AGENTS.md").exists()
+    content = (ref.snapshot_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert (
+        f"`{(run_dir / 'result' / 'demo-skill.1' / '_skill_run_feedback.md').as_posix()}`"
+        in content
+    )
+    assert content.rstrip().endswith("concrete suggestions for improving the skill.")
+
+
+def test_run_folder_bootstrapper_passes_feedback_option_to_patcher(tmp_path: Path) -> None:
+    skill_dir = _build_skill_dir(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    skill = SkillManifest(
+        id="demo-skill",
+        path=skill_dir,
+        engines=["codex"],
+        schemas={
+            "input": "assets/input.schema.json",
+            "parameter": "assets/parameter.schema.json",
+            "output": "assets/output.schema.json",
+        },
+    )
+
+    with patch(
+        "server.services.orchestration.run_skill_materialization_service.run_output_schema_service.materialize",
+        return_value=RunOutputSchemaMaterialization(
+            business_schema={"type": "object"},
+            machine_schema={"type": "object"},
+            schema_path=run_dir / ".audit" / "contracts" / "target_output_schema.json",
+            schema_relpath=".audit/contracts/target_output_schema.json",
+            prompt_contract_markdown="### Output Contract Details\n\nGenerated summary",
+        ),
+    ), patch(
+        "server.services.orchestration.run_skill_materialization_service.structured_output_pipeline.resolve_prompt_contract_markdown",
+        return_value="### Output Contract Details\n\nCodex compat summary",
+    ), patch(
+        "server.services.orchestration.run_skill_materialization_service.skill_patcher.patch_skill_md"
+    ) as mock_patch:
+        feedback_path = run_dir / "result" / "demo-skill.2" / "_skill_run_feedback.md"
+        run_folder_bootstrapper.materialize_skill(
+            skill=skill,
+            run_dir=run_dir,
+            engine_name="codex",
+            execution_mode="interactive",
+            source=RunLocalSkillSource.INSTALLED,
+            collect_skill_run_feedback=True,
+            feedback_path=feedback_path,
+        )
+
+    assert mock_patch.call_args.kwargs["collect_skill_run_feedback"] is True
+    assert mock_patch.call_args.kwargs["feedback_path"] == feedback_path

@@ -186,14 +186,15 @@ class RunOutputSchemaService:
                 "required": ["result"],
                 "additionalProperties": False,
             }
+        completion_marker_schema = self._completion_marker_schema()
+        base_schema = self._inject_completion_marker_into_object_union_branches(
+            base_schema,
+            completion_marker_schema=completion_marker_schema,
+        )
         properties_obj = base_schema.get("properties")
         properties = properties_obj if isinstance(properties_obj, dict) else {}
         wrapped_properties: dict[str, Any] = {
-            "__SKILL_DONE__": {
-                "type": "boolean",
-                "const": True,
-                "description": "Completion signal. Must be true in the final payload.",
-            }
+            "__SKILL_DONE__": completion_marker_schema,
         }
         for field_name, field_schema in properties.items():
             if not isinstance(field_name, str):
@@ -205,6 +206,48 @@ class RunOutputSchemaService:
         required = [item for item in required_obj if isinstance(item, str)] if isinstance(required_obj, list) else []
         base_schema["required"] = self._merge_required("__SKILL_DONE__", required)
         return base_schema
+
+    def _completion_marker_schema(self) -> dict[str, Any]:
+        return {
+            "type": "boolean",
+            "const": True,
+            "description": "Completion signal. Must be true in the final payload.",
+        }
+
+    def _inject_completion_marker_into_object_union_branches(
+        self,
+        schema: dict[str, Any],
+        *,
+        completion_marker_schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = deepcopy(schema)
+        for union_key in ("oneOf", "anyOf"):
+            branches_obj = updated.get(union_key)
+            if not isinstance(branches_obj, list):
+                continue
+            injected_branches: list[Any] = []
+            for branch in branches_obj:
+                if not isinstance(branch, dict):
+                    injected_branches.append(branch)
+                    continue
+                branch_copy = deepcopy(branch)
+                properties_obj = branch_copy.get("properties")
+                properties = properties_obj if isinstance(properties_obj, dict) else {}
+                if branch_copy.get("type") != "object" and not properties:
+                    injected_branches.append(branch_copy)
+                    continue
+                properties["__SKILL_DONE__"] = deepcopy(completion_marker_schema)
+                branch_copy["type"] = "object"
+                branch_copy["properties"] = properties
+                required_obj = branch_copy.get("required")
+                required = [
+                    item for item in required_obj
+                    if isinstance(item, str)
+                ] if isinstance(required_obj, list) else []
+                branch_copy["required"] = self._merge_required("__SKILL_DONE__", required)
+                injected_branches.append(branch_copy)
+            updated[union_key] = injected_branches
+        return updated
 
     def _build_interactive_union_schema(self, final_schema: dict[str, Any]) -> dict[str, Any]:
         return {

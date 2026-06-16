@@ -418,7 +418,15 @@ async def test_resolve_custom_provider_post_execute_fallback_waits_for_auth(tmp_
         tmp_path,
         custom_provider_model="openrouter/qwen-3",
     )
-    execution = _build_execution(exit_code=1, failure_reason="TIMEOUT")
+    execution = _build_execution(
+        exit_code=1,
+        failure_reason="AUTH_REQUIRED",
+        auth_signal_snapshot={
+            "required": True,
+            "confidence": "high",
+            "matched_pattern_id": "custom_provider_auth_required",
+        },
+    )
     convergence = OutputConvergenceResult()
     auth_service = _FakeAuthService(
         custom_pending_auth={
@@ -441,6 +449,86 @@ async def test_resolve_custom_provider_post_execute_fallback_waits_for_auth(tmp_
     assert outcome.pending_auth is not None
     assert outcome.pending_auth["auth_session_id"] == "auth-custom"
     assert auth_service.create_custom_provider_pending_auth_calls[0]["last_error"] == "Authentication is required to continue."
+
+
+@pytest.mark.asyncio
+async def test_resolve_custom_provider_low_confidence_auth_does_not_wait_for_auth(
+    tmp_path: Path,
+) -> None:
+    context = _build_context(
+        tmp_path,
+        custom_provider_model="openrouter/qwen-3",
+    )
+    execution = _build_execution(
+        exit_code=1,
+        auth_signal_snapshot={
+            "required": True,
+            "confidence": "low",
+            "matched_pattern_id": "generic_token_expired_text_fallback",
+        },
+    )
+    convergence = OutputConvergenceResult()
+    auth_service = _FakeAuthService(
+        custom_pending_auth={
+            "auth_session_id": "auth-custom",
+            "engine": "claude",
+            "provider_id": "openrouter",
+            "challenge_kind": "provider_config",
+        }
+    )
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+        auth_service=auth_service,
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.FAILED
+    assert outcome.pending_auth is None
+    assert outcome.auth_detection_result.classification == "auth_required"
+    assert outcome.auth_detection_result.confidence == "low"
+    assert auth_service.create_custom_provider_pending_auth_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_custom_provider_schema_failure_does_not_wait_for_auth(
+    tmp_path: Path,
+) -> None:
+    context = _build_context(
+        tmp_path,
+        custom_provider_model="openrouter/qwen-3",
+    )
+    execution = _build_execution(exit_code=1)
+    convergence = OutputConvergenceResult(
+        output_data={"ok": True},
+        has_structured_output=True,
+        done_signal_found=True,
+    )
+    auth_service = _FakeAuthService(
+        custom_pending_auth={
+            "auth_session_id": "auth-custom",
+            "engine": "claude",
+            "provider_id": "openrouter",
+            "challenge_kind": "provider_config",
+        }
+    )
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+        auth_service=auth_service,
+        schema_validator_backend=_FakeSchemaValidator(output_errors=["schema mismatch"]),
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.FAILED
+    assert outcome.pending_auth is None
+    assert outcome.normalized_error is not None
+    assert outcome.normalized_error["code"] is None
+    assert auth_service.create_custom_provider_pending_auth_calls == []
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ from ....models import SkillManifest
 from ....services.skill.skill_asset_resolver import resolve_schema_asset
 from ..contracts import AdapterExecutionContext
 from .profile_loader import AdapterProfile
+
+logger = logging.getLogger(__name__)
 
 
 def validate_run_folder_contract(
@@ -40,17 +43,29 @@ def validate_run_folder_contract(
     if not isinstance(runner, dict):
         raise RuntimeError(f"RUN_FOLDER_INVALID: runner.json must be an object: {runner_path}")
 
-    for schema_key in ("input", "parameter", "output"):
+    materialized_skill = SkillManifest(id=skill.id, path=skill_dir, schemas=runner.get("schemas"))
+    for schema_key in ("input", "parameter"):
         resolution = resolve_schema_asset(
-            SkillManifest(id=skill.id, path=skill_dir, schemas=runner.get("schemas")),
+            materialized_skill,
             schema_key,
         )
-        if resolution.path is None:
-            raise RuntimeError(
-                f"RUN_FOLDER_INVALID: missing schema file '{schema_key}': "
-                f"{resolution.fallback_relpath or resolution.declared_relpath or runner_path}"
+        if resolution.path is None and resolution.declared_relpath is not None:
+            logger.warning(
+                "Optional run folder schema declaration ignored: skill=%s schema=%s declared=%s "
+                "fallback=%s issue=%s",
+                skill.id,
+                schema_key,
+                resolution.declared_relpath,
+                resolution.fallback_relpath,
+                resolution.issue_code,
             )
 
+    output_resolution = resolve_schema_asset(materialized_skill, "output")
+    if output_resolution.path is None:
+        raise RuntimeError(
+            "RUN_FOLDER_INVALID: missing schema file 'output': "
+            f"{output_resolution.fallback_relpath or output_resolution.declared_relpath or runner_path}"
+        )
     return skill_dir
 
 

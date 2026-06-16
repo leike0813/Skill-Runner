@@ -7,6 +7,8 @@ from pathlib import Path
 
 from server.services.platform.run_file_filter_service import run_file_filter_service
 
+SKILL_RUN_FEEDBACK_FILENAME = "_skill_run_feedback.md"
+
 
 class RunBundleService:
     def build_run_bundle(self, run_dir: Path, debug: bool = False) -> str:
@@ -82,6 +84,7 @@ class RunBundleService:
         candidates: list[Path] = []
         result_candidates = self._result_candidates(run_dir)
         candidates.extend(result_candidates)
+        candidates.extend(self._feedback_sidecar_candidates(result_candidates))
         if not result_candidates:
             return candidates
 
@@ -111,6 +114,23 @@ class RunBundleService:
             seen.add(rel)
             unique.append(path)
         return unique
+
+    def _feedback_sidecar_candidates(self, result_candidates: list[Path]) -> list[Path]:
+        candidates: list[Path] = []
+        for result_path in result_candidates:
+            sidecar_path = result_path.parent / SKILL_RUN_FEEDBACK_FILENAME
+            if self._is_bundleable_feedback_sidecar(sidecar_path):
+                candidates.append(sidecar_path)
+        return candidates
+
+    def _is_bundleable_feedback_sidecar(self, path: Path) -> bool:
+        try:
+            if not path.exists() or not path.is_file():
+                return False
+            with path.open("rb"):
+                return True
+        except OSError:
+            return False
 
     def _result_candidates(self, run_dir: Path) -> list[Path]:
         result_root = run_dir / "result"

@@ -181,11 +181,8 @@ class RunAttemptPreparationService:
             )
         if not skill:
             raise ValueError(f"Skill {request.skill_id} not found during execution")
-        if not all(
-            resolve_schema_asset(skill, key).path is not None
-            for key in ("input", "parameter", "output")
-        ):
-            raise ValueError("Schema missing: input/parameter/output must be defined")
+        if resolve_schema_asset(skill, "output").path is None:
+            raise ValueError("Schema missing: output must be defined")
 
         adapter = orchestrator.adapters.get(request.engine_name)
         if not adapter:

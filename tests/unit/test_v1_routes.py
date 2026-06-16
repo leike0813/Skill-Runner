@@ -89,6 +89,16 @@ async def test_v1_system_ping_route_available():
 
 
 @pytest.mark.asyncio
+async def test_v1_runtime_network_client_address_reflects_backend_observed_peer():
+    transport = httpx.ASGITransport(app=app, client=("203.0.113.10", 49152))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/v1/runtime/network/client-address")
+
+    assert response.status_code == 200
+    assert response.json() == {"client_ip": "203.0.113.10"}
+
+
+@pytest.mark.asyncio
 async def test_v1_skills_route_available(monkeypatch):
     monkeypatch.setattr(
         "server.routers.skills.skill_registry.list_skills",
@@ -1175,6 +1185,115 @@ async def test_v1_jobs_chat_history_route(monkeypatch, tmp_path):
     assert payload["request_id"] == "req-chat-history"
     assert payload["count"] == 2
     assert payload["events"][0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_preobservable_request_status_and_history(monkeypatch):
+    request_record = {
+        "request_id": "req-preobservable",
+        "skill_id": "__temp_upload__",
+        "engine": "gemini",
+        "run_id": None,
+        "engine_options": {"model": "gemini-2.5-pro"},
+        "runtime_options": {"execution_mode": "auto"},
+        "effective_runtime_options": {"execution_mode": "auto"},
+        "client_metadata": {},
+        "created_at": "2026-06-17T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        AsyncMock(return_value=request_record),
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_auto_decision_stats",
+        AsyncMock(return_value={"auto_decision_count": 0, "last_auto_decision_at": None}),
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_interaction_count",
+        AsyncMock(return_value=0),
+    )
+
+    status = await _request("GET", "/v1/jobs/req-preobservable")
+    assert status.status_code == 200
+    status_payload = status.json()
+    assert status_payload["status"] == "queued"
+    assert status_payload["observability_ready"] is False
+
+    events = await _request("GET", "/v1/jobs/req-preobservable/events/history")
+    assert events.status_code == 200
+    events_payload = events.json()
+    assert events_payload["count"] == 0
+    assert events_payload["events"] == []
+    assert events_payload["source"] == "pre_observable"
+    assert events_payload["cursor_floor"] == 0
+    assert events_payload["cursor_ceiling"] == 0
+
+    chat = await _request("GET", "/v1/jobs/req-preobservable/chat/history")
+    assert chat.status_code == 200
+    chat_payload = chat.json()
+    assert chat_payload["count"] == 0
+    assert chat_payload["events"] == []
+    assert chat_payload["source"] == "pre_observable"
+
+    management_events = await _request(
+        "GET",
+        "/v1/management/runs/req-preobservable/events/history",
+    )
+    assert management_events.status_code == 200
+    assert management_events.json()["source"] == "pre_observable"
+
+    management_chat = await _request(
+        "GET",
+        "/v1/management/runs/req-preobservable/chat/history",
+    )
+    assert management_chat.status_code == 200
+    assert management_chat.json()["source"] == "pre_observable"
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_preobservable_request_sse_routes(monkeypatch):
+    request_record = {
+        "request_id": "req-preobservable-sse",
+        "skill_id": "__temp_upload__",
+        "engine": "gemini",
+        "run_id": None,
+        "engine_options": {},
+        "runtime_options": {},
+        "effective_runtime_options": {},
+        "client_metadata": {},
+        "created_at": "2026-06-17T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        AsyncMock(return_value=request_record),
+    )
+
+    events = await _request("GET", "/v1/jobs/req-preobservable-sse/events")
+    assert events.status_code == 200
+    assert events.headers["content-type"].startswith("text/event-stream")
+    assert "pre_observable" in events.text
+
+    chat = await _request("GET", "/v1/jobs/req-preobservable-sse/chat")
+    assert chat.status_code == 200
+    assert chat.headers["content-type"].startswith("text/event-stream")
+    assert "pre_observable" in chat.text
+
+
+@pytest.mark.asyncio
+async def test_v1_jobs_missing_request_observability_still_returns_404(monkeypatch):
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_request",
+        AsyncMock(return_value=None),
+    )
+
+    status = await _request("GET", "/v1/jobs/req-missing")
+    assert status.status_code == 404
+
+    events = await _request("GET", "/v1/jobs/req-missing/events/history")
+    assert events.status_code == 404
+
+    chat = await _request("GET", "/v1/jobs/req-missing/chat/history")
+    assert chat.status_code == 404
 
 
 @pytest.mark.asyncio

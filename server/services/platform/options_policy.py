@@ -12,6 +12,7 @@ from server.runtime.session.timeout import (
 from server.services.platform.runtime_env_options import validate_runtime_env
 
 HARD_TIMEOUT_SECONDS_KEY = "hard_timeout_seconds"
+COLLECT_SKILL_RUN_FEEDBACK_KEY = "collect_skill_run_feedback"
 
 
 class OptionsPolicy:
@@ -37,6 +38,7 @@ class OptionsPolicy:
         self._validate_hard_timeout_seconds(normalized)
         self._validate_workspace(normalized)
         self._validate_env(normalized)
+        self._validate_collect_skill_run_feedback(normalized)
         timeout_resolution = resolve_interactive_reply_timeout(
             normalized,
             default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
@@ -133,6 +135,16 @@ class OptionsPolicy:
         if "env" not in runtime_options:
             return
         validate_runtime_env(runtime_options.get("env"))
+
+    def _validate_collect_skill_run_feedback(self, runtime_options: Dict[str, Any]) -> None:
+        if COLLECT_SKILL_RUN_FEEDBACK_KEY not in runtime_options:
+            return
+        value = runtime_options.get(COLLECT_SKILL_RUN_FEEDBACK_KEY)
+        if isinstance(value, bool):
+            return
+        raise ValueError(
+            f"runtime_options.{COLLECT_SKILL_RUN_FEEDBACK_KEY} must be a boolean"
+        )
 
 
 options_policy = OptionsPolicy()

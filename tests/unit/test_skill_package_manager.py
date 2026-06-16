@@ -17,6 +17,7 @@ def _build_skill_zip(
     skill_name: str | None = None,
     runner_id: str | None = None,
     include_input_schema: bool = True,
+    include_parameter_schema: bool = True,
     include_output_schema: bool = True,
     engines: list[str] | None = None,
     artifacts: list[dict] | None = None,
@@ -65,6 +66,7 @@ def _build_skill_zip(
         zf.writestr(f"{skill_id}/assets/runner.json", json.dumps(runner))
         if include_input_schema:
             zf.writestr(f"{skill_id}/assets/input.schema.json", json.dumps(input_schema))
+        if include_parameter_schema:
             zf.writestr(f"{skill_id}/assets/parameter.schema.json", json.dumps(parameter_schema))
         if include_output_schema:
             zf.writestr(f"{skill_id}/assets/output.schema.json", json.dumps(output_schema))
@@ -122,6 +124,29 @@ async def test_install_new_skill(monkeypatch, isolated_skill_paths):
     assert row["status"] == "succeeded"
     assert row["action"] == "install"
     assert (Path(config.SYSTEM.SKILLS_DIR) / "demo-upload" / "assets" / "runner.json").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "zip_kwargs",
+    [
+        {"include_input_schema": False},
+        {"include_parameter_schema": False},
+    ],
+)
+async def test_install_accepts_missing_optional_schema(monkeypatch, isolated_skill_paths, zip_kwargs):
+    store = SkillInstallStore(db_path=Path(config.SYSTEM.SKILL_INSTALLS_DB))
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_install_store", store)
+    monkeypatch.setattr("server.services.skill.skill_package_manager.skill_registry.scan_skills", lambda: None)
+
+    manager = SkillPackageManager()
+    payload = _build_skill_zip("demo-upload", "1.0.0", **zip_kwargs)
+    await manager.create_install_request("req-1", payload)
+    await manager.run_install("req-1")
+
+    row = await store.get_install("req-1")
+    assert row is not None
+    assert row["status"] == "succeeded"
 
 
 @pytest.mark.asyncio

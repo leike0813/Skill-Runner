@@ -17,6 +17,7 @@
 2. **WorkspaceManager**:
    - 创建 `data/requests/<request_id>/` 目录。
    - 返回 `request_id`。
+   - 在临时 skill 或需要上传的请求中，此时可能尚未绑定 `run_id`。客户端可以立即读取 `GET /v1/jobs/{request_id}`，响应为 `queued` 且 `observability_ready=false`；`/events/history` 与 `/chat/history` 返回空历史，实时 SSE 只返回 pre-observable keepalive。
 3. **Client -> API**: (可选) 发送 `POST /v1/jobs/<request_id>/upload` 上传文件。
    - Payload: Zip 文件。
 4. **WorkspaceManager**:

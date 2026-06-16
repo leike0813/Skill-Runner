@@ -356,6 +356,9 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 if workspace_reuse is not None
                 else ""
             ),
+            collect_skill_run_feedback=bool(
+                effective_runtime_opts.get("collect_skill_run_feedback") is True
+            ),
         )
         await run_store.update_request_manifest(
             request_id,
@@ -476,12 +479,21 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 manifest_hash,
                 request_upload_mode="uploaded",
             )
+            collect_skill_run_feedback = bool(
+                effective_runtime_opts.get("collect_skill_run_feedback") is True
+            )
             run_folder_bootstrapper.materialize_skill(
                 skill=skill,
                 run_dir=run_dir,
                 engine_name=request.engine,
                 execution_mode=_execution_mode_value(policy.effective_execution_mode),
                 source=RunLocalSkillSource.INSTALLED,
+                collect_skill_run_feedback=collect_skill_run_feedback,
+                feedback_path=(
+                    layout.result_path.parent / "_skill_run_feedback.md"
+                    if collect_skill_run_feedback and layout is not None
+                    else None
+                ),
             )
             await run_state_service.initialize_queued_state(
                 run_dir=run_dir,
@@ -558,7 +570,69 @@ async def get_run_status(request_id: str):
         raise HTTPException(status_code=404, detail="Request not found")
     run_id = request_record.get("run_id")
     if not run_id:
-        raise HTTPException(status_code=404, detail="Run not found")
+        skill_id = str(request_record.get("skill_id") or "unknown")
+        engine = str(request_record.get("engine") or "unknown")
+        engine_options_obj = request_record.get("engine_options")
+        engine_options = engine_options_obj if isinstance(engine_options_obj, dict) else {}
+        model_obj = engine_options.get("model")
+        if not isinstance(model_obj, str) or not model_obj.strip():
+            model_obj = engine_options.get("model_id")
+        model = model_obj.strip() if isinstance(model_obj, str) and model_obj.strip() else None
+        created_at = _parse_datetime_utc(request_record.get("created_at"), default_now=True) or datetime.now(timezone.utc)
+        runtime_options = request_record.get("runtime_options", {})
+        effective_runtime_options = request_record.get("effective_runtime_options", runtime_options)
+        runtime_policy_fields = _build_runtime_policy_fields(
+            runtime_options=runtime_options,
+            effective_runtime_options=effective_runtime_options,
+            client_metadata=request_record.get("client_metadata"),
+        )
+        auto_stats: dict[str, Any] = await maybe_await(
+            run_store.get_auto_decision_stats(request_id)
+        )
+        last_auto_decision_at = _parse_datetime_utc(auto_stats.get("last_auto_decision_at"))
+        interaction_count: int = int(
+            await maybe_await(run_store.get_interaction_count(request_id)) or 0
+        )
+        return RequestStatusResponse(
+            request_id=request_id,
+            status=RunStatus.QUEUED,
+            skill_id=skill_id,
+            engine=engine,
+            model=model,
+            created_at=created_at,
+            updated_at=created_at,
+            warnings=[],
+            error=None,
+            auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
+            last_auto_decision_at=last_auto_decision_at,
+            pending_interaction_id=None,
+            pending_auth_session_id=None,
+            pending_payload=None,
+            interaction_count=interaction_count,
+            recovery_state=RecoveryState.NONE,
+            recovered_at=None,
+            recovery_reason=None,
+            requested_execution_mode=runtime_policy_fields["requested_execution_mode"],
+            effective_execution_mode=runtime_policy_fields["effective_execution_mode"],
+            conversation_mode=runtime_policy_fields["conversation_mode"],
+            interactive_auto_reply=runtime_policy_fields["interactive_auto_reply"],
+            interactive_reply_timeout_sec=runtime_policy_fields["interactive_reply_timeout_sec"],
+            effective_interactive_require_user_reply=runtime_policy_fields["effective_interactive_require_user_reply"],
+            effective_interactive_reply_timeout_sec=runtime_policy_fields["effective_interactive_reply_timeout_sec"],
+            current_attempt=0,
+            pending_owner=None,
+            dispatch_phase=None,
+            dispatch_ticket_id=None,
+            worker_claim_id=None,
+            resume_ticket_id=None,
+            resume_cause=None,
+            source_attempt=None,
+            target_attempt=None,
+            workspaceDir=None,
+            resultJsonPath=None,
+            inputManifestPath=None,
+            observability_ready=False,
+        )
     run_dir = workspace_manager.get_run_dir(run_id)
     if not run_dir:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -784,6 +858,7 @@ async def get_run_status(request_id: str):
         workspaceDir=workspace_fields["workspaceDir"],
         resultJsonPath=workspace_fields["resultJsonPath"],
         inputManifestPath=workspace_fields["inputManifestPath"],
+        observability_ready=True,
     )
 
 @router.get("/{request_id}/result", response_model=RunResultResponse)
@@ -1132,6 +1207,9 @@ async def upload_file(
                         if workspace_reuse is not None
                         else ""
                     ),
+                    collect_skill_run_feedback=bool(
+                        effective_runtime_options.get("collect_skill_run_feedback") is True
+                    ),
                 )
                 await run_store.update_request_cache_key(
                     request_id,
@@ -1312,6 +1390,14 @@ async def upload_file(
                     manifest_hash,
                     request_upload_mode="uploaded",
                 )
+                collect_skill_run_feedback = bool(
+                    effective_runtime_options.get("collect_skill_run_feedback") is True
+                )
+                feedback_path = (
+                    layout.result_path.parent / "_skill_run_feedback.md"
+                    if collect_skill_run_feedback and layout is not None
+                    else None
+                )
                 if source == RequestSkillSource.TEMP_UPLOAD.value:
                     run_folder_bootstrapper.materialize_skill(
                         skill=skill,
@@ -1319,6 +1405,8 @@ async def upload_file(
                         engine_name=request_record["engine"],
                         execution_mode=execution_mode,
                         source=RunLocalSkillSource.TEMP_UPLOAD,
+                        collect_skill_run_feedback=collect_skill_run_feedback,
+                        feedback_path=feedback_path,
                     )
                 else:
                     run_folder_bootstrapper.materialize_skill(
@@ -1327,6 +1415,8 @@ async def upload_file(
                         engine_name=request_record["engine"],
                         execution_mode=execution_mode,
                         source=RunLocalSkillSource.INSTALLED,
+                        collect_skill_run_feedback=collect_skill_run_feedback,
+                        feedback_path=feedback_path,
                     )
                 await run_state_service.initialize_queued_state(
                     run_dir=run_dir,

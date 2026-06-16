@@ -13,6 +13,7 @@ class SkillPatchModule(str, Enum):
     OUTPUT_CONTRACT_DETAILS = "output_contract_details"
     MODE_AUTO = "mode_auto"
     MODE_INTERACTIVE = "mode_interactive"
+    SKILL_RUN_FEEDBACK = "skill_run_feedback"
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,11 @@ MODE_INTERACTIVE_TEMPLATE = SkillPatchTemplate(
     filename="patch_mode_interactive.md",
     marker="## Execution Mode: INTERACTIVE",
 )
+SKILL_RUN_FEEDBACK_TEMPLATE = SkillPatchTemplate(
+    module=SkillPatchModule.SKILL_RUN_FEEDBACK,
+    filename="patch_skill_run_feedback.md.j2",
+    marker="## Skill Run Feedback Sidecar",
+)
 
 
 def template_dir() -> Path:
@@ -71,6 +77,7 @@ def template_map() -> Dict[SkillPatchModule, SkillPatchTemplate]:
         OUTPUT_CONTRACT_DETAILS_TEMPLATE.module: OUTPUT_CONTRACT_DETAILS_TEMPLATE,
         MODE_AUTO_TEMPLATE.module: MODE_AUTO_TEMPLATE,
         MODE_INTERACTIVE_TEMPLATE.module: MODE_INTERACTIVE_TEMPLATE,
+        SKILL_RUN_FEEDBACK_TEMPLATE.module: SKILL_RUN_FEEDBACK_TEMPLATE,
     }
 
 

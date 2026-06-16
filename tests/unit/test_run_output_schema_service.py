@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import jsonschema  # type: ignore[import-untyped]
+
 from server.models import SkillManifest
 from server.services.orchestration.run_output_schema_service import (
     REQUEST_INPUT_TARGET_OUTPUT_SCHEMA_PATH,
@@ -154,6 +156,44 @@ def test_materialize_interactive_machine_schema_uses_union_and_keeps_stable_path
     assert TARGET_OUTPUT_SCHEMA_RELPATH in first.prompt_contract_markdown
     assert first.prompt_contract_markdown.index("#### Final Branch Contract") < first.prompt_contract_markdown.index(
         "#### Pending Branch Contract"
+    )
+
+
+def test_final_wrapper_injects_done_marker_into_object_union_branches() -> None:
+    schema = run_output_schema_service.build_final_wrapper_schema(
+        {
+            "type": "object",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "ok"},
+                        "value": {"type": "string"},
+                    },
+                    "required": ["kind", "value"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"const": "canceled"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["kind", "reason"],
+                    "additionalProperties": False,
+                },
+            ],
+        }
+    )
+
+    assert schema["required"] == ["__SKILL_DONE__"]
+    for branch in schema["oneOf"]:
+        assert branch["properties"]["__SKILL_DONE__"]["const"] is True
+        assert "__SKILL_DONE__" in branch["required"]
+
+    jsonschema.validate(
+        instance={"__SKILL_DONE__": True, "kind": "ok", "value": "done"},
+        schema=schema,
     )
 
 

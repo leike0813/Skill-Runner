@@ -1,0 +1,6 @@
+- [x] 1. Create OpenSpec artifacts for pre-observable request reads.
+- [x] 2. Add status response field for `observability_ready`.
+- [x] 3. Add read-facade handling for pre-observable event/chat history and SSE.
+- [x] 4. Update API docs for the early-read contract.
+- [x] 5. Add API tests covering pre-observable status/history/SSE and true missing request 404.
+- [x] 6. Run targeted pytest and `openspec validate guard-preobservable-request-reads --strict`.

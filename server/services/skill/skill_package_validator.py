@@ -138,7 +138,18 @@ class SkillPackageValidator:
                 )
             schema_path = resolution.path
             if schema_path is None:
-                missing.append(resolution.fallback_relpath or resolution.declared_relpath or key)
+                if key == "output":
+                    missing.append(resolution.fallback_relpath or resolution.declared_relpath or key)
+                elif resolution.declared_relpath is not None:
+                    self._logger.warning(
+                        "Optional skill package schema declaration ignored: "
+                        "skill=%s schema=%s declared=%s fallback=%s issue=%s",
+                        skill_id,
+                        key,
+                        resolution.declared_relpath,
+                        resolution.fallback_relpath,
+                        resolution.issue_code,
+                    )
                 continue
             self._validate_skill_schema_file(schema_path, schema_key=key)
         if missing:

@@ -135,6 +135,7 @@ from .runtime_event import (ChatReplayEventEnvelope, ChatReplayKind, ChatReplayR
                             FcmpEventType, InteractionHistoryEventType, InteractiveResolutionMode,
                             OrchestratorEventType, RuntimeEventCategory, RuntimeEventEnvelope,
                             RuntimeEventIdentity, RuntimeEventRef, RuntimeEventSource)
+from .runtime_network import RuntimeClientAddressResponse
 from .local_runtime import (LocalLeaseAcquireRequest, LocalLeaseAcquireResponse, LocalLeaseHeartbeatRequest,
                             LocalLeaseHeartbeatResponse, LocalLeaseReleaseRequest, LocalLeaseReleaseResponse,
                             LocalRuntimeStatusResponse)

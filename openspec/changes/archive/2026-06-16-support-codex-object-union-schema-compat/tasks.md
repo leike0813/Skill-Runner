@@ -1,0 +1,6 @@
+- [x] 1. Create OpenSpec artifacts for Codex object-union schema compatibility.
+- [x] 2. Update output schema materialization to inject `__SKILL_DONE__` into object-union branches.
+- [x] 3. Update Codex structured-output compat translation for discriminated object-union schemas.
+- [x] 4. Update Codex payload canonicalization to project flat payloads back to the selected union branch.
+- [x] 5. Add targeted tests for materialization, Codex compat translation/canonicalization, and strict package validation.
+- [x] 6. Run targeted pytest and `openspec validate support-codex-object-union-schema-compat --strict`.

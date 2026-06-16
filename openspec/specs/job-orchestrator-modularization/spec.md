@@ -545,3 +545,12 @@ The system MUST isolate run-attempt preparation behind a dedicated service that 
 - **AND** the service MUST return a `RunAttemptContext`
 - **AND** later lifecycle steps MUST consume that context instead of recomputing the same preparation fields ad hoc
 
+### Requirement: Successful-run feedback sidecar diagnostics MUST be non-terminal
+
+The orchestrator SHALL inspect skill run feedback sidecar state after successful terminal projection and before/around bundle generation without converting sidecar issues into run failures.
+
+#### Scenario: sidecar write/read problem is diagnostic only
+- **WHEN** a successful run has no sidecar, an empty sidecar, or a sidecar filesystem read/stat failure
+- **THEN** the orchestrator logs the diagnostic condition
+- **AND** status update, cache recording, and bundle generation continue according to normal success behavior
+

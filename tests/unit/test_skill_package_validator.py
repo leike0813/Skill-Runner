@@ -18,6 +18,8 @@ def _build_skill_zip(
     include_engines: bool = True,
     unsupported_engines: list[str] | None = None,
     legacy_unsupport_engine: list[str] | None = None,
+    include_input: bool = True,
+    include_parameter: bool = True,
     include_output: bool = True,
     include_runner_artifacts: bool = True,
     include_execution_modes: bool = True,
@@ -65,14 +67,16 @@ def _build_skill_zip(
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{top}/SKILL.md", f"---\nname: {name}\n---\n")
         zf.writestr(f"{top}/assets/runner.json", json.dumps(runner))
-        zf.writestr(
-            f"{top}/assets/input.schema.json",
-            json.dumps(input_schema_override or {"type": "object", "properties": {}}),
-        )
-        zf.writestr(
-            f"{top}/assets/parameter.schema.json",
-            json.dumps(parameter_schema_override or {"type": "object", "properties": {}}),
-        )
+        if include_input:
+            zf.writestr(
+                f"{top}/assets/input.schema.json",
+                json.dumps(input_schema_override or {"type": "object", "properties": {}}),
+            )
+        if include_parameter:
+            zf.writestr(
+                f"{top}/assets/parameter.schema.json",
+                json.dumps(parameter_schema_override or {"type": "object", "properties": {}}),
+            )
         if include_output:
             zf.writestr(
                 f"{top}/assets/output.schema.json",
@@ -133,6 +137,28 @@ def test_accepts_valid_temp_skill_without_runner_artifacts(tmp_path):
     validator.extract_zip_safe(zip_path, tmp_path / "stage_no_artifacts")
     skill_id, version = validator.validate_skill_dir(
         tmp_path / "stage_no_artifacts" / top, top, require_version=False
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+@pytest.mark.parametrize(
+    ("schema_key", "include_kwargs"),
+    [
+        ("input", {"include_input": False}),
+        ("parameter", {"include_parameter": False}),
+    ],
+)
+def test_accepts_valid_temp_skill_without_optional_schema_file(tmp_path, schema_key, include_kwargs):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / f"missing_optional_{schema_key}.zip"
+    zip_path.write_bytes(_build_skill_zip(**include_kwargs))
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / f"stage_missing_optional_{schema_key}")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / f"stage_missing_optional_{schema_key}" / top,
+        top,
+        require_version=False,
     )
     assert skill_id == "demo-temp-skill"
     assert version is None
@@ -299,6 +325,78 @@ def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
         )
 
 
+def test_accepts_output_schema_with_root_object_union(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "object_union_output_schema.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            output_schema_override={
+                "type": "object",
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"const": "ok"},
+                            "value": {"type": "string"},
+                        },
+                        "required": ["kind", "value"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"const": "canceled"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["kind", "reason"],
+                        "additionalProperties": False,
+                    },
+                ],
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_object_union_output_schema")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_object_union_output_schema" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
+def test_rejects_output_schema_with_pure_top_level_union(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "pure_union_output_schema.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            output_schema_override={
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {"kind": {"const": "ok"}},
+                        "required": ["kind"],
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"kind": {"const": "canceled"}},
+                        "required": ["kind"],
+                    },
+                ],
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_pure_union_output_schema")
+    with pytest.raises(ValueError, match="Invalid output schema"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_pure_union_output_schema" / top,
+            top,
+            require_version=False,
+        )
+
+
 def test_accepts_runner_runtime_default_options_object(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "runtime_defaults_ok.zip"
@@ -384,7 +482,43 @@ def test_accepts_schema_fallback_when_runner_declaration_invalid(tmp_path, caplo
     assert "schema fallback used" in caplog.text
 
 
-def test_rejects_schema_when_declaration_invalid_and_fallback_missing(tmp_path):
+@pytest.mark.parametrize(
+    ("schema_key", "include_kwargs"),
+    [
+        ("input", {"include_input": False}),
+        ("parameter", {"include_parameter": False}),
+    ],
+)
+def test_accepts_optional_schema_when_declaration_invalid_and_fallback_missing(
+    tmp_path,
+    caplog,
+    schema_key,
+    include_kwargs,
+):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / f"missing_optional_after_fallback_{schema_key}.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            schemas_override={
+                schema_key: f"missing/{schema_key}.schema.json",
+                "output": "assets/output.schema.json",
+            },
+            **include_kwargs,
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / f"stage_missing_optional_after_fallback_{schema_key}")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / f"stage_missing_optional_after_fallback_{schema_key}" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+    assert "Optional skill package schema declaration ignored" in caplog.text
+
+
+def test_rejects_output_schema_when_declaration_invalid_and_fallback_missing(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "missing_after_fallback.zip"
     zip_path.write_bytes(

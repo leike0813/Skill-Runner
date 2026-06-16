@@ -316,9 +316,29 @@ class RunRequestStore:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM requests WHERE run_id = ?", (run_id,))
             row = await cursor.fetchone()
+            run_row = None
+            if row:
+                run_cursor = await conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+                run_row = await run_cursor.fetchone()
         if not row:
             return None
-        return self._decode_request_row(row)
+        data = self._decode_request_row(row)
+        if run_row:
+            data.update(
+                {
+                    "run_status": run_row["status"],
+                    "result_path": run_row["result_path"],
+                    "artifacts_manifest_path": run_row["artifacts_manifest_path"],
+                    "workspace_id": run_row["workspace_id"],
+                    "workspace_dir": run_row["workspace_dir"],
+                    "workspace_namespace": run_row["workspace_namespace"],
+                    "workspace_source_request_id": run_row["workspace_source_request_id"],
+                    "run_input_manifest_path": run_row["input_manifest_path"],
+                    "workspace_input_token": run_row["workspace_input_token"],
+                    "workspace_output_token": run_row["workspace_output_token"],
+                }
+            )
+        return data
 
     async def list_requests_with_runs(self, limit: int = 200) -> List[Dict[str, Any]]:
         await self._database.ensure_initialized()

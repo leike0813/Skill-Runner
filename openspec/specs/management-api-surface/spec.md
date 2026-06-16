@@ -560,3 +560,14 @@ The management API SHALL synchronize Claude active state when a managed MCP serv
 - **WHEN** a client deletes a managed MCP server that had been materialized for Claude agent-home use
 - **THEN** the API MUST remove the managed active state entry
 - **AND** it MUST preserve unrelated Claude MCP servers
+
+### Requirement: Management run observability aliases MUST inherit pre-observable read behavior
+Management event and chat aliases MUST preserve Jobs API pre-observable semantics.
+
+#### Scenario: Management history aliases for pre-observable request
+- **GIVEN** a request exists
+- **AND** no `run_id` has been bound yet
+- **WHEN** the client calls management `/events/history` or `/chat/history`
+- **THEN** the system returns `200`
+- **AND** the response contains no events
+- **AND** `source=pre_observable`
