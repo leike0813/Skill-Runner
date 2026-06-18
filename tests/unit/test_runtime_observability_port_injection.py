@@ -75,6 +75,19 @@ class _FakeJobControl:
         return True
 
 
+class _LegacyBundleJobControl:
+    def __init__(self) -> None:
+        self.used_build_run_bundle = False
+
+    def build_run_bundle(self, run_dir: Path, debug: bool = False):
+        self.used_build_run_bundle = True
+        bundle_dir = run_dir / "bundle"
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
+        bundle_path.write_bytes(b"legacy")
+        return bundle_path.relative_to(run_dir).as_posix()
+
+
 @pytest.mark.asyncio
 async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-1"
@@ -160,6 +173,50 @@ async def test_run_read_facade_bundle_uses_namespaced_layout(tmp_path: Path) -> 
         assert fake_job_control.build_kwargs.get("layout") is not None
         assert (workspace / "bundle" / "skill-a.1" / "run_bundle.zip").exists()
         assert Path(str(response.path)) == workspace / "bundle" / "skill-a.1" / "run_bundle.zip"
+    finally:
+        source_adapter_module.run_store = previous_source_store
+        source_adapter_module.workspace_manager = previous_source_workspace
+        read_facade_module.job_control = previous_job_control
+
+
+@pytest.mark.asyncio
+async def test_run_read_facade_bundle_rejects_legacy_builder_for_layouted_request(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    run_id = "run-ns"
+    request_id = "req-ns"
+
+    fake_store = _FakeRunStore(
+        run_id,
+        {
+            "skill_id": "skill-a",
+            "workspace_id": "workspace",
+            "workspace_dir": str(workspace),
+            "workspace_namespace": "skill-a.1",
+        },
+    )
+    fake_workspace = _FakeWorkspace(workspace)
+
+    previous_source_store = source_adapter_module.run_store
+    previous_source_workspace = source_adapter_module.workspace_manager
+    previous_job_control = read_facade_module.job_control
+
+    try:
+        configure_run_source_ports(run_store_backend=fake_store, workspace_backend=fake_workspace)
+        legacy_job_control = _LegacyBundleJobControl()
+        configure_run_read_facade_ports(job_control_backend=legacy_job_control)
+
+        source_adapter = cast(RunSourceAdapter, InstalledRunSourceAdapter())
+        with pytest.raises(HTTPException) as excinfo:
+            await RunReadFacade().get_bundle(
+                source_adapter=source_adapter,
+                request_id=request_id,
+            )
+
+        assert excinfo.value.status_code == 500
+        assert "workspace layout" in str(excinfo.value.detail)
+        assert legacy_job_control.used_build_run_bundle is False
+        assert not (workspace / "bundle" / "run_bundle.zip").exists()
     finally:
         source_adapter_module.run_store = previous_source_store
         source_adapter_module.workspace_manager = previous_source_workspace

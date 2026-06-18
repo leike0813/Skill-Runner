@@ -193,17 +193,22 @@ class RunReadFacade:
         if not bundle_path.exists():
             control = self._job_control()
             if hasattr(control, "build_run_bundle"):
-                try:
-                    control.build_run_bundle(
-                        run_dir,
-                        debug,
-                        **({"layout": layout} if layout is not None else {}),
-                    )
-                except TypeError:
+                if layout is not None:
+                    try:
+                        control.build_run_bundle(run_dir, debug, layout=layout)
+                    except TypeError as exc:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Bundle builder does not support run workspace layout",
+                        ) from exc
+                else:
                     control.build_run_bundle(run_dir, debug)
-                    if layout is not None:
-                        bundle_path = run_dir / "bundle" / bundle_name
             else:
+                if layout is not None:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Bundle builder does not support run workspace layout",
+                    )
                 # Backward-compatible fallback for legacy test doubles.
                 legacy_control = control
                 if isinstance(legacy_control, object):

@@ -60,10 +60,10 @@ class _RunStoreRecorder:
 
 @dataclass
 class _BundleRecorder:
-    calls: list[tuple[Path, bool]]
+    calls: list[tuple[Path, bool, Any | None]]
 
-    def __call__(self, run_dir: Path, debug: bool) -> str:
-        self.calls.append((run_dir, debug))
+    def __call__(self, run_dir: Path, debug: bool, **kwargs: Any) -> str:
+        self.calls.append((run_dir, debug, kwargs.get("layout")))
         suffix = "debug" if debug else "normal"
         return str(run_dir / f"bundle-{suffix}.zip")
 
@@ -275,8 +275,8 @@ async def test_projection_finalizer_writes_success_terminal_bundle_and_cache(tmp
     assert result.result_path == finalize_input.context.run_dir / "result" / "result.json"
     assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
     assert bundles.calls == [
-        (finalize_input.context.run_dir, False),
-        (finalize_input.context.run_dir, True),
+        (finalize_input.context.run_dir, False, None),
+        (finalize_input.context.run_dir, True, None),
     ]
     assert run_store.cache_entries == [("cache-1", "run-1")]
     assert run_store.temp_cache_entries == []
@@ -300,7 +300,7 @@ async def test_projection_finalizer_uses_namespaced_result_path_from_request_rec
         "workspace_dir": str(run_dir),
         "workspace_namespace": "demo-skill.2",
     }
-    finalize_input, projection, run_store, _events, _bundles = _build_finalize_input(
+    finalize_input, projection, run_store, _events, bundles = _build_finalize_input(
         tmp_path,
         outcome=outcome,
         request_record=request_record,
@@ -312,6 +312,12 @@ async def test_projection_finalizer_uses_namespaced_result_path_from_request_rec
     assert result.result_path == expected_path
     assert projection.terminal_calls[0]["request_record"] == request_record
     assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(expected_path))]
+    assert len(bundles.calls) == 2
+    assert bundles.calls[0][0] == finalize_input.context.run_dir
+    assert bundles.calls[0][1] is False
+    assert bundles.calls[0][2] is not None
+    assert bundles.calls[0][2].namespace == "demo-skill.2"
+    assert bundles.calls[1] == (finalize_input.context.run_dir, True, bundles.calls[0][2])
 
 
 @pytest.mark.asyncio
@@ -344,8 +350,8 @@ async def test_projection_finalizer_feedback_sidecar_diagnostics_do_not_change_s
     assert result.final_status == RunStatus.SUCCEEDED
     assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
     assert bundles.calls == [
-        (finalize_input.context.run_dir, False),
-        (finalize_input.context.run_dir, True),
+        (finalize_input.context.run_dir, False, None),
+        (finalize_input.context.run_dir, True, None),
     ]
     assert run_store.cache_entries == [("cache-1", "run-1")]
     assert expected_event in caplog.text
