@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException, Request  # type: ignore[import-not-found]
 from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import-not-found]
 
+from server.services.platform.async_compat import maybe_await
 from server.models import (
     CancelResponse,
     RunArtifactsResponse,
@@ -19,11 +20,12 @@ from server.models import (
 )
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
+from . import run_source_adapter as run_source_ports
 from server.runtime.workspace_layout import layout_from_record
 from .run_source_adapter import (
     RunSourceAdapter,
-    get_request_and_run_dir,
-    get_request_and_optional_run_dir,
+    get_request_and_workspace_dir,
+    get_request_and_optional_workspace_dir,
     installed_run_source_adapter,
 )
 
@@ -54,14 +56,35 @@ class RunReadFacade:
     def _job_control(self) -> JobControlPort:
         return job_control
 
-    async def _resolve_request_and_run_dir(
+    async def _resolve_request_and_workspace_dir(
         self,
         *,
         source_adapter: RunSourceAdapter | None,
         request_id: str,
     ) -> tuple[dict[str, Any], Path]:
         resolved_source = source_adapter or installed_run_source_adapter
-        return await get_request_and_run_dir(resolved_source, request_id)
+        return await get_request_and_workspace_dir(resolved_source, request_id)
+
+    async def _resolve_request_and_run_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+    ) -> tuple[dict[str, Any], Path]:
+        """Compatibility wrapper; returns the physical workspace directory."""
+        return await self._resolve_request_and_workspace_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
+
+    async def _resolve_request_and_optional_workspace_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+    ) -> tuple[dict[str, Any], Path | None]:
+        resolved_source = source_adapter or installed_run_source_adapter
+        return await get_request_and_optional_workspace_dir(resolved_source, request_id)
 
     async def _resolve_request_and_optional_run_dir(
         self,
@@ -69,8 +92,11 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None,
         request_id: str,
     ) -> tuple[dict[str, Any], Path | None]:
-        resolved_source = source_adapter or installed_run_source_adapter
-        return await get_request_and_optional_run_dir(resolved_source, request_id)
+        """Compatibility wrapper; returns the physical workspace directory."""
+        return await self._resolve_request_and_optional_workspace_dir(
+            source_adapter=source_adapter,
+            request_id=request_id,
+        )
 
     def _preobservable_history_payload(self, *, request_id: str) -> dict[str, Any]:
         return {
@@ -102,7 +128,7 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunResultResponse:
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -123,7 +149,7 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunArtifactsResponse:
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -147,7 +173,7 @@ class RunReadFacade:
         request_id: str,
         debug: bool,
     ) -> FileResponse:
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -211,7 +237,7 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunFilesResponse:
-        _request_record, _run_dir = await self._resolve_request_and_run_dir(
+        _request_record, _run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -246,7 +272,7 @@ class RunReadFacade:
         request_id: str,
         path: str,
     ) -> RunFilePreviewResponse:
-        _request_record, _run_dir = await self._resolve_request_and_run_dir(
+        _request_record, _run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -273,7 +299,7 @@ class RunReadFacade:
         source_adapter: RunSourceAdapter | None = None,
         request_id: str,
     ) -> RunLogsResponse:
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -444,7 +470,7 @@ class RunReadFacade:
         byte_to: int,
         attempt: int | None = None,
     ) -> dict[str, Any]:
-        _request_record, run_dir = await self._resolve_request_and_run_dir(
+        _request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=source_adapter,
             request_id=request_id,
         )
@@ -469,7 +495,7 @@ class RunReadFacade:
         request_id: str,
     ) -> CancelResponse:
         resolved_source = source_adapter or installed_run_source_adapter
-        request_record, run_dir = await self._resolve_request_and_run_dir(
+        request_record, run_dir = await self._resolve_request_and_workspace_dir(
             source_adapter=resolved_source,
             request_id=request_id,
         )
@@ -478,7 +504,11 @@ class RunReadFacade:
             raise HTTPException(status_code=404, detail="Run not found")
         run_id = run_id_obj
 
-        status = _read_status(run_dir, request_record=request_record)
+        status = await _read_status_for_request(
+            request_id=request_id,
+            run_dir=run_dir,
+            request_record=request_record,
+        )
         if status in TERMINAL_STATUSES:
             return CancelResponse(
                 request_id=request_id,
@@ -526,6 +556,26 @@ def _read_status(run_dir: Path, *, request_record: dict[str, Any] | None = None)
         payload = json.loads(state_file.read_text(encoding="utf-8"))
         return RunStatus(payload.get("status", RunStatus.QUEUED.value))
     return RunStatus.QUEUED
+
+
+async def _read_status_for_request(
+    *,
+    request_id: str,
+    run_dir: Path,
+    request_record: dict[str, Any] | None = None,
+) -> RunStatus:
+    try:
+        state_payload = await maybe_await(run_source_ports.run_store.get_run_state(request_id))
+    except (AttributeError, RuntimeError, ValueError, TypeError):
+        state_payload = None
+    if isinstance(state_payload, dict):
+        status_obj = state_payload.get("status")
+        if isinstance(status_obj, str):
+            try:
+                return RunStatus(status_obj)
+            except ValueError:
+                pass
+    return _read_status(run_dir, request_record=request_record)
 
 
 def _resolve_result_path(request_record: dict[str, Any], run_dir: Path) -> Path:

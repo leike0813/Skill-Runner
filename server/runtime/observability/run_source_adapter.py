@@ -8,6 +8,10 @@ from fastapi import HTTPException  # type: ignore[import-not-found]
 
 from server.services.platform.async_compat import maybe_await
 from server.runtime.observability.contracts import RunStorePort, WorkspacePort
+from server.runtime.workspace_layout import (
+    record_has_workspace_layout,
+    resolve_workspace_dir_from_record,
+)
 
 class _UnconfiguredRunStore:
     async def get_request(self, request_id: str):
@@ -152,20 +156,28 @@ def require_capability(
     )
 
 
+async def get_request_and_workspace_dir(
+    source_adapter: RunSourceAdapter,
+    request_id: str,
+) -> tuple[Dict[str, Any], Path]:
+    request_record, workspace_dir = await get_request_and_optional_workspace_dir(
+        source_adapter,
+        request_id,
+    )
+    if workspace_dir is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return request_record, workspace_dir
+
+
 async def get_request_and_run_dir(
     source_adapter: RunSourceAdapter,
     request_id: str,
 ) -> tuple[Dict[str, Any], Path]:
-    request_record, run_dir = await get_request_and_optional_run_dir(
-        source_adapter,
-        request_id,
-    )
-    if run_dir is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return request_record, run_dir
+    """Compatibility wrapper; returns the resolved physical workspace directory."""
+    return await get_request_and_workspace_dir(source_adapter, request_id)
 
 
-async def get_request_and_optional_run_dir(
+async def get_request_and_optional_workspace_dir(
     source_adapter: RunSourceAdapter,
     request_id: str,
 ) -> tuple[Dict[str, Any], Path | None]:
@@ -177,12 +189,21 @@ async def get_request_and_optional_run_dir(
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         return request_record, None
-    workspace_dir_obj = request_record.get("workspace_dir")
-    if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
-        workspace_dir = Path(workspace_dir_obj)
-        if workspace_dir.exists():
-            return request_record, workspace_dir
-    run_dir = _require_workspace().get_run_dir(run_id_obj)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return request_record, run_dir
+    workspace_dir = resolve_workspace_dir_from_record(
+        request_record,
+        workspace_backend=_require_workspace(),
+        run_id=run_id_obj,
+    )
+    if workspace_dir is None:
+        if record_has_workspace_layout(request_record):
+            raise HTTPException(status_code=409, detail="Run workspace layout is unavailable")
+        return request_record, None
+    return request_record, workspace_dir
+
+
+async def get_request_and_optional_run_dir(
+    source_adapter: RunSourceAdapter,
+    request_id: str,
+) -> tuple[Dict[str, Any], Path | None]:
+    """Compatibility wrapper; returns the resolved physical workspace directory."""
+    return await get_request_and_optional_workspace_dir(source_adapter, request_id)

@@ -312,15 +312,12 @@ async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detai
 
     service = RunObservabilityService()
     rows = await service.list_runs()
-    detail = await service.get_run_detail("req-orphan")
+    with pytest.raises(ValueError, match="Run workspace layout is unavailable"):
+        await service.get_run_detail("req-orphan")
 
     assert rows[0]["status"] == "failed"
     assert rows[0]["recovery_state"] == "failed_reconciled"
     assert rows[0]["recovery_reason"] == "missing_run_dir_before_resume_redrive"
-    assert detail["status"] == "failed"
-    assert detail["recovery_state"] == "failed_reconciled"
-    assert detail["recovery_reason"] == "missing_run_dir_before_resume_redrive"
-    assert detail["entries"] == []
 
 
 def test_timeline_protocol_summary_formats_output_repair_event() -> None:

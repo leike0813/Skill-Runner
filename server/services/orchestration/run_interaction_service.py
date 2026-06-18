@@ -42,7 +42,10 @@ from server.services.orchestration.run_auth_orchestration_service import (
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_store import run_store
-from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.run_workspace_layout import (
+    layout_from_record,
+    resolve_workspace_dir_from_record,
+)
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.async_compat import maybe_await
 
@@ -65,12 +68,11 @@ class RunInteractionService:
         run_id_obj = request_record.get("run_id")
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise HTTPException(status_code=404, detail="Run not found")
-        workspace_dir_obj = request_record.get("workspace_dir")
-        if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
-            workspace_dir = Path(workspace_dir_obj)
-            if workspace_dir.exists():
-                return request_record, workspace_dir
-        run_dir = workspace_manager.get_run_dir(run_id_obj)
+        run_dir = resolve_workspace_dir_from_record(
+            request_record,
+            workspace_backend=workspace_manager,
+            run_id=run_id_obj,
+        )
         if run_dir is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return request_record, run_dir
@@ -650,10 +652,14 @@ def _append_orchestrator_event_for_request(
 ) -> Any:
     layout = layout_from_record(request_record, run_dir)
     audit_dir = layout.audit_dir if layout is not None else None
+    run_id_obj = request_record.get("run_id")
+    logical_run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else None
 
     def append_orchestrator_event(**kwargs: Any) -> None:
         if audit_dir is not None:
             kwargs.setdefault("audit_dir", audit_dir)
+        if logical_run_id is not None:
+            kwargs.setdefault("run_id", logical_run_id)
         job_orchestrator.audit_service.append_orchestrator_event(**kwargs)
 
     return append_orchestrator_event
@@ -667,10 +673,20 @@ def _update_status_for_request(*, request_record: dict[str, Any]) -> Any:
         warnings: list[str] | None = None,
         effective_session_timeout_sec: int | None = None,
     ) -> None:
-        layout = layout_from_record(request_record, run_dir)
+        run_id_obj = request_record.get("run_id")
+        resolved_run_dir = (
+            resolve_workspace_dir_from_record(
+                request_record,
+                workspace_backend=workspace_manager,
+                run_id=run_id_obj if isinstance(run_id_obj, str) else None,
+                fallback_workspace_dir=run_dir,
+            )
+            or run_dir
+        )
+        layout = layout_from_record(request_record, resolved_run_dir)
         if layout is None:
             job_orchestrator._update_status(
-                run_dir,
+                resolved_run_dir,
                 status,
                 error=error,
                 warnings=warnings,

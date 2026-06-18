@@ -4,6 +4,7 @@ import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterable
 from tempfile import NamedTemporaryFile
 
 import tomlkit
@@ -28,9 +29,16 @@ _FILE_LOCK_EXCEPTIONS = (
 
 
 class CodexTrustFolderStrategy:
-    def __init__(self, config_path: Path, runs_root: Path) -> None:
+    def __init__(
+        self,
+        config_path: Path,
+        runs_root: Path,
+        managed_roots: Iterable[Path] | None = None,
+    ) -> None:
         self.config_path = config_path
         self.runs_root = runs_root.resolve()
+        roots = tuple(managed_roots) if managed_roots is not None else (runs_root,)
+        self.managed_roots = tuple(Path(root).resolve() for root in roots)
         self._thread_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
 
@@ -88,13 +96,15 @@ class CodexTrustFolderStrategy:
             candidate = Path(raw_path).resolve()
         except _PATH_RESOLVE_EXCEPTIONS:
             return False
-        if candidate == self.runs_root:
-            return False
-        try:
-            candidate.relative_to(self.runs_root)
-            return True
-        except ValueError:
-            return False
+        for root in self.managed_roots:
+            if candidate == root:
+                continue
+            try:
+                candidate.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
 
     def _load_toml(self, path: Path) -> tomlkit.TOMLDocument:
         try:

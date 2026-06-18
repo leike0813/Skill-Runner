@@ -54,7 +54,10 @@ from server.services.platform.run_file_filter_service import (
     normalize_relative_path,
     run_file_filter_service,
 )
-from server.runtime.workspace_layout import layout_from_record
+from server.runtime.workspace_layout import (
+    layout_from_record,
+    resolve_workspace_dir_from_record,
+)
 
 
 RUNNING_STATUSES = {"queued", "running"}
@@ -198,6 +201,36 @@ class RunObservabilityService:
         if not isinstance(record, dict):
             return None
         return layout_from_record(record, run_dir)
+
+    async def _resolve_logical_run_id(self, request_id: Optional[str], run_dir: Path) -> str:
+        if not request_id:
+            return run_dir.name
+        record: Any | None = None
+        try:
+            record = await maybe_await(self._run_store().get_request_with_run(request_id))
+        except (RuntimeError, ValueError, TypeError):
+            record = None
+        if not isinstance(record, dict):
+            try:
+                record = await maybe_await(self._run_store().get_request(request_id))
+            except (RuntimeError, ValueError, TypeError):
+                record = None
+        if isinstance(record, dict):
+            run_id_obj = record.get("run_id")
+            if isinstance(run_id_obj, str) and run_id_obj.strip():
+                return run_id_obj.strip()
+        logger.warning(
+            "Unable to resolve logical run_id for request-bound observability path",
+            extra={"request_id": request_id},
+        )
+        return run_dir.name
+
+    def _resolve_workspace_dir_from_record(self, record: Dict[str, Any], run_id: str) -> Path | None:
+        return resolve_workspace_dir_from_record(
+            record,
+            workspace_backend=self._workspace(),
+            run_id=run_id,
+        )
 
     def _audit_dir_for_layout(self, run_dir: Path, layout: Any | None = None) -> Path:
         return layout.audit_dir if layout is not None else run_dir / AUDIT_DIR_NAME
@@ -354,6 +387,7 @@ class RunObservabilityService:
         is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         layout = await self._resolve_layout_for_request(request_id, run_dir)
+        logical_run_id = await self._resolve_logical_run_id(request_id, run_dir)
         status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
@@ -391,7 +425,7 @@ class RunObservabilityService:
             yield {"event": "chat_event", "data": event}
             last_chat_event_seq = seq_obj
 
-        queue, unsubscribe = fcmp_live_journal.subscribe(run_id=run_dir.name)
+        queue, unsubscribe = fcmp_live_journal.subscribe(run_id=logical_run_id)
         terminal_idle_cycles = 0
         try:
             while True:
@@ -461,6 +495,7 @@ class RunObservabilityService:
         is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         layout = await self._resolve_layout_for_request(request_id, run_dir)
+        logical_run_id = await self._resolve_logical_run_id(request_id, run_dir)
         status_payload = self._read_status_payload_for_layout(run_dir, layout)
         status = status_payload.get("status")
         if not isinstance(status, str) or not status:
@@ -497,7 +532,7 @@ class RunObservabilityService:
             yield {"event": "chat_event", "data": event}
             last_chat_seq = seq_obj
 
-        queue, unsubscribe = chat_replay_live_journal.subscribe(run_id=run_dir.name)
+        queue, unsubscribe = chat_replay_live_journal.subscribe(run_id=logical_run_id)
         terminal_idle_cycles = 0
         last_heartbeat_at = time.monotonic()
         try:
@@ -675,7 +710,7 @@ class RunObservabilityService:
         from_ts: Optional[str] = None,
         to_ts: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_id = run_dir.name
+        run_id = await self._resolve_logical_run_id(request_id, run_dir)
         requested_from = int(from_seq) if from_seq is not None else None
         live_payload = chat_replay_live_journal.replay(
             run_id=run_id,
@@ -728,7 +763,7 @@ class RunObservabilityService:
         from_ts: Optional[str] = None,
         to_ts: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_id = run_dir.name
+        run_id = await self._resolve_logical_run_id(request_id, run_dir)
         requested_from = int(from_seq) if from_seq is not None else None
         live_payload = fcmp_live_journal.replay(
             run_id=run_id,
@@ -936,6 +971,7 @@ class RunObservabilityService:
             raise ValueError("stream must be one of: fcmp, rasp, orchestrator")
 
         layout = await self._resolve_layout_for_request(request_id, run_dir)
+        logical_run_id = await self._resolve_logical_run_id(request_id, run_dir)
         audit_dir = self._audit_dir_for_layout(run_dir, layout)
         legacy_audit_dir = self._legacy_audit_dir(run_dir)
         status_payload = self._read_status_payload_for_layout(run_dir, layout)
@@ -958,6 +994,7 @@ class RunObservabilityService:
             audit_dir=audit_dir,
         ):
             fast_live_payload = self._get_live_protocol_payload(
+                run_id=logical_run_id,
                 run_dir=run_dir,
                 stream=normalized_stream,
                 attempt_number=selected_attempt,
@@ -982,7 +1019,7 @@ class RunObservabilityService:
         terminal_mirror_drained = not (terminal_status and normalized_stream in {"fcmp", "rasp"})
         if terminal_status and normalized_stream in {"fcmp", "rasp"}:
             terminal_mirror_drained = await flush_live_audit_mirrors(
-                run_id=run_dir.name,
+                run_id=logical_run_id,
                 timeout_sec=0.2,
             )
             if terminal_mirror_drained:
@@ -990,6 +1027,7 @@ class RunObservabilityService:
                 live_rows = []
             else:
                 live_payload = self._get_live_protocol_payload(
+                    run_id=logical_run_id,
                     run_dir=run_dir,
                     stream=normalized_stream,
                     attempt_number=selected_attempt,
@@ -1012,6 +1050,7 @@ class RunObservabilityService:
                     live_ceiling = 0
         else:
             live_payload = self._get_live_protocol_payload(
+                run_id=logical_run_id,
                 run_dir=run_dir,
                 stream=normalized_stream,
                 attempt_number=selected_attempt,
@@ -1571,6 +1610,7 @@ class RunObservabilityService:
     def _get_live_protocol_payload(
         self,
         *,
+        run_id: str,
         run_dir: Path,
         stream: str,
         attempt_number: int,
@@ -1579,7 +1619,6 @@ class RunObservabilityService:
         from_ts: Optional[str],
         to_ts: Optional[str],
     ) -> Dict[str, Any]:
-        run_id = run_dir.name
         after_seq = max(0, int(from_seq or 1) - 1)
         if stream == "fcmp":
             payload = fcmp_live_journal.replay(
@@ -2830,7 +2869,7 @@ class RunObservabilityService:
             if not isinstance(run_id_obj, str) or not run_id_obj:
                 continue
             run_id = run_id_obj
-            run_dir = self._workspace().get_run_dir(run_id)
+            run_dir = self._resolve_workspace_dir_from_record(row, run_id)
             layout = layout_from_record(row, run_dir)
             run_dir_path = (
                 layout.workspace_dir
@@ -2852,12 +2891,12 @@ class RunObservabilityService:
                 refreshed_row = await maybe_await(self._run_store().get_request_with_run(request_id))
                 if isinstance(refreshed_row, dict):
                     row = refreshed_row
-                run_dir = self._workspace().get_run_dir(run_id)
+                run_dir = self._resolve_workspace_dir_from_record(row, run_id)
                 layout = layout_from_record(row, run_dir)
                 run_dir_path = (
                     layout.workspace_dir
                     if layout is not None
-                    else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id)
+                    else run_dir
                 )
                 status_payload = (
                     self._read_status_payload(run_dir_path, layout)
@@ -2898,31 +2937,35 @@ class RunObservabilityService:
         run_id_obj = record.get("run_id")
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise ValueError("Run not found")
-        run_dir = self._workspace().get_run_dir(run_id_obj)
+        run_dir = self._resolve_workspace_dir_from_record(record, run_id_obj)
         layout = layout_from_record(record, run_dir)
         run_dir_path = (
             layout.workspace_dir
             if layout is not None
-            else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+            else run_dir
         )
-        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path.exists() else {}
+        if run_dir_path is None:
+            raise ValueError("Run workspace layout is unavailable")
+        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path and run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
         await self._reconcile_waiting_auth_if_needed(request_id, run_status)
         await self._redrive_queued_resume_if_needed(request_id, run_status)
         refreshed_record = await maybe_await(self._run_store().get_request_with_run(request_id))
         if isinstance(refreshed_record, dict):
             record = refreshed_record
-        run_dir = self._workspace().get_run_dir(run_id_obj)
+        run_dir = self._resolve_workspace_dir_from_record(record, run_id_obj)
         layout = layout_from_record(record, run_dir)
         run_dir_path = (
             layout.workspace_dir
             if layout is not None
-            else run_dir or (Path(config.SYSTEM.RUNS_DIR) / run_id_obj)
+            else run_dir
         )
-        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path.exists() else {}
+        if run_dir_path is None:
+            raise ValueError("Run workspace layout is unavailable")
+        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path and run_dir_path.exists() else {}
         run_status = self._normalize_run_status(record, status_payload)
         file_state = self._build_file_state(run_dir_path, layout)
-        entries = self._list_run_entries(run_dir_path) if run_dir_path.exists() else []
+        entries = self._list_run_entries(run_dir_path) if run_dir_path and run_dir_path.exists() else []
         runtime_options = record.get("runtime_options", {})
         effective_runtime_options = record.get("effective_runtime_options", runtime_options)
         requested_execution_mode = None
@@ -2961,6 +3004,7 @@ class RunObservabilityService:
             "model": self._resolve_model_from_row(record),
             "status": run_status,
             "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir_path, record),
+            "error": status_payload.get("error"),
             "effective_session_timeout_sec": await maybe_await(self._run_store().get_effective_session_timeout(request_id)),
             "recovery_state": record.get("recovery_state") or "none",
             "recovered_at": record.get("recovered_at"),
@@ -3033,8 +3077,7 @@ class RunObservabilityService:
 
     async def get_logs_tail(self, request_id: str, max_bytes: int = 64 * 1024) -> Dict[str, Any]:
         detail = await self.get_run_detail(request_id)
-        run_id = str(detail.get("run_id") or "")
-        run_dir = self._workspace().get_run_dir(run_id) if run_id else Path(detail["run_dir"])
+        run_dir = Path(detail["run_dir"])
         layout = await self._resolve_layout_for_request(request_id, run_dir)
         audit_dir = self._audit_dir_for_layout(run_dir, layout)
         latest_attempt = max(1, self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir))

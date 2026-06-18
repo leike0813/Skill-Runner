@@ -13,16 +13,22 @@ class RunFolderTrustManager:
         gemini_trusted_path: Path | None = None,
         claude_config_path: Path | None = None,
         runs_root: Path | None = None,
+        workspace_root: Path | None = None,
+        managed_roots: Iterable[Path] | None = None,
     ) -> None:
         self.codex_config_path = codex_config_path
         self.gemini_trusted_path = gemini_trusted_path
         self.claude_config_path = claude_config_path
         self.runs_root = (runs_root or Path(config.SYSTEM.RUNS_DIR)).resolve()
+        self.workspace_root = (workspace_root or Path(config.SYSTEM.WORKSPACES_DIR)).resolve()
+        roots = tuple(managed_roots) if managed_roots is not None else (self.runs_root, self.workspace_root)
+        self.managed_roots = tuple(Path(root).resolve() for root in roots)
         self._registry = create_default_trust_registry(
             codex_config_path=self.codex_config_path,
             gemini_trusted_path=self.gemini_trusted_path,
             claude_config_path=self.claude_config_path,
             runs_root=self.runs_root,
+            managed_roots=self.managed_roots,
         )
 
     def register_run_folder(self, engine: str, run_dir: Path) -> None:

@@ -11,7 +11,10 @@ from server.services.engine_management.engine_policy import apply_engine_policy_
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
-from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.run_workspace_layout import (
+    layout_from_record,
+    record_has_workspace_layout,
+)
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.runtime_env_options import runtime_env_secret_service
 from server.services.platform.schema_validator import schema_validator
@@ -20,6 +23,8 @@ from server.services.skill.skill_registry import skill_registry
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.config import config
 from pydantic import ValidationError
+
+WORKSPACE_LAYOUT_UNAVAILABLE = "Run workspace layout is unavailable"
 
 if TYPE_CHECKING:
     from server.services.orchestration.run_job_lifecycle_service import RunJobRequest
@@ -45,6 +50,11 @@ class RunAttemptContext:
     input_data: dict[str, dict[str, Any]]
     run_options: dict[str, Any]
     custom_provider_model: str | None
+
+    @property
+    def workspace_dir(self) -> Path:
+        """Physical execution root; `run_dir` remains an adapter compatibility alias."""
+        return self.run_dir
 
 
 def resolve_interactive_auto_reply(
@@ -232,6 +242,8 @@ class RunAttemptPreparationService:
             if runtime_env:
                 run_options["__runtime_env"] = runtime_env
         layout = layout_from_record(request_record or {}, run_dir)
+        if request_id and layout is None and record_has_workspace_layout(request_record or {}):
+            raise RuntimeError(WORKSPACE_LAYOUT_UNAVAILABLE)
         if layout is not None:
             run_options["__audit_dir"] = str(layout.audit_dir)
             run_options["__input_manifest_path"] = str(layout.input_manifest_path)

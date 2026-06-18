@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -233,7 +234,22 @@ class RunAttemptProjectionFinalizer:
             )
 
         if final_status == RunStatus.SUCCEEDED:
-            bundle_kwargs = {"layout": layout} if layout is not None else {}
+            bundle_kwargs: dict[str, Any] = {}
+            if layout is not None:
+                try:
+                    signature = inspect.signature(inputs.build_run_bundle)
+                except (TypeError, ValueError):
+                    signature = None
+                accepts_layout = (
+                    signature is not None
+                    and any(
+                        parameter.kind == inspect.Parameter.VAR_KEYWORD
+                        or parameter.name == "layout"
+                        for parameter in signature.parameters.values()
+                    )
+                )
+                if accepts_layout:
+                    bundle_kwargs["layout"] = layout
             inputs.build_run_bundle(run_dir, False, **bundle_kwargs)
             inputs.build_run_bundle(run_dir, True, **bundle_kwargs)
             bundle_written = True
@@ -247,6 +263,7 @@ class RunAttemptProjectionFinalizer:
                 data={"status": RunStatus.CANCELED.value},
                 engine_name=engine_name,
                 audit_dir=inputs.audit_dir,
+                run_id=inputs.run_id,
             )
         elif final_status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
             terminal_payload: dict[str, Any] = {"status": final_status.value}
@@ -265,6 +282,7 @@ class RunAttemptProjectionFinalizer:
                 data=terminal_payload,
                 engine_name=engine_name,
                 audit_dir=inputs.audit_dir,
+                run_id=inputs.run_id,
             )
 
         if emit_error_run_failed_event:
@@ -284,6 +302,7 @@ class RunAttemptProjectionFinalizer:
                 },
                 engine_name=engine_name,
                 audit_dir=inputs.audit_dir,
+                run_id=inputs.run_id,
             )
 
         if inputs.cache_key and final_status == RunStatus.SUCCEEDED:

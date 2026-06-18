@@ -19,7 +19,7 @@ class RunStatePhase(BaseModel):
 
 
 class RunPendingState(BaseModel):
-    """Current waiting payload embedded into .state/state.json."""
+    """Current waiting payload embedded into .state/<namespace>/state.json."""
 
     owner: Optional[PendingOwner] = None
     interaction_id: Optional[int] = Field(default=None, ge=1)
@@ -48,7 +48,7 @@ class RunRuntimeState(BaseModel):
 
 
 class RunStateEnvelope(BaseModel):
-    """Single current-truth envelope persisted under .state/state.json."""
+    """Single current-truth envelope persisted under .state/<namespace>/state.json."""
 
     request_id: str
     run_id: str

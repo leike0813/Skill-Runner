@@ -451,6 +451,7 @@ class RunAuditService:
         data: dict[str, Any],
         engine_name: str | None = None,
         audit_dir: Path | None = None,
+        run_id: str | None = None,
     ) -> None:
         audit_dir = audit_dir or run_dir / ".audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -473,10 +474,12 @@ class RunAuditService:
         with event_path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False))
             fp.write("\n")
+        logical_run_id = run_id or run_dir.name
         resolved_engine = self._resolve_orchestrator_event_engine(
             run_dir=run_dir,
             data=data,
             engine_name=engine_name,
+            run_id=logical_run_id,
         )
         for spec in translate_orchestrator_event_to_fcmp_specs(
             engine=resolved_engine,
@@ -486,7 +489,7 @@ class RunAuditService:
             default_attempt_number=attempt_number,
         ):
             event = make_fcmp_event(
-                run_id=run_dir.name,
+                run_id=logical_run_id,
                 seq=1,
                 engine=resolved_engine,
                 type_name=str(spec["type_name"]),
@@ -502,13 +505,14 @@ class RunAuditService:
         run_dir: Path,
         data: dict[str, Any],
         engine_name: str | None,
+        run_id: str | None = None,
     ) -> str:
         if isinstance(engine_name, str) and engine_name.strip():
             return engine_name.strip()
         engine_obj = data.get("engine")
         if isinstance(engine_obj, str) and engine_obj.strip():
             return engine_obj.strip()
-        live_payload = fcmp_live_journal.replay(run_id=run_dir.name, after_seq=0)
+        live_payload = fcmp_live_journal.replay(run_id=run_id or run_dir.name, after_seq=0)
         live_events = live_payload.get("events")
         if isinstance(live_events, list):
             for row in reversed(live_events):
@@ -568,6 +572,7 @@ class RunAuditService:
         schema_path: str,
         detail: str,
         audit_dir: Path | None = None,
+        run_id: str | None = None,
     ) -> None:
         self.append_orchestrator_event(
             run_dir=run_dir,
@@ -580,4 +585,5 @@ class RunAuditService:
                 detail=detail,
             ),
             audit_dir=audit_dir,
+            run_id=run_id,
         )

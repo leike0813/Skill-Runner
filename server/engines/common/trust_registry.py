@@ -58,17 +58,34 @@ def create_default_trust_registry(
     gemini_trusted_path: Path | None = None,
     claude_config_path: Path | None = None,
     runs_root: Path,
+    managed_roots: Iterable[Path] | None = None,
 ) -> TrustFolderStrategyRegistry:
     profile = get_runtime_profile()
     codex_path = codex_config_path or (profile.agent_home / ".codex" / "config.toml")
     gemini_path = gemini_trusted_path or (profile.agent_home / ".gemini" / "trustedFolders.json")
     claude_path = claude_config_path or active_claude_state_path(profile.agent_home)
     runs_root_resolved = runs_root.resolve()
+    managed_roots_resolved = tuple(
+        Path(root).resolve()
+        for root in (tuple(managed_roots) if managed_roots is not None else (runs_root_resolved,))
+    )
     return TrustFolderStrategyRegistry(
         _strategies={
-            "codex": CodexTrustFolderStrategy(codex_path, runs_root_resolved),
-            "gemini": GeminiTrustFolderStrategy(gemini_path, runs_root_resolved),
-            "claude": ClaudeTrustFolderStrategy(claude_path, runs_root_resolved),
+            "codex": CodexTrustFolderStrategy(
+                codex_path,
+                runs_root_resolved,
+                managed_roots=managed_roots_resolved,
+            ),
+            "gemini": GeminiTrustFolderStrategy(
+                gemini_path,
+                runs_root_resolved,
+                managed_roots=managed_roots_resolved,
+            ),
+            "claude": ClaudeTrustFolderStrategy(
+                claude_path,
+                runs_root_resolved,
+                managed_roots=managed_roots_resolved,
+            ),
         },
         _noop=_NoopTrustFolderStrategy(),
     )

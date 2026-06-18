@@ -19,6 +19,7 @@ uv_cache/
 .agent/
 .codegraph/
 data/
+data_pg/
 agent_config/
 deprecated/
 *.log

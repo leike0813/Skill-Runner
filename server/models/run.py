@@ -137,6 +137,8 @@ class RunResponse(BaseModel):
     engine: str
     created_at: datetime
     updated_at: datetime
+    workspace_id: Optional[str] = None
+    workspace_dir: Optional[str] = None
     warnings: List[Any] = []
     error: Optional[Any] = None
 

@@ -12,10 +12,10 @@ class WorkspaceManager:
     Manages the filesystem workspace for execution runs.
     
     Responsibilities:
-    - Creates unique run directories (`runs/{uuid}`).
+    - Creates unique physical workspace directories (`workspaces/{uuid}`).
     - Provisions canonical subdirectories (`artifacts`, `result`, `.state`, `.audit`).
     - Handles file uploads to the workspace.
-    - Provides accessors for run paths.
+    - Provides legacy accessors for historical run paths.
     """
     def create_run(
         self,
@@ -67,22 +67,23 @@ class WorkspaceManager:
         workspace_dir: Path | None = None,
     ) -> RunResponse:
         run_id = str(uuid.uuid4())
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         if workspace_dir is not None:
-            target = workspace_dir.resolve()
-            if not target.exists() or not target.is_dir():
+            resolved_workspace_dir = workspace_dir.resolve()
+            if not resolved_workspace_dir.exists() or not resolved_workspace_dir.is_dir():
                 raise ValueError("workspace reuse target does not exist")
-            run_dir.parent.mkdir(parents=True, exist_ok=True)
-            run_dir.symlink_to(target, target_is_directory=True)
+            workspace_id = resolved_workspace_dir.name
         else:
-            run_dir.mkdir(parents=True, exist_ok=True)
+            workspace_id = run_id
+            resolved_workspace_dir = (Path(config.SYSTEM.WORKSPACES_DIR) / workspace_id).resolve()
+            resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
 
         # Create canonical subdirectories in the physical workspace.
-        (run_dir / "artifacts").mkdir(exist_ok=True)
-        (run_dir / "result").mkdir(exist_ok=True)
-        (run_dir / ".state").mkdir(exist_ok=True)
-        (run_dir / ".audit").mkdir(exist_ok=True)
-        # uploads directory is created only when inputs are promoted
+        (resolved_workspace_dir / "uploads").mkdir(exist_ok=True)
+        (resolved_workspace_dir / "artifacts").mkdir(exist_ok=True)
+        (resolved_workspace_dir / "result").mkdir(exist_ok=True)
+        (resolved_workspace_dir / ".state").mkdir(exist_ok=True)
+        (resolved_workspace_dir / ".audit").mkdir(exist_ok=True)
+        (resolved_workspace_dir / "bundle").mkdir(exist_ok=True)
 
         # Initial status
         now = datetime.now()
@@ -92,7 +93,9 @@ class WorkspaceManager:
             skill_id=skill_id,
             engine=request.engine,
             created_at=now,
-            updated_at=now
+            updated_at=now,
+            workspace_id=workspace_id,
+            workspace_dir=str(resolved_workspace_dir),
         )
         
         # Save initial status backup (optional, for persistent state)
@@ -100,8 +103,23 @@ class WorkspaceManager:
         
         return status
 
-    def get_run_dir(self, run_id: str) -> Optional[Path]:
+    def get_legacy_run_dir(self, run_id: str) -> Optional[Path]:
+        """Return legacy data/runs directory for historical no-layout records only."""
+        patched_get_run_dir = self.__dict__.get("get_run_dir")
+        if (
+            callable(patched_get_run_dir)
+            and getattr(patched_get_run_dir, "__func__", None) is not WorkspaceManager.get_run_dir
+        ):
+            return patched_get_run_dir(run_id)
         path = Path(config.SYSTEM.RUNS_DIR) / run_id
+        return path if path.exists() else None
+
+    def get_run_dir(self, run_id: str) -> Optional[Path]:
+        """Compatibility wrapper for legacy no-layout callers."""
+        return self.get_legacy_run_dir(run_id)
+
+    def get_workspace_dir(self, workspace_id: str) -> Optional[Path]:
+        path = Path(config.SYSTEM.WORKSPACES_DIR) / workspace_id
         return path if path.exists() else None
 
     def allocate_namespace(self, *, workspace_dir: Path, skill_id: str) -> str:
@@ -124,13 +142,25 @@ class WorkspaceManager:
         return f"{safe_skill_id}.{highest + 1}"
 
     def delete_run_dir(self, run_id: str) -> None:
-        run_dir = self.get_run_dir(run_id)
+        run_dir = self.get_legacy_run_dir(run_id)
         if run_dir and run_dir.exists():
             from shutil import rmtree
             if run_dir.is_symlink():
                 run_dir.unlink(missing_ok=True)
             else:
                 rmtree(run_dir, ignore_errors=True)
+
+    def delete_workspace_dir(self, workspace_dir: Path) -> None:
+        from shutil import rmtree
+
+        target = workspace_dir.resolve()
+        workspaces_root = Path(config.SYSTEM.WORKSPACES_DIR).resolve()
+        try:
+            target.relative_to(workspaces_root)
+        except ValueError:
+            return
+        if target.exists() and target.is_dir():
+            rmtree(target, ignore_errors=True)
 
     def purge_runs_dir(self) -> None:
         runs_dir = Path(config.SYSTEM.RUNS_DIR)
@@ -140,6 +170,14 @@ class WorkspaceManager:
                 self.delete_run_dir(entry.name)
             else:
                 entry.unlink(missing_ok=True)
+
+    def purge_workspaces_dir(self) -> None:
+        from shutil import rmtree
+
+        workspaces_dir = Path(config.SYSTEM.WORKSPACES_DIR)
+        if workspaces_dir.exists():
+            rmtree(workspaces_dir, ignore_errors=True)
+        workspaces_dir.mkdir(parents=True, exist_ok=True)
 
 
 workspace_manager = WorkspaceManager()

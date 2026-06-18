@@ -5,6 +5,7 @@ import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterable
 from tempfile import NamedTemporaryFile
 
 _PATH_RESOLVE_EXCEPTIONS = (
@@ -26,9 +27,16 @@ _FILE_LOCK_EXCEPTIONS = (
 
 
 class GeminiTrustFolderStrategy:
-    def __init__(self, trusted_folders_path: Path, runs_root: Path) -> None:
+    def __init__(
+        self,
+        trusted_folders_path: Path,
+        runs_root: Path,
+        managed_roots: Iterable[Path] | None = None,
+    ) -> None:
         self.trusted_folders_path = trusted_folders_path
         self.runs_root = runs_root.resolve()
+        roots = tuple(managed_roots) if managed_roots is not None else (runs_root,)
+        self.managed_roots = tuple(Path(root).resolve() for root in roots)
         self._thread_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
 
@@ -72,13 +80,15 @@ class GeminiTrustFolderStrategy:
             candidate = Path(raw_path).resolve()
         except _PATH_RESOLVE_EXCEPTIONS:
             return False
-        if candidate == self.runs_root:
-            return False
-        try:
-            candidate.relative_to(self.runs_root)
-            return True
-        except ValueError:
-            return False
+        for root in self.managed_roots:
+            if candidate == root:
+                continue
+            try:
+                candidate.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
 
     def _load_or_repair_trusted_folders_unlocked(self) -> dict[str, str]:
         self.trusted_folders_path.parent.mkdir(parents=True, exist_ok=True)

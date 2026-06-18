@@ -73,6 +73,8 @@ from ..services.orchestration.run_skill_materialization_service import run_folde
 from ..services.orchestration.run_state_service import run_state_service
 from ..services.orchestration.run_workspace_layout import (
     layout_from_record,
+    record_has_workspace_layout,
+    resolve_workspace_dir_from_record,
     workspace_output_token as build_workspace_output_token,
 )
 from ..services.platform.concurrency_manager import concurrency_manager
@@ -141,8 +143,7 @@ async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str,
     source_run_id = str(source_record.get("run_id") or "").strip()
     if not source_run_id:
         raise HTTPException(status_code=409, detail="Workspace source request has no run")
-    source_run_dir = workspace_manager.get_run_dir(source_run_id)
-    source_layout = layout_from_record(source_record, source_run_dir)
+    source_layout = layout_from_record(source_record, None)
     if source_layout is None or not source_layout.workspace_dir.exists():
         raise HTTPException(status_code=409, detail="Workspace source directory is unavailable")
     output_token = str(source_record.get("workspace_output_token") or "").strip()
@@ -403,8 +404,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         )
         run_status = workspace_manager.create_run(run_request, workspace_dir=workspace_dir)
         run_cache_key: str | None = cache_key if cache_enabled else None
-        run_dir = workspace_manager.get_run_dir(run_status.run_id)
-        if run_dir is None:
+        run_dir = Path(str(run_status.workspace_dir or ""))
+        if not run_dir.exists():
             raise HTTPException(status_code=500, detail="Run directory not found")
         namespace = workspace_manager.allocate_namespace(workspace_dir=run_dir, skill_id=skill.id)
         layout_record = {
@@ -413,12 +414,14 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             "workspace_id": (
                 str(workspace_reuse.get("workspace_id"))
                 if workspace_reuse is not None
-                else run_status.run_id
+                else str(run_status.workspace_id or run_status.run_id)
             ),
-            "workspace_dir": str(run_dir.resolve()),
+            "workspace_dir": str(run_dir),
             "workspace_namespace": namespace,
         }
         layout = layout_from_record(layout_record, run_dir)
+        if layout is None:
+            raise RuntimeError("Run workspace layout is unavailable")
         await run_store.create_run(
             run_status.run_id,
             run_cache_key,
@@ -639,9 +642,14 @@ async def get_run_status(request_id: str):
             inputManifestPath=None,
             observability_ready=False,
         )
-    run_dir = workspace_manager.get_run_dir(run_id)
-    if not run_dir:
-        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = resolve_workspace_dir_from_record(
+        request_record,
+        workspace_backend=workspace_manager,
+        run_id=str(run_id),
+    )
+    layout = layout_from_record(request_record, run_dir)
+    if run_dir is None or (record_has_workspace_layout(request_record) and layout is None):
+        raise HTTPException(status_code=409, detail="Run workspace layout is unavailable")
     
     
     projection_payload: dict[str, Any] | None = await maybe_await(
@@ -1298,8 +1306,8 @@ async def upload_file(
                     run_id=run_status.run_id,
                     engine=request_record["engine"],
                 )
-                run_dir = workspace_manager.get_run_dir(run_status.run_id)
-                if run_dir is None:
+                run_dir = Path(str(run_status.workspace_dir or ""))
+                if not run_dir.exists():
                     raise HTTPException(status_code=500, detail="Run directory not found")
                 _copy_tree(uploads_dir, run_dir / "uploads")
                 run_cache_key: str | None = cache_key if cache_enabled else None
@@ -1310,12 +1318,14 @@ async def upload_file(
                     "workspace_id": (
                         str(workspace_reuse.get("workspace_id"))
                         if workspace_reuse is not None
-                        else run_status.run_id
+                        else str(run_status.workspace_id or run_status.run_id)
                     ),
-                    "workspace_dir": str(run_dir.resolve()),
+                    "workspace_dir": str(run_dir),
                     "workspace_namespace": namespace,
                 }
                 layout = layout_from_record(layout_record, run_dir)
+                if layout is None:
+                    raise RuntimeError("Run workspace layout is unavailable")
                 await run_store.create_run(
                     run_status.run_id,
                     run_cache_key,

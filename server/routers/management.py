@@ -71,12 +71,21 @@ from ..services.platform.system_settings_service import (
 )
 from ..services.platform.system_log_explorer_service import system_log_explorer_service
 from ..services.skill.skill_registry import is_builtin_skill_path, skill_registry
+from ..services.orchestration.run_workspace_layout import resolve_workspace_dir_from_record
 from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
 
 router = APIRouter(prefix="/management", tags=["management"])
 logger = logging.getLogger(__name__)
+
+
+def _resolve_request_workspace_dir(request_record: dict[str, Any], run_id: str) -> Path | None:
+    return resolve_workspace_dir_from_record(
+        request_record,
+        workspace_backend=workspace_manager,
+        run_id=run_id,
+    )
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
@@ -712,7 +721,7 @@ async def list_management_run_protocol_history(
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    run_dir = _resolve_request_workspace_dir(request_record, run_id_obj)
     if not run_dir or not run_dir.exists():
         raise HTTPException(status_code=404, detail="Run directory not found")
 
@@ -770,7 +779,7 @@ async def list_management_run_timeline_history(
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    run_dir = _resolve_request_workspace_dir(request_record, run_id_obj)
     if not run_dir or not run_dir.exists():
         raise HTTPException(status_code=404, detail="Run directory not found")
 
@@ -800,7 +809,7 @@ async def rebuild_management_run_protocol_history(request_id: str):
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = workspace_manager.get_run_dir(run_id_obj)
+    run_dir = _resolve_request_workspace_dir(request_record, run_id_obj)
     if not run_dir or not run_dir.exists():
         raise HTTPException(status_code=404, detail="Run directory not found")
     detail = await _get_run_detail_or_404(request_id)
@@ -977,8 +986,6 @@ async def _build_run_state_from_detail(
     request_id: str,
     detail: dict[str, Any],
 ) -> ManagementRunConversationState:
-    run_dir_obj = detail.get("run_dir")
-    run_dir = Path(run_dir_obj) if isinstance(run_dir_obj, str) else None
     auto_stats = await run_store.get_auto_decision_stats(request_id)
     status = _parse_run_status(detail.get("status"))
     timeout_obj = detail.get("interactive_reply_timeout_sec")
@@ -1003,7 +1010,7 @@ async def _build_run_state_from_detail(
         recovered_at=_parse_datetime_or_none(detail.get("recovered_at")),
         recovery_reason=_coerce_str_or_none(detail.get("recovery_reason")),
         poll_logs=bool(detail.get("poll_logs", False)),
-        error=_read_run_error(run_dir, detail=detail),
+        error=detail.get("error"),
         interactive_auto_reply=(
             detail.get("interactive_auto_reply")
             if isinstance(detail.get("interactive_auto_reply"), bool)

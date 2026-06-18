@@ -98,3 +98,55 @@ def layout_from_record(record: dict[str, Any], fallback_run_dir: Path | None = N
         workspace_dir=workspace_dir,
         namespace=namespace or default_namespace_for_run(skill_id, 1),
     )
+
+
+def record_has_workspace_layout(record: dict[str, Any]) -> bool:
+    namespace = str(record.get("workspace_namespace") or "").strip()
+    workspace_dir_raw = record.get("workspace_dir")
+    return bool(namespace) or (
+        isinstance(workspace_dir_raw, str) and bool(workspace_dir_raw.strip())
+    )
+
+
+def resolve_legacy_workspace_dir(
+    *,
+    workspace_backend: Any | None,
+    run_id: str,
+) -> Path | None:
+    if workspace_backend is None or not run_id:
+        return None
+    for method_name in ("get_workspace_dir", "get_legacy_run_dir", "get_run_dir"):
+        method = getattr(workspace_backend, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            candidate = method(run_id)
+        except (OSError, RuntimeError, ValueError, TypeError):
+            continue
+        if candidate is None:
+            continue
+        path = candidate if isinstance(candidate, Path) else Path(str(candidate))
+        if path.exists():
+            return path
+    return None
+
+
+def resolve_workspace_dir_from_record(
+    record: dict[str, Any],
+    *,
+    workspace_backend: Any | None = None,
+    run_id: str | None = None,
+    fallback_workspace_dir: Path | None = None,
+) -> Path | None:
+    layout = layout_from_record(record, None)
+    if layout is not None:
+        return layout.workspace_dir if layout.workspace_dir.exists() else None
+    if record_has_workspace_layout(record):
+        return None
+    if fallback_workspace_dir is not None and fallback_workspace_dir.exists():
+        return fallback_workspace_dir
+    resolved_run_id = str(run_id or record.get("run_id") or "").strip()
+    return resolve_legacy_workspace_dir(
+        workspace_backend=workspace_backend,
+        run_id=resolved_run_id,
+    )

@@ -59,7 +59,10 @@ from server.services.orchestration.run_attempt_preparation_service import (
 from server.services.orchestration.run_attempt_projection_finalizer import (
     RunAttemptFinalizeInput,
 )
-from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.run_workspace_layout import (
+    layout_from_record,
+    resolve_workspace_dir_from_record,
+)
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
@@ -531,7 +534,13 @@ class _RunJobLifecyclePipeline:
             engine=engine_name,
         )
         try:
-            run_dir = workspace_manager.get_run_dir(run_id)
+            request_record = await run_store.get_request_by_run_id(run_id)
+            request_id = request_record.get("request_id") if request_record else None
+            run_dir = resolve_workspace_dir_from_record(
+                request_record or {},
+                workspace_backend=workspace_manager,
+                run_id=run_id,
+            )
             if not run_dir:
                 log_event(
                     logger,
@@ -545,8 +554,6 @@ class _RunJobLifecyclePipeline:
                     error_code="RUN_DIR_NOT_FOUND",
                 )
                 return RunJobOutcome(run_id=run_id)
-            request_record = await run_store.get_request_by_run_id(run_id)
-            request_id = request_record.get("request_id") if request_record else None
             effective_runtime_options = (
                 request_record.get("effective_runtime_options", {})
                 if isinstance(request_record, dict)
@@ -597,6 +604,7 @@ class _RunJobLifecyclePipeline:
             def append_orchestrator_event(**kwargs: Any) -> None:
                 if audit_dir is not None:
                     kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("run_id", run_id)
                 orchestrator.audit_service.append_orchestrator_event(**kwargs)
 
             def append_output_repair_record(**kwargs: Any) -> None:
@@ -607,6 +615,7 @@ class _RunJobLifecyclePipeline:
             def append_internal_schema_warning(**kwargs: Any) -> None:
                 if audit_dir is not None:
                     kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("run_id", run_id)
                 orchestrator.audit_service.append_internal_schema_warning(**kwargs)
 
             def write_attempt_audit_artifacts(**kwargs: Any) -> None:
@@ -672,6 +681,7 @@ class _RunJobLifecyclePipeline:
                     skill_id=skill_id,
                     audit_dir=audit_dir,
                     input_manifest_path=input_manifest_path,
+                    run_id=run_id,
                 )
             run_audit_contract_service.initialize_run_audit(run_dir=run_dir, audit_dir=audit_dir)
             run_log_mirror_stack = contextlib.ExitStack()

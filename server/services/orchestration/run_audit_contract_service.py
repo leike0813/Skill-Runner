@@ -16,11 +16,12 @@ class RunAuditContractService:
         attempt_number: int,
         audit_dir: Path | None = None,
         request_input_path: Path | None = None,
+        run_id: str | None = None,
     ) -> RunAuditContract:
         audit_dir = audit_dir or run_dir / ".audit"
         return RunAuditContract(
             request_id="",
-            run_id=run_dir.name,
+            run_id=run_id or run_dir.name,
             attempt_number=attempt_number,
             request_input_path=str(request_input_path or audit_dir / "request_input.json"),
             run_service_log_path=str(audit_dir / "service.run.log"),
@@ -49,9 +50,7 @@ class RunAuditContractService:
         request_payload: dict[str, object],
         input_manifest_path: Path | None = None,
     ) -> Path:
-        audit_dir = run_dir / ".audit"
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        path = input_manifest_path or audit_dir / "request_input.json"
+        path = input_manifest_path or run_dir / ".audit" / "request_input.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2),
@@ -82,6 +81,7 @@ class RunAuditContractService:
         skill_id: str | None = None,
         audit_dir: Path | None = None,
         input_manifest_path: Path | None = None,
+        run_id: str | None = None,
     ) -> None:
         audit_dir = audit_dir or run_dir / ".audit"
         contract = self._contract(
@@ -89,12 +89,13 @@ class RunAuditContractService:
             attempt_number,
             audit_dir=audit_dir,
             request_input_path=input_manifest_path,
+            run_id=run_id,
         )
         audit_dir.mkdir(parents=True, exist_ok=True)
 
         meta = AttemptAuditMeta(
             request_id=request_id,
-            run_id=run_dir.name,
+            run_id=run_id or run_dir.name,
             attempt_number=attempt_number,
             created_at=datetime.utcnow(),
             status=status,

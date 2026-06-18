@@ -66,8 +66,12 @@ async def _write_status(
     run_id: str,
     status: RunStatus,
 ) -> None:
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
     request_record = await store.get_request(request_id)
+    run_dir = (
+        Path(request_record["workspace_dir"])
+        if isinstance(request_record, dict) and isinstance(request_record.get("workspace_dir"), str)
+        else Path(config.SYSTEM.RUNS_DIR) / run_id
+    )
     input_manifest_path = (
         Path(request_record["input_manifest_path"])
         if isinstance(request_record, dict)
@@ -461,7 +465,11 @@ async def test_auth_interaction_callbacks_write_namespaced_state_and_audit(monke
     assert run_id is not None
 
     await _write_status(store, request_id, run_id, RunStatus.WAITING_AUTH)
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    run_dir = (
+        Path(request_record["workspace_dir"])
+        if isinstance(request_record.get("workspace_dir"), str)
+        else Path(config.SYSTEM.RUNS_DIR) / run_id
+    )
     audit_dir = Path(request_record["input_manifest_path"]).parent
     state_path = run_dir / ".state" / audit_dir.name / "state.json"
 

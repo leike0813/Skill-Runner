@@ -30,7 +30,10 @@ from server.runtime.session.statechart import (
 )
 from server.services.platform.async_compat import maybe_await
 from server.services.orchestration.run_projection_service import run_projection_service
-from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.run_workspace_layout import (
+    layout_from_record,
+    resolve_workspace_dir_from_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +377,11 @@ class RunInteractionLifecycleService:
         request_record = await maybe_await(run_store_backend.get_request(request_id))
         if not request_record or request_record.get("run_id") != run_id:
             return
-        run_dir = workspace_backend.get_run_dir(run_id)
+        run_dir = resolve_workspace_dir_from_record(
+            request_record,
+            workspace_backend=workspace_backend,
+            run_id=run_id,
+        )
         if run_dir is None:
             return
         layout = layout_from_record(request_record, run_dir)
@@ -466,7 +473,11 @@ class RunInteractionLifecycleService:
             validate_resume_command(resume_command)
         except ProtocolSchemaViolation as exc:
             append_internal_schema_warning(
-                run_dir=workspace_backend.get_run_dir(run_id) or Path(config.SYSTEM.RUNS_DIR) / run_id,
+                run_dir=resolve_workspace_dir_from_record(
+                    request_record,
+                    workspace_backend=workspace_backend,
+                    run_id=run_id,
+                ) or Path(config.SYSTEM.RUNS_DIR) / run_id,
                 attempt_number=await resolve_attempt_number(request_id=request_id, is_interactive=True),
                 schema_path="interactive_resume_command",
                 detail=str(exc),
@@ -486,7 +497,11 @@ class RunInteractionLifecycleService:
             return
 
         next_status = waiting_reply_target_status()
-        run_dir = workspace_backend.get_run_dir(run_id)
+        run_dir = resolve_workspace_dir_from_record(
+            request_record,
+            workspace_backend=workspace_backend,
+            run_id=run_id,
+        )
         if run_dir is None:
             return
         await maybe_await(run_store_backend.update_run_status(run_id, next_status))
