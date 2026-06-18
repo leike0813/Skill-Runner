@@ -517,7 +517,7 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
 
 
 @pytest.mark.asyncio
-async def test_management_run_state_prefers_namespaced_error(monkeypatch, tmp_path: Path):
+async def test_management_run_state_prefers_detail_error(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-ns-error"
     _write_state_file(run_dir, "failed")
     root_state_path = run_dir / ".state" / "state.json"
@@ -545,11 +545,12 @@ async def test_management_run_state_prefers_namespaced_error(monkeypatch, tmp_pa
                 "engine": "codex",
                 "status": "failed",
                 "updated_at": "2026-02-16T00:00:00",
-                "poll_logs": False,
-                "entries": [],
-                "inputManifestPath": str(input_manifest_path),
-            }
-        ),
+                    "poll_logs": False,
+                    "entries": [],
+                    "error": {"code": "DB_CURRENT"},
+                    "inputManifestPath": str(input_manifest_path),
+                }
+            ),
     )
     monkeypatch.setattr(
         "server.routers.management.run_store.get_interaction_count",
@@ -563,7 +564,7 @@ async def test_management_run_state_prefers_namespaced_error(monkeypatch, tmp_pa
     response = await _request("GET", "/v1/management/runs/req-ns-error")
 
     assert response.status_code == 200
-    assert response.json()["error"]["code"] == "NAMESPACED_CURRENT"
+    assert response.json()["error"]["code"] == "DB_CURRENT"
 
 
 @pytest.mark.asyncio

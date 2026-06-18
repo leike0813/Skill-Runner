@@ -74,7 +74,23 @@ def test_engine_status_cache_service_invalid_cache_degrades_to_empty_snapshot(tm
     assert snapshot["gemini"].version is None
 
 
-def test_engine_status_cache_service_migrates_legacy_file_when_db_empty(tmp_path: Path):
+def test_engine_status_cache_service_get_snapshot_does_not_touch_sqlite(tmp_path: Path, monkeypatch):
+    service = EngineStatusCacheService(_FakeManager(tmp_path), db_path=tmp_path / "runs.db")
+
+    def _fail_connect(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        raise AssertionError("get_snapshot must not open sqlite connections")
+
+    monkeypatch.setattr(sqlite3, "connect", _fail_connect)
+
+    snapshot = service.get_snapshot()
+
+    assert snapshot["codex"].version is None
+
+
+@pytest.mark.asyncio
+async def test_engine_status_cache_service_migrates_legacy_file_when_db_empty(tmp_path: Path):
     manager = _FakeManager(tmp_path)
     service = EngineStatusCacheService(manager, db_path=tmp_path / "runs.db")
     legacy_path = manager.profile.data_dir / "agent_status.json"
@@ -84,7 +100,7 @@ def test_engine_status_cache_service_migrates_legacy_file_when_db_empty(tmp_path
         encoding="utf-8",
     )
 
-    snapshot = service.get_snapshot()
+    snapshot = await service.load_persisted()
 
     assert snapshot["codex"].version == "0.201.0"
     with sqlite3.connect(str(service.db_path)) as conn:

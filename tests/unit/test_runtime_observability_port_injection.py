@@ -26,14 +26,25 @@ import server.runtime.observability.run_source_adapter as source_adapter_module
 
 
 class _FakeRunStore:
-    def __init__(self, run_id: str, request_overrides: dict | None = None) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        request_overrides: dict | None = None,
+        *,
+        run_state: dict | None = None,
+    ) -> None:
         self._run_id = run_id
         self._request_overrides = request_overrides or {}
+        self._run_state = run_state
 
     def get_request(self, request_id: str):
         payload = {"request_id": request_id, "run_id": self._run_id, "runtime_options": {}, "engine": "codex"}
         payload.update(self._request_overrides)
         return payload
+
+    def get_run_state(self, request_id: str):
+        _ = request_id
+        return self._run_state
 
 
 class _FakeWorkspace:
@@ -71,7 +82,7 @@ async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
     run_id = "run-1"
     request_id = "req-1"
 
-    fake_store = _FakeRunStore(run_id)
+    fake_store = _FakeRunStore(run_id, run_state={"status": "waiting_user"})
     fake_workspace = _FakeWorkspace(run_dir)
 
     previous_run_store = observability_module.run_store
@@ -206,6 +217,7 @@ async def test_run_read_facade_result_uses_namespaced_state(tmp_path: Path) -> N
             "workspace_namespace": namespace,
             "result_path": str(result_path),
         },
+        run_state={"status": "succeeded"},
     )
     fake_workspace = _FakeWorkspace(run_dir)
 

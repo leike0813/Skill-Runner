@@ -78,9 +78,10 @@ async def test_set_pending_interaction_rejects_invalid_payload(tmp_path):
 async def test_get_pending_interaction_ignores_invalid_legacy_payload(tmp_path):
     store = RunStore(db_path=tmp_path / "runs.db")
     await store.get_request("req-legacy")
-    with sqlite3.connect(store.db_path) as conn:
+    await store._ensure_initialized()
+    async with store._interaction_database.connect() as conn:
         now = "2026-02-24T00:00:00"
-        conn.execute(
+        await conn.execute(
             """
             INSERT INTO request_interactions (
                 request_id, interaction_id, payload_json, state,
@@ -98,5 +99,5 @@ async def test_get_pending_interaction_ignores_invalid_legacy_payload(tmp_path):
                 now,
             ),
         )
-        conn.commit()
+        await conn.commit()
     assert await store.get_pending_interaction("req-legacy") is None

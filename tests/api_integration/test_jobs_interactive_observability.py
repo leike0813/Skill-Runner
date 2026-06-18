@@ -23,47 +23,44 @@ def _write_state(
     *,
     error: dict | None = None,
     warnings: list[str] | None = None,
-) -> None:
+) -> dict:
     state_dir = run_dir / ".state"
     state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "request_id": f"req-{run_dir.name}",
-                "run_id": run_dir.name,
-                "status": status,
-                "updated_at": "2026-02-16T00:00:00",
-                "current_attempt": 1,
-                "state_phase": {
-                    "waiting_auth_phase": None,
-                    "dispatch_phase": None,
-                },
-                "pending": {
-                    "owner": None,
-                    "interaction_id": None,
-                    "auth_session_id": None,
-                    "payload": None,
-                },
-                "resume": {
-                    "resume_ticket_id": None,
-                    "resume_cause": None,
-                    "source_attempt": None,
-                    "target_attempt": None,
-                },
-                "runtime": {
-                    "conversation_mode": "session",
-                    "requested_execution_mode": "interactive",
-                    "effective_execution_mode": "interactive",
-                    "effective_interactive_require_user_reply": True,
-                    "effective_interactive_reply_timeout_sec": None,
-                    "effective_session_timeout_sec": None,
-                },
-                "warnings": warnings or [],
-                "error": error,
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "request_id": f"req-{run_dir.name}",
+        "run_id": run_dir.name,
+        "status": status,
+        "updated_at": "2026-02-16T00:00:00",
+        "current_attempt": 1,
+        "state_phase": {
+            "waiting_auth_phase": None,
+            "dispatch_phase": None,
+        },
+        "pending": {
+            "owner": None,
+            "interaction_id": None,
+            "auth_session_id": None,
+            "payload": None,
+        },
+        "resume": {
+            "resume_ticket_id": None,
+            "resume_cause": None,
+            "source_attempt": None,
+            "target_attempt": None,
+        },
+        "runtime": {
+            "conversation_mode": "session",
+            "requested_execution_mode": "interactive",
+            "effective_execution_mode": "interactive",
+            "effective_interactive_require_user_reply": True,
+            "effective_interactive_reply_timeout_sec": None,
+            "effective_session_timeout_sec": None,
+        },
+        "warnings": warnings or [],
+        "error": error,
+    }
+    (state_dir / "state.json").write_text(json.dumps(payload), encoding="utf-8")
+    return payload
 
 
 def _patch_projection_store(monkeypatch, *, recovery_info: dict | None = None) -> None:
@@ -136,7 +133,7 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
     (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
     (run_dir / ".audit" / "stdout.1.log").write_text("", encoding="utf-8")
     (run_dir / ".audit" / "stderr.1.log").write_text("", encoding="utf-8")
-    _write_state(run_dir, "waiting_user")
+    state_box = {"payload": _write_state(run_dir, "waiting_user")}
 
     request_record = {
         "request_id": "req-branches",
@@ -158,6 +155,10 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
         lambda _request_id: request_record,
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_run_state",
+        lambda _request_id: state_box["payload"],
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -201,7 +202,7 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
     assert accepted.json()["accepted"] is True
     assert accepted.json()["status"] == "queued"
 
-    _write_state(run_dir, "waiting_user")
+    state_box["payload"] = _write_state(run_dir, "waiting_user")
     stale = await _request(
         "POST",
         "/v1/jobs/req-branches/interaction/reply",
@@ -209,7 +210,7 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
     )
     assert stale.status_code == 409
 
-    _write_state(run_dir, "running")
+    state_box["payload"] = _write_state(run_dir, "running")
     not_waiting = await _request(
         "POST",
         "/v1/jobs/req-branches/interaction/reply",
@@ -228,7 +229,7 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
-    _write_state(run_dir, "waiting_user")
+    state_box = {"payload": _write_state(run_dir, "waiting_user")}
 
     request_record = {
         "request_id": "req-e2e",
@@ -249,7 +250,7 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
 
     async def _run_job(**_kwargs):
         pending_state["pending"] = None
-        _write_state(
+        state_box["payload"] = _write_state(
             run_dir,
             "succeeded",
             warnings=["INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER"],
@@ -258,6 +259,10 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
         lambda _request_id: request_record,
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_run_state",
+        lambda _request_id: state_box["payload"],
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -303,7 +308,7 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
     status_before = await _request("GET", "/v1/jobs/req-e2e")
     assert status_before.status_code == 200
     body_before = status_before.json()
-    assert body_before["status"] == "queued"
+    assert body_before["status"] == "waiting_user"
     assert body_before["interaction_count"] == 1
 
     pending = await _request("GET", "/v1/jobs/req-e2e/interaction/pending")
@@ -319,7 +324,7 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
     assert reply.json()["accepted"] is True
     status_after = await _request("GET", "/v1/jobs/req-e2e")
     assert status_after.status_code == 200
-    assert status_after.json()["status"] == "queued"
+    assert status_after.json()["status"] == "succeeded"
 
 
 @pytest.mark.asyncio
@@ -332,7 +337,7 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
-    _write_state(run_dir, "waiting_user")
+    state_box = {"payload": _write_state(run_dir, "waiting_user")}
 
     request_record = {
         "request_id": "req-e2e-max-attempt",
@@ -353,7 +358,7 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
 
     async def _run_job(**_kwargs):
         pending_state["pending"] = None
-        _write_state(
+        state_box["payload"] = _write_state(
             run_dir,
             "failed",
             error={
@@ -365,6 +370,10 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
         lambda _request_id: request_record,
+    )
+    monkeypatch.setattr(
+        "server.routers.jobs.run_store.get_run_state",
+        lambda _request_id: state_box["payload"],
     )
     monkeypatch.setattr(
         "server.routers.jobs.workspace_manager.get_run_dir",
@@ -409,7 +418,7 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
 
     status_before = await _request("GET", "/v1/jobs/req-e2e-max-attempt")
     assert status_before.status_code == 200
-    assert status_before.json()["status"] == "queued"
+    assert status_before.json()["status"] == "waiting_user"
 
     reply = await _request(
         "POST",
@@ -422,7 +431,7 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
     status_after = await _request("GET", "/v1/jobs/req-e2e-max-attempt")
     assert status_after.status_code == 200
     body_after = status_after.json()
-    assert body_after["status"] == "queued"
+    assert body_after["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -617,7 +626,7 @@ async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatc
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
-    _write_state(run_dir, "waiting_user")
+    state_box = {"payload": _write_state(run_dir, "waiting_user")}
 
     request_record = {
         "request_id": "req-recovered",
@@ -638,6 +647,7 @@ async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatc
     )
 
     monkeypatch.setattr("server.routers.jobs.run_store.get_request", lambda _request_id: request_record)
+    monkeypatch.setattr("server.routers.jobs.run_store.get_run_state", lambda _request_id: state_box["payload"])
     monkeypatch.setattr("server.routers.jobs.workspace_manager.get_run_dir", lambda _run_id: run_dir)
     monkeypatch.setattr("server.routers.jobs.run_store.get_pending_interaction", lambda _request_id: pending_state)
     monkeypatch.setattr(
@@ -664,7 +674,7 @@ async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatc
     status = await _request("GET", "/v1/jobs/req-recovered")
     assert status.status_code == 200
     body = status.json()
-    assert body["status"] == "queued"
+    assert body["status"] == "waiting_user"
     assert body["recovery_state"] == "recovered_waiting"
     assert body["recovery_reason"] == "resumable_waiting_preserved"
 

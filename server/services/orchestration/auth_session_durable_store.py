@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from server.services.platform import aiosqlite_compat as aiosqlite
+from server.services.platform.sqlite_db_handle import sqlite_sync_bridge
 
 
 DURABLE_AUTH_SESSION_TABLE = "durable_auth_sessions"
@@ -33,14 +35,9 @@ class DurableAuthSessionSyncStore:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
-
     def ensure_initialized(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            await conn.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {DURABLE_AUTH_SESSION_TABLE} (
                     auth_session_id TEXT PRIMARY KEY,
@@ -67,25 +64,27 @@ class DurableAuthSessionSyncStore:
                 )
                 """
             )
-            conn.execute(
+            await conn.execute(
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_scope_status
                 ON {DURABLE_AUTH_SESSION_TABLE} (scope_key, status)
                 """
             )
-            conn.execute(
+            await conn.execute(
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_request_status
                 ON {DURABLE_AUTH_SESSION_TABLE} (request_id, status)
                 """
             )
-            conn.execute(
+            await conn.execute(
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_{DURABLE_AUTH_SESSION_TABLE}_run_status
                 ON {DURABLE_AUTH_SESSION_TABLE} (run_id, status)
                 """
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
     def upsert_snapshot(
         self,
@@ -114,8 +113,8 @@ class DurableAuthSessionSyncStore:
             payload["challenge_kind"] = challenge_kind
         if terminal_reason:
             payload["terminal_reason"] = terminal_reason
-        with self._connect() as conn:
-            conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            await conn.execute(
                 f"""
                 INSERT OR REPLACE INTO {DURABLE_AUTH_SESSION_TABLE} (
                     auth_session_id, engine, provider_id, scope_key, request_id, run_id,
@@ -149,7 +148,9 @@ class DurableAuthSessionSyncStore:
                     json.dumps(payload, sort_keys=True),
                 ),
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
     def mark_terminal(
         self,
@@ -161,12 +162,12 @@ class DurableAuthSessionSyncStore:
     ) -> None:
         self.ensure_initialized()
         now = utc_iso_now()
-        with self._connect() as conn:
-            cur = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            cur = await conn.execute(
                 f"SELECT payload_json FROM {DURABLE_AUTH_SESSION_TABLE} WHERE auth_session_id = ? LIMIT 1",
                 (auth_session_id,),
             )
-            row = cur.fetchone()
+            row = await cur.fetchone()
             payload: dict[str, Any] = {}
             if row is not None:
                 try:
@@ -178,7 +179,7 @@ class DurableAuthSessionSyncStore:
                 payload["error"] = last_error
             if terminal_reason is not None:
                 payload["terminal_reason"] = terminal_reason
-            conn.execute(
+            await conn.execute(
                 f"""
                 UPDATE {DURABLE_AUTH_SESSION_TABLE}
                 SET status = ?, updated_at = ?, last_error = COALESCE(?, last_error),
@@ -194,12 +195,14 @@ class DurableAuthSessionSyncStore:
                     auth_session_id,
                 ),
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
     def get_active_for_scope(self, *, engine: str, provider_id: str | None) -> dict[str, Any] | None:
         self.ensure_initialized()
-        with self._connect() as conn:
-            cur = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> Any:
+            cur = await conn.execute(
                 f"""
                 SELECT payload_json
                 FROM {DURABLE_AUTH_SESSION_TABLE}
@@ -209,7 +212,9 @@ class DurableAuthSessionSyncStore:
                 """,
                 (build_auth_session_scope_key(engine, provider_id), *DURABLE_AUTH_SESSION_ACTIVE_STATUSES),
             )
-            row = cur.fetchone()
+            return await cur.fetchone()
+
+        row = sqlite_sync_bridge.run(_operation, db_path=self._db_path)
         if row is None:
             return None
         try:
@@ -219,12 +224,14 @@ class DurableAuthSessionSyncStore:
 
     def get_session(self, auth_session_id: str) -> dict[str, Any] | None:
         self.ensure_initialized()
-        with self._connect() as conn:
-            cur = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> Any:
+            cur = await conn.execute(
                 f"SELECT payload_json FROM {DURABLE_AUTH_SESSION_TABLE} WHERE auth_session_id = ? LIMIT 1",
                 (auth_session_id,),
             )
-            row = cur.fetchone()
+            return await cur.fetchone()
+
+        row = sqlite_sync_bridge.run(_operation, db_path=self._db_path)
         if row is None:
             return None
         try:

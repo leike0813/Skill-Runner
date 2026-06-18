@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class RunAuthStateStore:
-    def __init__(self, database: RunStoreDatabase) -> None:
+    def __init__(self, database: RunStoreDatabase, *, interaction_database: RunStoreDatabase | None = None) -> None:
         self._database = database
+        self._interaction_database = interaction_database or database
 
     async def issue_resume_ticket(
         self,
@@ -36,8 +37,8 @@ class RunAuthStateStore:
         target_attempt: int,
         payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        await self._database.ensure_initialized()
-        async with self._database.connect() as conn:
+        await self._interaction_database.ensure_initialized()
+        async with self._interaction_database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """
@@ -97,8 +98,8 @@ class RunAuthStateStore:
         return ticket
 
     async def get_resume_ticket(self, request_id: str) -> Optional[Dict[str, Any]]:
-        await self._database.ensure_initialized()
-        async with self._database.connect() as conn:
+        await self._interaction_database.ensure_initialized()
+        async with self._interaction_database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """
@@ -116,9 +117,9 @@ class RunAuthStateStore:
         return self._resume_ticket_from_row(row)
 
     async def mark_resume_ticket_dispatched(self, request_id: str, ticket_id: str) -> bool:
-        await self._database.ensure_initialized()
+        await self._interaction_database.ensure_initialized()
         now = datetime.utcnow().isoformat()
-        async with self._database.connect() as conn:
+        async with self._interaction_database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """
@@ -138,9 +139,9 @@ class RunAuthStateStore:
         *,
         target_attempt: int,
     ) -> bool:
-        await self._database.ensure_initialized()
+        await self._interaction_database.ensure_initialized()
         now = datetime.utcnow().isoformat()
-        async with self._database.connect() as conn:
+        async with self._interaction_database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """

@@ -13,7 +13,7 @@ class EngineUpgradeStore:
     """SQLite-backed store for engine upgrade task lifecycle."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or Path(config.SYSTEM.RUNS_DB)
+        self.db_path = db_path or Path(config.SYSTEM.ENGINE_UPGRADES_DB)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -37,6 +37,9 @@ class EngineUpgradeStore:
     async def _init_db(self) -> None:
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.execute("PRAGMA busy_timeout = 5000")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS engine_upgrades (

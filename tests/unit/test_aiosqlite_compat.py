@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
 import sqlite3
-import threading
 
 import pytest
 
@@ -23,144 +24,42 @@ async def test_aiosqlite_compat_crud_preserves_row_factory(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_aiosqlite_connect_runs_off_event_loop_thread(tmp_path, monkeypatch):
-    event_loop_thread_id = threading.get_ident()
-    connect_thread_ids: list[int] = []
-    real_connect = sqlite3.connect
+async def test_aiosqlite_compat_shutdown_executor_is_noop():
+    await aiosqlite.shutdown_executor()
 
-    def _recording_connect(*args, **kwargs):
-        connect_thread_ids.append(threading.get_ident())
-        return real_connect(*args, **kwargs)
 
-    monkeypatch.setattr(aiosqlite.sqlite3, "connect", _recording_connect)
+def test_aiosqlite_compat_is_thin_official_aiosqlite_shim():
+    source = inspect.getsource(aiosqlite)
 
-    async with aiosqlite.connect(str(tmp_path / "threaded.db")) as conn:
+    assert "ThreadPoolExecutor" not in source
+    assert "_run_with_retry" not in source
+    assert "SQLITE_BUSY_RETRY_DELAYS" not in source
+
+
+@pytest.mark.asyncio
+async def test_aiosqlite_connect_ignores_legacy_semaphore_argument(tmp_path):
+    async with aiosqlite.connect(str(tmp_path / "threaded.db"), semaphore=object()) as conn:
         await conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY)")
         await conn.commit()
 
-    assert connect_thread_ids
-    assert all(thread_id != event_loop_thread_id for thread_id in connect_thread_ids)
 
+def test_runtime_service_code_does_not_directly_open_sqlite_connections():
+    root = Path(__file__).resolve().parents[2]
+    searched_roots = (
+        root / "server" / "services",
+        root / "server" / "runtime",
+        root / "server" / "routers",
+    )
+    allowed = {
+        root / "server" / "services" / "platform" / "aiosqlite_compat.py",
+    }
+    offenders: list[str] = []
+    for searched_root in searched_roots:
+        for path in searched_root.rglob("*.py"):
+            if path in allowed:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "sqlite3.connect" in text:
+                offenders.append(str(path.relative_to(root)))
 
-@pytest.mark.asyncio
-async def test_aiosqlite_operations_run_off_event_loop_thread(monkeypatch):
-    event_loop_thread_id = threading.get_ident()
-    operation_thread_ids: list[int] = []
-
-    class _FakeCursor:
-        rowcount = 1
-
-        def fetchone(self):
-            operation_thread_ids.append(threading.get_ident())
-            return ("ok",)
-
-        def fetchall(self):
-            operation_thread_ids.append(threading.get_ident())
-            return []
-
-        def close(self):
-            operation_thread_ids.append(threading.get_ident())
-
-    class _FakeConnection:
-        row_factory = None
-
-        def execute(self, sql, parameters=()):
-            _ = sql
-            _ = parameters
-            operation_thread_ids.append(threading.get_ident())
-            return _FakeCursor()
-
-        def commit(self):
-            operation_thread_ids.append(threading.get_ident())
-
-        def close(self):
-            operation_thread_ids.append(threading.get_ident())
-
-    monkeypatch.setattr(aiosqlite.sqlite3, "connect", lambda *args, **kwargs: _FakeConnection())
-
-    async with aiosqlite.connect(":memory:") as conn:
-        cursor = await conn.execute("SELECT 1")
-        assert await cursor.fetchone() == ("ok",)
-        await cursor.close()
-        await conn.commit()
-
-    assert operation_thread_ids
-    assert all(thread_id != event_loop_thread_id for thread_id in operation_thread_ids)
-    assert len(set(operation_thread_ids)) == 1
-
-
-@pytest.mark.asyncio
-async def test_aiosqlite_retries_transient_locked_error(monkeypatch):
-    monkeypatch.setattr(aiosqlite, "SQLITE_BUSY_RETRY_DELAYS", (0, 0, 0))
-
-    class _FakeCursor:
-        rowcount = 1
-
-        def fetchone(self):
-            return ("ok",)
-
-        def fetchall(self):
-            return []
-
-        def close(self):
-            return None
-
-    class _FakeConnection:
-        row_factory = None
-
-        def __init__(self) -> None:
-            self.select_calls = 0
-
-        def execute(self, sql, parameters=()):
-            _ = parameters
-            if sql == "SELECT 1":
-                self.select_calls += 1
-                if self.select_calls < 3:
-                    raise sqlite3.OperationalError("database is locked")
-            return _FakeCursor()
-
-        def close(self):
-            return None
-
-    fake_conn = _FakeConnection()
-    monkeypatch.setattr(aiosqlite.sqlite3, "connect", lambda *args, **kwargs: fake_conn)
-
-    async with aiosqlite.connect(":memory:") as conn:
-        cursor = await conn.execute("SELECT 1")
-        row = await cursor.fetchone()
-
-    assert row == ("ok",)
-    assert fake_conn.select_calls == 3
-
-
-@pytest.mark.asyncio
-async def test_aiosqlite_raises_after_locked_retry_budget(monkeypatch):
-    monkeypatch.setattr(aiosqlite, "SQLITE_BUSY_RETRY_DELAYS", (0, 0, 0))
-
-    class _FakeCursor:
-        rowcount = 0
-
-    class _FakeConnection:
-        row_factory = None
-
-        def __init__(self) -> None:
-            self.select_calls = 0
-
-        def execute(self, sql, parameters=()):
-            _ = parameters
-            if sql == "SELECT 1":
-                self.select_calls += 1
-                raise sqlite3.OperationalError("database table is locked")
-            return _FakeCursor()
-
-        def close(self):
-            return None
-
-    fake_conn = _FakeConnection()
-    monkeypatch.setattr(aiosqlite.sqlite3, "connect", lambda *args, **kwargs: fake_conn)
-
-    async with aiosqlite.connect(":memory:") as conn:
-        with pytest.raises(sqlite3.OperationalError, match="locked"):
-            await conn.execute("SELECT 1")
-
-    assert fake_conn.select_calls == 4
+    assert offenders == []

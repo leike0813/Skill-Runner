@@ -194,3 +194,66 @@ Historical no-layout records MUST remain readable through `data/runs/<run_id>` f
 - **GIVEN** a run record has no persisted `workspace_dir`
 - **WHEN** a read path resolves its files
 - **THEN** the backend may fall back to `data/runs/<run_id>`.
+
+### Requirement: Request-bound state files MUST use run-owned namespace
+
+Request-bound run state and dispatch files MUST use the persisted workspace namespace whenever layout metadata exists.
+
+#### Scenario: Queued and running state use namespaced state files
+- **WHEN** a request-bound run is initialized, admitted, scheduled, claimed, or marked running
+- **THEN** the backend writes `.state/<namespace>/state.json`
+- **AND** dispatch phase writes `.state/<namespace>/dispatch.json`
+- **AND** root `.state/state.json` is not updated as current truth for that request-bound run.
+
+#### Scenario: Queued initialization refetches layout after request binding
+- **GIVEN** a request was bound to a run after an earlier request record was loaded
+- **WHEN** queued state is initialized with that stale request record
+- **THEN** the backend refetches the bound request metadata before resolving state paths
+- **AND** initialization still writes `.state/<namespace>/state.json` and `.state/<namespace>/dispatch.json`.
+
+#### Scenario: Interaction and auth callbacks update namespaced state
+- **WHEN** reply, auth selection, auth input, auth import, auth status reconciliation, or auth timeout updates current status for a request-bound run
+- **THEN** the update targets `.state/<namespace>/state.json`
+- **AND** root `.state/state.json` is only used when no layout metadata exists.
+
+### Requirement: Package-owned fallback scans MUST not confuse runner-owned namespace files
+
+Fallback scans for package-owned outputs SHALL keep runner-owned state, audit, and result namespaces separate from package-owned artifacts.
+
+#### Scenario: Result fallback excludes runner-owned namespaces
+- **WHEN** lifecycle scans a workspace for package-owned fallback output
+- **THEN** files under `result/`, `.state/`, and `.audit/` are not treated as package-owned output candidates.
+
+### Requirement: Request-bound bundles MUST use run-owned namespace
+
+Request-bound bundle zip files and manifests MUST use the persisted workspace namespace whenever layout metadata exists.
+
+#### Scenario: Bundle generation writes namespaced bundle files
+- **WHEN** a request-bound run with namespace `<safeSkillId>.<n>` succeeds
+- **THEN** the backend writes `bundle/<safeSkillId>.<n>/run_bundle.zip`
+- **AND** debug bundle generation writes `bundle/<safeSkillId>.<n>/run_bundle_debug.zip`
+- **AND** the corresponding manifests are written in that same bundle namespace directory
+- **AND** root `bundle/run_bundle*.zip` is not updated as current truth for that request-bound run.
+
+#### Scenario: Bundle collection only includes the current namespace
+- **GIVEN** a reused workspace contains multiple result namespaces
+- **WHEN** the caller downloads a bundle for one request
+- **THEN** the bundle includes that request's actual `resultJsonPath`
+- **AND** it may include `_skill_run_feedback.md` from the same result directory
+- **AND** it may include artifacts referenced by that result payload
+- **AND** it does not include result, audit, state, feedback, or artifact files solely owned by another namespace.
+
+### Requirement: State files MUST NOT be current request-bound artifacts
+
+New request-bound runs MUST NOT rely on `.state/<namespace>/state.json` or `.state/<namespace>/dispatch.json` as current runner-owned state artifacts.
+
+#### Scenario: Request-bound lifecycle writes state
+- **WHEN** a request-bound run transitions state or dispatch phase
+- **THEN** the backend writes `request_run_state`, `request_current_projection`, and/or `request_dispatch_state`
+- **AND** it does not create `.state/<namespace>/state.json`
+- **AND** it does not create `.state/<namespace>/dispatch.json`.
+
+#### Scenario: Legacy state files exist
+- **GIVEN** legacy `.state` files exist in a workspace
+- **WHEN** a request-bound API reads current state
+- **THEN** those files are treated as diagnostic/legacy data only.

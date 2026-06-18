@@ -165,7 +165,7 @@ async def test_list_runs_prefers_namespaced_state_over_legacy_root_state(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_list_runs_reconciles_waiting_auth_before_render(monkeypatch, tmp_path: Path):
+async def test_list_runs_does_not_reconcile_waiting_auth_before_render(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth"
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_state_file(run_dir, "waiting_auth")
@@ -207,7 +207,7 @@ async def test_list_runs_reconciles_waiting_auth_before_render(monkeypatch, tmp_
     service = RunObservabilityService()
     rows = await service.list_runs()
 
-    assert rows[0]["status"] == "failed"
+    assert rows[0]["status"] == "waiting_auth"
 
 
 @pytest.mark.asyncio
@@ -315,9 +315,9 @@ async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detai
     with pytest.raises(ValueError, match="Run workspace layout is unavailable"):
         await service.get_run_detail("req-orphan")
 
-    assert rows[0]["status"] == "failed"
-    assert rows[0]["recovery_state"] == "failed_reconciled"
-    assert rows[0]["recovery_reason"] == "missing_run_dir_before_resume_redrive"
+    assert rows[0]["status"] == "queued"
+    assert rows[0]["recovery_state"] == "none"
+    assert rows[0]["recovery_reason"] is None
 
 
 def test_timeline_protocol_summary_formats_output_repair_event() -> None:

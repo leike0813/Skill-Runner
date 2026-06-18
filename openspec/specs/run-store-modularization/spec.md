@@ -119,3 +119,36 @@ Cleanup MUST delete a physical workspace only after no remaining run references 
 #### Scenario: Last workspace reference is deleted
 - **WHEN** cleanup deletes the last run record referencing a workspace
 - **THEN** the physical workspace may be removed.
+
+### Requirement: Run store SQLite configuration MUST be centralized in RunStoreDatabase
+
+The run store MUST centralize SQLite connection gating and database-level PRAGMA configuration in `RunStoreDatabase` rather than duplicating it across request, run, cache, interaction, state, or auth stores.
+
+#### Scenario: Request store opens a connection
+- **WHEN** a modular run store component opens a connection through `RunStoreDatabase.connect()`
+- **THEN** the connection participates in the per-database concurrency gate
+- **AND** the component does not implement its own SQLite connection throttling.
+
+#### Scenario: Run store database initializes schema
+- **WHEN** `RunStoreDatabase.init_db()` prepares schema
+- **THEN** it applies WAL and synchronous mode configuration before table creation and migration
+- **AND** modular stores rely on that shared configuration.
+
+### Requirement: RunStoreDatabase MUST expose operation-scoped connections
+
+`RunStoreDatabase.connect()` MUST provide an operation-scoped async context backed by the per-DB SQLite handle.
+
+#### Scenario: Existing sub-store uses async with
+- **WHEN** a sub-store enters `async with database.connect()`
+- **THEN** it receives the DB file's shared `aiosqlite` connection
+- **AND** the operation lock is held until the context exits
+- **AND** exiting the context does not close the shared connection
+
+### Requirement: SQLite handles MUST close during app shutdown
+
+Runtime SQLite handles MUST be closed during app shutdown through a bounded cleanup path.
+
+#### Scenario: Service shuts down after DB use
+- **WHEN** application lifespan exits
+- **THEN** the SQLite handle registry closes open connections
+- **AND** cleanup timeout records diagnostics instead of blocking forever

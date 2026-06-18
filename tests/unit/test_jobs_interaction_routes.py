@@ -66,26 +66,6 @@ async def _write_status(
     run_id: str,
     status: RunStatus,
 ) -> None:
-    request_record = await store.get_request(request_id)
-    run_dir = (
-        Path(request_record["workspace_dir"])
-        if isinstance(request_record, dict) and isinstance(request_record.get("workspace_dir"), str)
-        else Path(config.SYSTEM.RUNS_DIR) / run_id
-    )
-    input_manifest_path = (
-        Path(request_record["input_manifest_path"])
-        if isinstance(request_record, dict)
-        and isinstance(request_record.get("input_manifest_path"), str)
-        else None
-    )
-    if (
-        input_manifest_path is not None
-        and input_manifest_path.parent.parent.name == ".audit"
-    ):
-        state_dir = run_dir / ".state" / input_manifest_path.parent.name
-    else:
-        state_dir = run_dir / ".state"
-    state_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "request_id": request_id,
         "run_id": run_id,
@@ -119,7 +99,6 @@ async def _write_status(
         "error": None,
         "warnings": [],
     }
-    (state_dir / "state.json").write_text(json.dumps(payload), encoding="utf-8")
     await store.set_run_state(request_id, payload)
 
 
@@ -457,7 +436,7 @@ async def test_reply_interaction_appends_response_preview_for_open_text(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_auth_interaction_callbacks_write_namespaced_state_and_audit(monkeypatch, temp_config_dirs):
+async def test_auth_interaction_callbacks_write_namespaced_audit_without_state_file(monkeypatch, temp_config_dirs):
     store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
     request_record = await store.get_request(request_id)
     assert request_record is not None
@@ -519,8 +498,7 @@ async def test_auth_interaction_callbacks_write_namespaced_state_and_audit(monke
     namespaced_events = audit_dir / "orchestrator_events.1.jsonl"
     assert namespaced_events.exists()
     assert not (run_dir / ".audit" / "orchestrator_events.1.jsonl").exists()
-    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state_payload["error"]["code"] == "AUTH_TEST_MARKER"
+    assert not state_path.exists()
 
 
 @pytest.mark.asyncio

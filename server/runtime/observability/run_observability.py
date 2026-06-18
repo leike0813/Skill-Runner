@@ -24,6 +24,7 @@ from server.runtime.protocol.event_protocol import (
 )
 from server.runtime.protocol.factories import make_fcmp_event
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
+from server.runtime.logging.structured_trace import log_event
 from server.runtime.protocol.schema_registry import (
     ProtocolSchemaViolation,
     validate_chat_replay_event,
@@ -219,9 +220,13 @@ class RunObservabilityService:
             run_id_obj = record.get("run_id")
             if isinstance(run_id_obj, str) and run_id_obj.strip():
                 return run_id_obj.strip()
-        logger.warning(
-            "Unable to resolve logical run_id for request-bound observability path",
-            extra={"request_id": request_id},
+        log_event(
+            logger,
+            event="run.observability.resolve_run_id_failed",
+            phase="observability",
+            outcome="warning",
+            level=logging.WARNING,
+            request_id=request_id,
         )
         return run_dir.name
 
@@ -2869,6 +2874,8 @@ class RunObservabilityService:
             if not isinstance(run_id_obj, str) or not run_id_obj:
                 continue
             run_id = run_id_obj
+            request_id_obj = row.get("request_id")
+            request_id = request_id_obj if isinstance(request_id_obj, str) else ""
             run_dir = self._resolve_workspace_dir_from_record(row, run_id)
             layout = layout_from_record(row, run_dir)
             run_dir_path = (
@@ -2876,35 +2883,9 @@ class RunObservabilityService:
                 if layout is not None
                 else run_dir
             )
-            status_payload = (
-                self._read_status_payload(run_dir_path, layout)
-                if run_dir_path
-                else {}
-            )
+            status_payload = await self._read_status_payload_for_request(request_id, run_dir_path, layout)
             run_status = self._normalize_run_status(row, status_payload)
             file_state = self._build_file_state(run_dir_path, layout)
-            request_id_obj = row.get("request_id")
-            request_id = request_id_obj if isinstance(request_id_obj, str) else ""
-            await self._reconcile_waiting_auth_if_needed(request_id, run_status)
-            await self._redrive_queued_resume_if_needed(request_id, run_status)
-            if request_id:
-                refreshed_row = await maybe_await(self._run_store().get_request_with_run(request_id))
-                if isinstance(refreshed_row, dict):
-                    row = refreshed_row
-                run_dir = self._resolve_workspace_dir_from_record(row, run_id)
-                layout = layout_from_record(row, run_dir)
-                run_dir_path = (
-                    layout.workspace_dir
-                    if layout is not None
-                    else run_dir
-                )
-                status_payload = (
-                    self._read_status_payload(run_dir_path, layout)
-                    if run_dir_path
-                    else {}
-                )
-                run_status = self._normalize_run_status(row, status_payload)
-                file_state = self._build_file_state(run_dir_path, layout)
             updated_at = status_payload.get("updated_at")
             if not isinstance(updated_at, str):
                 updated_at = self._derive_updated_at(run_dir_path, row)
@@ -2917,11 +2898,8 @@ class RunObservabilityService:
                     "model": self._resolve_model_from_row(row),
                     "status": run_status,
                     "updated_at": updated_at,
-                    "effective_session_timeout_sec": (
-                        await maybe_await(self._run_store().get_effective_session_timeout(request_id))
-                        if request_id
-                        else None
-                    ),
+                    "pending_interaction_id": status_payload.get("pending_interaction_id"),
+                    "effective_session_timeout_sec": status_payload.get("effective_session_timeout_sec"),
                     "recovery_state": row.get("recovery_state") or "none",
                     "recovered_at": row.get("recovered_at"),
                     "recovery_reason": row.get("recovery_reason"),
@@ -2946,7 +2924,7 @@ class RunObservabilityService:
         )
         if run_dir_path is None:
             raise ValueError("Run workspace layout is unavailable")
-        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path and run_dir_path.exists() else {}
+        status_payload = await self._read_status_payload_for_request(request_id, run_dir_path, layout)
         run_status = self._normalize_run_status(record, status_payload)
         await self._reconcile_waiting_auth_if_needed(request_id, run_status)
         await self._redrive_queued_resume_if_needed(request_id, run_status)
@@ -2962,7 +2940,7 @@ class RunObservabilityService:
         )
         if run_dir_path is None:
             raise ValueError("Run workspace layout is unavailable")
-        status_payload = self._read_status_payload(run_dir_path, layout) if run_dir_path and run_dir_path.exists() else {}
+        status_payload = await self._read_status_payload_for_request(request_id, run_dir_path, layout)
         run_status = self._normalize_run_status(record, status_payload)
         file_state = self._build_file_state(run_dir_path, layout)
         entries = self._list_run_entries(run_dir_path) if run_dir_path and run_dir_path.exists() else []
@@ -3005,7 +2983,10 @@ class RunObservabilityService:
             "status": run_status,
             "updated_at": status_payload.get("updated_at") or self._derive_updated_at(run_dir_path, record),
             "error": status_payload.get("error"),
-            "effective_session_timeout_sec": await maybe_await(self._run_store().get_effective_session_timeout(request_id)),
+            "effective_session_timeout_sec": (
+                status_payload.get("effective_session_timeout_sec")
+                or await maybe_await(self._run_store().get_effective_session_timeout(request_id))
+            ),
             "recovery_state": record.get("recovery_state") or "none",
             "recovered_at": record.get("recovered_at"),
             "recovery_reason": record.get("recovery_reason"),
@@ -3095,9 +3076,9 @@ class RunObservabilityService:
         }
 
     def _read_status_payload(self, run_dir: Path, layout: Any | None = None) -> Dict[str, Any]:
-        candidates = []
         if layout is not None:
-            candidates.append(layout.state_path)
+            return {}
+        candidates = []
         candidates.append(run_dir / ".state" / "state.json")
         for state_file in candidates:
             if not state_file.exists():
@@ -3110,6 +3091,29 @@ class RunObservabilityService:
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 pass
         return {}
+
+    async def _read_status_payload_for_request(
+        self,
+        request_id: str,
+        run_dir: Path | None,
+        layout: Any | None = None,
+    ) -> Dict[str, Any]:
+        if request_id:
+            try:
+                state_payload = await maybe_await(self._run_store().get_run_state(request_id))
+            except (AttributeError, RuntimeError, ValueError, TypeError):
+                state_payload = None
+            if isinstance(state_payload, dict):
+                return state_payload
+            try:
+                projection_payload = await maybe_await(self._run_store().get_current_projection(request_id))
+            except (AttributeError, RuntimeError, ValueError, TypeError):
+                projection_payload = None
+            if isinstance(projection_payload, dict):
+                return projection_payload
+        if run_dir is None:
+            return {}
+        return self._read_status_payload(run_dir, layout)
 
     def _normalize_run_status(self, record: Dict[str, Any], status_payload: Dict[str, Any]) -> str:
         status_obj = status_payload.get("status")
@@ -3126,8 +3130,6 @@ class RunObservabilityService:
         audit_dir = layout.audit_dir if layout is not None else run_dir / AUDIT_DIR_NAME
         latest_attempt = max(1, self._latest_attempt_number_for_audit(run_dir, audit_dir=audit_dir))
         targets = {
-            "state": layout.state_path if layout is not None else run_dir / ".state" / "state.json",
-            "dispatch": layout.dispatch_path if layout is not None else run_dir / ".state" / "dispatch.json",
             "request_input": (
                 layout.input_manifest_path if layout is not None else run_dir / ".audit" / "request_input.json"
             ),
@@ -3136,6 +3138,9 @@ class RunObservabilityService:
             "result": layout.result_path if layout is not None else run_dir / "result" / "result.json",
             "artifacts_dir": run_dir / "artifacts",
         }
+        if layout is None:
+            targets["state"] = run_dir / ".state" / "state.json"
+            targets["dispatch"] = run_dir / ".state" / "dispatch.json"
         state: Dict[str, Dict[str, Any]] = {}
         for name, path in targets.items():
             exists = path.exists()

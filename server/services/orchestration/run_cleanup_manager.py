@@ -43,10 +43,14 @@ class RunCleanupManager:
         deleted_requests = 0
         for row in candidates:
             run_id = row["run_id"]
+            workspace_dir_obj = row.get("workspace_dir") if isinstance(row, dict) else None
             request_ids = await run_store.delete_run_records(run_id)
             runtime_env_secret_service.delete_many(request_ids)
             deleted_requests += len(request_ids)
-            workspace_manager.delete_run_dir(run_id)
+            if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
+                workspace_manager.delete_workspace_dir(Path(workspace_dir_obj))
+            else:
+                workspace_manager.delete_run_dir(run_id)
             deleted_runs += 1
         if deleted_runs or deleted_requests:
             logger.info(
@@ -60,6 +64,7 @@ class RunCleanupManager:
     async def clear_all(self) -> dict:
         counts = await run_store.clear_all()
         workspace_manager.purge_runs_dir()
+        workspace_manager.purge_workspaces_dir()
         runtime_env_secret_service.clear_all()
         return counts
 
@@ -67,7 +72,19 @@ class RunCleanupManager:
         active_run_ids = await run_store.list_active_run_ids()
         active_run_dirs = []
         for run_id in active_run_ids:
-            run_dir = workspace_manager.get_run_dir(run_id)
+            run_dir = None
+            try:
+                run_record = await run_store.get_run(run_id)
+            except (OSError, RuntimeError, ValueError, TypeError):
+                run_record = None
+            if isinstance(run_record, dict):
+                workspace_dir_obj = run_record.get("workspace_dir")
+                if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
+                    candidate = Path(workspace_dir_obj)
+                    if candidate.exists():
+                        run_dir = candidate
+            if run_dir is None:
+                run_dir = workspace_manager.get_run_dir(run_id)
             if run_dir:
                 active_run_dirs.append(run_dir)
         try:

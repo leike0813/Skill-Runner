@@ -26,7 +26,14 @@ from server.runtime.protocol.schema_registry import (
 from server.services.platform import aiosqlite_compat as aiosqlite
 from server.services.orchestration.run_store_auth_state_store import RunAuthStateStore
 from server.services.orchestration.run_store_cache_store import RunCacheStore
-from server.services.orchestration.run_store_database import RunStoreDatabase
+from server.services.orchestration.run_store_database import (
+    SCHEMA_AUTH,
+    SCHEMA_CACHE,
+    SCHEMA_CORE,
+    SCHEMA_INTERACTIONS,
+    SCHEMA_STATE,
+    RunStoreDatabase,
+)
 from server.services.orchestration.run_store_interaction_store import RunInteractionStore, RunInteractiveRuntimeStore
 from server.services.orchestration.run_store_request_store import RunRegistryStore, RunRequestStore
 from server.services.orchestration.run_store_state_store import RunProjectionStateStore, RunRecoveryStateStore
@@ -35,24 +42,76 @@ from server.services.orchestration.run_store_state_store import RunProjectionSta
 class RunStore:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path or Path(config.SYSTEM.RUNS_DB)
-        self._database = RunStoreDatabase(self.db_path)
+        configured_legacy_db_path = Path(getattr(config.SYSTEM, "LEGACY_RUNS_DB", self.db_path))
+        legacy_db_path = configured_legacy_db_path if configured_legacy_db_path.exists() else self.db_path
+        if db_path is None:
+            state_db_path = Path(config.SYSTEM.RUN_STATE_DB)
+            interaction_db_path = Path(config.SYSTEM.RUN_INTERACTIONS_DB)
+            auth_db_path = Path(config.SYSTEM.RUN_AUTH_DB)
+            cache_db_path = Path(config.SYSTEM.RUNTIME_CACHE_DB)
+        else:
+            state_db_path = self.db_path.with_name("run_state.db")
+            interaction_db_path = self.db_path.with_name("run_interactions.db")
+            auth_db_path = self.db_path.with_name("run_auth.db")
+            cache_db_path = self.db_path.with_name("runtime_cache.db")
+        self._database = RunStoreDatabase(
+            self.db_path,
+            schema=SCHEMA_CORE,
+            legacy_source_db_path=legacy_db_path,
+        )
+        self._state_database = RunStoreDatabase(
+            state_db_path,
+            schema=SCHEMA_STATE,
+            legacy_source_db_path=legacy_db_path,
+        )
+        self._interaction_database = RunStoreDatabase(
+            interaction_db_path,
+            schema=SCHEMA_INTERACTIONS,
+            legacy_source_db_path=legacy_db_path,
+        )
+        self._auth_database = RunStoreDatabase(
+            auth_db_path,
+            schema=SCHEMA_AUTH,
+            legacy_source_db_path=legacy_db_path,
+        )
+        self._cache_database = RunStoreDatabase(
+            cache_db_path,
+            schema=SCHEMA_CACHE,
+            legacy_source_db_path=legacy_db_path,
+        )
         self._request_store = RunRequestStore(self._database)
         self._run_registry = RunRegistryStore(self._database)
-        self._cache_store = RunCacheStore(self._database)
-        self._projection_state_store = RunProjectionStateStore(self._database)
-        self._recovery_state_store = RunRecoveryStateStore(self._database)
-        self._interactive_runtime_store = RunInteractiveRuntimeStore(self._database)
-        self._interaction_store = RunInteractionStore(self._database)
-        self._auth_state_store = RunAuthStateStore(self._database)
+        self._cache_store = RunCacheStore(self._cache_database)
+        self._projection_state_store = RunProjectionStateStore(self._state_database)
+        self._recovery_state_store = RunRecoveryStateStore(
+            self._database,
+            state_database=self._state_database,
+            interaction_database=self._interaction_database,
+            auth_database=self._auth_database,
+            cache_database=self._cache_database,
+        )
+        self._interactive_runtime_store = RunInteractiveRuntimeStore(self._interaction_database)
+        self._interaction_store = RunInteractionStore(self._interaction_database)
+        self._auth_state_store = RunAuthStateStore(
+            self._auth_database,
+            interaction_database=self._interaction_database,
+        )
 
     def _connect(self):
         return self._database.connect()
 
     async def _ensure_initialized(self) -> None:
-        await self._database.ensure_initialized()
+        for database in (
+            self._database,
+            self._state_database,
+            self._interaction_database,
+            self._auth_database,
+            self._cache_database,
+        ):
+            await database.ensure_initialized()
 
     async def _init_db(self) -> None:
-        await self._database.init_db()
+        await self._ensure_initialized()
 
     async def _migrate_interactive_runtime_table(self, conn: aiosqlite.Connection) -> None:
         await self._database._schema_migration.migrate_interactive_runtime_table(conn)

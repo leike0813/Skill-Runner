@@ -38,7 +38,7 @@ from server.services.platform.async_compat import maybe_await
 
 
 class RunStateService:
-    """Single writer for .state/* and terminal result files."""
+    """Single writer for DB run state and terminal result files."""
 
     def _backend_method(self, run_store_backend: Any, name: str) -> Any | None:
         candidate = getattr(run_store_backend, name, None)
@@ -130,6 +130,31 @@ class RunStateService:
         layout = self._layout(request_record, run_dir)
         return layout.result_path if layout is not None else run_dir / "result" / "result.json"
 
+    def _should_use_legacy_state_files(
+        self,
+        run_dir: Path,
+        request_record: Dict[str, Any] | None = None,
+    ) -> bool:
+        return self._layout(request_record, run_dir) is None
+
+    def _write_state_json(
+        self,
+        run_dir: Path,
+        request_record: Dict[str, Any] | None,
+        payload: Dict[str, Any],
+    ) -> None:
+        if self._should_use_legacy_state_files(run_dir, request_record):
+            self._write_json(self._state_path(run_dir, request_record), payload)
+
+    def _write_dispatch_json(
+        self,
+        run_dir: Path,
+        request_record: Dict[str, Any] | None,
+        payload: Dict[str, Any],
+    ) -> None:
+        if self._should_use_legacy_state_files(run_dir, request_record):
+            self._write_json(self._dispatch_path(run_dir, request_record), payload)
+
     def _write_json(self, path: Path, payload: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -150,6 +175,8 @@ class RunStateService:
             return
 
     def read_state_file(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        if not self._should_use_legacy_state_files(run_dir, request_record):
+            return {}
         state_path = self._state_path(run_dir, request_record)
         payload = self._read_json_dict(state_path)
         if payload or state_path == run_dir / ".state" / "state.json":
@@ -157,6 +184,8 @@ class RunStateService:
         return self._read_json_dict(run_dir / ".state" / "state.json")
 
     def read_dispatch_file(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        if not self._should_use_legacy_state_files(run_dir, request_record):
+            return {}
         dispatch_path = self._dispatch_path(run_dir, request_record)
         payload = self._read_json_dict(dispatch_path)
         if payload or dispatch_path == run_dir / ".state" / "dispatch.json":
@@ -307,7 +336,7 @@ class RunStateService:
         validate_run_state_envelope(state_payload)
         await self._set_run_state(run_store_backend, request_id, state_payload)
         await self._update_run_status(run_store_backend, run_id, RunStatus.QUEUED)
-        self._write_json(self._state_path(run_dir, request_record), state_payload)
+        self._write_state_json(run_dir, request_record, state_payload)
         projection_payload = self._state_to_projection(state_payload)
         validate_current_run_projection(projection_payload)
         await self._set_current_projection(run_store_backend, request_id, projection_payload)
@@ -366,7 +395,7 @@ class RunStateService:
         dispatch_payload = dispatch_model.model_dump(mode="json")
         validate_run_dispatch_envelope(dispatch_payload)
         await self._set_dispatch_state(run_store_backend, request_id, dispatch_payload)
-        self._write_json(self._dispatch_path(run_dir, request_record), dispatch_payload)
+        self._write_dispatch_json(run_dir, request_record, dispatch_payload)
         state_payload = await self._get_run_state(run_store_backend, request_id)
         if isinstance(state_payload, dict):
             state_payload = dict(state_payload)
@@ -376,7 +405,7 @@ class RunStateService:
             state_payload["state_phase"] = phase_payload
             state_payload["updated_at"] = now.isoformat()
             await self._set_run_state(run_store_backend, request_id, state_payload)
-            self._write_json(self._state_path(run_dir, request_record), state_payload)
+            self._write_state_json(run_dir, request_record, state_payload)
             projection_payload = self._state_to_projection(state_payload)
             validate_current_run_projection(projection_payload)
             await self._set_current_projection(run_store_backend, request_id, projection_payload)
@@ -492,7 +521,7 @@ class RunStateService:
         validate_run_state_envelope(state_payload)
         await self._set_run_state(run_store_backend, request_id, state_payload)
         await self._update_run_status(run_store_backend, run_id, status)
-        self._write_json(self._state_path(run_dir, request_record), state_payload)
+        self._write_state_json(run_dir, request_record, state_payload)
         projection_payload = self._state_to_projection(state_payload)
         validate_current_run_projection(projection_payload)
         await self._set_current_projection(run_store_backend, request_id, projection_payload)

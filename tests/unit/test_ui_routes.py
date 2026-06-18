@@ -515,7 +515,7 @@ async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
 
     preview_res = await _request("GET", "/ui/skills/demo-ui-skill/view?path=SKILL.md")
     assert preview_res.status_code == 200
-    assert "# skill" in preview_res.text
+    assert "SKILL.md" in preview_res.text
     assert "preview-plain" in preview_res.text or "preview-rich" in preview_res.text
 
     preview_json_res = await _request("GET", "/ui/skills/demo-ui-skill/preview?path=SKILL.md")
@@ -523,6 +523,7 @@ async def test_ui_skill_detail_and_text_preview(monkeypatch, tmp_path: Path):
     payload = preview_json_res.json()
     assert payload["path"] == "SKILL.md"
     assert payload["preview"]["mode"] == "text"
+    assert payload["preview"]["content"] == "# skill\n"
 
 
 @pytest.mark.asyncio

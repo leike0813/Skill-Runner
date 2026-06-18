@@ -10,11 +10,22 @@ from server.services.platform.data_reset_service import DataResetOptions, DataRe
 
 def _build_fake_config(tmp_path: Path) -> SimpleNamespace:
     data_dir = tmp_path / "data"
+    db_dir = data_dir / "db"
     return SimpleNamespace(
         SYSTEM=SimpleNamespace(
             DATA_DIR=str(data_dir),
-            RUNS_DB=str(data_dir / "runs.db"),
+            DB_DIR=str(db_dir),
+            RUNS_DB=str(db_dir / "runs.db"),
+            RUN_STATE_DB=str(db_dir / "run_state.db"),
+            RUN_INTERACTIONS_DB=str(db_dir / "run_interactions.db"),
+            RUN_AUTH_DB=str(db_dir / "run_auth.db"),
+            RUNTIME_CACHE_DB=str(db_dir / "runtime_cache.db"),
+            PROCESS_LEASES_DB=str(db_dir / "process_leases.db"),
+            ENGINE_STATUS_DB=str(db_dir / "engine_status.db"),
+            ENGINE_UPGRADES_DB=str(db_dir / "engine_upgrades.db"),
+            SKILL_INSTALLS_DB=str(db_dir / "skill_installs.db"),
             RUNS_DIR=str(data_dir / "runs"),
+            WORKSPACES_DIR=str(data_dir / "workspaces"),
             SKILL_INSTALLS_DIR=str(data_dir / "skill_installs"),
             TMP_UPLOADS_DIR=str(data_dir / "tmp_uploads"),
             SETTINGS_FILE=str(data_dir / "system_settings.json"),
@@ -48,12 +59,14 @@ def test_data_reset_service_build_targets_includes_expected_optional_paths(tmp_p
     assert (data_dir / "logs") in targets.optional_paths
     assert (data_dir / "tmp_uploads") in targets.optional_paths
     assert (data_dir / "engine_catalog" / "opencode_models_cache.json") in targets.optional_paths
+    assert (data_dir / "db") in targets.data_dirs
     assert (data_dir / "runs") in targets.data_dirs
     assert (data_dir / "skill_installs") in targets.data_dirs
     assert (data_dir / "requests") not in targets.data_dirs
     assert (data_dir / "temp_skill_runs").resolve() not in targets.data_dirs
     assert (data_dir / "temp_skill_runs.db") not in targets.db_files
-    assert (data_dir / "skill_installs.db") not in targets.db_files
+    assert (data_dir / "skill_installs.db") in targets.optional_paths
+    assert (data_dir / "db" / "skill_installs.db") in targets.db_files
 
 
 def test_data_reset_service_hides_engine_auth_targets_when_feature_disabled(tmp_path: Path):

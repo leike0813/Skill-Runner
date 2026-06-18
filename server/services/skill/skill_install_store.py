@@ -12,7 +12,7 @@ class SkillInstallStore:
     """SQLite-backed store for skill package install request lifecycle."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = db_path or Path(config.SYSTEM.RUNS_DB)
+        self.db_path = db_path or Path(config.SYSTEM.SKILL_INSTALLS_DB)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -36,6 +36,9 @@ class SkillInstallStore:
     async def _init_db(self) -> None:
         async with self._connect() as conn:
             conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.execute("PRAGMA busy_timeout = 5000")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS skill_installs (
@@ -54,7 +57,7 @@ class SkillInstallStore:
         await self._migrate_legacy_skill_installs_if_needed()
 
     async def _migrate_legacy_skill_installs_if_needed(self) -> None:
-        legacy_path = Path(config.SYSTEM.SKILL_INSTALLS_DB)
+        legacy_path = Path(getattr(config.SYSTEM, "LEGACY_RUNS_DB", config.SYSTEM.RUNS_DB))
         if legacy_path.resolve() == self.db_path.resolve():
             return
         if not legacy_path.exists():

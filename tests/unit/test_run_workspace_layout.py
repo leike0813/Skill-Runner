@@ -79,7 +79,7 @@ async def test_run_store_projects_workspace_metadata_into_request(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_state_service_writes_namespaced_state_when_layout_exists(tmp_path):
+async def test_run_state_service_uses_db_state_when_layout_exists(tmp_path):
     store = RunStore(db_path=tmp_path / "runs.db")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -110,8 +110,10 @@ async def test_run_state_service_writes_namespaced_state_when_layout_exists(tmp_
         run_store_backend=store,
     )
 
-    assert (workspace / ".state" / "skill-b.1" / "state.json").exists()
-    assert (workspace / ".state" / "skill-b.1" / "dispatch.json").exists()
+    assert await store.get_run_state("req-b") is not None
+    assert await store.get_dispatch_state("req-b") is not None
+    assert not (workspace / ".state" / "skill-b.1" / "state.json").exists()
+    assert not (workspace / ".state" / "skill-b.1" / "dispatch.json").exists()
     assert not (workspace / ".state" / "state.json").exists()
     assert not (workspace / ".state" / "dispatch.json").exists()
 
@@ -155,7 +157,9 @@ async def test_run_state_service_refetches_layout_for_stale_request_record(tmp_p
         run_store_backend=store,
     )
 
-    assert (workspace / ".state" / "skill-stale.1" / "state.json").exists()
-    assert (workspace / ".state" / "skill-stale.1" / "dispatch.json").exists()
+    assert await store.get_run_state("req-stale") is not None
+    assert await store.get_dispatch_state("req-stale") is not None
+    assert not (workspace / ".state" / "skill-stale.1" / "state.json").exists()
+    assert not (workspace / ".state" / "skill-stale.1" / "dispatch.json").exists()
     assert not (workspace / ".state" / "state.json").exists()
     assert not (workspace / ".state" / "dispatch.json").exists()

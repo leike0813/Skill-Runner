@@ -87,6 +87,19 @@ async def lifespan(_app: FastAPI):
     cli_manager = AgentCliManager(runtime_profile)
     cli_manager.ensure_layout()
     try:
+        await engine_status_cache_service.load_persisted()
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        logger.warning(
+            "Engine version cache load failed during startup; continuing with empty cache",
+            extra={
+                "component": "main",
+                "action": "startup_engine_status_load",
+                "error_type": type(exc).__name__,
+                "fallback": "empty_engine_status_cache",
+            },
+            exc_info=True,
+        )
+    try:
         await engine_status_cache_service.refresh_all()
     except (OSError, RuntimeError, ValueError, TypeError) as exc:
         logger.warning(
@@ -167,6 +180,13 @@ async def lifespan(_app: FastAPI):
         await process_supervisor.stop()
         engine_status_cache_service.stop()
         engine_model_catalog_lifecycle.stop()
+        from .services.platform.sqlite_db_handle import sqlite_db_handle_registry, sqlite_sync_bridge
+
+        try:
+            await asyncio.wait_for(sqlite_db_handle_registry.close_all(), timeout=2.0)
+            await asyncio.wait_for(sqlite_sync_bridge.close(), timeout=2.0)
+        except (asyncio.TimeoutError, OSError, RuntimeError, ValueError):
+            logger.warning("SQLite handle shutdown did not finish cleanly", exc_info=True)
 
 app = FastAPI(
     title="Agent Skill Runner",

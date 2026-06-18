@@ -360,12 +360,11 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
     assert request_record is not None
     assert request_record["cache_key"]
 
-    runs_dir = Path(config.SYSTEM.RUNS_DIR)
-    assert runs_dir.exists()
-
     request_record = await store.get_request(response.request_id)
     assert request_record is not None
     assert request_record["run_id"]
+    assert request_record["workspace_dir"]
+    assert Path(str(request_record["workspace_dir"])).exists()
 
 
 @pytest.mark.asyncio
@@ -956,8 +955,8 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
     request_record = await store.get_request(create_response.request_id)
     assert request_record is not None
     run_id = request_record["run_id"]
-    runs_dir = Path(config.SYSTEM.RUNS_DIR)
-    run_dir = runs_dir / run_id
+    assert run_id
+    run_dir = Path(str(request_record["workspace_dir"]))
     assert (run_dir / "uploads" / "input.txt").exists()
 
     request_dir = Path(config.SYSTEM.REQUESTS_DIR) / create_response.request_id
@@ -1047,7 +1046,7 @@ async def test_upload_temp_skill_creates_run_without_installed_registry_lookup(m
     assert request_record["skill_source"] == "temp_upload"
     assert request_record["skill_id"] == "temp-upload-skill"
     assert request_record["run_id"]
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / request_record["run_id"]
+    run_dir = Path(str(request_record["workspace_dir"]))
     assert run_dir.exists()
 
 
@@ -1344,11 +1343,12 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     request_id = "request-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
     run_response = workspace_manager.create_run(run_request)
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
+    run_dir = Path(str(run_response.workspace_dir))
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
-    (run_dir / "result").mkdir(parents=True, exist_ok=True)
-    (run_dir / "result" / "result.json").write_text(
+    result_path = run_dir / "result" / "demo-skill.1" / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
         '{"status":"success","artifacts":["artifacts/output.txt"]}'
     )
 
@@ -1359,6 +1359,15 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
         parameter={},
         engine_options={},
         runtime_options={}
+    )
+    await store.create_run(
+        run_response.run_id,
+        cache_key=None,
+        status=RunStatus.SUCCEEDED,
+        result_path=str(result_path),
+        workspace_id=run_response.run_id,
+        workspace_dir=str(run_dir),
+        workspace_namespace="demo-skill.1",
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 

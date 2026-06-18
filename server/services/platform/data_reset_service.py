@@ -107,10 +107,19 @@ class DataResetService:
         db_files = self._ordered_unique(
             [
                 Path(self._cfg.SYSTEM.RUNS_DB),
+                Path(self._cfg.SYSTEM.RUN_STATE_DB),
+                Path(self._cfg.SYSTEM.RUN_INTERACTIONS_DB),
+                Path(self._cfg.SYSTEM.RUN_AUTH_DB),
+                Path(self._cfg.SYSTEM.RUNTIME_CACHE_DB),
+                Path(self._cfg.SYSTEM.PROCESS_LEASES_DB),
+                Path(self._cfg.SYSTEM.ENGINE_STATUS_DB),
+                Path(self._cfg.SYSTEM.ENGINE_UPGRADES_DB),
+                Path(self._cfg.SYSTEM.SKILL_INSTALLS_DB),
             ]
         )
         data_dirs = self._ordered_unique(
             [
+                Path(self._cfg.SYSTEM.DB_DIR),
                 Path(self._cfg.SYSTEM.RUNS_DIR),
                 Path(self._cfg.SYSTEM.SKILL_INSTALLS_DIR),
             ]
@@ -126,6 +135,9 @@ class DataResetService:
         optional_paths.append(data_dir / "ui_shell_sessions")
         optional_paths.append(Path(self._cfg.SYSTEM.TMP_UPLOADS_DIR))
         # Legacy persistence artifacts cleanup (best-effort).
+        optional_paths.append(data_dir / "runs.db")
+        optional_paths.append(data_dir / "runs.db-shm")
+        optional_paths.append(data_dir / "runs.db-wal")
         optional_paths.append(data_dir / "skill_installs.db")
         optional_paths.append(data_dir / "temp_skill_runs.db")
         optional_paths.append(data_dir / "temp_skill_runs")
@@ -134,6 +146,7 @@ class DataResetService:
         recreate_dirs = self._ordered_unique(
             [
                 data_dir,
+                Path(self._cfg.SYSTEM.DB_DIR),
                 Path(self._cfg.SYSTEM.RUNS_DIR),
                 Path(self._cfg.SYSTEM.SKILL_INSTALLS_DIR),
                 Path(self._cfg.SYSTEM.LOGGING.DIR),

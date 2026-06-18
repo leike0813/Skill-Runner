@@ -38,7 +38,9 @@ def _write_fake_bundle(root: Path, *, binary_name: str = "zotero-bridge") -> tup
     skill_root = bundle / "skills" / "zotero-bridge-cli"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Zotero Bridge CLI\n", encoding="utf-8")
-    (bundle / "profile.template.json").write_text(
+    profile_template = bundle / "assets" / "profile.template.json"
+    profile_template.parent.mkdir(parents=True)
+    profile_template.write_text(
         json.dumps(
             {
                 "schema": "zotero-bridge.profile.v1",
@@ -76,7 +78,7 @@ def _write_fake_bundle(root: Path, *, binary_name: str = "zotero-bridge") -> tup
             "entrypoint": "skills/zotero-bridge-cli/SKILL.md",
         },
         "profileTemplate": {
-            "path": "profile.template.json",
+            "path": "assets/profile.template.json",
             "endpointEnv": "ZOTERO_BRIDGE_ENDPOINT",
             "tokenEnv": "ZOTERO_BRIDGE_TOKEN",
             "connectionModeEnv": "ZOTERO_BRIDGE_CONNECTION_MODE",
@@ -197,7 +199,7 @@ def test_zotero_bridge_submodule_and_docker_wiring_are_declared() -> None:
     assert (bundle / "manifest.json").exists()
     assert (bundle / "bin").is_dir()
     assert (bundle / "skills" / "zotero-bridge-cli" / "SKILL.md").exists()
-    assert (bundle / "profile.template.json").exists()
+    assert (bundle / "assets" / "profile.template.json").exists()
 
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
     assert "COPY plugins ./plugins" in dockerfile

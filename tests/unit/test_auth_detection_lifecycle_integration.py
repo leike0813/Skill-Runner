@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -410,18 +411,61 @@ def _build_interactive_skill(tmp_path: Path, *, skill_id: str, engine: str) -> S
 
 
 def _create_run(skill: SkillManifest, engine: str) -> str:
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
+    config.defrost()
+    config.SYSTEM.WORKSPACES_DIR = config.SYSTEM.RUNS_DIR
+    config.freeze()
     with patch(
         "server.services.skill.skill_registry.skill_registry.get_skill",
         return_value=skill,
     ):
-        response = workspace_manager.create_run(
-            RunCreateRequest(skill_id=skill.id, engine=engine, parameter={})
-        )
+        try:
+            response = workspace_manager.create_run(
+                RunCreateRequest(skill_id=skill.id, engine=engine, parameter={})
+            )
+        finally:
+            config.defrost()
+            config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
+            config.freeze()
     return response.run_id
 
 
 def _read_state_data(run_dir: Path) -> dict:
-    return json.loads((run_dir / ".state" / "state.json").read_text(encoding="utf-8"))
+    state_path = run_dir / ".state" / "state.json"
+    if state_path.exists():
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    run_id = run_dir.name
+    state_db_path = Path(config.SYSTEM.RUNS_DB).with_name("run_state.db")
+    with sqlite3.connect(state_db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT payload_json FROM request_current_projection WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT payload_json FROM request_run_state WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+    if row is None:
+        raise FileNotFoundError(f"No state projection found for {run_id}")
+    return json.loads(row["payload_json"])
+
+
+def _read_result_data(run_dir: Path) -> dict:
+    legacy_path = run_dir / "result" / "result.json"
+    if legacy_path.exists():
+        return json.loads(legacy_path.read_text(encoding="utf-8"))
+    run_id = run_dir.name
+    with sqlite3.connect(config.SYSTEM.RUNS_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT result_path FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+    if row is None or not row["result_path"]:
+        raise FileNotFoundError(f"No result path found for {run_id}")
+    return json.loads(Path(row["result_path"]).read_text(encoding="utf-8"))
 
 
 async def _seed_interactive_request(
@@ -553,7 +597,7 @@ async def test_low_confidence_auth_detection_is_audited_without_forcing_waiting_
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = _read_result_data(run_dir)
         meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
         assert result_data["error"]["code"] is None
         assert meta_data["auth_detection"]["classification"] == "auth_required"
@@ -603,7 +647,7 @@ async def test_low_confidence_auth_signal_does_not_translate_terminal_failure_to
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = _read_result_data(run_dir)
         meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] is None
@@ -1099,7 +1143,7 @@ async def test_opencode_high_confidence_auth_with_unresolved_model_audits_reason
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = _read_result_data(run_dir)
         audit_rows = [
             json.loads(line)
             for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()

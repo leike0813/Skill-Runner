@@ -24,6 +24,10 @@ from server.services.engine_management.agent_cli_manager import (  # noqa: E402
 from server.services.engine_management.engine_status_cache_service import (  # noqa: E402
     EngineStatusCacheService,
 )
+from server.services.platform.sqlite_db_handle import (  # noqa: E402
+    sqlite_db_handle_registry,
+    sqlite_sync_bridge,
+)
 
 
 logger = logging.getLogger("agent-manager")
@@ -165,10 +169,29 @@ def _write_bootstrap_report(report_file: Path | None, payload: dict[str, Any]) -
     logger.info("Bootstrap diagnostics report written to %s", report_file)
 
 
+async def _write_status_cache(cache_service: EngineStatusCacheService, payload: dict[str, Any]) -> None:
+    try:
+        await cache_service.write_payload(payload)
+    finally:
+        await sqlite_db_handle_registry.close_path(cache_service.db_path)
+
+
+async def _close_sqlite_handles_async() -> None:
+    await sqlite_db_handle_registry.close_all()
+    await sqlite_sync_bridge.close()
+
+
+def _close_sqlite_handles() -> None:
+    try:
+        asyncio.run(_close_sqlite_handles_async())
+    except (OSError, RuntimeError, ValueError, asyncio.TimeoutError):
+        logger.warning("SQLite handle cleanup failed during agent manager shutdown", exc_info=True)
+
+
 def _write_status(manager: AgentCliManager, status_file: Path | None) -> dict:
     payload = format_status_payload(manager.collect_status())
     cache_service = EngineStatusCacheService(manager)
-    asyncio.run(cache_service.write_payload(payload))
+    asyncio.run(_write_status_cache(cache_service, payload))
     logger.info(
         "Agent status cache updated in %s (table=engine_status_cache)",
         cache_service.db_path,
@@ -294,7 +317,7 @@ def _ensure_with_diagnostics(manager: AgentCliManager, engine_spec: str | None =
     }
 
 
-def main() -> int:
+def _main_impl() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = _build_parser()
     args = parser.parse_args()
@@ -337,6 +360,13 @@ def main() -> int:
 
     _write_status(manager, Path(args.status_file).resolve() if args.status_file else None)
     return 0
+
+
+def main() -> int:
+    try:
+        return _main_impl()
+    finally:
+        _close_sqlite_handles()
 
 
 if __name__ == "__main__":

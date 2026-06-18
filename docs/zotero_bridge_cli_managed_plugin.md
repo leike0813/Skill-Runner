@@ -6,7 +6,7 @@ Skill Runner includes the Zotero Bridge CLI bundle as a managed plugin submodule
 plugins/zotero-bridge-cli-bundle
 ```
 
-The bundle provides `manifest.json`, platform binaries under `bin/`, the global wrapper skill at `skills/zotero-bridge-cli/`, and `profile.template.json`.
+The bundle provides `manifest.json`, platform binaries under `bin/`, the global wrapper skill at `skills/zotero-bridge-cli/`, and `assets/profile.template.json`.
 
 ## Bootstrap Behavior
 

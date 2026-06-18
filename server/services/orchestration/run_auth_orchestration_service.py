@@ -463,9 +463,13 @@ class RunAuthOrchestrationService:
         pending_payload = await maybe_await(run_store_backend.get_pending_auth(request_id))
         if not isinstance(pending_payload, dict):
             raise HTTPException(status_code=409, detail="No pending auth session")
-        request_record = await maybe_await(run_store_backend.get_request(request_id))
-        if not isinstance(request_record, dict):
-            raise HTTPException(status_code=404, detail="Request not found")
+        get_request = getattr(run_store_backend, "get_request", None)
+        if callable(get_request):
+            request_record = await maybe_await(get_request(request_id))
+            if not isinstance(request_record, dict):
+                raise HTTPException(status_code=404, detail="Request not found")
+        else:
+            request_record = {"request_id": request_id, "run_id": run_id}
         current_auth_session_id = pending_payload.get("auth_session_id")
         if current_auth_session_id != auth_session_id:
             raise HTTPException(status_code=409, detail="stale auth session")

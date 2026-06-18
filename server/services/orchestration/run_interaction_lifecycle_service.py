@@ -384,12 +384,18 @@ class RunInteractionLifecycleService:
         )
         if run_dir is None:
             return
-        layout = layout_from_record(request_record, run_dir)
-        status_file = layout.state_path if layout is not None else run_dir / ".state" / "state.json"
-        if not status_file.exists():
-            return
-        payload = json.loads(status_file.read_text(encoding="utf-8"))
-        current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
+        state_payload = await maybe_await(run_store_backend.get_run_state(request_id))
+        if isinstance(state_payload, dict) and isinstance(state_payload.get("status"), str):
+            current_status = RunStatus(state_payload.get("status", RunStatus.QUEUED.value))
+        else:
+            layout = layout_from_record(request_record, run_dir)
+            if layout is not None:
+                return
+            status_file = run_dir / ".state" / "state.json"
+            if not status_file.exists():
+                return
+            payload = json.loads(status_file.read_text(encoding="utf-8"))
+            current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
         if current_status != RunStatus.WAITING_USER:
             return
         pending_interaction = await maybe_await(run_store_backend.get_pending_interaction(request_id))

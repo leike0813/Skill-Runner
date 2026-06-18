@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from server.config import config
+from server.services.platform import aiosqlite_compat as aiosqlite
+from server.services.platform.sqlite_db_handle import sqlite_sync_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ def _utc_now_iso() -> str:
 
 class ProcessLeaseStore:
     def __init__(self, db_path: Path | None = None) -> None:
-        self._db_path = db_path or Path(config.SYSTEM.RUNS_DB)
+        self._db_path = db_path or Path(config.SYSTEM.PROCESS_LEASES_DB)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialized = False
 
@@ -25,16 +26,11 @@ class ProcessLeaseStore:
     def db_path(self) -> Path:
         return self._db_path
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
-
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
-        with self._connect() as conn:
-            conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS process_leases (
                     lease_id TEXT PRIMARY KEY,
@@ -55,13 +51,15 @@ class ProcessLeaseStore:
                 )
                 """
             )
-            conn.execute(
+            await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_process_leases_status ON process_leases(status)"
             )
-            conn.execute(
+            await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_process_leases_updated_at ON process_leases(updated_at)"
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
         self._initialized = True
 
     @staticmethod
@@ -77,7 +75,7 @@ class ProcessLeaseStore:
             return None
 
     @staticmethod
-    def _row_to_payload(row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_payload(row: Any) -> dict[str, Any]:
         import json
 
         payload: dict[str, Any] = {
@@ -117,8 +115,8 @@ class ProcessLeaseStore:
         payload["status"] = "active"
         payload.setdefault("updated_at", _utc_now_iso())
         payload.setdefault("created_at", payload["updated_at"])
-        with self._connect() as conn:
-            conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            await conn.execute(
                 """
                 INSERT INTO process_leases (
                     lease_id, owner_kind, owner_id, pid, request_id, run_id,
@@ -156,18 +154,23 @@ class ProcessLeaseStore:
                     payload["updated_at"],
                 ),
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
     def get(self, lease_id: str) -> dict[str, Any] | None:
         self._ensure_initialized()
         safe = lease_id.strip()
         if not safe:
             return None
-        with self._connect() as conn:
-            row = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> Any:
+            cursor = await conn.execute(
                 "SELECT * FROM process_leases WHERE lease_id = ?",
                 (safe,),
-            ).fetchone()
+            )
+            return await cursor.fetchone()
+
+        row = sqlite_sync_bridge.run(_operation, db_path=self._db_path)
         if row is None:
             return None
         return self._row_to_payload(row)
@@ -177,12 +180,16 @@ class ProcessLeaseStore:
         safe = lease_id.strip()
         if not safe:
             return
-        payload = self.get(safe)
-        if payload is None:
-            return
         closed_ts = closed_at or _utc_now_iso()
-        with self._connect() as conn:
-            conn.execute(
+
+        async def _operation(conn: aiosqlite.Connection) -> None:
+            cursor = await conn.execute(
+                "SELECT lease_id FROM process_leases WHERE lease_id = ?",
+                (safe,),
+            )
+            if await cursor.fetchone() is None:
+                return
+            await conn.execute(
                 """
                 UPDATE process_leases
                 SET status = 'closed',
@@ -193,24 +200,29 @@ class ProcessLeaseStore:
                 """,
                 (reason, closed_ts, closed_ts, safe),
             )
-            conn.commit()
+            await conn.commit()
+
+        sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
     def list_active(self) -> list[dict[str, Any]]:
         self._ensure_initialized()
-        with self._connect() as conn:
-            rows = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> list[Any]:
+            cursor = await conn.execute(
                 """
                 SELECT * FROM process_leases
                 WHERE status = 'active'
                 ORDER BY created_at ASC
                 """
-            ).fetchall()
+            )
+            return list(await cursor.fetchall())
+
+        rows = sqlite_sync_bridge.run(_operation, db_path=self._db_path)
         return [self._row_to_payload(row) for row in rows]
 
     def prune_closed_before(self, *, cutoff_iso: str) -> int:
         self._ensure_initialized()
-        with self._connect() as conn:
-            cur = conn.execute(
+        async def _operation(conn: aiosqlite.Connection) -> int:
+            cur = await conn.execute(
                 """
                 DELETE FROM process_leases
                 WHERE status = 'closed'
@@ -218,8 +230,10 @@ class ProcessLeaseStore:
                 """,
                 (cutoff_iso,),
             )
-            conn.commit()
+            await conn.commit()
             return int(cur.rowcount or 0)
+
+        return sqlite_sync_bridge.run(_operation, db_path=self._db_path)
 
 
 process_lease_store = ProcessLeaseStore()

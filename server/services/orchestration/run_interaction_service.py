@@ -693,31 +693,11 @@ def _update_status_for_request(*, request_record: dict[str, Any]) -> Any:
                 effective_session_timeout_sec=effective_session_timeout_sec,
             )
             return
-        state_file = layout.state_path
-        status_data: dict[str, Any] = {}
-        if state_file.exists():
-            try:
-                loaded = json.loads(state_file.read_text(encoding="utf-8"))
-                status_data = loaded if isinstance(loaded, dict) else {}
-            except (OSError, ValueError, TypeError):
-                status_data = {}
-        runtime_obj = status_data.get("runtime")
-        runtime_payload: dict[str, Any] = dict(runtime_obj) if isinstance(runtime_obj, dict) else {}
-        runtime_payload["effective_session_timeout_sec"] = effective_session_timeout_sec
-        status_data.update(
-            {
-                "status": status.value if isinstance(status, RunStatus) else str(status),
-                "updated_at": str(datetime.now()),
-                "error": error,
-                "warnings": warnings or [],
-                "runtime": runtime_payload,
-            }
-        )
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(
-            json.dumps(status_data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        _ = layout
+        _ = status
+        _ = error
+        _ = warnings
+        _ = effective_session_timeout_sec
 
     return update_status
 
@@ -748,13 +728,10 @@ async def _read_run_status_for_request(
     run_dir: Path,
     request_record: dict[str, Any] | None = None,
 ) -> tuple[RunStatus, list[Any], Any, str]:
-    file_status = _read_run_status(run_dir, request_record)
-    if file_status[0] in {RunStatus.WAITING_USER, RunStatus.WAITING_AUTH}:
-        return file_status
     state_payload = await maybe_await(run_store_backend.get_run_state(request_id))
     if isinstance(state_payload, dict) and isinstance(state_payload.get("status"), str):
         return _status_tuple_from_payload(state_payload)
-    return file_status
+    return _read_run_status(run_dir, request_record)
 
 
 def _status_tuple_from_payload(payload: dict[str, Any]) -> tuple[RunStatus, list[Any], Any, str]:
@@ -776,6 +753,8 @@ def _write_run_status(
     effective_session_timeout_sec: int | None = None,
     request_record: dict[str, Any] | None = None,
 ) -> None:
+    if layout_from_record(request_record or {}, run_dir) is not None:
+        return
     status_file = _state_file(run_dir, request_record)
     status_file.parent.mkdir(parents=True, exist_ok=True)
     existing_timeout = None

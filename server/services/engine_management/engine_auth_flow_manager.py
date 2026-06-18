@@ -733,5 +733,5 @@ class EngineAuthFlowManager:
 
 
 engine_auth_flow_manager = EngineAuthFlowManager(
-    durable_store=DurableAuthSessionSyncStore(Path(config.SYSTEM.RUNS_DB))
+    durable_store=DurableAuthSessionSyncStore(Path(config.SYSTEM.RUN_AUTH_DB))
 )

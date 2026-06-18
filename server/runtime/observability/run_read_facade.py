@@ -132,7 +132,13 @@ class RunReadFacade:
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        current_status = _read_status(run_dir, request_record=request_record).value
+        current_status = (
+            await _read_status_for_request(
+                request_id=request_id,
+                run_dir=run_dir,
+                request_record=request_record,
+            )
+        ).value
         if current_status not in {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELED.value}:
             raise HTTPException(status_code=409, detail="terminal result not ready")
         result_path = _resolve_result_path(request_record, run_dir)
@@ -544,11 +550,9 @@ class RunReadFacade:
 
 
 def _read_status(run_dir: Path, *, request_record: dict[str, Any] | None = None) -> RunStatus:
+    if isinstance(request_record, dict) and layout_from_record(request_record, run_dir) is not None:
+        return RunStatus.QUEUED
     candidates: list[Path] = []
-    if isinstance(request_record, dict):
-        layout = layout_from_record(request_record, run_dir)
-        if layout is not None:
-            candidates.append(layout.state_path)
     candidates.append(run_dir / ".state" / "state.json")
     for state_file in candidates:
         if not state_file.exists():

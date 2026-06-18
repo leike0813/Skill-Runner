@@ -54,3 +54,55 @@ The system MUST include tests that fail when migrated store modules reintroduce 
 - **WHEN** CI runs unit checks
 - **THEN** regression guard tests fail
 - **AND** the change is blocked until async store boundary is restored
+
+### Requirement: SQLite compatibility layer MUST tolerate short lock contention
+
+The SQLite compatibility layer MUST configure a busy timeout and retry short `SQLITE_BUSY` or `SQLITE_LOCKED` failures with bounded backoff before surfacing the original error.
+
+#### Scenario: A transient lock resolves during retry
+- **GIVEN** SQLite raises a locked database operational error for an operation
+- **WHEN** the contention clears before the retry budget is exhausted
+- **THEN** the operation succeeds
+- **AND** callers observe the normal result.
+
+#### Scenario: A persistent lock exceeds retry budget
+- **GIVEN** SQLite continues raising a locked database operational error
+- **WHEN** the retry budget is exhausted
+- **THEN** the original operational error is raised
+- **AND** the retry loop terminates.
+
+### Requirement: Run store MUST bound concurrent SQLite connections per database
+
+The run store database wrapper MUST limit active SQLite compatibility connections for a single database to a bounded default.
+
+#### Scenario: Many requests poll the same missing run
+- **WHEN** many coroutines concurrently query the same run store database
+- **THEN** the run store gates active SQLite connections
+- **AND** it avoids unbounded connection storms.
+
+### Requirement: SQLite runtime stores MUST use official aiosqlite handles
+
+Runtime SQLite stores MUST use official `aiosqlite` connections managed by the runtime handle registry.
+
+#### Scenario: Store opens SQLite connection
+- **WHEN** a runtime store needs SQLite access
+- **THEN** it obtains a connection through the handle registry
+- **AND** it MUST NOT create a custom executor/retry wrapper around `sqlite3`
+
+### Requirement: Each SQLite DB file MUST have one process-local operation queue
+
+The system MUST maintain at most one process-local long-lived `aiosqlite` connection and operation lock per resolved DB path.
+
+#### Scenario: Multiple stores use the same DB file
+- **WHEN** multiple stores operate on the same SQLite file
+- **THEN** their operations share the same handle and operation lock
+- **AND** operations against that DB file execute serially within the process
+
+### Requirement: Production hot paths MUST NOT synchronously open SQLite
+
+Production request/runtime hot paths MUST NOT call `sqlite3.connect()` directly.
+
+#### Scenario: Management UI reads engine metadata
+- **WHEN** management/UI routes render engine summaries
+- **THEN** they read cached in-memory engine status
+- **AND** they do not synchronously open SQLite from the event-loop thread

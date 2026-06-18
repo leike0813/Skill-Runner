@@ -23,6 +23,8 @@ def _isolate_persistence_root(tmp_path):
     from server.config import config
 
     old_data_dir = config.SYSTEM.DATA_DIR
+    old_db_dir = config.SYSTEM.DB_DIR
+    old_legacy_runs_db = config.SYSTEM.LEGACY_RUNS_DB
     old_logging_dir = config.SYSTEM.LOGGING.DIR
     old_settings_file = config.SYSTEM.SETTINGS_FILE
     old_mcp_registry_file = config.SYSTEM.MCP_REGISTRY_FILE
@@ -32,6 +34,13 @@ def _isolate_persistence_root(tmp_path):
     old_tmp_uploads_dir = config.SYSTEM.TMP_UPLOADS_DIR
     old_temp_skill_package_cache_dir = config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR
     old_runs_db = config.SYSTEM.RUNS_DB
+    old_run_state_db = config.SYSTEM.RUN_STATE_DB
+    old_run_interactions_db = config.SYSTEM.RUN_INTERACTIONS_DB
+    old_run_auth_db = config.SYSTEM.RUN_AUTH_DB
+    old_runtime_cache_db = config.SYSTEM.RUNTIME_CACHE_DB
+    old_process_leases_db = config.SYSTEM.PROCESS_LEASES_DB
+    old_engine_status_db = config.SYSTEM.ENGINE_STATUS_DB
+    old_engine_upgrades_db = config.SYSTEM.ENGINE_UPGRADES_DB
     old_skill_installs_db = config.SYSTEM.SKILL_INSTALLS_DB
     old_skill_installs_dir = config.SYSTEM.SKILL_INSTALLS_DIR
     old_skills_archive_dir = config.SYSTEM.SKILLS_ARCHIVE_DIR
@@ -56,6 +65,8 @@ def _isolate_persistence_root(tmp_path):
 
     config.defrost()
     config.SYSTEM.DATA_DIR = str(test_data_dir)
+    config.SYSTEM.DB_DIR = str(test_data_dir / "db")
+    config.SYSTEM.LEGACY_RUNS_DB = str(test_data_dir / "legacy_runs.db")
     config.SYSTEM.LOGGING.DIR = str(test_data_dir / "logs")
     config.SYSTEM.SETTINGS_FILE = str(test_data_dir / "system_settings.json")
     config.SYSTEM.MCP_REGISTRY_FILE = str(test_data_dir / "mcp_registry.json")
@@ -65,6 +76,13 @@ def _isolate_persistence_root(tmp_path):
     config.SYSTEM.TMP_UPLOADS_DIR = str(test_data_dir / "tmp_uploads")
     config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = str(test_data_dir / "temp_skill_package_cache")
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
+    config.SYSTEM.RUN_STATE_DB = str(tmp_path / "run_state.db")
+    config.SYSTEM.RUN_INTERACTIONS_DB = str(tmp_path / "run_interactions.db")
+    config.SYSTEM.RUN_AUTH_DB = str(tmp_path / "run_auth.db")
+    config.SYSTEM.RUNTIME_CACHE_DB = str(tmp_path / "runtime_cache.db")
+    config.SYSTEM.PROCESS_LEASES_DB = str(tmp_path / "process_leases.db")
+    config.SYSTEM.ENGINE_STATUS_DB = str(tmp_path / "engine_status.db")
+    config.SYSTEM.ENGINE_UPGRADES_DB = str(tmp_path / "engine_upgrades.db")
     config.SYSTEM.SKILL_INSTALLS_DB = str(tmp_path / "runs.db")
     config.SYSTEM.SKILL_INSTALLS_DIR = str(tmp_path / "skill_installs")
     config.SYSTEM.SKILLS_ARCHIVE_DIR = str(tmp_path / "skills" / ".archive")
@@ -90,6 +108,8 @@ def _isolate_persistence_root(tmp_path):
     finally:
         config.defrost()
         config.SYSTEM.DATA_DIR = old_data_dir
+        config.SYSTEM.DB_DIR = old_db_dir
+        config.SYSTEM.LEGACY_RUNS_DB = old_legacy_runs_db
         config.SYSTEM.LOGGING.DIR = old_logging_dir
         config.SYSTEM.SETTINGS_FILE = old_settings_file
         config.SYSTEM.MCP_REGISTRY_FILE = old_mcp_registry_file
@@ -99,6 +119,13 @@ def _isolate_persistence_root(tmp_path):
         config.SYSTEM.TMP_UPLOADS_DIR = old_tmp_uploads_dir
         config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = old_temp_skill_package_cache_dir
         config.SYSTEM.RUNS_DB = old_runs_db
+        config.SYSTEM.RUN_STATE_DB = old_run_state_db
+        config.SYSTEM.RUN_INTERACTIONS_DB = old_run_interactions_db
+        config.SYSTEM.RUN_AUTH_DB = old_run_auth_db
+        config.SYSTEM.RUNTIME_CACHE_DB = old_runtime_cache_db
+        config.SYSTEM.PROCESS_LEASES_DB = old_process_leases_db
+        config.SYSTEM.ENGINE_STATUS_DB = old_engine_status_db
+        config.SYSTEM.ENGINE_UPGRADES_DB = old_engine_upgrades_db
         config.SYSTEM.SKILL_INSTALLS_DB = old_skill_installs_db
         config.SYSTEM.SKILL_INSTALLS_DIR = old_skill_installs_dir
         config.SYSTEM.SKILLS_ARCHIVE_DIR = old_skills_archive_dir
@@ -124,3 +151,17 @@ def _isolate_persistence_root(tmp_path):
 def temp_config_dirs(tmp_path):
     # Backward-compatible alias used by existing tests.
     yield tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _close_sqlite_handles_after_test():
+    yield
+    from server.services.platform.sqlite_db_handle import (
+        sqlite_db_handle_registry,
+        sqlite_sync_bridge,
+    )
+
+    import asyncio
+
+    asyncio.run(sqlite_db_handle_registry.close_all())
+    asyncio.run(sqlite_sync_bridge.close())

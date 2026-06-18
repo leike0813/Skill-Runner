@@ -67,10 +67,13 @@ def promote_request_uploads(base_dir: str | Path, request_id: str, run_dir: str 
         raise ValueError(f"Run directory {run_root} not found")
     source_dir = request_dir / "uploads"
     target_dir = run_root / "uploads"
-    if target_dir.exists():
+    if target_dir.exists() and any(target_dir.iterdir()):
         raise ValueError(f"Run uploads already exist for {run_root.name}")
     if source_dir.exists():
-        move(str(source_dir), str(target_dir))
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for entry in source_dir.iterdir():
+            move(str(entry), str(target_dir / entry.name))
+        source_dir.rmdir()
 
 
 def delete_request_root(base_dir: str | Path, request_id: str) -> None:

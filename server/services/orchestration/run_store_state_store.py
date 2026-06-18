@@ -253,8 +253,20 @@ class RunProjectionStateStore:
 
 
 class RunRecoveryStateStore:
-    def __init__(self, database: RunStoreDatabase) -> None:
+    def __init__(
+        self,
+        database: RunStoreDatabase,
+        *,
+        state_database: RunStoreDatabase | None = None,
+        interaction_database: RunStoreDatabase | None = None,
+        auth_database: RunStoreDatabase | None = None,
+        cache_database: RunStoreDatabase | None = None,
+    ) -> None:
         self._database = database
+        self._state_database = state_database or database
+        self._interaction_database = interaction_database or database
+        self._auth_database = auth_database or database
+        self._cache_database = cache_database or database
 
     async def list_runs_for_cleanup(self, retention_days: int) -> List[Dict[str, Any]]:
         await self._database.ensure_initialized()
@@ -264,7 +276,7 @@ class RunRecoveryStateStore:
         candidates = []
         async with self._database.connect() as conn:
             conn.row_factory = aiosqlite.Row
-            cursor = await conn.execute("SELECT run_id, status, created_at FROM runs")
+            cursor = await conn.execute("SELECT run_id, status, created_at, workspace_dir FROM runs")
             rows = await cursor.fetchall()
         for row in rows:
             status = row["status"]
@@ -290,49 +302,12 @@ class RunRecoveryStateStore:
             request_cur = await conn.execute("SELECT request_id FROM requests WHERE run_id = ?", (run_id,))
             request_rows = await request_cur.fetchall()
             request_ids = [row["request_id"] for row in request_rows]
-            if request_ids:
-                placeholders = ",".join("?" for _ in request_ids)
-                await conn.execute(
-                    f"DELETE FROM request_interactions WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_interactive_runtime WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_interaction_history WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_auth_sessions WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_auth_method_selection WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE} WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_current_projection WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_run_state WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
-                await conn.execute(
-                    f"DELETE FROM request_dispatch_state WHERE request_id IN ({placeholders})",
-                    tuple(request_ids),
-                )
             await conn.execute("DELETE FROM requests WHERE run_id = ?", (run_id,))
-            await conn.execute("DELETE FROM cache_entries WHERE run_id = ?", (run_id,))
-            await conn.execute("DELETE FROM temp_cache_entries WHERE run_id = ?", (run_id,))
             await conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
             await conn.commit()
+        if request_ids:
+            await self._delete_request_scoped_records(request_ids)
+        await self._delete_cache_records_for_run(run_id)
         return request_ids
 
     async def clear_all(self) -> Dict[str, int]:
@@ -341,30 +316,17 @@ class RunRecoveryStateStore:
             conn.row_factory = aiosqlite.Row
             run_rows_cur = await conn.execute("SELECT run_id FROM runs")
             request_rows_cur = await conn.execute("SELECT request_id FROM requests")
-            cache_rows_cur = await conn.execute("SELECT cache_key FROM cache_entries")
-            temp_cache_rows_cur = await conn.execute("SELECT cache_key FROM temp_cache_entries")
             run_rows = await run_rows_cur.fetchall()
             request_rows = await request_rows_cur.fetchall()
-            cache_rows = await cache_rows_cur.fetchall()
-            temp_cache_rows = await temp_cache_rows_cur.fetchall()
             run_count = len(run_rows)
             request_count = len(request_rows)
-            cache_count = len(cache_rows) + len(temp_cache_rows)
-            await conn.execute("DELETE FROM request_interactions")
-            await conn.execute("DELETE FROM request_interactive_runtime")
-            await conn.execute("DELETE FROM request_interaction_history")
-            await conn.execute("DELETE FROM request_auth_sessions")
-            await conn.execute("DELETE FROM request_auth_method_selection")
-            await conn.execute(f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE}")
-            await conn.execute("DELETE FROM request_resume_tickets")
-            await conn.execute("DELETE FROM request_current_projection")
-            await conn.execute("DELETE FROM request_run_state")
-            await conn.execute("DELETE FROM request_dispatch_state")
-            await conn.execute("DELETE FROM cache_entries")
-            await conn.execute("DELETE FROM temp_cache_entries")
             await conn.execute("DELETE FROM runs")
             await conn.execute("DELETE FROM requests")
             await conn.commit()
+        cache_count = await self._clear_cache_records()
+        await self._clear_state_records()
+        await self._clear_interaction_records()
+        await self._clear_auth_records()
         return {"runs": run_count, "requests": request_count, "cache_entries": cache_count}
 
     async def list_active_run_ids(self) -> List[str]:
@@ -393,19 +355,9 @@ class RunRecoveryStateStore:
                     run.status AS run_status,
                     run.recovery_state AS recovery_state,
                     run.recovered_at AS recovered_at,
-                    run.recovery_reason AS recovery_reason,
-                    ir.effective_session_timeout_sec AS effective_session_timeout_sec,
-                    ir.session_handle_json AS session_handle_json,
-                    ir.updated_at AS interactive_runtime_updated_at,
-                    auth.payload_json AS pending_auth_json,
-                    auth.auth_session_id AS auth_session_id,
-                    auth.auth_resume_context_json AS auth_resume_context_json,
-                    auth_select.payload_json AS pending_auth_method_selection_json
+                    run.recovery_reason AS recovery_reason
                 FROM requests req
                 JOIN runs run ON req.run_id = run.run_id
-                LEFT JOIN request_interactive_runtime ir ON req.request_id = ir.request_id
-                LEFT JOIN request_auth_sessions auth ON req.request_id = auth.request_id
-                LEFT JOIN request_auth_method_selection auth_select ON req.request_id = auth_select.request_id
                 WHERE run.status IN ('queued', 'running', 'waiting_user', 'waiting_auth')
                 ORDER BY req.created_at ASC
                 """
@@ -415,11 +367,16 @@ class RunRecoveryStateStore:
         for row in rows:
             item = dict(row)
             runtime_options_json = item.pop("runtime_options_json", "{}")
-            session_handle_json = item.pop("session_handle_json", None)
-            pending_auth_json = item.pop("pending_auth_json", None)
-            auth_resume_context_json = item.pop("auth_resume_context_json", None)
-            pending_auth_method_selection_json = item.pop("pending_auth_method_selection_json", None)
-            timeout_obj = item.get("effective_session_timeout_sec")
+            runtime_row = await self._get_interactive_runtime_row(str(item.get("request_id") or ""))
+            auth_row = await self._get_pending_auth_row(str(item.get("request_id") or ""))
+            auth_select_row = await self._get_pending_auth_method_selection_row(str(item.get("request_id") or ""))
+            session_handle_json = runtime_row.get("session_handle_json") if runtime_row else None
+            timeout_obj = runtime_row.get("effective_session_timeout_sec") if runtime_row else None
+            pending_auth_json = auth_row.get("payload_json") if auth_row else None
+            auth_resume_context_json = auth_row.get("auth_resume_context_json") if auth_row else None
+            pending_auth_method_selection_json = auth_select_row.get("payload_json") if auth_select_row else None
+            item["auth_session_id"] = auth_row.get("auth_session_id") if auth_row else None
+            item["interactive_runtime_updated_at"] = runtime_row.get("updated_at") if runtime_row else None
             try:
                 item["runtime_options"] = json.loads(runtime_options_json or "{}")
             except (json.JSONDecodeError, TypeError):
@@ -455,6 +412,105 @@ class RunRecoveryStateStore:
                 item["pending_auth_method_selection"] = None
             records.append(item)
         return records
+
+    async def _delete_request_scoped_records(self, request_ids: List[str]) -> None:
+        placeholders = ",".join("?" for _ in request_ids)
+        params = tuple(request_ids)
+        await self._state_database.ensure_initialized()
+        async with self._state_database.connect() as conn:
+            await conn.execute(f"DELETE FROM request_current_projection WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_run_state WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_dispatch_state WHERE request_id IN ({placeholders})", params)
+            await conn.commit()
+        await self._interaction_database.ensure_initialized()
+        async with self._interaction_database.connect() as conn:
+            await conn.execute(f"DELETE FROM request_interactions WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_interactive_runtime WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_interaction_history WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_resume_tickets WHERE request_id IN ({placeholders})", params)
+            await conn.commit()
+        await self._auth_database.ensure_initialized()
+        async with self._auth_database.connect() as conn:
+            await conn.execute(f"DELETE FROM request_auth_sessions WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM request_auth_method_selection WHERE request_id IN ({placeholders})", params)
+            await conn.execute(f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE} WHERE request_id IN ({placeholders})", params)
+            await conn.commit()
+
+    async def _delete_cache_records_for_run(self, run_id: str) -> None:
+        await self._cache_database.ensure_initialized()
+        async with self._cache_database.connect() as conn:
+            await conn.execute("DELETE FROM cache_entries WHERE run_id = ?", (run_id,))
+            await conn.execute("DELETE FROM temp_cache_entries WHERE run_id = ?", (run_id,))
+            await conn.commit()
+
+    async def _clear_cache_records(self) -> int:
+        await self._cache_database.ensure_initialized()
+        async with self._cache_database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cache_rows_cur = await conn.execute("SELECT cache_key FROM cache_entries")
+            temp_cache_rows_cur = await conn.execute("SELECT cache_key FROM temp_cache_entries")
+            cache_count = len(await cache_rows_cur.fetchall()) + len(await temp_cache_rows_cur.fetchall())
+            await conn.execute("DELETE FROM cache_entries")
+            await conn.execute("DELETE FROM temp_cache_entries")
+            await conn.execute("DELETE FROM skill_package_identities")
+            await conn.execute("DELETE FROM temp_skill_package_cache")
+            await conn.commit()
+        return cache_count
+
+    async def _clear_state_records(self) -> None:
+        await self._state_database.ensure_initialized()
+        async with self._state_database.connect() as conn:
+            await conn.execute("DELETE FROM request_current_projection")
+            await conn.execute("DELETE FROM request_run_state")
+            await conn.execute("DELETE FROM request_dispatch_state")
+            await conn.commit()
+
+    async def _clear_interaction_records(self) -> None:
+        await self._interaction_database.ensure_initialized()
+        async with self._interaction_database.connect() as conn:
+            await conn.execute("DELETE FROM request_interactions")
+            await conn.execute("DELETE FROM request_interactive_runtime")
+            await conn.execute("DELETE FROM request_interaction_history")
+            await conn.execute("DELETE FROM request_resume_tickets")
+            await conn.commit()
+
+    async def _clear_auth_records(self) -> None:
+        await self._auth_database.ensure_initialized()
+        async with self._auth_database.connect() as conn:
+            await conn.execute("DELETE FROM request_auth_sessions")
+            await conn.execute("DELETE FROM request_auth_method_selection")
+            await conn.execute(f"DELETE FROM {DURABLE_AUTH_SESSION_TABLE}")
+            await conn.commit()
+
+    async def _get_interactive_runtime_row(self, request_id: str) -> Dict[str, Any] | None:
+        await self._interaction_database.ensure_initialized()
+        async with self._interaction_database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute("SELECT * FROM request_interactive_runtime WHERE request_id = ?", (request_id,))
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _get_pending_auth_row(self, request_id: str) -> Dict[str, Any] | None:
+        await self._auth_database.ensure_initialized()
+        async with self._auth_database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                "SELECT * FROM request_auth_sessions WHERE request_id = ? AND state = 'pending' LIMIT 1",
+                (request_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _get_pending_auth_method_selection_row(self, request_id: str) -> Dict[str, Any] | None:
+        await self._auth_database.ensure_initialized()
+        async with self._auth_database.connect() as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.execute(
+                "SELECT * FROM request_auth_method_selection WHERE request_id = ? AND state = 'pending' LIMIT 1",
+                (request_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
 
     async def set_recovery_info(
         self,

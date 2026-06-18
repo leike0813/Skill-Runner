@@ -27,20 +27,11 @@ def _allow_test_skill(monkeypatch, tmp_path):
     )
 
 def test_create_run_structure(tmp_path):
-    # Mock config RUNS_DIR 
-    # (In integration we depend on real config, here we might want to patch it, 
-    # but WorkspaceManager imports config globally. 
-    # For simplicity, we assume we use the global config or patch it)
-    
-    # Actually, workspace_manager uses `config.RUNS_DIR`.
-    # Let's patch `server.config.config.RUNS_DIR`
-    
     from server.config import config
     
-    # Save old
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.freeze()
     
     try:
@@ -50,28 +41,29 @@ def test_create_run_structure(tmp_path):
         assert resp.run_id is not None
         assert resp.status == "queued"
         
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / resp.run_id
+        run_dir = Path(str(resp.workspace_dir))
         assert run_dir.exists()
+        assert run_dir == Path(config.SYSTEM.WORKSPACES_DIR) / resp.run_id
         assert (run_dir / "artifacts").exists()
         assert (run_dir / "result").exists()
         assert (run_dir / ".state").exists()
         assert (run_dir / ".audit").exists()
         assert not (run_dir / ".audit" / "request_input.json").exists()
         assert not (run_dir / "interactions").exists()
-        assert not (run_dir / "uploads").exists()
+        assert (run_dir / "uploads").exists()
         
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.freeze()
 
 
 def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
     from server.config import config
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.freeze()
 
     skill = SkillManifest(
@@ -89,10 +81,10 @@ def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
         req = RunCreateRequest(skill_id="test-skill", engine="gemini", parameter={})
         with pytest.raises(ValueError, match="does not support engine"):
             workspace_manager.create_run(req)
-        assert not Path(config.SYSTEM.RUNS_DIR).exists()
+        assert not Path(config.SYSTEM.WORKSPACES_DIR).exists()
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.freeze()
 
 
@@ -124,10 +116,10 @@ def test_handle_upload(tmp_path):
     import io
     import zipfile
     
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
     
@@ -148,7 +140,7 @@ def test_handle_upload(tmp_path):
         
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()
 
@@ -157,10 +149,10 @@ def test_handle_upload_nested_paths(tmp_path):
     import io
     import zipfile
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
 
@@ -179,17 +171,17 @@ def test_handle_upload_nested_paths(tmp_path):
         assert "nested/inner.txt" in result["extracted_files"]
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()
 
 def test_handle_upload_bad_zip(tmp_path):
     from server.config import config
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
 
@@ -201,7 +193,7 @@ def test_handle_upload_bad_zip(tmp_path):
             stage_request_upload(config.SYSTEM.REQUESTS_DIR, request_id, b"not-a-zip")
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()
 
@@ -209,10 +201,10 @@ def test_handle_upload_bad_zip(tmp_path):
 def test_write_input_manifest_empty_uploads(tmp_path):
     from server.config import config
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
 
@@ -224,7 +216,7 @@ def test_write_input_manifest_empty_uploads(tmp_path):
         assert json.loads(manifest_path.read_text()) == {"files": []}
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()
 
@@ -232,10 +224,10 @@ def test_write_input_manifest_empty_uploads(tmp_path):
 def test_promote_request_uploads_moves_files(tmp_path):
     from server.config import config
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
 
@@ -246,15 +238,15 @@ def test_promote_request_uploads_moves_files(tmp_path):
         (request_uploads / "input.txt").write_text("content")
 
         run_response = workspace_manager.create_run(RunCreateRequest(skill_id="test-skill", parameter={}))
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
+        run_dir = Path(str(run_response.workspace_dir))
         promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, run_dir)
 
-        run_uploads = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id / "uploads"
+        run_uploads = run_dir / "uploads"
         assert (run_uploads / "input.txt").exists()
         assert not request_uploads.exists()
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()
 
@@ -262,10 +254,10 @@ def test_promote_request_uploads_moves_files(tmp_path):
 def test_promote_request_uploads_existing_target_raises(tmp_path):
     from server.config import config
 
-    old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.freeze()
 
@@ -274,13 +266,13 @@ def test_promote_request_uploads_existing_target_raises(tmp_path):
         ensure_request_root(config.SYSTEM.REQUESTS_DIR, request_id, {"skill_id": "test-skill"})
 
         run_response = workspace_manager.create_run(RunCreateRequest(skill_id="test-skill", parameter={}))
-        run_uploads = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id / "uploads"
-        run_uploads.mkdir()
+        run_dir = Path(str(run_response.workspace_dir))
+        (run_dir / "uploads" / "existing.txt").write_text("existing", encoding="utf-8")
 
         with pytest.raises(ValueError, match="Run uploads already exist"):
-            promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, Path(config.SYSTEM.RUNS_DIR) / run_response.run_id)
+            promote_staged_uploads(config.SYSTEM.REQUESTS_DIR, request_id, run_dir)
     finally:
         config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.freeze()

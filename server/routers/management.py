@@ -573,12 +573,9 @@ async def list_management_runs(
             continue
         request_id = request_id_obj
         run_status = _parse_run_status(row.get("status"))
-        pending_interaction_id = (
-            await _read_pending_interaction_id(request_id)
-            if run_status == RunStatus.WAITING_USER
-            else None
-        )
-        auto_stats = await run_store.get_auto_decision_stats(request_id)
+        pending_interaction_id = row.get("pending_interaction_id")
+        if not isinstance(pending_interaction_id, int):
+            pending_interaction_id = None
         runs.append(
             ManagementRunConversationState(
                 request_id=request_id,
@@ -589,9 +586,9 @@ async def list_management_runs(
                 skill_id=str(row.get("skill_id", "unknown")),
                 updated_at=_parse_datetime(row.get("updated_at")),
                 pending_interaction_id=pending_interaction_id,
-                interaction_count=await run_store.get_interaction_count(request_id),
-                auto_decision_count=int(auto_stats.get("auto_decision_count") or 0),
-                last_auto_decision_at=_parse_datetime_or_none(auto_stats.get("last_auto_decision_at")),
+                interaction_count=0,
+                auto_decision_count=0,
+                last_auto_decision_at=None,
                 recovery_state=_parse_recovery_state(row.get("recovery_state")),
                 recovered_at=_parse_datetime_or_none(row.get("recovered_at")),
                 recovery_reason=_coerce_str_or_none(row.get("recovery_reason")),
@@ -1040,27 +1037,8 @@ async def _read_pending_interaction_id(request_id: str) -> int | None:
 
 
 def _read_run_error(run_dir: Path | None, *, detail: dict[str, Any] | None = None) -> Any:
-    if not run_dir:
-        return None
-    candidates: list[Path] = []
     detail_payload = detail if isinstance(detail, dict) else {}
-    input_manifest_obj = detail_payload.get("inputManifestPath")
-    if isinstance(input_manifest_obj, str) and input_manifest_obj.strip():
-        input_manifest_path = Path(input_manifest_obj)
-        namespace = input_manifest_path.parent.name
-        if namespace and input_manifest_path.parent.parent.name == ".audit":
-            candidates.append(run_dir / ".state" / namespace / "state.json")
-    candidates.append(run_dir / ".state" / "state.json")
-    for state_file in candidates:
-        if not state_file.exists():
-            continue
-        try:
-            payload = json.loads(state_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict):
-            return payload.get("error")
-    return None
+    return detail_payload.get("error")
 
 
 def _parse_run_status(raw: Any) -> RunStatus:

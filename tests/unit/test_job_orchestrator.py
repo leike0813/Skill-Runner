@@ -415,8 +415,17 @@ def _patch_trust_manager(monkeypatch):
 
 def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     req = RunCreateRequest(skill_id=skill.id, engine="codex", parameter={})
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
+    config.defrost()
+    config.SYSTEM.WORKSPACES_DIR = config.SYSTEM.RUNS_DIR
+    config.freeze()
     with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
-        resp = workspace_manager.create_run(req)
+        try:
+            resp = workspace_manager.create_run(req)
+        finally:
+            config.defrost()
+            config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
+            config.freeze()
     return resp.run_id
 
 
@@ -3761,12 +3770,12 @@ async def test_run_job_missing_run_dir_releases_slot_and_does_not_block_followin
         await _seed_interactive_request(local_store, run_id, skill.id)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
-        original_get_run_dir = workspace_manager.get_run_dir
 
         def _get_run_dir(target_run_id: str):
             if target_run_id == "missing-run":
                 return None
-            return original_get_run_dir(target_run_id)
+            candidate = Path(config.SYSTEM.RUNS_DIR) / target_run_id
+            return candidate if candidate.exists() else None
 
         monkeypatch.setattr(
             "server.services.orchestration.job_orchestrator.workspace_manager.get_run_dir",

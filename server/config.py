@@ -178,8 +178,17 @@ _C.SYSTEM.OPENCODE_MODELS_CACHE_PATH = os.environ.get(
     ),
 )
 
-_C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
-_C.SYSTEM.SKILL_INSTALLS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs.db")
+_C.SYSTEM.DB_DIR = os.environ.get("SKILL_RUNNER_DB_DIR", os.path.join(_C.SYSTEM.DATA_DIR, "db"))
+_C.SYSTEM.LEGACY_RUNS_DB = os.path.join(_C.SYSTEM.DATA_DIR, "runs.db")
+_C.SYSTEM.RUNS_DB = os.path.join(_C.SYSTEM.DB_DIR, "runs.db")
+_C.SYSTEM.RUN_STATE_DB = os.path.join(_C.SYSTEM.DB_DIR, "run_state.db")
+_C.SYSTEM.RUN_INTERACTIONS_DB = os.path.join(_C.SYSTEM.DB_DIR, "run_interactions.db")
+_C.SYSTEM.RUN_AUTH_DB = os.path.join(_C.SYSTEM.DB_DIR, "run_auth.db")
+_C.SYSTEM.RUNTIME_CACHE_DB = os.path.join(_C.SYSTEM.DB_DIR, "runtime_cache.db")
+_C.SYSTEM.PROCESS_LEASES_DB = os.path.join(_C.SYSTEM.DB_DIR, "process_leases.db")
+_C.SYSTEM.ENGINE_STATUS_DB = os.path.join(_C.SYSTEM.DB_DIR, "engine_status.db")
+_C.SYSTEM.ENGINE_UPGRADES_DB = os.path.join(_C.SYSTEM.DB_DIR, "engine_upgrades.db")
+_C.SYSTEM.SKILL_INSTALLS_DB = os.path.join(_C.SYSTEM.DB_DIR, "skill_installs.db")
 
 _C.SYSTEM.SKILL_INSTALLS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "skill_installs")
 _C.SYSTEM.SKILLS_ARCHIVE_DIR = os.path.join(_C.SYSTEM.SKILLS_DIR, ".archive")

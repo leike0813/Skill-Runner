@@ -280,3 +280,35 @@ Qwen 的 live observability 要求 MUST 归入共享 `interactive-run-observabil
 - **THEN** 消息 `details.source` MUST 等于 `claude_result_fallback`
 - **AND** completion metadata 仍 MUST 继续通过 turn-complete 语义发布
 
+
+### Requirement: Missing run observability endpoints MUST remain cheap 404 responses
+
+Observability endpoints for missing requests or missing runs MUST continue returning 404 and MUST NOT create SSE streams, placeholder requests, or placeholder run records.
+
+#### Scenario: Events history is polled for a missing request
+- **WHEN** a client calls `GET /v1/jobs/{request_id}/events/history` for an unknown request
+- **THEN** the response status is 404
+- **AND** no run directory, request row, or SSE stream is created.
+
+#### Scenario: Chat history is polled for a missing request
+- **WHEN** a client calls `GET /v1/jobs/{request_id}/chat/history` for an unknown request
+- **THEN** the response status is 404
+- **AND** no run directory, request row, or SSE stream is created.
+
+#### Scenario: Missing-run polling happens concurrently with management reads
+- **WHEN** many missing-run history requests arrive concurrently
+- **THEN** unrelated management read endpoints remain responsive
+- **AND** the missing-run requests continue to return 404.
+
+### Requirement: Chat and event history MUST be layout-aware
+
+Event and chat history endpoints MUST resolve the request layout before reading persisted history.
+
+#### Scenario: Event history reads namespaced audit
+- **WHEN** a client reads event history for a request-bound run with layout metadata
+- **THEN** the service reads `.audit/<namespace>/events.<attempt>.jsonl`, `.audit/<namespace>/fcmp_events.<attempt>.jsonl`, and `.audit/<namespace>/orchestrator_events.<attempt>.jsonl` as applicable.
+
+#### Scenario: Chat history reads namespaced replay
+- **WHEN** a client reads chat history for a request-bound run with layout metadata
+- **THEN** the service reads `.audit/<namespace>/chat_replay.jsonl`
+- **AND** may derive missing chat rows from namespaced FCMP rows.
