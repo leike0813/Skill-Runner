@@ -47,7 +47,7 @@ def test_protocol_golden_fixture_capability_gating_respects_parser_capability_co
 
     common_fixture = load_protocol_golden_fixture("common_outcome_waiting_auth_smoke")
     assert fixture_supports_engine(common_fixture, target_engine="codex") is True
-    assert fixture_supports_engine(common_fixture, target_engine="gemini") is True
+    assert fixture_supports_engine(common_fixture, target_engine="qwen") is True
 
 
 def test_protocol_golden_fixture_manifest_covers_all_source_runs_for_protocol_and_outcome() -> None:

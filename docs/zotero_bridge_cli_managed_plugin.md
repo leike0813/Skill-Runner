@@ -34,7 +34,6 @@ Bootstrap syncs the bundled wrapper skill into managed agent homes:
 ```text
 <AGENT_HOME>/.codex/skills/zotero-bridge-cli
 <AGENT_HOME>/.claude/skills/zotero-bridge-cli
-<AGENT_HOME>/.gemini/skills/zotero-bridge-cli
 <AGENT_HOME>/.qwen/skills/zotero-bridge-cli
 <AGENT_HOME>/.opencode/skills/zotero-bridge-cli
 ```

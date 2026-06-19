@@ -150,18 +150,18 @@ def test_auth_detection_rule_registry_loads_builtin_adapter_profiles() -> None:
     registry.load()
     assert "opencode" in registry._rules_by_engine
     assert "codex" in registry._rules_by_engine
-    assert "gemini" in registry._rules_by_engine
     assert "qwen" in registry._rules_by_engine
     assert "claude" in registry._rules_by_engine
+    assert "gemini" not in registry._rules_by_engine
 
 
 def test_auth_detection_rule_registry_rejects_duplicate_rule_ids(tmp_path: Path) -> None:
     codex_profile = _write_profile(root=tmp_path / "codex", engine="codex", rule_id="duplicate-rule")
-    gemini_profile = _write_profile(root=tmp_path / "gemini", engine="gemini", rule_id="duplicate-rule")
+    qwen_profile = _write_profile(root=tmp_path / "qwen", engine="qwen", rule_id="duplicate-rule")
     registry = AuthDetectionRuleRegistry(
         profile_paths={
             "codex": codex_profile,
-            "gemini": gemini_profile,
+            "qwen": qwen_profile,
         }
     )
     with pytest.raises(RulePackLoadError, match="Duplicate auth detection rule id"):

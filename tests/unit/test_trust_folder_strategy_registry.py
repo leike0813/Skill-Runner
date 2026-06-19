@@ -18,7 +18,7 @@ def test_trust_registry_resolves_codex_gemini_and_claude_strategies(tmp_path: Pa
     noop_strategy = registry.resolve("iflow")
 
     assert codex_strategy.__class__.__name__ == "CodexTrustFolderStrategy"
-    assert gemini_strategy.__class__.__name__ == "GeminiTrustFolderStrategy"
+    assert gemini_strategy.__class__.__name__ == "_NoopTrustFolderStrategy"
     assert claude_strategy.__class__.__name__ == "ClaudeTrustFolderStrategy"
     assert noop_strategy.__class__.__name__ == "_NoopTrustFolderStrategy"
 

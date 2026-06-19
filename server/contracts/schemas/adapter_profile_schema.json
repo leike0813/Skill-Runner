@@ -21,7 +21,7 @@
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "gemini", "opencode", "claude", "qwen"]
+      "enum": ["codex", "opencode", "claude", "qwen"]
     },
     "provider_contract": {
       "type": "object",
@@ -235,18 +235,17 @@
           "enum": [
             "static_supported",
             "static_unsupported",
-            "codex_landlock",
-            "gemini_container"
+            "codex_landlock"
           ]
         },
         "sandbox_probe_message": { "type": ["string", "null"] },
         "auth_hint_strategy": {
           "type": "string",
-          "enum": ["none", "gemini_api_key_disables_sandbox"]
+          "enum": ["none"]
         },
         "runtime_override_strategy": {
           "type": "string",
-          "enum": ["none", "gemini_ui_shell", "claude_ui_shell"]
+          "enum": ["none", "claude_ui_shell"]
         },
         "config_assets": {
           "type": "object",
@@ -299,8 +298,6 @@
                   null,
                   "json_object",
                   "codex_auth_json",
-                  "gemini_google_accounts_json",
-                  "gemini_oauth_creds_json",
                   "opencode_auth_json",
                   "opencode_antigravity_accounts_json",
                   "qwen_oauth_creds_json"

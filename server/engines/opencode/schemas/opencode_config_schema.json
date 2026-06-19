@@ -7669,7 +7669,7 @@
       "additionalProperties": false
     }
   },
-  "additionalProperties": false,
+  "additionalProperties": true,
   "allowComments": true,
   "allowTrailingCommas": true
 }

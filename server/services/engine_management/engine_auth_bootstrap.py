@@ -17,11 +17,6 @@ from server.engines.common.callbacks.openai_local_callback_server import (
     openai_local_callback_server,
 )
 from server.engines.common.openai_auth import OpenAIDeviceProxyFlow
-from server.engines.gemini.auth import GeminiAuthCliFlow, GeminiOAuthProxyFlow
-from server.engines.gemini.auth.callbacks.local_callback_server import (
-    gemini_local_callback_server,
-)
-from server.engines.gemini.auth.runtime_handler import GeminiAuthRuntimeHandler
 from server.engines.opencode.auth import (
     OpencodeAuthCliFlow,
     OpencodeGoogleAntigravityOAuthProxyFlow,
@@ -45,7 +40,7 @@ from server.services.engine_management.engine_auth_strategy_service import (
 )
 
 logger = logging.getLogger(__name__)
-_WINDOWS_PYWINPTY_ENGINES = frozenset({"gemini", "opencode", "qwen"})
+_WINDOWS_PYWINPTY_ENGINES = frozenset({"opencode", "qwen"})
 
 
 @dataclass(frozen=True)
@@ -116,7 +111,6 @@ def _resolve_disabled_cli_delegate_engines() -> set[str]:
 def _build_callback_listener_registry() -> CallbackListenerRegistry:
     registry = CallbackListenerRegistry()
     registry.register(channel="openai", listener=openai_local_callback_server)
-    registry.register(channel="gemini", listener=gemini_local_callback_server)
     registry.register(channel="antigravity", listener=antigravity_local_callback_server)
     registry.register(channel="claude", listener=claude_local_callback_server)
     return registry
@@ -128,8 +122,6 @@ def build_engine_auth_bootstrap(
     agent_home.mkdir(parents=True, exist_ok=True)
     disabled_cli_delegate_engines = _resolve_disabled_cli_delegate_engines()
     # Flows are attached on manager because runtime handlers access them via manager attributes.
-    manager._gemini_flow = GeminiAuthCliFlow()  # noqa: SLF001
-    manager._gemini_oauth_proxy_flow = GeminiOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._opencode_flow = OpencodeAuthCliFlow()  # noqa: SLF001
     manager._claude_flow = ClaudeAuthCliFlow()  # noqa: SLF001
     manager._openai_device_proxy_flow = OpenAIDeviceProxyFlow()  # noqa: SLF001
@@ -147,7 +139,6 @@ def build_engine_auth_bootstrap(
 
     handlers = {
         "codex": CodexAuthRuntimeHandler(manager),
-        "gemini": GeminiAuthRuntimeHandler(manager),
         "opencode": OpencodeAuthRuntimeHandler(manager),
         "claude": ClaudeAuthRuntimeHandler(manager),
         "qwen": QwenAuthRuntimeHandler(manager),

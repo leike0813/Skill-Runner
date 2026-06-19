@@ -42,7 +42,7 @@ def _allow_workspace_skill(monkeypatch, temp_config_dirs):
     skill = SkillManifest(
         id="demo-skill",
         name="demo-skill",
-        engines=["gemini"],
+        engines=["codex"],
         path=temp_config_dirs
     )
     monkeypatch.setattr(
@@ -66,7 +66,7 @@ def _create_skill(
     assets_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text("skill")
     if engines is None:
-        engines = ["gemini"]
+        engines = ["codex"]
     if unsupported_engines is None:
         unsupported_engines = []
     if execution_modes is None:
@@ -121,7 +121,7 @@ def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
         json.dumps(
             {
                 "id": skill_id,
-                "engines": ["gemini"],
+                "engines": ["codex"],
                 "execution_modes": ["auto", "interactive"],
             }
         )
@@ -144,7 +144,7 @@ def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
         id=skill_id,
         path=skill_dir,
         schemas={"input": "assets/input.schema.json"},
-        engines=["gemini"],
+        engines=["codex"],
         execution_modes=["auto", "interactive"],
     )
 
@@ -188,7 +188,7 @@ def _build_upload_zip(filename: str, content: str) -> UploadFile:
 def _build_skill_package_upload(
     *,
     skill_id: str = "temp-upload-skill",
-    engine: str = "gemini",
+    engine: str = "codex",
     runtime_default_options: dict[str, Any] | None = None,
 ) -> UploadFile:
     buffer = io.BytesIO()
@@ -220,7 +220,7 @@ def _create_temp_equivalent_installed_skill(
     base_dir: Path,
     *,
     skill_id: str = "temp-upload-skill",
-    engine: str = "gemini",
+    engine: str = "codex",
 ) -> SkillManifest:
     skill_dir = base_dir / skill_id
     assets_dir = skill_dir / "assets"
@@ -262,16 +262,16 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
         lambda engine, model: {"model": model}
     )
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "codex")
     skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
-    model_name = "gemini-2.5-pro"
+    model_name = "gpt-5.4-mini"
     cache_key = compute_cache_key(
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model=model_name),
+        engine_options=_normalized_engine_options(engine="codex", model=model_name),
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
@@ -281,7 +281,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
             model=model_name
         ),
@@ -318,9 +318,9 @@ async def test_create_run_rejects_when_queue_full(monkeypatch, temp_config_dirs)
         await jobs_router.create_run(
             RunCreateRequest(
                 skill_id=skill.id,
-                engine="gemini",
+                engine="codex",
                 parameter={"a": 1},
-                model="gemini-2.5-pro"
+                model="gpt-5.4-mini"
             ),
             BackgroundTasks()
         )
@@ -345,9 +345,9 @@ async def test_create_run_cache_miss_without_input(monkeypatch, temp_config_dirs
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro"
+            model="gpt-5.4-mini"
         ),
         background_tasks
     )
@@ -383,9 +383,9 @@ async def test_create_run_runtime_env_is_redacted_and_not_in_cache_key(monkeypat
     first = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"env": {"FOO": "secret-a"}},
         ),
         BackgroundTasks(),
@@ -393,9 +393,9 @@ async def test_create_run_runtime_env_is_redacted_and_not_in_cache_key(monkeypat
     second = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"env": {"FOO": "secret-b"}},
         ),
         BackgroundTasks(),
@@ -438,7 +438,7 @@ async def test_create_run_reuses_succeeded_request_workspace(monkeypatch, temp_c
     await store.create_request(
         request_id="req-a",
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={},
@@ -460,9 +460,9 @@ async def test_create_run_reuses_succeeded_request_workspace(monkeypatch, temp_c
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"step": 2},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={
                 "no_cache": True,
                 "workspace": {"mode": "reuse", "request_id": "req-a"},
@@ -501,9 +501,9 @@ async def test_create_run_reuses_succeeded_request_workspace(monkeypatch, temp_c
     c_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"step": 3},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={
                 "no_cache": True,
                 "workspace": {"mode": "reuse", "request_id": response.request_id},
@@ -541,9 +541,9 @@ async def test_create_run_applies_skill_runtime_default_options(monkeypatch, tem
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={},
         ),
         background_tasks,
@@ -581,9 +581,9 @@ async def test_create_run_request_runtime_options_override_skill_defaults(monkey
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"hard_timeout_seconds": 9},
         ),
         background_tasks,
@@ -620,9 +620,9 @@ async def test_create_run_invalid_skill_runtime_defaults_emit_warning_payload(mo
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={},
         ),
         background_tasks,
@@ -652,9 +652,9 @@ async def test_create_run_with_input_schema_requires_upload(monkeypatch, temp_co
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro"
+            model="gpt-5.4-mini"
         ),
         background_tasks
     )
@@ -681,10 +681,10 @@ async def test_create_run_with_inline_only_input_starts_immediately(monkeypatch,
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             input={"query": "hello"},
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         background_tasks
     )
@@ -711,10 +711,10 @@ async def test_create_run_with_inline_required_missing_returns_400(monkeypatch, 
         await jobs_router.create_run(
             RunCreateRequest(
                 skill_id=skill.id,
-                engine="gemini",
+                engine="codex",
                 input={},
                 parameter={},
-                model="gemini-2.5-pro",
+                model="gpt-5.4-mini",
             ),
             BackgroundTasks()
         )
@@ -743,9 +743,9 @@ async def test_create_run_allows_missing_engines_and_defaults_to_all(monkeypatch
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         BackgroundTasks(),
     )
@@ -757,7 +757,7 @@ async def test_create_run_rejects_engine_not_allowed(monkeypatch, temp_config_di
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
     monkeypatch.setattr(jobs_router, "run_store", store)
 
-    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False, engines=["codex"])
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False, engines=["opencode"])
     _patch_skill_registry(monkeypatch, skill)
 
     background_tasks = BackgroundTasks()
@@ -765,7 +765,7 @@ async def test_create_run_rejects_engine_not_allowed(monkeypatch, temp_config_di
         await jobs_router.create_run(
             RunCreateRequest(
                 skill_id=skill.id,
-                engine="gemini",
+                engine="codex",
                 parameter={"a": 1}
             ),
             background_tasks
@@ -775,7 +775,7 @@ async def test_create_run_rejects_engine_not_allowed(monkeypatch, temp_config_di
     detail = excinfo.value.detail
     assert isinstance(detail, dict)
     assert detail["code"] == "SKILL_ENGINE_UNSUPPORTED"
-    assert detail["requested_engine"] == "gemini"
+    assert detail["requested_engine"] == "codex"
 
 
 @pytest.mark.asyncio
@@ -788,7 +788,7 @@ async def test_create_run_rejects_engine_denied_by_unsupported_engines(monkeypat
         "demo-skill",
         with_input_schema=False,
         include_engines=False,
-        unsupported_engines=["gemini"],
+        unsupported_engines=["codex"],
     )
     _patch_skill_registry(monkeypatch, skill)
 
@@ -796,7 +796,7 @@ async def test_create_run_rejects_engine_denied_by_unsupported_engines(monkeypat
         await jobs_router.create_run(
             RunCreateRequest(
                 skill_id=skill.id,
-                engine="gemini",
+                engine="codex",
                 parameter={"a": 1}
             ),
             BackgroundTasks()
@@ -825,22 +825,22 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro"
+            model="gpt-5.4-mini"
         ),
         background_tasks
     )
 
     manifest_hash = _manifest_hash_for_content(temp_config_dirs, "input.txt", "hello")
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "codex")
     skill_package_hash = compute_skill_package_hash(skill.path)
     cache_key = compute_cache_key(
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        engine_options=_normalized_engine_options(engine="codex", model="gpt-5.4-mini"),
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
@@ -882,23 +882,23 @@ async def test_upload_file_interactive_skips_cache_hit(monkeypatch, temp_config_
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"execution_mode": "interactive"}
         ),
         background_tasks
     )
 
     manifest_hash = _manifest_hash_for_content(temp_config_dirs, "input.txt", "hello")
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "codex")
     skill_package_hash = compute_skill_package_hash(skill.path)
     cache_key = compute_cache_key(
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        engine_options=_normalized_engine_options(engine="codex", model="gpt-5.4-mini"),
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
@@ -934,9 +934,9 @@ async def test_upload_file_cache_miss(monkeypatch, temp_config_dirs):
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro"
+            model="gpt-5.4-mini"
         ),
         background_tasks
     )
@@ -980,9 +980,9 @@ async def test_upload_file_rejects_when_queue_full(monkeypatch, temp_config_dirs
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro"
+            model="gpt-5.4-mini"
         ),
         BackgroundTasks()
     )
@@ -1022,9 +1022,9 @@ async def test_upload_temp_skill_creates_run_without_installed_registry_lookup(m
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_source=RequestSkillSource.TEMP_UPLOAD,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"no_cache": True},
         ),
         BackgroundTasks(),
@@ -1036,7 +1036,7 @@ async def test_upload_temp_skill_creates_run_without_installed_registry_lookup(m
         request_id=create_response.request_id,
         background_tasks=upload_tasks,
         file=None,
-        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="codex"),
     )
 
     assert upload_response.cache_hit is False
@@ -1068,9 +1068,9 @@ async def test_upload_temp_skill_applies_runtime_default_options(monkeypatch, te
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_source=RequestSkillSource.TEMP_UPLOAD,
-            engine="gemini",
+            engine="codex",
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={},
         ),
         BackgroundTasks(),
@@ -1084,7 +1084,7 @@ async def test_upload_temp_skill_applies_runtime_default_options(monkeypatch, te
         file=None,
         skill_package=_build_skill_package_upload(
             skill_id="temp-upload-skill",
-            engine="gemini",
+            engine="codex",
             runtime_default_options={"hard_timeout_seconds": 66},
         ),
     )
@@ -1115,10 +1115,10 @@ async def test_upload_temp_skill_different_inline_input_does_not_hit_cache(monke
     first = await jobs_router.create_run(
         RunCreateRequest(
             skill_source=RequestSkillSource.TEMP_UPLOAD,
-            engine="gemini",
+            engine="codex",
             input={"query": "one"},
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         BackgroundTasks(),
     )
@@ -1126,7 +1126,7 @@ async def test_upload_temp_skill_different_inline_input_does_not_hit_cache(monke
         request_id=first.request_id,
         background_tasks=BackgroundTasks(),
         file=None,
-        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="codex"),
     )
     first_record = await store.get_request(first.request_id)
     assert first_record is not None
@@ -1135,10 +1135,10 @@ async def test_upload_temp_skill_different_inline_input_does_not_hit_cache(monke
     second = await jobs_router.create_run(
         RunCreateRequest(
             skill_source=RequestSkillSource.TEMP_UPLOAD,
-            engine="gemini",
+            engine="codex",
             input={"query": "two"},
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         BackgroundTasks(),
     )
@@ -1146,7 +1146,7 @@ async def test_upload_temp_skill_different_inline_input_does_not_hit_cache(monke
         request_id=second.request_id,
         background_tasks=BackgroundTasks(),
         file=None,
-        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="gemini"),
+        skill_package=_build_skill_package_upload(skill_id="temp-upload-skill", engine="codex"),
     )
     second_record = await store.get_request(second.request_id)
 
@@ -1171,9 +1171,9 @@ async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(
     manifest_hash = compute_input_manifest_hash({"files": []})
     cache_key = compute_cache_key(
         skill_id=installed_skill.id,
-        engine="gemini",
+        engine="codex",
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        engine_options=_normalized_engine_options(engine="codex", model="gpt-5.4-mini"),
         input_manifest_hash=manifest_hash,
         inline_input_hash=compute_inline_input_hash({"query": "same"}),
         skill_package_hash=package_hash,
@@ -1183,10 +1183,10 @@ async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(
     create_response = await jobs_router.create_run(
         RunCreateRequest(
             skill_source=RequestSkillSource.TEMP_UPLOAD,
-            engine="gemini",
+            engine="codex",
             input={"query": "same"},
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         BackgroundTasks(),
     )
@@ -1194,7 +1194,7 @@ async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(
         request_id=create_response.request_id,
         background_tasks=BackgroundTasks(),
         file=None,
-        skill_package=_build_skill_package_upload(skill_id=installed_skill.id, engine="gemini"),
+        skill_package=_build_skill_package_upload(skill_id=installed_skill.id, engine="codex"),
     )
     request_record = await store.get_request(create_response.request_id)
 
@@ -1216,15 +1216,15 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
         lambda engine, model: {"model": model}
     )
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "codex")
     skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
     cache_key = compute_cache_key(
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        engine_options=_normalized_engine_options(engine="codex", model="gpt-5.4-mini"),
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
@@ -1234,9 +1234,9 @@ async def test_create_run_no_cache_skips_hit(monkeypatch, temp_config_dirs):
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"no_cache": True}
         ),
         background_tasks
@@ -1264,15 +1264,15 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
         lambda engine, model: {"model": model}
     )
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "codex")
     skill_package_hash = compute_skill_package_hash(skill.path)
     manifest_hash = compute_input_manifest_hash({"files": []})
     cache_key = compute_cache_key(
         skill_id=skill.id,
-        engine="gemini",
+        engine="codex",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
-        engine_options=_normalized_engine_options(engine="gemini", model="gemini-2.5-pro"),
+        engine_options=_normalized_engine_options(engine="codex", model="gpt-5.4-mini"),
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
@@ -1282,9 +1282,9 @@ async def test_create_run_interactive_skips_cache_hit(monkeypatch, temp_config_d
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={"a": 1},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"execution_mode": "interactive"}
         ),
         background_tasks
@@ -1321,9 +1321,9 @@ async def test_create_run_rejects_interactive_when_skill_declares_auto_only(monk
         await jobs_router.create_run(
             RunCreateRequest(
                 skill_id=skill.id,
-                engine="gemini",
+                engine="codex",
                 parameter={"a": 1},
-                model="gemini-2.5-pro",
+                model="gpt-5.4-mini",
                 runtime_options={"execution_mode": "interactive"},
             ),
             BackgroundTasks(),
@@ -1341,7 +1341,7 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     _patch_run_store(monkeypatch, store)
 
     request_id = "request-artifacts"
-    run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
+    run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
     run_dir = Path(str(run_response.workspace_dir))
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -1355,7 +1355,7 @@ async def test_get_run_artifacts_lists_outputs(monkeypatch, temp_config_dirs):
     await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={}
@@ -1382,13 +1382,13 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
     _patch_run_store(monkeypatch, store)
 
     request_id = "request-empty-artifacts"
-    run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
+    run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
 
     await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={}
@@ -1406,7 +1406,7 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     _patch_run_store(monkeypatch, store)
 
     request_id = "request-bundle"
-    run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
+    run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -1419,7 +1419,7 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={}
@@ -1437,7 +1437,7 @@ async def test_get_run_artifacts_does_not_scan_unlisted_files(monkeypatch, temp_
     _patch_run_store(monkeypatch, store)
 
     request_id = "request-unlisted-artifacts"
-    run_request = RunCreateRequest(skill_id="demo-skill", engine="gemini", parameter={})
+    run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
     run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
@@ -1448,7 +1448,7 @@ async def test_get_run_artifacts_does_not_scan_unlisted_files(monkeypatch, temp_
     await store.create_request(
         request_id=request_id,
         skill_id="demo-skill",
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={}

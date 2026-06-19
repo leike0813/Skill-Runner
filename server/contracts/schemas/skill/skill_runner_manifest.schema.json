@@ -84,9 +84,6 @@
         "codex": {
           "type": "string"
         },
-        "gemini": {
-          "type": "string"
-        },
         "opencode": {
           "type": "string"
         },
@@ -146,7 +143,6 @@
       "enum": [
         "codex",
         "claude",
-        "gemini",
         "opencode",
         "qwen"
       ]

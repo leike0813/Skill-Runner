@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from server.engines.codex.auth.detection import CodexAuthDetector
-from server.engines.gemini.auth.detection import GeminiAuthDetector
 from server.engines.opencode.auth.detection import OpencodeAuthDetector
 from server.engines.qwen.auth.detection import QwenAuthDetector
 
@@ -28,7 +27,6 @@ def create_default_auth_detector_registry() -> AuthDetectorRegistry:
     return AuthDetectorRegistry(
         _detectors={
             "codex": CodexAuthDetector(),
-            "gemini": GeminiAuthDetector(),
             "opencode": OpencodeAuthDetector(),
             "qwen": QwenAuthDetector(),
         }

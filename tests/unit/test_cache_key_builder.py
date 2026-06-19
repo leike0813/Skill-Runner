@@ -37,10 +37,10 @@ def test_skill_fingerprint_changes_with_files(tmp_path):
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
 
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
-    fp1 = compute_skill_fingerprint(skill, "gemini")
+    fp1 = compute_skill_fingerprint(skill, "qwen")
 
     (skill_dir / "SKILL.md").write_text("v2")
-    fp2 = compute_skill_fingerprint(skill, "gemini")
+    fp2 = compute_skill_fingerprint(skill, "qwen")
 
     assert fp1 != fp2
 
@@ -53,10 +53,10 @@ def test_cache_key_stable_for_same_inputs(tmp_path):
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "qwen")
     cache_key1 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -64,7 +64,7 @@ def test_cache_key_stable_for_same_inputs(tmp_path):
     )
     cache_key2 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -98,10 +98,10 @@ def test_cache_key_changes_with_inline_input_hash(tmp_path):
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "qwen")
     key1 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -110,7 +110,7 @@ def test_cache_key_changes_with_inline_input_hash(tmp_path):
     )
     key2 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -128,10 +128,10 @@ def test_cache_key_changes_with_workspace_input_token(tmp_path):
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
 
-    skill_fp = compute_skill_fingerprint(skill, "gemini")
+    skill_fp = compute_skill_fingerprint(skill, "qwen")
     key1 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -140,7 +140,7 @@ def test_cache_key_changes_with_workspace_input_token(tmp_path):
     )
     key2 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         skill_fingerprint=skill_fp,
         parameter={"a": 1},
         engine_options={"model": "x"},
@@ -153,14 +153,14 @@ def test_cache_key_changes_with_workspace_input_token(tmp_path):
 def test_cache_key_changes_only_when_skill_run_feedback_enabled():
     base_key = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
     )
     false_key = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
@@ -168,7 +168,7 @@ def test_cache_key_changes_only_when_skill_run_feedback_enabled():
     )
     true_key = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
@@ -184,18 +184,15 @@ def test_skill_fingerprint_engine_specific_config(tmp_path):
     assets_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("base")
     (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
-    (assets_dir / "gemini_settings.json").write_text(json.dumps({"model": "a"}))
     (assets_dir / "qwen_config.json").write_text(json.dumps({"model": {"name": "b"}}))
     (assets_dir / "codex_config.toml").write_text("model = 'c'")
     (assets_dir / "opencode_config.json").write_text(json.dumps({"sandbox": "workspace-write"}))
 
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
-    gemini_fp = compute_skill_fingerprint(skill, "gemini")
     qwen_fp = compute_skill_fingerprint(skill, "qwen")
     codex_fp = compute_skill_fingerprint(skill, "codex")
     opencode_fp = compute_skill_fingerprint(skill, "opencode")
 
-    assert gemini_fp != qwen_fp
     assert qwen_fp != codex_fp
     assert codex_fp != opencode_fp
 
@@ -209,7 +206,7 @@ def test_skill_fingerprint_uses_declared_engine_config_override(tmp_path):
         json.dumps(
             {
                 "id": "demo",
-                "engine_configs": {"gemini": "custom/gemini_settings.json"},
+                "engine_configs": {"qwen": "custom/gemini_settings.json"},
             }
         )
     )
@@ -222,12 +219,12 @@ def test_skill_fingerprint_uses_declared_engine_config_override(tmp_path):
         id="demo",
         path=skill_dir,
         schemas={},
-        engine_configs={"gemini": "custom/gemini_settings.json"},
+        engine_configs={"qwen": "custom/gemini_settings.json"},
     )
-    original = compute_skill_fingerprint(skill, "gemini")
+    original = compute_skill_fingerprint(skill, "qwen")
 
     (custom_dir / "gemini_settings.json").write_text(json.dumps({"model": "declared-2"}))
-    updated = compute_skill_fingerprint(skill, "gemini")
+    updated = compute_skill_fingerprint(skill, "qwen")
 
     assert original != updated
 
@@ -241,17 +238,17 @@ def test_skill_fingerprint_uses_schema_fallback_assets(tmp_path):
     (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {"a": {"type": "string"}}}))
 
     skill = SkillManifest(id="demo", path=skill_dir, schemas={})
-    original = compute_skill_fingerprint(skill, "gemini")
+    original = compute_skill_fingerprint(skill, "qwen")
 
     (assets_dir / "output.schema.json").write_text(json.dumps({"type": "object", "properties": {"b": {"type": "string"}}}))
-    updated = compute_skill_fingerprint(skill, "gemini")
+    updated = compute_skill_fingerprint(skill, "qwen")
 
     assert original != updated
 
 
 def test_skill_fingerprint_without_path_returns_empty():
     skill = SkillManifest(id="demo", path=None, schemas={})
-    assert compute_skill_fingerprint(skill, "gemini") == ""
+    assert compute_skill_fingerprint(skill, "qwen") == ""
 
 
 def test_input_manifest_missing_dir():
@@ -293,7 +290,7 @@ def test_cache_key_changes_with_skill_package_hash(tmp_path):
 
     key1 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
@@ -301,7 +298,7 @@ def test_cache_key_changes_with_skill_package_hash(tmp_path):
     )
     key2 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
@@ -320,7 +317,7 @@ def test_cache_key_stable_for_installed_and_temp_with_same_package_hash(tmp_path
 
     key1 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",
@@ -329,7 +326,7 @@ def test_cache_key_stable_for_installed_and_temp_with_same_package_hash(tmp_path
     )
     key2 = compute_cache_key(
         skill_id="demo",
-        engine="gemini",
+        engine="qwen",
         parameter={"a": 1},
         engine_options={"model": "x"},
         input_manifest_hash="h",

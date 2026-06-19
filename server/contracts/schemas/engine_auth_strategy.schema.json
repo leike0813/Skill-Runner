@@ -18,16 +18,12 @@
       "additionalProperties": false,
       "required": [
         "codex",
-        "gemini",
         "opencode",
         "claude",
         "qwen"
       ],
       "properties": {
         "codex": {
-          "$ref": "#/$defs/engine_scoped_engine"
-        },
-        "gemini": {
           "$ref": "#/$defs/engine_scoped_engine"
         },
         "opencode": {

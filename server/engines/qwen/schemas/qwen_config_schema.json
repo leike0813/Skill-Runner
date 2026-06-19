@@ -11,7 +11,13 @@
           "properties": {
             "selectedType": {
               "type": "string",
-              "enum": ["qwen-oauth", "openai", "alibaba-cloud-coding-plan"]
+              "enum": [
+                "qwen-oauth",
+                "openai",
+                "alibaba-cloud-coding-plan",
+                "coding-plan-china",
+                "coding-plan-global"
+              ]
             }
           }
         },
@@ -63,7 +69,7 @@
         },
         "approvalMode": {
           "type": "string",
-          "enum": ["plan", "default", "auto-edit", "yolo"]
+          "enum": ["plan", "default", "auto-edit", "yolo", "bypassPermissions", "dontAsk"]
         },
         "enableInteractiveShell": {
           "type": "boolean"
@@ -87,7 +93,7 @@
       "properties": {
         "defaultMode": {
           "type": "string",
-          "enum": ["plan", "default", "auto-edit", "yolo"]
+          "enum": ["plan", "default", "auto-edit", "yolo", "bypassPermissions", "dontAsk"]
         },
         "allow": {
           "type": "array",
@@ -198,11 +204,42 @@
             },
             "envKey": {
               "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "generationConfig": {
+              "type": "object"
             }
           },
           "required": ["id", "envKey"]
         }
       }
+    },
+    "slashCommands": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "mcpServers": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "lsp": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": true
     }
-  }
+  },
+  "additionalProperties": true
 }

@@ -33,26 +33,6 @@ def test_codex_register_and_remove_run_folder(tmp_path):
     assert str(run_dir.resolve()) not in doc.get("projects", {})
 
 
-def test_gemini_register_repairs_malformed_file(tmp_path):
-    runs_root = tmp_path / "runs"
-    run_dir = runs_root / "run-b"
-    run_dir.mkdir(parents=True)
-    codex_path = tmp_path / "codex" / "config.toml"
-    gemini_path = tmp_path / "gemini" / "trustedFolders.json"
-    gemini_path.parent.mkdir(parents=True, exist_ok=True)
-    gemini_path.write_text("not-json", encoding="utf-8")
-    manager = RunFolderTrustManager(
-        codex_config_path=codex_path,
-        gemini_trusted_path=gemini_path,
-        runs_root=runs_root,
-    )
-
-    manager.register_run_folder("gemini", run_dir)
-    payload = json.loads(gemini_path.read_text(encoding="utf-8"))
-    assert payload[str(run_dir.resolve())] == "TRUST_FOLDER"
-    assert gemini_path.with_name("trustedFolders.json.bak").exists()
-
-
 def test_claude_register_and_remove_run_folder(tmp_path):
     runs_root = tmp_path / "runs"
     run_dir = runs_root / "run-claude"
@@ -119,8 +99,6 @@ def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     manager.bootstrap_parent_trust(runs_root)
     manager.register_run_folder("codex", active_dir)
     manager.register_run_folder("codex", stale_dir)
-    manager.register_run_folder("gemini", active_dir)
-    manager.register_run_folder("gemini", stale_dir)
     manager.register_run_folder("claude", active_dir)
     manager.register_run_folder("claude", stale_dir)
 
@@ -132,10 +110,10 @@ def test_cleanup_stale_entries_only_removes_inactive_run_paths(tmp_path):
     assert str(stale_dir.resolve()) not in projects
     assert str(runs_root.resolve()) in projects
 
-    payload = json.loads(gemini_path.read_text(encoding="utf-8"))
-    assert str(active_dir.resolve()) in payload
-    assert str(stale_dir.resolve()) not in payload
-    assert str(runs_root.resolve()) in payload
+    assert not gemini_path.exists()
+
+    manager.register_run_folder("gemini", active_dir)
+    assert not gemini_path.exists()
 
     claude_payload = json.loads(claude_path.read_text(encoding="utf-8"))
     projects = claude_payload.get("projects", {})
@@ -165,9 +143,7 @@ def test_bootstrap_parent_trust_is_idempotent(tmp_path):
     assert projects[parent_key]["trust_level"] == "trusted"
     assert list(projects.keys()).count(parent_key) == 1
 
-    payload = json.loads(gemini_path.read_text(encoding="utf-8"))
-    assert payload[parent_key] == "TRUST_FOLDER"
-    assert len([k for k in payload if k == parent_key]) == 1
+    assert not gemini_path.exists()
 
 
 def test_claude_register_repairs_malformed_file(tmp_path):

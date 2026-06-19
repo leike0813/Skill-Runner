@@ -34,9 +34,8 @@ class FakeBackend:
     async def list_management_engines(self) -> dict[str, Any]:
         return {
             "engines": [
-                {"engine": "gemini"},
-                {"engine": "codex"},
                 {"engine": "qwen"},
+                {"engine": "codex"},
             ]
         }
 
@@ -48,7 +47,7 @@ class FakeBackend:
                     "run_id": "run-e2e-1",
                     "status": "waiting_user",
                     "skill_id": "demo-skill",
-                    "engine": "gemini",
+                    "engine": "qwen",
                     "updated_at": "2026-02-24T00:00:00",
                 },
                 {
@@ -56,7 +55,7 @@ class FakeBackend:
                     "run_id": "run-temp-1",
                     "status": "waiting_user",
                     "skill_id": "demo-prime-number",
-                    "engine": "gemini",
+                    "engine": "qwen",
                     "updated_at": "2026-02-24T00:01:00",
                     "run_source": "temp",
                 },
@@ -70,7 +69,7 @@ class FakeBackend:
                     "id": "demo-skill",
                     "name": "Demo Skill",
                     "version": "1.0.0",
-                    "engines": ["gemini"],
+                    "engines": ["qwen"],
                     "health": "healthy",
                 }
             ]
@@ -82,7 +81,7 @@ class FakeBackend:
             "id": "demo-skill",
             "name": "Demo Skill",
             "version": "1.0.0",
-            "engines": ["gemini"],
+            "engines": ["qwen"],
             "execution_modes": ["auto", "interactive"],
             "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
         }
@@ -115,13 +114,12 @@ class FakeBackend:
         }
 
     async def get_engine_detail(self, engine: str) -> dict[str, Any]:
-        if engine != "gemini":
+        if engine != "qwen":
             return {"engine": engine, "models": []}
         return {
-            "engine": "gemini",
+            "engine": "qwen",
             "models": [
-                {"id": "gemini-2.5-pro", "display_name": "Gemini 2.5 Pro"},
-                {"id": "gemini-2.5-flash", "display_name": "Gemini 2.5 Flash"},
+                {"id": "qwen3-coder-plus", "display_name": "Qwen3 Coder Plus"},
             ],
         }
 
@@ -179,7 +177,7 @@ class FakeBackend:
                 "status": "waiting_user",
                 "pending_interaction_id": 11,
                 "skill_id": "demo-prime-number",
-                "engine": "gemini",
+                "engine": "qwen",
             }
         return {
             "request_id": request_id,
@@ -187,7 +185,7 @@ class FakeBackend:
             "status": "waiting_user",
             "pending_interaction_id": 7,
             "skill_id": "demo-skill",
-            "engine": "gemini",
+            "engine": "qwen",
         }
 
     async def get_run_pending(
@@ -401,7 +399,7 @@ class FakeBackendEffectiveEnginesOnly(FakeBackend):
                     "name": "Demo Skill",
                     "version": "1.0.0",
                     "engines": [],
-                    "effective_engines": ["gemini"],
+                    "effective_engines": ["qwen"],
                     "health": "healthy",
                 }
             ]
@@ -414,7 +412,7 @@ class FakeBackendEffectiveEnginesOnly(FakeBackend):
             "name": "Demo Skill",
             "version": "1.0.0",
             "engines": [],
-            "effective_engines": ["gemini"],
+            "effective_engines": ["qwen"],
             "execution_modes": ["auto", "interactive"],
             "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
         }
@@ -427,7 +425,7 @@ class FakeBackendNoSkillRuntimeDefault(FakeBackend):
             "id": "demo-skill",
             "name": "Demo Skill",
             "version": "1.0.0",
-            "engines": ["gemini"],
+            "engines": ["qwen"],
             "execution_modes": ["auto", "interactive"],
         }
 
@@ -644,9 +642,9 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
             "POST",
             "/skills/demo-skill/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "auto",
-                "model": "gemini-2.5-pro",
+                "model": "qwen3-coder-plus",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
                 "runtime__hard_timeout_seconds": "1800",
@@ -660,7 +658,7 @@ async def test_e2e_example_client_full_flow(tmp_path: Path):
         assert create.status_code == 303
         assert create.headers.get("location") == "/runs/req-e2e-1"
         assert fake_backend.create_payloads[-1]["runtime_options"]["execution_mode"] == "auto"
-        assert fake_backend.create_payloads[-1]["model"] == "gemini-2.5-pro"
+        assert fake_backend.create_payloads[-1]["model"] == "qwen3-coder-plus"
         assert fake_backend.create_payloads[-1]["effort"] == "default"
         assert fake_backend.create_payloads[-1]["runtime_options"]["no_cache"] is True
         assert fake_backend.create_payloads[-1]["runtime_options"]["hard_timeout_seconds"] == 1800
@@ -812,7 +810,7 @@ async def test_e2e_example_client_fixture_temp_skill_flow(tmp_path: Path):
             "POST",
             "/fixtures/demo-prime-number/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "auto",
                 "parameter__divisor": "3",
                 "runtime__hard_timeout_seconds": "2400",
@@ -928,9 +926,9 @@ async def test_e2e_example_client_fixture_fallbacks_to_management_engines_when_o
     try:
         run_form = await _request(app, "GET", "/fixtures/demo-auto-skill/run")
         assert run_form.status_code == 200
-        assert 'option value="gemini"' in run_form.text
+        assert 'option value="qwen"' in run_form.text
         assert 'option value="codex"' in run_form.text
-        assert "gemini-2.5-pro" in run_form.text
+        assert "qwen3-coder-plus" in run_form.text
         assert 'value="1200"' in run_form.text
 
         create = await _request(
@@ -945,7 +943,7 @@ async def test_e2e_example_client_fixture_fallbacks_to_management_engines_when_o
         )
         assert create.status_code == 303
         assert fake_backend.temp_create_payloads
-        assert fake_backend.temp_create_payloads[-1]["engine"] == "gemini"
+        assert fake_backend.temp_create_payloads[-1]["engine"] == "qwen"
     finally:
         app.dependency_overrides.clear()
 
@@ -961,7 +959,7 @@ async def test_e2e_example_client_rejects_invalid_execution_mode(tmp_path: Path)
             "POST",
             "/skills/demo-skill/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "unsupported-mode",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
@@ -989,7 +987,7 @@ async def test_e2e_example_client_rejects_invalid_model_for_engine(tmp_path: Pat
             "POST",
             "/skills/demo-skill/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "auto",
                 "model": "not-exist-model",
                 "input__prompt": "hello",
@@ -1096,11 +1094,11 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
     try:
         home = await _request(app, "GET", "/")
         assert home.status_code == 200
-        assert "gemini" in home.text
+        assert "qwen" in home.text
 
         run_form = await _request(app, "GET", "/skills/demo-skill/run")
         assert run_form.status_code == 200
-        assert 'option value="gemini"' in run_form.text
+        assert 'option value="qwen"' in run_form.text
 
         create = await _request(
             app,
@@ -1108,7 +1106,7 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
             "/skills/demo-skill/run",
             data={
                 "execution_mode": "auto",
-                "model": "gemini-2.5-pro",
+                "model": "qwen3-coder-plus",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
                 "runtime__hard_timeout_seconds": "1800",
@@ -1119,7 +1117,7 @@ async def test_e2e_example_client_uses_effective_engines_when_declared_engines_e
             follow_redirects=False,
         )
         assert create.status_code == 303
-        assert fake_backend.create_payloads[-1]["engine"] == "gemini"
+        assert fake_backend.create_payloads[-1]["engine"] == "qwen"
     finally:
         app.dependency_overrides.clear()
 
@@ -1154,7 +1152,7 @@ async def test_e2e_example_client_rejects_invalid_hard_timeout(submitted_value: 
             "POST",
             "/skills/demo-skill/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "auto",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",
@@ -1183,7 +1181,7 @@ async def test_e2e_example_client_accepts_zero_hard_timeout():
             "POST",
             "/skills/demo-skill/run",
             data={
-                "engine": "gemini",
+                "engine": "qwen",
                 "execution_mode": "auto",
                 "input__prompt": "hello",
                 "parameter__top_k": "3",

@@ -214,3 +214,12 @@ The system SHALL remove only Skill-Runner-managed Claude MCP entries during mana
 - **THEN** the system MUST remove that server from active state top-level `mcpServers`
 - **AND** it MUST preserve unrelated user-configured MCP servers
 
+
+### Requirement: MCP engine scopes MUST use active engine enum
+
+
+MCP registry entries MUST target only active supported engines.
+
+#### Scenario: MCP registry rejects Gemini scope
+- **WHEN** an MCP registry entry declares `engines` or `unsupported_engines` containing `gemini`
+- **THEN** MCP registry validation MUST reject the entry as unsupported

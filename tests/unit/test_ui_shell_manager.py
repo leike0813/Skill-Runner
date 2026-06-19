@@ -127,7 +127,7 @@ def test_ui_shell_manager_single_active_session_busy(tmp_path: Path, patch_fake_
     assert started["active"] is True
     assert started["ttyd_port"] == 17681
     with pytest.raises(UiShellBusyError):
-        manager.start_session("gemini")
+        manager.start_session("qwen")
 
 
 def test_ui_shell_manager_stop_session_sets_terminal(tmp_path: Path, patch_fake_popen, monkeypatch):
@@ -197,7 +197,7 @@ def test_ui_shell_manager_non_codex_sandbox_probe_is_non_blocking(
     patch_fake_popen,
 ):
     manager = _new_manager(tmp_path)
-    started = manager.start_session("gemini")
+    started = manager.start_session("qwen")
     assert started["active"] is True
     assert started["sandbox_status"] in {"supported", "unsupported"}
     assert started["sandbox_message"]
@@ -406,27 +406,8 @@ def test_ui_shell_manager_gemini_session_enforces_sandbox_and_disables_shell(
     patch_fake_popen,
 ):
     manager = _new_manager(tmp_path)
-    monkeypatch.setattr(
-        manager,
-        "_probe_sandbox_status",
-        lambda _engine: ("supported", "sandbox ready"),
-    )
-    started = manager.start_session("gemini")
-    session_dir = Path(started["session_dir"])
-    popen_args, popen_kwargs = patch_fake_popen[0]
-    command = list(cast(list[str], popen_args[0]))
-    assert "--sandbox" in command
-    assert "--approval-mode" in command
-    assert "default" in command
-    assert "GEMINI_SANDBOX" not in popen_kwargs["env"]
-    settings_path = session_dir / ".gemini" / "settings.json"
-    payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["general"]["enableAutoUpdate"] is False
-    assert payload["tools"]["sandbox"] is True
-    assert payload["tools"]["autoAccept"] is False
-    assert "run_shell_command" in payload["tools"]["exclude"]
-    assert "ShellTool" in payload["tools"]["exclude"]
-    assert payload["security"]["disableYoloMode"] is True
+    with pytest.raises(UiShellValidationError, match="Unsupported engine"):
+        manager.start_session("gemini")
 
 
 def test_ui_shell_manager_qwen_session_disables_shell_and_reports_non_sandbox(
@@ -482,22 +463,8 @@ def test_ui_shell_manager_gemini_fallback_without_sandbox_runtime_still_disables
     patch_fake_popen,
 ):
     manager = _new_manager(tmp_path)
-    monkeypatch.setattr(
-        manager,
-        "_probe_sandbox_status",
-        lambda _engine: ("unsupported", "docker unavailable"),
-    )
-    started = manager.start_session("gemini")
-    session_dir = Path(started["session_dir"])
-    popen_args, _ = patch_fake_popen[0]
-    command = list(cast(list[str], popen_args[0]))
-    assert "--sandbox" not in command
-    assert "GEMINI_SANDBOX" not in patch_fake_popen[0][1]["env"]
-    settings_path = session_dir / ".gemini" / "settings.json"
-    payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["general"]["enableAutoUpdate"] is False
-    assert payload["tools"]["sandbox"] is False
-    assert "run_shell_command" in payload["tools"]["exclude"]
+    with pytest.raises(UiShellValidationError, match="Unsupported engine"):
+        manager.start_session("gemini")
 
 
 def test_ui_shell_manager_gemini_api_key_mode_disables_sandbox(
@@ -506,37 +473,8 @@ def test_ui_shell_manager_gemini_api_key_mode_disables_sandbox(
     patch_fake_popen,
 ):
     manager = _new_manager(tmp_path)
-    monkeypatch.setattr(
-        manager,
-        "_probe_sandbox_status",
-        lambda _engine: ("supported", "sandbox ready"),
-    )
-    gemini_settings = tmp_path / "agent_home" / ".gemini" / "settings.json"
-    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
-    gemini_settings.write_text(
-        json.dumps(
-            {
-                "security": {
-                    "auth": {
-                        "selectedType": "gemini-api-key",
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    started = manager.start_session("gemini")
-    popen_args, _ = patch_fake_popen[0]
-    command = list(cast(list[str], popen_args[0]))
-    assert "--sandbox" not in command
-    assert started["sandbox_status"] == "unsupported"
-    assert "gemini-api-key" in started["sandbox_message"]
-
-    session_dir = Path(started["session_dir"])
-    settings_path = session_dir / ".gemini" / "settings.json"
-    payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["tools"]["sandbox"] is False
+    with pytest.raises(UiShellValidationError, match="Unsupported engine"):
+        manager.start_session("gemini")
 
 
 @pytest.mark.parametrize(
@@ -554,20 +492,5 @@ def test_ui_shell_manager_gemini_missing_auth_fields_do_not_crash_and_keep_sandb
     settings_payload: dict[str, Any],
 ):
     manager = _new_manager(tmp_path)
-    monkeypatch.setattr(
-        manager,
-        "_probe_sandbox_status",
-        lambda _engine: ("supported", "sandbox ready"),
-    )
-    gemini_settings = tmp_path / "agent_home" / ".gemini" / "settings.json"
-    gemini_settings.parent.mkdir(parents=True, exist_ok=True)
-    gemini_settings.write_text(
-        json.dumps(settings_payload),
-        encoding="utf-8",
-    )
-
-    started = manager.start_session("gemini")
-    popen_args, _ = patch_fake_popen[0]
-    command = list(cast(list[str], popen_args[0]))
-    assert "--sandbox" in command
-    assert started["sandbox_status"] == "supported"
+    with pytest.raises(UiShellValidationError, match="Unsupported engine"):
+        manager.start_session("gemini")

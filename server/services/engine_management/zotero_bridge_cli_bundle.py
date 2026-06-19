@@ -24,7 +24,6 @@ WRAPPER_SKILL_ID = "zotero-bridge-cli"
 GLOBAL_SKILL_DIRS: Mapping[str, Path] = {
     "codex": Path(".codex") / "skills" / WRAPPER_SKILL_ID,
     "claude": Path(".claude") / "skills" / WRAPPER_SKILL_ID,
-    "gemini": Path(".gemini") / "skills" / WRAPPER_SKILL_ID,
     "qwen": Path(".qwen") / "skills" / WRAPPER_SKILL_ID,
     "opencode": Path(".opencode") / "skills" / WRAPPER_SKILL_ID,
 }

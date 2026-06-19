@@ -13,7 +13,7 @@ from server.services.skill.temp_skill_package_cache_service import TempSkillPack
 def _package_bytes(*, skill_id: str = "demo-temp", reverse_order: bool = False) -> bytes:
     runner = {
         "id": skill_id,
-        "engines": ["gemini"],
+        "engines": ["codex"],
         "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",

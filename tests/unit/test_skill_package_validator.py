@@ -44,7 +44,7 @@ def _build_skill_zip(
         },
     }
     if include_engines:
-        runner["engines"] = ["gemini"]
+        runner["engines"] = ["codex"]
     if unsupported_engines is not None:
         runner["unsupported_engines"] = unsupported_engines
     if legacy_unsupport_engine is not None:
@@ -214,7 +214,7 @@ def test_rejects_overlapping_engines_and_unsupported_engines(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "overlap_engines.zip"
     zip_path.write_bytes(
-        _build_skill_zip(unsupported_engines=["gemini"])
+        _build_skill_zip(unsupported_engines=["codex"])
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)
     validator.extract_zip_safe(zip_path, tmp_path / "stage_overlap_engines")
@@ -232,7 +232,7 @@ def test_rejects_empty_effective_engines_when_engines_omitted(tmp_path):
     zip_path.write_bytes(
         _build_skill_zip(
             include_engines=False,
-            unsupported_engines=["codex", "gemini", "opencode", "claude", "qwen"],
+            unsupported_engines=["codex", "opencode", "claude", "qwen"],
         )
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)
@@ -249,7 +249,7 @@ def test_rejects_legacy_unsupport_engine_field(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "legacy_unsupport_engine.zip"
     zip_path.write_bytes(
-        _build_skill_zip(legacy_unsupport_engine=["gemini"])
+        _build_skill_zip(legacy_unsupport_engine=["codex"])
     )
     top = validator.inspect_zip_top_level_from_path(zip_path)
     validator.extract_zip_safe(zip_path, tmp_path / "stage_legacy_unsupport_engine")

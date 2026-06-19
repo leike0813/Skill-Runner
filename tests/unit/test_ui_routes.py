@@ -160,13 +160,12 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.ui.engine_status_cache_service.get_snapshot",
-        lambda: {
-            "claude": SimpleNamespace(present=False, version=None),
-            "codex": SimpleNamespace(present=True, version="0.89.0"),
-            "gemini": SimpleNamespace(present=True, version=""),
-            "opencode": SimpleNamespace(present=True, version=None),
-            "qwen": SimpleNamespace(present=False, version=None),
-        },
+            lambda: {
+                "claude": SimpleNamespace(present=False, version=None),
+                "codex": SimpleNamespace(present=True, version="0.89.0"),
+                "opencode": SimpleNamespace(present=True, version=None),
+                "qwen": SimpleNamespace(present=False, version=None),
+            },
     )
 
     response = await _request("GET", "/ui")
@@ -176,10 +175,9 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
     assert 'id="engine-status-indicator"' in response.text
     assert 'data-engine-status-refresh="static"' in response.text
-    assert 'data-engine-count="5"' in response.text
-    assert "style=\"--engine-count: 5;\"" in response.text
+    assert 'data-engine-count="4"' in response.text
+    assert "style=\"--engine-count: 4;\"" in response.text
     assert 'data-engine="codex" data-status-level="healthy"' in response.text
-    assert 'data-engine="gemini" data-status-level="warning"' in response.text
     assert 'data-engine="qwen" data-status-level="error"' in response.text
 
 

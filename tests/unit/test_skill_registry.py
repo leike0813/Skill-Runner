@@ -87,7 +87,7 @@ def test_scan_skips_excluded_and_invalid_dirs(tmp_path):
             {
                 "id": "valid-skill",
                 "version": "1.0.0",
-                "engines": ["gemini"],
+                "engines": ["claude"],
                 "schemas": {
                     "input": "assets/input.schema.json",
                     "parameter": "assets/parameter.schema.json",
@@ -120,7 +120,7 @@ def test_scan_missing_execution_modes_falls_back_to_auto(tmp_path, caplog):
         json.dumps(
             {
                 "id": "legacy-skill",
-                "engines": ["gemini"],
+                "engines": ["claude"],
                 "schemas": {"output": "assets/output.schema.json"},
             }
         )
@@ -160,7 +160,7 @@ def test_scan_missing_engines_defaults_to_all_supported(tmp_path):
         registry.scan_skills()
         skill = registry.get_skill("legacy-engine-skill")
         assert skill is not None
-        assert skill.effective_engines == ["codex", "gemini", "opencode", "claude", "qwen"]
+        assert skill.effective_engines == ["codex", "opencode", "claude", "qwen"]
         assert skill.engines == []
 
 
@@ -205,7 +205,7 @@ def test_scan_skills_falls_back_to_builtin_when_user_dir_empty(tmp_path):
             {
                 "id": "builtin-only-skill",
                 "version": "1.0.0",
-                "engines": ["gemini"],
+                "engines": ["claude"],
                 "execution_modes": ["auto"],
                 "schemas": {"output": "assets/output.schema.json"},
             }
@@ -245,7 +245,7 @@ def test_scan_skills_user_overrides_builtin_on_same_skill_id(tmp_path):
             {
                 "id": "duplicate-skill",
                 "version": "1.0.0",
-                "engines": ["gemini"],
+                "engines": ["claude"],
                 "execution_modes": ["auto"],
                 "schemas": {"output": "assets/output.schema.json"},
             }

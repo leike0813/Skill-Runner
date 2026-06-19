@@ -25,7 +25,7 @@ def _build_skill_zip(
     runner = {
         "id": skill_id,
         "version": version,
-        "engines": ["gemini"],
+        "engines": ["codex"],
         "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",
@@ -73,7 +73,7 @@ def _build_invalid_zip_missing_output_schema(skill_id: str, version: str) -> byt
     runner = {
         "id": skill_id,
         "version": version,
-        "engines": ["gemini"],
+        "engines": ["codex"],
         "execution_modes": ["auto", "interactive"],
         "schemas": {
             "input": "assets/input.schema.json",

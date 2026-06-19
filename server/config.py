@@ -256,7 +256,6 @@ _C.SYSTEM.SESSION_TIMEOUT_SEC = int(
 _C.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = (
     "opencode",
     "codex",
-    "gemini",
     "claude",
     "qwen"
 )

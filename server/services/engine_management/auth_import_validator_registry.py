@@ -43,22 +43,6 @@ def _validate_json_object(name: str, content: bytes) -> None:
     _require_json_object(name, content)
 
 
-def _validate_gemini_accounts(name: str, content: bytes) -> None:
-    payload = _require_json_object(name, content)
-    if "accounts" not in payload and "active" not in payload:
-        raise AuthImportValidationError(
-            f"{name} must contain Gemini account metadata (accounts/active)"
-        )
-
-
-def _validate_gemini_oauth_creds(name: str, content: bytes) -> None:
-    payload = _require_json_object(name, content)
-    if "refresh_token" not in payload and "tokens" not in payload:
-        raise AuthImportValidationError(
-            f"{name} must contain oauth credential fields (refresh_token/tokens)"
-        )
-
-
 def _validate_iflow_accounts(name: str, content: bytes) -> None:
     payload = _require_json_object(name, content)
     if "accounts" not in payload and "active" not in payload:
@@ -135,8 +119,6 @@ auth_import_validator_registry = AuthImportValidatorRegistry(
     _validators={
         "json_object": _validate_json_object,
         "codex_auth_json": _validate_codex_auth_json,
-        "gemini_google_accounts_json": _validate_gemini_accounts,
-        "gemini_oauth_creds_json": _validate_gemini_oauth_creds,
         "opencode_auth_json": _validate_opencode_auth,
         "opencode_antigravity_accounts_json": _validate_opencode_antigravity_accounts,
         "qwen_oauth_creds_json": _validate_qwen_oauth_creds,

@@ -109,7 +109,7 @@ def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(tmp_p
 
     result = ensure_zotero_bridge_managed_plugin(
         profile,
-        engines=("codex", "claude", "gemini", "qwen", "opencode"),
+        engines=("codex", "claude", "qwen", "opencode"),
         bundle_root=bundle,
         system="Linux",
         machine="x86_64",

@@ -18,7 +18,7 @@ def _allow_cleanup_skill(monkeypatch, tmp_path):
     skill = SkillManifest(
         id="s",
         name="s",
-        engines=["gemini"],
+        engines=["codex"],
         path=tmp_path
     )
     monkeypatch.setattr(
@@ -67,9 +67,9 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
     old_ts = (now - timedelta(days=2)).isoformat()
     current_ts = now.isoformat()
 
-    run_old = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    run_failed = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_old = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
+    run_failed = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
+    run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
 
     await _create_run_record(store, run_old, cache_key="k1", status=RunStatus.SUCCEEDED)
     await _create_run_record(store, run_failed, cache_key="k2", status=RunStatus.FAILED)
@@ -84,7 +84,7 @@ async def test_cleanup_expired_runs_removes_failed_and_old(monkeypatch, temp_con
         await store.create_request(
             request_id=request_id,
             skill_id="s",
-            engine="gemini",
+            engine="codex",
             parameter={},
             engine_options={},
             runtime_options={}
@@ -129,8 +129,8 @@ async def test_cleanup_skips_queued_and_running(monkeypatch, temp_config_dirs):
     manager = RunCleanupManager()
 
     old_ts = (datetime.utcnow() - timedelta(days=3)).isoformat()
-    run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
-    run_queued = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_running = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
+    run_queued = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
 
     await _create_run_record(store, run_running, cache_key="k1", status=RunStatus.RUNNING)
     await _create_run_record(store, run_queued, cache_key="k2", status=RunStatus.QUEUED)
@@ -160,7 +160,7 @@ async def test_cleanup_handles_invalid_timestamp(monkeypatch, temp_config_dirs):
 
     manager = RunCleanupManager()
 
-    run_bad = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_bad = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
     await _create_run_record(store, run_bad, cache_key="k1", status=RunStatus.SUCCEEDED)
     await _set_run_row(store, run_bad.run_id, RunStatus.SUCCEEDED, "bad-timestamp")
 
@@ -186,7 +186,7 @@ async def test_cleanup_handles_missing_run_dir(monkeypatch, temp_config_dirs):
 
     manager = RunCleanupManager()
 
-    run_missing = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_missing = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
     await _create_run_record(store, run_missing, cache_key="k1", status=RunStatus.FAILED)
     workspace_manager.delete_workspace_dir(Path(str(run_missing.workspace_dir)))
 
@@ -216,7 +216,7 @@ async def test_cleanup_disabled_when_retention_zero(monkeypatch, temp_config_dir
 
     manager = RunCleanupManager()
 
-    run_old = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_old = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
     await _create_run_record(store, run_old, cache_key="k1", status=RunStatus.SUCCEEDED)
     await _set_run_row(store, run_old.run_id, RunStatus.SUCCEEDED, (datetime.utcnow() - timedelta(days=10)).isoformat())
 
@@ -247,14 +247,14 @@ async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs
 
     manager = RunCleanupManager()
 
-    run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
     await _create_run_record(store, run_response, cache_key="k1", status=RunStatus.SUCCEEDED)
 
     request_id = "request-clear"
     await store.create_request(
         request_id=request_id,
         skill_id="s",
-        engine="gemini",
+        engine="codex",
         parameter={},
         engine_options={},
         runtime_options={}
@@ -282,7 +282,7 @@ async def test_cleanup_stale_trust_entries_passes_active_run_dirs(monkeypatch, t
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.run_store", store)
     monkeypatch.setattr("server.services.orchestration.run_cleanup_manager.workspace_manager", workspace_manager)
 
-    run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="gemini", parameter={}))
+    run_response = workspace_manager.create_run(RunCreateRequest(skill_id="s", engine="codex", parameter={}))
     await _create_run_record(store, run_response, cache_key="k1", status=RunStatus.RUNNING)
 
     class RecorderTrustManager:

@@ -174,7 +174,7 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
     schema_path.write_text("{}", encoding="utf-8")
     models_root.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
-        json.dumps({"engine": "gemini", "snapshots": []}),
+        json.dumps({"engine": "qwen", "snapshots": []}),
         encoding="utf-8",
     )
 
@@ -182,7 +182,7 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
     profile_path.write_text(
         json.dumps(
             {
-                "engine": "gemini",
+                    "engine": "qwen",
                 "provider_contract": {
                     "multi_provider": True,
                     "canonical_provider_id": None,
@@ -204,7 +204,7 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "regex_pattern": None
                 },
                 "attempt_workspace": {
-                    "workspace_subdir": ".gemini",
+                    "workspace_subdir": ".qwen",
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": True,
                     "unknown_fallback": False
@@ -214,7 +214,7 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "default_path": str(default_path),
                     "enforced_path": str(enforced_path),
                     "settings_schema_path": str(schema_path),
-                    "skill_defaults_path": "assets/gemini_settings.json"
+                    "skill_defaults_path": "assets/qwen_config.json"
                 },
                 "model_catalog": {
                     "mode": "manifest",
@@ -235,15 +235,15 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "payload_canonicalizer": "noop"
                 },
                 "ui_shell": {
-                    "command_id": "gemini-tui",
-                    "label": "Gemini TUI",
-                    "trust_bootstrap_parent": True,
-                    "sandbox_arg": "--sandbox",
-                    "retry_without_sandbox_on_early_exit": True,
-                    "sandbox_probe_strategy": "gemini_container",
-                    "sandbox_probe_message": None,
-                    "auth_hint_strategy": "gemini_api_key_disables_sandbox",
-                    "runtime_override_strategy": "gemini_ui_shell",
+                    "command_id": "qwen-tui",
+                    "label": "Qwen TUI",
+                    "trust_bootstrap_parent": False,
+                    "sandbox_arg": None,
+                    "retry_without_sandbox_on_early_exit": False,
+                    "sandbox_probe_strategy": "static_unsupported",
+                    "sandbox_probe_message": "Qwen TUI runs without sandbox.",
+                    "auth_hint_strategy": "none",
+                    "runtime_override_strategy": "none",
                     "config_assets": {
                         "default_path": None,
                         "enforced_path": None,
@@ -252,12 +252,12 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     }
                 },
                 "cli_management": {
-                    "package": "@google/gemini-cli",
-                    "binary_candidates": ["gemini"],
+                    "package": "@qwen-code/qwen-code",
+                    "binary_candidates": ["qwen"],
                     "credential_imports": [
                         {
                             "source": "oauth_creds.json",
-                            "target_relpath": ".gemini/oauth_creds.json"
+                            "target_relpath": ".qwen/oauth_creds.json"
                         }
                     ],
                     "credential_policy": {
@@ -270,8 +270,8 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                         "dynamic_args": ["--resume", "probe-session", "--help"]
                     },
                     "layout": {
-                        "extra_dirs": [".gemini"],
-                        "bootstrap_target_relpath": ".gemini/settings.json",
+                        "extra_dirs": [".qwen"],
+                        "bootstrap_target_relpath": ".qwen/settings.json",
                         "bootstrap_format": "json",
                         "normalize_strategy": None
                     }

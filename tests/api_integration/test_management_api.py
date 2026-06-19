@@ -35,7 +35,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
         id="demo-skill",
         name="Demo Skill",
         version="1.0.0",
-        engines=["gemini"],
+        engines=["codex"],
         execution_modes=["auto", "interactive"],
         runtime=RuntimeDefinition(default_options={"hard_timeout_seconds": 1800}),
         schemas={
@@ -57,7 +57,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(
         "server.routers.management.model_registry.list_engines",
-        lambda: [{"engine": "gemini", "cli_version_detected": "1.0.0"}],
+        lambda: [{"engine": "codex", "cli_version_detected": "1.0.0"}],
     )
     monkeypatch.setattr(
         "server.routers.management.model_registry.get_models",
@@ -65,8 +65,8 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
             cli_version_detected="1.0.0",
             models=[
                 SimpleNamespace(
-                    id="gemini-2.5-pro",
-                    display_name="Gemini 2.5 Pro",
+                    id="gpt-5.2-codex",
+                    display_name="GPT-5.2 Codex",
                     deprecated=False,
                     notes="snapshot",
                     supported_effort=None,
@@ -81,7 +81,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
             "run_id": "run-1",
             "run_dir": str(tmp_path / "runs" / "run-1"),
             "skill_id": "demo-skill",
-            "engine": "gemini",
+            "engine": "codex",
             "status": "succeeded",
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": False,
@@ -123,7 +123,7 @@ async def test_management_api_end_to_end_connectivity(monkeypatch, tmp_path: Pat
 
     engines_res = await _request("GET", "/v1/management/engines")
     assert engines_res.status_code == 200
-    assert engines_res.json()["engines"][0]["engine"] == "gemini"
+    assert engines_res.json()["engines"][0]["engine"] == "codex"
     assert "auth_ready" not in engines_res.json()["engines"][0]
     assert "sandbox_status" not in engines_res.json()["engines"][0]
 

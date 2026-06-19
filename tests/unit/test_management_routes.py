@@ -84,9 +84,9 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
         name="Demo Skill",
         description="Demo skill description",
         version="1.2.3",
-        engines=["gemini", "codex"],
-        unsupported_engines=["codex"],
-        effective_engines=["gemini"],
+        engines=["codex", "claude"],
+        unsupported_engines=["claude"],
+        effective_engines=["codex"],
         execution_modes=["auto", "interactive"],
         schemas={"output": "assets/output.schema.json"},
         entrypoint={"type": "prompt"},
@@ -112,9 +112,9 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert body["skills"][0]["id"] == "demo-skill"
     assert body["skills"][0]["health"] == "healthy"
     assert body["skills"][0]["execution_modes"] == ["auto", "interactive"]
-    assert body["skills"][0]["engines"] == ["gemini", "codex"]
-    assert body["skills"][0]["unsupported_engines"] == ["codex"]
-    assert body["skills"][0]["effective_engines"] == ["gemini"]
+    assert body["skills"][0]["engines"] == ["codex", "claude"]
+    assert body["skills"][0]["unsupported_engines"] == ["claude"]
+    assert body["skills"][0]["effective_engines"] == ["codex"]
     assert body["skills"][0]["is_builtin"] is False
     assert body["skills"][0]["description"] == "Demo skill description"
 
@@ -127,7 +127,7 @@ async def test_management_skills_list_and_detail(monkeypatch, tmp_path: Path):
     assert detail["files"][0]["path"] == "SKILL.md"
     assert detail["description"] == "Demo skill description"
     assert detail["execution_modes"] == ["auto", "interactive"]
-    assert detail["effective_engines"] == ["gemini"]
+    assert detail["effective_engines"] == ["codex"]
     assert detail["is_builtin"] is False
     assert detail["runtime"]["default_options"]["hard_timeout_seconds"] == 1800
 
@@ -245,7 +245,7 @@ async def test_management_skills_list_marks_builtin_skill(monkeypatch, tmp_path:
         id="builtin-skill",
         name="Builtin Skill",
         version="1.0.0",
-        engines=["gemini"],
+        engines=["codex"],
         execution_modes=["auto"],
         schemas={"output": "assets/output.schema.json"},
         path=skill_dir,
@@ -291,7 +291,7 @@ async def test_management_skill_schemas_endpoint(monkeypatch, tmp_path: Path):
         id="schema-skill",
         name="Schema Skill",
         version="1.0.0",
-        engines=["gemini"],
+        engines=["codex"],
         schemas={
             "input": "assets/input.schema.json",
             "parameter": "assets/parameter.schema.json",
@@ -391,7 +391,7 @@ async def test_management_engine_auth_import_spec_route(monkeypatch):
     monkeypatch.setattr(
         "server.routers.management.auth_import_service.get_import_spec",
         lambda **_kwargs: {
-            "engine": "gemini",
+            "engine": "codex",
             "provider_id": None,
             "supported": True,
             "ask_user": {
@@ -419,7 +419,7 @@ async def test_management_engine_auth_import_spec_route(monkeypatch):
     response = await _request("GET", "/v1/management/engines/gemini/auth/import/spec")
     assert response.status_code == 200
     body = response.json()
-    assert body["engine"] == "gemini"
+    assert body["engine"] == "codex"
     assert body["supported"] is True
     assert body["ask_user"]["kind"] == "upload_files"
     assert [item["name"] for item in body["ask_user"]["files"]] == [
@@ -473,7 +473,7 @@ async def test_management_run_state_includes_pending_and_interaction_count(monke
             "run_id": "run-1",
             "run_dir": str(run_dir),
             "skill_id": "demo",
-            "engine": "gemini",
+            "engine": "codex",
             "status": "waiting_user",
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": False,
@@ -576,7 +576,7 @@ async def test_management_run_files_and_preview(monkeypatch):
             "run_id": "run-2",
             "run_dir": "/tmp/run-2",
             "skill_id": "demo",
-            "engine": "gemini",
+            "engine": "codex",
             "status": "running",
             "updated_at": "2026-02-16T00:00:00",
             "poll_logs": True,
@@ -619,7 +619,7 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
             side_effect=lambda request_id: {
                 "request_id": request_id,
                 "run_id": "run-events",
-                "engine": "gemini",
+                "engine": "codex",
             }
         ),
     )

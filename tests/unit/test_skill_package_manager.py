@@ -28,7 +28,7 @@ def _build_skill_zip(
     if runner_id is None:
         runner_id = skill_id
     if engines is None:
-        engines = ["gemini"]
+        engines = ["codex"]
     if artifacts is None:
         artifacts = [{"role": "result", "pattern": "artifacts/out.json", "required": True}]
 

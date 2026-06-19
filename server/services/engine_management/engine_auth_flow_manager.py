@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 import sqlite3
@@ -263,20 +262,6 @@ class EngineAuthFlowManager:
             {"reason": "settle_active_device_session"},
         )
         self._refresh_session_locked(session)
-
-    def _write_json(self, path: Path, payload: Dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-    def _prepare_gemini_auth_workspace(self, session_dir: Path) -> None:
-        self._write_json(
-            session_dir / ".gemini" / "settings.json",
-            {
-                "general": {
-                    "enableAutoUpdate": False,
-                },
-            },
-        )
 
     def _build_opencode_auth_store(self) -> OpencodeAuthStore:
         return OpencodeAuthStore(self.agent_manager.profile.agent_home)

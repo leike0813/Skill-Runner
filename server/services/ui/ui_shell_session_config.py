@@ -44,18 +44,6 @@ class _NoopRuntimeOverride:
         return {}
 
 
-class _GeminiUiShellRuntimeOverride:
-    def build(
-        self,
-        *,
-        session_dir: Path,
-        sandbox_enabled: bool,
-        custom_model: str | None,
-    ) -> dict[str, object]:
-        _ = (session_dir, custom_model)
-        return {"tools": {"sandbox": sandbox_enabled}}
-
-
 class _ClaudeUiShellRuntimeOverride:
     def build(
         self,
@@ -74,7 +62,6 @@ class _ClaudeUiShellRuntimeOverride:
 
 _RUNTIME_OVERRIDE_REGISTRY: dict[str, UiShellRuntimeOverrideStrategy] = {
     "none": _NoopRuntimeOverride(),
-    "gemini_ui_shell": _GeminiUiShellRuntimeOverride(),
     "claude_ui_shell": _ClaudeUiShellRuntimeOverride(),
 }
 

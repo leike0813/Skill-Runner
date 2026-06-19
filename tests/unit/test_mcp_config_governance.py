@@ -17,7 +17,6 @@ from server.engines.claude.adapter.mcp_materializer import (
     sync_claude_agent_home_mcp,
 )
 from server.engines.claude.adapter.state_paths import active_claude_state_path
-from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.models import SkillManifest, SkillMcpDeclaration
 from server.services.mcp import (
     McpAuthEnvRef,
@@ -41,7 +40,7 @@ def _stdio_server(
     server_id: str,
     *,
     activation: str = "declared",
-    engines: tuple[str, ...] = ("codex", "gemini", "qwen", "claude", "opencode"),
+    engines: tuple[str, ...] = ("codex", "qwen", "claude", "opencode"),
     scope: str = "run-local",
 ) -> McpServerDefinition:
     return McpServerDefinition(
@@ -88,7 +87,7 @@ def test_mcp_registry_schema_accepts_stdio_server() -> None:
             "demo": {
                 "activation": "default",
                 "engines": ["codex"],
-                "unsupported_engines": ["gemini"],
+                "unsupported_engines": ["qwen"],
                 "scope": "agent-home",
                 "transport": "stdio",
                 "command": "python",
@@ -180,7 +179,7 @@ def test_mcp_registry_loader_validates_and_computes_effective_engines(tmp_path: 
                 "servers": {
                     "demo": {
                         "activation": "default",
-                        "unsupported_engines": ["gemini"],
+                        "unsupported_engines": ["qwen"],
                         "scope": "run-local",
                         "transport": "stdio",
                         "command": "python",
@@ -194,7 +193,7 @@ def test_mcp_registry_loader_validates_and_computes_effective_engines(tmp_path: 
     registry = load_mcp_registry(registry_path)
 
     assert "demo" in registry
-    assert "gemini" not in registry["demo"].effective_engines
+    assert "qwen" not in registry["demo"].effective_engines
     assert "codex" in registry["demo"].effective_engines
 
 
@@ -256,18 +255,18 @@ def test_resolver_applies_default_and_declared_engine_filtering() -> None:
             activation="default",
             engines=("codex",),
         ),
-        "declared-gemini": _stdio_server(
-            "declared-gemini",
+        "declared-qwen": _stdio_server(
+            "declared-qwen",
             activation="declared",
-            engines=("gemini",),
+            engines=("qwen",),
         ),
     }
-    skill = _skill_with_mcp("declared-gemini")
+    skill = _skill_with_mcp("declared-qwen")
 
-    gemini = resolve_mcp_servers(skill=skill, engine="gemini", registry=registry)
+    qwen = resolve_mcp_servers(skill=skill, engine="qwen", registry=registry)
     codex = resolve_mcp_servers(skill=SkillManifest(id="demo-skill"), engine="codex", registry=registry)
 
-    assert [server.definition.id for server in gemini.servers] == ["declared-gemini"]
+    assert [server.definition.id for server in qwen.servers] == ["declared-qwen"]
     assert [server.definition.id for server in codex.servers] == ["default-codex"]
 
 
@@ -287,10 +286,10 @@ def test_resolver_rejects_unknown_and_engine_incompatible_mcp() -> None:
             registry=registry,
         )
 
-    with pytest.raises(McpConfigError, match="does not support engine 'gemini'"):
+    with pytest.raises(McpConfigError, match="does not support engine 'qwen'"):
         resolve_mcp_servers(
             skill=_skill_with_mcp("declared-codex"),
-            engine="gemini",
+            engine="qwen",
             registry=registry,
         )
 
@@ -335,7 +334,6 @@ def test_declared_mcp_is_forced_run_local() -> None:
     ("engine", "root"),
     [
         ("codex", "mcp_servers"),
-        ("gemini", "mcpServers"),
         ("qwen", "mcpServers"),
         ("claude", "mcpServers"),
         ("opencode", "mcp"),
@@ -373,7 +371,6 @@ def test_renderer_injects_stdio_env_secret() -> None:
     ("engine", "header_key"),
     [
         ("codex", "http_headers"),
-        ("gemini", "headers"),
         ("qwen", "headers"),
         ("claude", "headers"),
         ("opencode", "headers"),
@@ -549,54 +546,6 @@ def test_mcp_secret_store_masks_replaces_and_deletes(tmp_path: Path) -> None:
 def test_direct_mcp_root_key_bypass_is_rejected(root_key: str) -> None:
     with pytest.raises(McpConfigError, match=root_key):
         validate_no_mcp_root_keys({root_key: {}}, source="test config")
-
-
-def test_gemini_composer_inserts_governed_mcp_before_enforced_policy(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = GeminiExecutionAdapter()
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    skill_dir = tmp_path / "skill"
-    (skill_dir / "assets").mkdir(parents=True)
-    skill = SkillManifest(id="demo-skill", path=skill_dir)
-    monkeypatch.setattr(
-        "server.engines.gemini.adapter.config_composer.build_mcp_config_layer",
-        lambda *, skill, engine: (
-            McpResolution(servers=()),
-            {"mcpServers": {"governed": {"command": "python"}}},
-        ),
-    )
-    captured: dict[str, object] = {}
-
-    def _capture_generate_config(schema_name: str, config_layers, output_path: Path):
-        captured["schema_name"] = schema_name
-        captured["layers"] = config_layers
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("{}", encoding="utf-8")
-        return output_path
-
-    with patch(
-        "server.engines.gemini.adapter.config_composer.config_generator.generate_config",
-        side_effect=_capture_generate_config,
-    ):
-        adapter._construct_config(skill, run_dir, options={})
-
-    layers = captured["layers"]
-    assert isinstance(layers, list)
-    assert layers[-2]["mcpServers"]["governed"]["command"] == "python"
-    assert layers[-1]["output"]["format"] == "json"
-
-
-def test_gemini_composer_rejects_runtime_mcp_root_bypass(tmp_path: Path) -> None:
-    adapter = GeminiExecutionAdapter()
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    skill = SkillManifest(id="demo-skill", path=tmp_path)
-
-    with pytest.raises(McpConfigError, match="Gemini runtime override"):
-        adapter._construct_config(skill, run_dir, options={"gemini_config": {"mcpServers": {}}})
 
 
 def test_codex_declared_mcp_creates_per_run_profile_and_command_uses_it(

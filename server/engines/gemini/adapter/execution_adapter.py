@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
-from server.runtime.adapter.common.profile_loader import load_adapter_profile
+from server.runtime.adapter.common.profile_loader import load_legacy_readonly_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
 from server.runtime.adapter.common.session_codec_common import ProfiledSessionCodec
 from server.runtime.adapter.common.run_folder_validator_common import (
@@ -20,7 +20,10 @@ class GeminiExecutionAdapter(EngineExecutionAdapter):
     def __init__(self, **kwargs: Any) -> None:
         _ = kwargs
         super().__init__(process_prefix="Gemini")
-        profile = load_adapter_profile("gemini", Path(__file__).with_name("adapter_profile.json"))
+        profile = load_legacy_readonly_adapter_profile(
+            "gemini",
+            Path(__file__).with_name("adapter_profile.json"),
+        )
         self.profile = profile
         self.agent_manager = AgentCliManager()
         self.config_composer = GeminiConfigComposer(self)

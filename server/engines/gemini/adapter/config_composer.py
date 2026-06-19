@@ -90,7 +90,9 @@ class GeminiConfigComposer:
         try:
             _, governed_mcp = build_mcp_config_layer(skill=skill, engine="gemini")
         except McpConfigError as exc:
-            raise RuntimeError(f"Configuration Error: {exc}") from exc
+            if "Unknown engine" not in str(exc):
+                raise RuntimeError(f"Configuration Error: {exc}") from exc
+            governed_mcp = {}
 
         enforced_config_path = self._adapter.profile.resolve_enforced_config_path()
         project_enforced: dict[str, object] = {}

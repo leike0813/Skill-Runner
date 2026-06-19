@@ -555,7 +555,6 @@
   - 可选声明 `runner.json.engine_configs.{engine}`
   - 声明失败时静默回退到固定文件名：
     - `codex` -> `assets/codex_config.toml`
-    - `gemini` -> `assets/gemini_settings.json`
     - `qwen` -> `assets/qwen_config.json`
     - `opencode` -> `assets/opencode_config.json`
   - 若声明和 fallback 都不存在：视为“未提供 skill-specific engine config”，不阻断运行
@@ -606,7 +605,7 @@
 ```json
 {
   "skill_id": "demo-prime-number",
-  "engine": "qwen",            // 可选: "gemini" / "codex" / "opencode" / "claude" / "qwen" (默认: codex)
+  "engine": "qwen",            // 可选: "codex" / "opencode" / "claude" / "qwen" (默认: codex)
   "provider_id": "qwen-oauth",
   "effort": "default",
   "input": {
@@ -632,7 +631,7 @@
   - `effort` 为空时按 `"default"` 处理。
   - 对支持 effort 的模型，`"default"` 会映射到引擎实际生效值；通常为 `"medium"`。
   - 对不支持 effort 的模型，`supported_effort` 固定为 `["default"]`；此时传入任何 `effort` 都不会改变行为。
-  - 单 provider 引擎（`codex`、`gemini`）允许 `provider_id` 为空或任意值；系统会统一收口到 canonical provider。
+  - 单 provider 引擎（当前为 `codex`）允许 `provider_id` 为空或任意值；系统会统一收口到 canonical provider。
   - 多 provider 引擎（`claude`、`qwen`、`opencode`）标准写法必须显式带 `provider_id`。
   - 旧客户端仍兼容：
     - `model="provider/model@effort"`
@@ -694,8 +693,9 @@
   "status": "waiting_user",
   "observability_ready": true,
   "skill_id": "demo-prime-number",
-  "engine": "gemini",
-  "model": "gemini-3.1-pro-preview",
+  "engine": "qwen",
+  "provider_id": "qwen-oauth",
+  "model": "coder-model",
   "created_at": "2024-01-01T12:00:00Z",
   "updated_at": "2024-01-01T12:01:00Z",
   "pending_interaction_id": 12,
@@ -1290,10 +1290,7 @@
 - 在页面下方内嵌 TUI 终端（ttyd 网关）。
 - 每个引擎提供“在内嵌终端中启动 TUI”按钮（同一时刻仅允许一个活跃会话）。
 - sandbox 状态只在内嵌终端 banner 和 TUI 启动响应中展示，不再出现在 engine 表格中。
-- Gemini 内嵌 TUI 在容器沙箱运行时可用时会显式追加 `--sandbox`（不可用时降级启动并保留状态提示）。
-- 若 Gemini 当前认证模式是 API key（`security.auth.selectedType=gemini-api-key`），内嵌 TUI 会强制禁用 `--sandbox`，以避免该模式下 CLI 因 `GEMINI_API_KEY` 前置校验导致启动即退出。
-- iFlow 内嵌 TUI 当前固定非沙箱运行，并返回告警状态（其沙箱依赖 Docker 镜像执行，不符合当前内嵌 TUI 设计）。
-- 内嵌 TUI 路径默认禁用三引擎 shell 工具能力（最小权限策略）。
+- 内嵌 TUI 路径默认禁用 shell 工具能力（最小权限策略）。
 - 内嵌 TUI 安全配置与 RUN 路径（`/v1/jobs`）配置隔离，不复用 RUN 的权限融合策略。
 
 终端相关接口（JSON）：
@@ -1448,9 +1445,10 @@ Query 参数：
 ```json
 {
   "skill_source": "temp_upload",
-  "engine": "gemini",
+  "engine": "qwen",
   "parameter": {},
-  "model": "gemini-2.5-pro",
+  "provider_id": "qwen-oauth",
+  "model": "coder-model",
   "runtime_options": {
     "debug_keep_temp": false
   }
@@ -1560,7 +1558,6 @@ Query 参数：
 {
   "engines": [
     {"engine": "codex", "cli_version_detected": "0.89.0"},
-    {"engine": "gemini", "cli_version_detected": "0.25.2"},
     {"engine": "opencode", "cli_version_detected": "0.1.0"},
     {"engine": "claude", "cli_version_detected": "0.1.0"},
     {"engine": "qwen", "cli_version_detected": "0.1.0"}
@@ -1612,10 +1609,6 @@ provider-aware 示例：
 - V2 下不再使用 `method` 历史字段；兼容层仍可接收 `method`。
 - provider-aware engine（当前为 `opencode`、`qwen`）应显式提交 `provider_id`；这也是新的推荐写法。
 - `codex` 支持 2x2 组合：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
-- `gemini` 支持：
-  - `oauth_proxy + callback`（自动回调优先，零 CLI，支持 `/input` 兜底）
-  - `oauth_proxy + auth_code_or_url`（手工码流，需 `/input`）
-  - `cli_delegate + auth_code_or_url`（现有 CLI 委托链路）
 - `opencode(provider_id=openai)` 支持 2x2：`oauth_proxy|cli_delegate` × `callback|auth_code_or_url`。
 - `opencode(provider_id=google)` 支持：
   - `oauth_proxy + callback`（自动回调）
@@ -1651,12 +1644,9 @@ OpenCode Google（Antigravity）OAuth 代理说明：
   - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_ID`
   - `SKILL_RUNNER_OPENCODE_GOOGLE_OAUTH_CLIENT_SECRET`
 
-Gemini OAuth 代理说明：
-- `oauth_proxy + gemini` 使用本地回调地址 `http://localhost:51122/oauth2callback`。
-- 会话启动时服务按需拉起本地 listener（`127.0.0.1:51122`），会话终止时释放。
-- `callback` 模式要求本地 listener 可用，并支持 `/input` 兜底。
-- `auth_code_or_url` 模式使用手工码流，通过 `/input(kind=text|code)` 完成鉴权。
-- 鉴权成功后会写入 `~/.gemini/oauth_creds.json`（以及可选 `google_accounts.json`），并确保 `~/.gemini/settings.json` 中 `security.auth.selectedType="oauth-personal"`。
+Gemini 说明：
+- Gemini 已软弃用，不再作为新鉴权会话、engine 管理、安装/升级或新 run 的活跃 engine。
+- 历史 `.gemini` workspace、audit 与文件浏览仍按只读 legacy 路径保留。
 
 Qwen OAuth / Coding Plan 说明：
 - `oauth_proxy + qwen(provider_id=qwen-oauth)` 走设备码语义，返回 `auth_url + user_code`；当前实现会在后端自动轮询完成状态，不要求用户额外调用 `/input`。
@@ -1664,9 +1654,6 @@ Qwen OAuth / Coding Plan 说明：
 - `coding-plan-china` / `coding-plan-global` 通过 API Key 完成，会写入 `.qwen/settings.json`。
 - `qwen` 当前没有公开的 browser callback 端点；`qwen-oauth` 的 `oauth_proxy` 不是本地回调模式。
 - 不读写 `mcp-oauth-tokens-v2.json`。
-- 需通过环境变量提供 Google OAuth 凭据：
-  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_ID`
-  - `SKILL_RUNNER_GEMINI_OAUTH_CLIENT_SECRET`
 
 Claude bootstrap / runtime 配置说明：
 - Claude 的 bootstrap 默认值写入 `~/.claude.json`，而不是 `~/.claude/settings.json`。
@@ -1726,7 +1713,6 @@ Claude bootstrap / runtime 配置说明：
 - 新客户端应优先读取 `provider_id + model + supported_effort`；`id` 保留兼容语义。
 - 单 provider 引擎的 `provider_id` 固定为 canonical provider：
   - `codex -> openai`
-  - `gemini -> google`
 
 OpenCode 返回示例（动态探测缓存）：
 ```json
@@ -1837,7 +1823,7 @@ OpenCode 兼容视图说明：
 ```json
 {
   "mode": "single",
-  "engine": "gemini"
+  "engine": "qwen"
 }
 ```
 
@@ -1863,8 +1849,8 @@ OpenCode 兼容视图说明：
   "status": "failed",
   "results": {
     "codex": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
-    "gemini": {"status": "failed", "action": "install", "stdout": "...", "stderr": "...", "error": "Install command exited with code 1"},
-    "opencode": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null}
+    "opencode": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null},
+    "qwen": {"status": "succeeded", "action": "upgrade", "stdout": "...", "stderr": "", "error": null}
   },
   "created_at": "2026-02-12T10:00:00.000000",
   "updated_at": "2026-02-12T10:00:12.000000"

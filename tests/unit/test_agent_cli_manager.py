@@ -74,7 +74,6 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     manager.ensure_layout()
 
     codex_config = manager.profile.agent_home / ".codex" / "config.toml"
-    gemini_settings = manager.profile.agent_home / ".gemini" / "settings.json"
     claude_bootstrap = active_claude_state_path(manager.profile.agent_home)
     claude_settings = manager.profile.agent_home / ".claude" / "settings.json"
     claude_probe = manager.profile.agent_home / ".claude" / "sandbox_probe.json"
@@ -86,7 +85,6 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     assert codex_config.exists()
     assert codex_probe.exists()
     assert 'cli_auth_credentials_store = "file"' in codex_config.read_text(encoding="utf-8")
-    assert json.loads(gemini_settings.read_text(encoding="utf-8"))["security"]["auth"]["selectedType"] == "oauth-personal"
     assert json.loads(claude_bootstrap.read_text(encoding="utf-8"))["hasCompletedOnboarding"] is True
     assert json.loads(claude_settings.read_text(encoding="utf-8")) == {}
     assert claude_probe.exists()
@@ -158,7 +156,7 @@ def test_ensure_layout_syncs_existing_claude_agent_home_mcp(tmp_path):
 
 def test_default_bootstrap_engines_come_from_global_config(tmp_path: Path) -> None:
     manager = AgentCliManager(_build_profile(tmp_path))
-    assert manager.default_bootstrap_engines() == ("opencode", "codex", "gemini", "claude", "qwen")
+    assert manager.default_bootstrap_engines() == ("opencode", "codex", "claude", "qwen")
 
 
 def test_default_bootstrap_engines_respect_config_override(tmp_path: Path) -> None:
@@ -167,10 +165,10 @@ def test_default_bootstrap_engines_respect_config_override(tmp_path: Path) -> No
     config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("claude", "gemini", "claude", "missing")
     config.freeze()
     try:
-        assert manager.default_bootstrap_engines() == ("claude", "gemini")
+        assert manager.default_bootstrap_engines() == ("claude",)
     finally:
         config.defrost()
-        config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("opencode", "codex", "gemini", "claude", "qwen")
+        config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("opencode", "codex", "claude", "qwen")
         config.freeze()
 
 
@@ -416,17 +414,12 @@ def test_import_credentials_whitelist_only(tmp_path):
 
     src = tmp_path / "src"
     (src / "codex").mkdir(parents=True)
-    (src / "gemini").mkdir(parents=True)
     (src / "opencode").mkdir(parents=True)
     (src / "claude").mkdir(parents=True)
     (src / "qwen").mkdir(parents=True)
 
     (src / "codex" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (src / "codex" / "config.toml").write_text("should_not_copy=true", encoding="utf-8")
-
-    (src / "gemini" / "google_accounts.json").write_text("{}", encoding="utf-8")
-    (src / "gemini" / "oauth_creds.json").write_text("{}", encoding="utf-8")
-    (src / "gemini" / "settings.json").write_text('{"bad":"override"}', encoding="utf-8")
 
     (src / "opencode" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
     (src / "opencode" / "antigravity-accounts.json").write_text('{"accounts":[]}', encoding="utf-8")
@@ -436,13 +429,11 @@ def test_import_credentials_whitelist_only(tmp_path):
     copied = manager.import_credentials(src)
     assert copied["codex"] == ["auth.json"]
     assert copied["claude"] == [".credentials.json"]
-    assert copied["gemini"] == ["google_accounts.json", "oauth_creds.json"]
     assert copied["opencode"] == ["auth.json", "antigravity-accounts.json"]
     assert copied["qwen"] == ["oauth_creds.json"]
 
     codex_dst = manager.profile.agent_home / ".codex"
     claude_dst = manager.profile.agent_home / ".claude"
-    gemini_dst = manager.profile.agent_home / ".gemini"
     opencode_data_dst = manager.profile.agent_home / ".local" / "share" / "opencode"
     opencode_config_dst = manager.profile.agent_home / ".config" / "opencode"
     qwen_dst = manager.profile.agent_home / ".qwen"
@@ -450,8 +441,6 @@ def test_import_credentials_whitelist_only(tmp_path):
     assert (codex_dst / "auth.json").exists()
     assert 'cli_auth_credentials_store = "file"' in (codex_dst / "config.toml").read_text(encoding="utf-8")
 
-    gemini_settings = json.loads((gemini_dst / "settings.json").read_text(encoding="utf-8"))
-    assert gemini_settings["security"]["auth"]["selectedType"] == "oauth-personal"
     assert (claude_dst / ".credentials.json").exists()
     assert (qwen_dst / "oauth_creds.json").exists()
     assert (opencode_data_dst / "auth.json").exists()
@@ -479,8 +468,8 @@ def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "install_package", _fake_install)
 
     results = manager.ensure_installed()
-    assert set(results.keys()) == {"codex", "opencode", "gemini", "claude", "qwen"}
-    assert len(calls) == 5
+    assert set(results.keys()) == {"codex", "opencode", "claude", "qwen"}
+    assert len(calls) == 4
 
 
 def test_collect_auth_status_reports_global_fallback(tmp_path, monkeypatch):
@@ -527,10 +516,10 @@ def test_probe_resume_capability_success_and_profile_mapping(tmp_path, monkeypat
         return CommandResult(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(manager, "_run_command", _fake_run)
-    capability = manager.probe_resume_capability("gemini")
+    capability = manager.probe_resume_capability("qwen")
     assert capability.supported is True
-    profile = manager.resolve_interactive_profile("gemini", 1200)
-    assert profile.reason == "resume_probe_ok"
+    profile = manager.resolve_interactive_profile("qwen", 1200)
+    assert profile.reason == "resume_flag_detected"
     assert profile.session_timeout_sec == 1200
 
 
@@ -712,7 +701,6 @@ def test_install_package_returns_failure_on_oserror(tmp_path: Path, monkeypatch)
     ("engine", "source_name", "target_relpath"),
     [
         ("codex", "auth.json", ".codex/auth.json"),
-        ("gemini", "oauth_creds.json", ".gemini/oauth_creds.json"),
         ("opencode", "auth.json", ".local/share/opencode/auth.json"),
         ("qwen", "oauth_creds.json", ".qwen/oauth_creds.json"),
     ],

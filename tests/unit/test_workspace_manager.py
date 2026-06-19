@@ -17,7 +17,7 @@ def _allow_test_skill(monkeypatch, tmp_path):
     skill = SkillManifest(
         id="test-skill",
         name="test-skill",
-        engines=["codex", "gemini", "opencode", "qwen"],
+        engines=["codex", "codex", "opencode", "codex"],
         path=tmp_path
     )
 
@@ -69,7 +69,7 @@ def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
     skill = SkillManifest(
         id="test-skill",
         name="test-skill",
-        engines=["codex"],
+        engines=["opencode"],
         path=tmp_path
     )
     monkeypatch.setattr(
@@ -78,7 +78,7 @@ def test_create_run_rejects_unsupported_engine(tmp_path, monkeypatch):
     )
 
     try:
-        req = RunCreateRequest(skill_id="test-skill", engine="gemini", parameter={})
+        req = RunCreateRequest(skill_id="test-skill", engine="codex", parameter={})
         with pytest.raises(ValueError, match="does not support engine"):
             workspace_manager.create_run(req)
         assert not Path(config.SYSTEM.WORKSPACES_DIR).exists()

@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -19,15 +18,6 @@ from server.runtime.protocol.event_protocol import build_rasp_events
             "codex_ndjson",
             "codex message",
             "t-codex",
-        ),
-        (
-            "gemini",
-            "succeeded",
-            "YOLO mode enabled\n",
-            json.dumps({"session_id": "t-gemini", "response": "gemini message"}, ensure_ascii=False),
-            "gemini_json",
-            "gemini message",
-            "t-gemini",
         ),
         (
             "qwen",

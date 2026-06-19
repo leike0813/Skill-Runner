@@ -30,6 +30,7 @@ def _isolate_persistence_root(tmp_path):
     old_mcp_registry_file = config.SYSTEM.MCP_REGISTRY_FILE
     old_mcp_secrets_file = config.SYSTEM.MCP_SECRETS_FILE
     old_runs_dir = config.SYSTEM.RUNS_DIR
+    old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     old_requests_dir = config.SYSTEM.REQUESTS_DIR
     old_tmp_uploads_dir = config.SYSTEM.TMP_UPLOADS_DIR
     old_temp_skill_package_cache_dir = config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR
@@ -72,6 +73,7 @@ def _isolate_persistence_root(tmp_path):
     config.SYSTEM.MCP_REGISTRY_FILE = str(test_data_dir / "mcp_registry.json")
     config.SYSTEM.MCP_SECRETS_FILE = str(test_data_dir / "mcp_secrets.json")
     config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
+    config.SYSTEM.WORKSPACES_DIR = str(tmp_path / "workspaces")
     config.SYSTEM.REQUESTS_DIR = str(tmp_path / "requests")
     config.SYSTEM.TMP_UPLOADS_DIR = str(test_data_dir / "tmp_uploads")
     config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = str(test_data_dir / "temp_skill_package_cache")
@@ -115,6 +117,7 @@ def _isolate_persistence_root(tmp_path):
         config.SYSTEM.MCP_REGISTRY_FILE = old_mcp_registry_file
         config.SYSTEM.MCP_SECRETS_FILE = old_mcp_secrets_file
         config.SYSTEM.RUNS_DIR = old_runs_dir
+        config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
         config.SYSTEM.REQUESTS_DIR = old_requests_dir
         config.SYSTEM.TMP_UPLOADS_DIR = old_tmp_uploads_dir
         config.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = old_temp_skill_package_cache_dir

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Protocol
@@ -87,45 +84,6 @@ class _CodexSandboxProbe:
         return ("supported", "LANDLOCK enabled.")
 
 
-class _GeminiSandboxProbe:
-    def probe(self, *, agent_manager: AgentCliManager, engine: str) -> tuple[str, str]:
-        env = agent_manager.profile.build_subprocess_env(os.environ.copy())
-        path_env = env.get("PATH", os.environ.get("PATH", ""))
-        runtime_errors: list[str] = []
-        for runtime in ("docker", "podman"):
-            runtime_path = shutil.which(runtime, path=path_env)
-            if not runtime_path:
-                continue
-            try:
-                result = subprocess.run(
-                    [runtime_path, "info"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=3,
-                )
-            except (OSError, subprocess.SubprocessError, TypeError, ValueError) as exc:
-                runtime_errors.append(f"{runtime}: {str(exc)}")
-                continue
-            if result.returncode == 0:
-                return (
-                    "supported",
-                    f"{engine} sandbox runtime is available via {runtime}.",
-                )
-            first_line = ((result.stderr or "").strip() or (result.stdout or "").strip()).splitlines()
-            detail = first_line[0] if first_line else f"exit={result.returncode}"
-            runtime_errors.append(f"{runtime}: {detail}")
-        if runtime_errors:
-            return (
-                "unsupported",
-                f"{engine} sandbox runtime is unavailable ({'; '.join(runtime_errors)}).",
-            )
-        return (
-            "unsupported",
-            "gemini sandbox runtime is unavailable (docker/podman not found).",
-        )
-
-
 class _NoopSecurity:
     def prepare(
         self,
@@ -151,48 +109,6 @@ class _NoopAuthHint:
         return (sandbox_enabled, sandbox_status, sandbox_message)
 
 
-class _GeminiAuthHint:
-    def _read_gemini_selected_auth_type(self, *, agent_manager: AgentCliManager) -> str | None:
-        settings_path = agent_manager.profile.agent_home / ".gemini" / "settings.json"
-        if not settings_path.exists():
-            return None
-        try:
-            payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-        security = payload.get("security")
-        if not isinstance(security, dict):
-            return None
-        auth = security.get("auth")
-        if not isinstance(auth, dict):
-            return None
-        selected = auth.get("selectedType")
-        if isinstance(selected, str) and selected.strip():
-            return selected.strip()
-        return None
-
-    def apply(
-        self,
-        *,
-        agent_manager: AgentCliManager,
-        sandbox_enabled: bool,
-        sandbox_status: str,
-        sandbox_message: str,
-    ) -> tuple[bool, str, str]:
-        selected = self._read_gemini_selected_auth_type(agent_manager=agent_manager)
-        if not selected:
-            return (sandbox_enabled, sandbox_status, sandbox_message)
-        if "api-key" not in selected.lower():
-            return (sandbox_enabled, sandbox_status, sandbox_message)
-        return (
-            False,
-            "unsupported",
-            "gemini inline TUI disables --sandbox when security.auth.selectedType is gemini-api-key.",
-        )
-
-
 class EngineShellCapabilityProvider:
     def __init__(self) -> None:
         self._capabilities = self._build_capabilities()
@@ -212,15 +128,11 @@ class EngineShellCapabilityProvider:
         message = profile.ui_shell.sandbox_probe_message or "Sandbox capability is unknown for this engine."
         if strategy == "codex_landlock":
             return _CodexSandboxProbe()
-        if strategy == "gemini_container":
-            return _GeminiSandboxProbe()
         if strategy == "static_supported":
             return _StaticSupportedSandboxProbe(message=message)
         return _StaticUnsupportedSandboxProbe(message=message)
 
     def _resolve_auth_hint_strategy(self, profile: AdapterProfile) -> AuthHintStrategy:
-        if profile.ui_shell.auth_hint_strategy == "gemini_api_key_disables_sandbox":
-            return _GeminiAuthHint()
         return _NoopAuthHint()
 
     def _resolve_session_security_strategy(self, profile: AdapterProfile) -> SessionSecurityStrategy:

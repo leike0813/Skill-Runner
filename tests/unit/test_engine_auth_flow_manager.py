@@ -8,7 +8,6 @@ import pytest
 
 from server.config import config
 from server.engines.codex.auth import CodexOAuthProxySession
-from server.engines.gemini.auth import GeminiOAuthProxySession
 from server.engines.opencode.auth import (
     OpencodeAuthCliSession,
     OpencodeGoogleAntigravityOAuthProxySession,
@@ -103,7 +102,6 @@ class _FakeCliManager:
         opencode_auth = self.profile.agent_home / ".local" / "share" / "opencode" / "auth.json"
         return {
             "codex": {"credential_state": "present" if auth_file.exists() else "missing"},
-            "gemini": {"credential_state": "missing"},
             "opencode": {"credential_state": "present" if opencode_auth.exists() else "missing"},
             "qwen": {"credential_state": "missing"},
         }
@@ -943,106 +941,7 @@ def test_engine_auth_flow_manager_rejects_unsupported_engine(tmp_path: Path):
         manager.start_session("gemini", "auth", transport="cli_delegate", auth_method="callback")
         raise AssertionError("expected ValueError")
     except ValueError as exc:
-        assert "auth_code_or_url" in str(exc)
-
-
-def test_engine_auth_flow_manager_gemini_oauth_proxy_uses_protocol_flow(tmp_path: Path, monkeypatch):
-    _set_google_oauth_proxy_env(monkeypatch)
-    command_path = _write_script(tmp_path / "fake-gemini", "exit 0")
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-    listener_calls = {"start": 0, "stop": 0}
-
-    def _fake_listener_start() -> str:
-        listener_calls["start"] = listener_calls["start"] + 1
-        return "http://127.0.0.1:51122/oauth2callback"
-
-    def _fake_listener_stop() -> None:
-        listener_calls["stop"] = listener_calls["stop"] + 1
-
-    monkeypatch.setattr(
-        manager,
-        "start_callback_listener",
-        lambda *, channel, callback_handler: (True, _fake_listener_start()),
-    )
-    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: _fake_listener_stop())
-
-    started = manager.start_session(
-        "gemini",
-        "auth",
-        transport="oauth_proxy",
-        auth_method="auth_code_or_url",
-    )
-    assert started["engine"] == "gemini"
-    assert started["transport"] == "oauth_proxy"
-    assert started["auth_method"] == "auth_code_or_url"
-    assert started["status"] == "waiting_user"
-    assert started["execution_mode"] == "protocol_proxy"
-    assert "accounts.google.com/o/oauth2/v2/auth" in str(started["auth_url"])
-    assert listener_calls["start"] == 0
-
-    runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
-    assert isinstance(runtime, GeminiOAuthProxySession)
-
-    monkeypatch.setattr(
-        manager._gemini_oauth_proxy_flow,
-        "submit_input",
-        lambda *_args, **_kwargs: {"google_account_email": "test@example.com"},
-    )
-    final = manager.input_session(
-        started["session_id"],
-        "text",
-        f"http://127.0.0.1:51122/oauth2callback?code=code-1&state={runtime.state}",
-    )
-    assert final["status"] == "succeeded"
-    assert final["manual_fallback_used"] is True
-    assert final["audit"]["callback_mode"] == "manual"
-    assert listener_calls["stop"] == 1
-
-
-def test_engine_auth_flow_manager_gemini_oauth_proxy_callback_state_once(tmp_path: Path, monkeypatch):
-    _set_google_oauth_proxy_env(monkeypatch)
-    command_path = _write_script(tmp_path / "fake-gemini", "exit 0")
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-    monkeypatch.setattr(
-        manager,
-        "start_callback_listener",
-        lambda *, channel, callback_handler: (True, "http://127.0.0.1:51122/oauth2callback"),
-    )
-    monkeypatch.setattr(manager, "stop_callback_listener", lambda *, channel: None)
-    monkeypatch.setattr(
-        manager._gemini_oauth_proxy_flow,
-        "complete_with_code",
-        lambda **_kwargs: {"google_account_email": "test@example.com"},
-    )
-    started = manager.start_session(
-        "gemini",
-        "auth",
-        transport="oauth_proxy",
-        auth_method="callback",
-    )
-    runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
-    assert isinstance(runtime, GeminiOAuthProxySession)
-
-    payload = manager.complete_callback(channel="gemini", state=runtime.state, code="callback-code")
-    assert payload["status"] == "succeeded"
-    assert payload["oauth_callback_received"] is True
-    assert payload["manual_fallback_used"] is False
-
-    try:
-        manager.complete_callback(channel="gemini", state=runtime.state, code="callback-code")
-        raise AssertionError("expected ValueError")
-    except ValueError as exc:
-        assert "already been consumed" in str(exc)
+        assert "Unsupported engine" in str(exc)
 
 
 def test_engine_auth_flow_manager_iflow_oauth_proxy_is_unsupported(tmp_path: Path, monkeypatch):
@@ -1188,85 +1087,6 @@ def _wait_until_status(
             return payload
         time.sleep(0.05)
     return payload
-
-
-def test_engine_auth_flow_manager_gemini_submit_success(tmp_path: Path):
-    _require_pty()
-    command_path = _write_script(
-        tmp_path / "fake-gemini",
-        """
-printf 'How would you like to authenticate for this project?\\n'
-printf '(checked) 1. Login with Google\\n'
-printf '(Use Enter to select)\\n'
-IFS= read -r _menu
-printf 'Please visit the following URL to authorize the application:\\n\\n'
-printf 'https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&access_type=off\\n'
-printf 'line&scope=openid\\n\\n'
-printf 'Enter the authorization code:\\n'
-IFS= read -r _code
-printf 'Type your message or @path/to/file\\n'
-sleep 0.2
-""".strip(),
-    )
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-
-    started = manager.start_session(
-        "gemini",
-        "auth",
-        transport="cli_delegate",
-        auth_method="auth_code_or_url",
-    )
-    waiting = _wait_until_status(manager, started["session_id"], {"waiting_user"})
-    assert waiting["engine"] == "gemini"
-    assert waiting["status"] == "waiting_user"
-    assert str(waiting["auth_url"]).startswith("https://accounts.google.com/o/oauth2")
-    assert "offline" in str(waiting["auth_url"])
-
-    submitted = manager.input_session(started["session_id"], "code", "ABCD-EFGH")
-    assert submitted["status"] in {"code_submitted_waiting_result", "succeeded"}
-
-    final = _wait_until_status(manager, started["session_id"], {"succeeded"})
-    assert final["status"] == "succeeded"
-
-
-def test_engine_auth_flow_manager_gemini_already_authenticated_triggers_reauth(tmp_path: Path):
-    _require_pty()
-    command_path = _write_script(
-        tmp_path / "fake-gemini-authenticated",
-        """
-printf 'Type your message or @path/to/file\\n'
-IFS= read -r first
-if [ "$first" = "/auth" ]; then
-  printf 'Please visit the following URL to authorize the application:\\n\\n'
-  printf 'https://accounts.google.com/o/oauth2/v2/auth?client_id=abc123\\n\\n'
-  printf 'Enter the authorization code:\\n'
-  IFS= read -r _code
-  printf 'Type your message or @path/to/file\\n'
-fi
-sleep 0.2
-""".strip(),
-    )
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-
-    started = manager.start_session(
-        "gemini",
-        "auth",
-        transport="cli_delegate",
-        auth_method="auth_code_or_url",
-    )
-    waiting = _wait_until_status(manager, started["session_id"], {"waiting_user"})
-    assert waiting["status"] == "waiting_user"
-    assert waiting["auth_url"] == "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc123"
 
 
 def test_engine_auth_flow_manager_iflow_cli_delegate_is_unsupported(tmp_path: Path):

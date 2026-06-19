@@ -15,7 +15,7 @@ class _FakeManager:
         self.profile = SimpleNamespace(data_dir=data_dir)
         self._status = {
             "codex": EngineStatus(present=True, version="0.105.0"),
-            "gemini": EngineStatus(present=True, version="0.30.0"),
+            "claude": EngineStatus(present=True, version="1.0.0"),
             "opencode": EngineStatus(present=True, version="1.2.15"),
             "qwen": EngineStatus(present=False, version=""),
         }
@@ -52,12 +52,12 @@ async def test_engine_status_cache_service_refresh_engine_merges_existing_cache(
     service = EngineStatusCacheService(manager, db_path=tmp_path / "runs.db")
     await service.refresh_all()
 
-    manager._status["gemini"] = EngineStatus(present=True, version="0.31.0")
-    refreshed = await service.refresh_engine("gemini")
+    manager._status["claude"] = EngineStatus(present=True, version="1.1.0")
+    refreshed = await service.refresh_engine("claude")
 
     snapshot = service.get_snapshot()
-    assert refreshed.version == "0.31.0"
-    assert snapshot["gemini"].version == "0.31.0"
+    assert refreshed.version == "1.1.0"
+    assert snapshot["claude"].version == "1.1.0"
     assert snapshot["codex"].version == "0.105.0"
 
 
@@ -71,7 +71,7 @@ def test_engine_status_cache_service_invalid_cache_degrades_to_empty_snapshot(tm
     snapshot = service.get_snapshot()
 
     assert snapshot["codex"].version is None
-    assert snapshot["gemini"].version is None
+    assert snapshot["claude"].version is None
 
 
 def test_engine_status_cache_service_get_snapshot_does_not_touch_sqlite(tmp_path: Path, monkeypatch):

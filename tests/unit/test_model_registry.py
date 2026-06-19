@@ -12,17 +12,17 @@ def test_get_models_uses_latest_snapshot_when_version_unknown(monkeypatch):
         lambda _engine: None,
     )
 
-    catalog = registry.get_models("gemini", refresh=True)
+    catalog = registry.get_models("codex", refresh=True)
 
-    assert catalog.engine == "gemini"
-    manifest = registry._load_manifest("gemini")
+    assert catalog.engine == "codex"
+    manifest = registry._load_manifest("codex")
     expected = max(
         (snap["version"] for snap in manifest["snapshots"]),
         key=registry._semver_key,
     )
     assert catalog.snapshot_version_used == expected
     assert catalog.fallback_reason == "cli_version_unknown"
-    assert any(model.id == "gemini-2.5-pro" for model in catalog.models)
+    assert any(model.id == "gpt-5.2-codex" for model in catalog.models)
 
 
 def test_get_models_uses_exact_or_lower_version(monkeypatch):
@@ -32,9 +32,9 @@ def test_get_models_uses_exact_or_lower_version(monkeypatch):
         lambda _engine: "0.25.2",
     )
 
-    catalog = registry.get_models("gemini", refresh=True)
+    catalog = registry.get_models("codex", refresh=True)
 
-    assert catalog.snapshot_version_used == "0.25.2"
+    assert catalog.snapshot_version_used == "0.0.0"
     assert catalog.fallback_reason is None
 
 
@@ -104,10 +104,10 @@ def test_validate_model_non_codex_ignores_suffix_when_effort_is_unsupported(monk
         lambda _engine: None,
     )
 
-    result = registry.validate_model("gemini", "gemini-2.5-pro@high")
+    result = registry.validate_model("qwen", "qwen-oauth/coder-model@high")
     assert result == {
-        "model": "gemini-2.5-pro",
-        "provider_id": "google",
+        "model": "coder-model",
+        "provider_id": "qwen-oauth",
     }
 
 
@@ -312,7 +312,7 @@ class _FakeAdapterProfile:
     class _ProviderContract:
         def __init__(self) -> None:
             self.multi_provider = False
-            self.canonical_provider_id = "google"
+            self.canonical_provider_id = "openai"
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -344,16 +344,16 @@ class _FakeMultiProviderAdapterProfile:
 
 def test_get_manifest_view(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
-    _build_models_fixture(tmp_path, "gemini")
-    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(tmp_path / "gemini"))
+    _build_models_fixture(tmp_path, "codex")
+    monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(tmp_path / "codex"))
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
         lambda _engine: "0.1.0",
     )
 
-    view = registry.get_manifest_view("gemini")
+    view = registry.get_manifest_view("codex")
 
-    assert view["engine"] == "gemini"
+    assert view["engine"] == "codex"
     assert view["resolved_snapshot_version"] == "0.1.0"
     assert view["resolved_snapshot_file"] == "models_0.1.0.json"
     assert view["models"][0]["id"] == "model-a"
@@ -384,7 +384,7 @@ def test_get_manifest_view_qwen_uses_snapshot_contract(monkeypatch, tmp_path: Pa
 
 def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
-    engine_root = _build_models_fixture(tmp_path, "gemini")
+    engine_root = _build_models_fixture(tmp_path, "codex")
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
@@ -392,7 +392,7 @@ def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
     )
 
     view = registry.add_snapshot_for_detected_version(
-        "gemini",
+        "codex",
         [
             {
                 "id": "model-b",
@@ -412,9 +412,9 @@ def test_add_snapshot_for_detected_version_success(monkeypatch, tmp_path: Path):
 
 def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
-    engine_root = _build_models_fixture(tmp_path, "gemini")
+    engine_root = _build_models_fixture(tmp_path, "codex")
     with open(engine_root / "models_0.2.0.json", "w", encoding="utf-8") as f:
-        json.dump({"engine": "gemini", "version": "0.2.0", "models": []}, f)
+        json.dump({"engine": "codex", "version": "0.2.0", "models": []}, f)
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
@@ -422,12 +422,12 @@ def test_add_snapshot_for_detected_version_rejects_existing(monkeypatch, tmp_pat
     )
 
     with pytest.raises(ValueError, match="Snapshot already exists"):
-        registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])
+        registry.add_snapshot_for_detected_version("codex", [{"id": "model-c"}])
 
 
 def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_path: Path):
     registry = ModelRegistry()
-    engine_root = _build_models_fixture(tmp_path, "gemini")
+    engine_root = _build_models_fixture(tmp_path, "codex")
     monkeypatch.setattr(registry, "_adapter_profile", lambda _engine: _FakeAdapterProfile(engine_root))
     monkeypatch.setattr(
         "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
@@ -435,7 +435,7 @@ def test_add_snapshot_for_detected_version_requires_version(monkeypatch, tmp_pat
     )
 
     with pytest.raises(ValueError, match="CLI version not detected"):
-        registry.add_snapshot_for_detected_version("gemini", [{"id": "model-c"}])
+        registry.add_snapshot_for_detected_version("codex", [{"id": "model-c"}])
 
 
 def test_claude_catalog_merges_custom_provider_models_and_marks_sources(monkeypatch):

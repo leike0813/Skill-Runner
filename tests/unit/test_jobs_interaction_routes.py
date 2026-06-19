@@ -38,7 +38,7 @@ def _create_skill(
         json.dumps(
             {
                 "id": skill_id,
-                "engines": ["gemini"],
+                "engines": ["codex"],
                 "execution_modes": modes,
             }
         ),
@@ -47,7 +47,7 @@ def _create_skill(
     return SkillManifest(
         id=skill_id,
         path=skill_dir,
-        engines=["gemini"],
+        engines=["codex"],
         execution_modes=modes,
     )
 
@@ -127,9 +127,9 @@ async def _create_interactive_request(
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options=runtime_options or {"execution_mode": "interactive"},
         ),
         BackgroundTasks(),
@@ -238,9 +238,9 @@ async def test_create_run_normalizes_non_session_dual_mode_skill_to_auto(monkeyp
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={"execution_mode": "interactive"},
             client_metadata={"conversation_mode": "non_session"},
         ),
@@ -273,9 +273,9 @@ async def test_create_run_normalizes_non_session_interactive_only_skill_to_zero_
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
             runtime_options={},
             client_metadata={"conversation_mode": "non_session"},
         ),
@@ -545,9 +545,9 @@ async def test_interaction_endpoints_require_interactive_mode(monkeypatch, temp_
     response = await jobs_router.create_run(
         RunCreateRequest(
             skill_id=skill.id,
-            engine="gemini",
+            engine="codex",
             parameter={},
-            model="gemini-2.5-pro",
+            model="gpt-5.4-mini",
         ),
         BackgroundTasks(),
     )

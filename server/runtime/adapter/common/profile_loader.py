@@ -27,10 +27,9 @@ UiShellSandboxProbeStrategy = Literal[
     "static_supported",
     "static_unsupported",
     "codex_landlock",
-    "gemini_container",
 ]
-UiShellAuthHintStrategy = Literal["none", "gemini_api_key_disables_sandbox"]
-UiShellRuntimeOverrideStrategy = Literal["none", "gemini_ui_shell", "claude_ui_shell"]
+UiShellAuthHintStrategy = Literal["none"]
+UiShellRuntimeOverrideStrategy = Literal["none", "claude_ui_shell"]
 StructuredOutputMode = Literal["noop", "canonical_passthrough", "compat_translate"]
 StructuredOutputCliSchemaStrategy = Literal["noop", "path_schema_artifact", "inline_schema_object"]
 StructuredOutputCompatSchemaStrategy = Literal["noop", "canonical_passthrough", "compat_translate"]
@@ -40,8 +39,6 @@ StructuredOutputResultSuccessStrategy = Literal["none", "result_structured_outpu
 ImportValidatorName = Literal[
     "json_object",
     "codex_auth_json",
-    "gemini_google_accounts_json",
-    "gemini_oauth_creds_json",
     "opencode_auth_json",
     "opencode_antigravity_accounts_json",
     "qwen_oauth_creds_json",
@@ -354,20 +351,24 @@ def _is_absolute_relpath_like(raw_value: str) -> bool:
     return normalized.startswith(("/", "\\"))
 
 
-@lru_cache(maxsize=16)
-def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterProfile:
-    profile_path = Path(profile_path_str)
+def _parse_adapter_profile(
+    engine: str,
+    profile_path: Path,
+    *,
+    validate_schema: bool,
+) -> AdapterProfile:
     if not profile_path.exists():
         raise RuntimeError(f"Adapter profile not found for {engine}: {profile_path}")
 
     payload = json.loads(profile_path.read_text(encoding="utf-8"))
-    schema = _load_schema()
-    try:
-        jsonschema.validate(instance=payload, schema=schema)
-    except jsonschema.ValidationError as exc:
-        raise RuntimeError(
-            f"Adapter profile validation failed for {engine} ({profile_path}): {exc.message}"
-        ) from exc
+    if validate_schema:
+        schema = _load_schema()
+        try:
+            jsonschema.validate(instance=payload, schema=schema)
+        except jsonschema.ValidationError as exc:
+            raise RuntimeError(
+                f"Adapter profile validation failed for {engine} ({profile_path}): {exc.message}"
+            ) from exc
 
     payload_engine = payload.get("engine")
     if payload_engine != engine:
@@ -764,10 +765,29 @@ def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterP
     )
 
 
+@lru_cache(maxsize=16)
+def _load_adapter_profile_cached(engine: str, profile_path_str: str) -> AdapterProfile:
+    return _parse_adapter_profile(engine, Path(profile_path_str), validate_schema=True)
+
+
+@lru_cache(maxsize=4)
+def _load_legacy_readonly_adapter_profile_cached(
+    engine: str,
+    profile_path_str: str,
+) -> AdapterProfile:
+    return _parse_adapter_profile(engine, Path(profile_path_str), validate_schema=False)
+
+
 def load_adapter_profile(engine: str, profile_path: Path) -> AdapterProfile:
     if engine.strip().lower() not in keys.ENGINE_KEYS:
         raise RuntimeError(f"Unsupported adapter engine: {engine}")
     return _load_adapter_profile_cached(engine, str(profile_path.resolve()))
+
+
+def load_legacy_readonly_adapter_profile(engine: str, profile_path: Path) -> AdapterProfile:
+    if engine.strip().lower() not in keys.LEGACY_READONLY_ENGINE_KEYS:
+        raise RuntimeError(f"Unsupported legacy adapter engine: {engine}")
+    return _load_legacy_readonly_adapter_profile_cached(engine, str(profile_path.resolve()))
 
 
 def adapter_profile_path_for_engine(engine: str) -> Path:

@@ -45,7 +45,7 @@ async def test_create_task_rejects_when_busy(tmp_path):
 @pytest.mark.asyncio
 async def test_run_task_single_success(tmp_path, monkeypatch):
     manager, store = _build_manager_with_store(tmp_path)
-    await store.create_task("req-1", "single", "gemini")
+    await store.create_task("req-1", "single", "codex")
     manager._running_request_id = "req-1"  # type: ignore[attr-defined]
     refreshed_engines: list[str] = []
 
@@ -66,9 +66,9 @@ async def test_run_task_single_success(tmp_path, monkeypatch):
     record = await store.get_task("req-1")
     assert record is not None
     assert record["status"] == "succeeded"
-    assert record["results"]["gemini"]["status"] == "succeeded"
-    assert record["results"]["gemini"]["action"] == "upgrade"
-    assert "gemini" in refreshed_engines
+    assert record["results"]["codex"]["status"] == "succeeded"
+    assert record["results"]["codex"]["action"] == "upgrade"
+    assert "codex" in refreshed_engines
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,7 @@ async def test_run_task_all_with_failure(tmp_path, monkeypatch):
 
     async def _fake_run(engine: str, *, mode: str):
         assert mode == "all"
-        if engine == "gemini":
+        if engine == "codex":
             return {"status": "failed", "action": "upgrade", "stdout": "", "stderr": "boom", "error": "failed"}
         return {"status": "succeeded", "action": "upgrade", "stdout": "ok", "stderr": "", "error": None}
     async def _noop_refresh_status(_engine: str):
@@ -92,8 +92,8 @@ async def test_run_task_all_with_failure(tmp_path, monkeypatch):
     record = await store.get_task("req-2")
     assert record is not None
     assert record["status"] == "failed"
-    assert record["results"]["gemini"]["status"] == "failed"
-    assert record["results"]["gemini"]["action"] == "upgrade"
+    assert record["results"]["codex"]["status"] == "failed"
+    assert record["results"]["codex"]["action"] == "upgrade"
 
 
 def test_single_engine_action_uses_install_when_managed_missing(tmp_path, monkeypatch):
