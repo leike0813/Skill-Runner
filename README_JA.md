@@ -159,7 +159,7 @@ docker run --rm -p 9813:9813 -p 17681:17681 \
 リリース版 compose ファイルを直接ダウンロードしてデプロイ:
 
 ```bash
-VERSION=v0.4.3
+VERSION=v0.7.0
 curl -fL -o docker-compose.release.yml \
   "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
 curl -fL -o docker-compose.release.yml.sha256 \

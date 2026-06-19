@@ -156,7 +156,7 @@ The installers download these GitHub Release assets for the selected tag:
 Deploy directly from a release compose asset:
 
 ```bash
-VERSION=v0.4.3
+VERSION=v0.7.0
 curl -fL -o docker-compose.release.yml \
   "https://github.com/leike0813/Skill-Runner/releases/download/${VERSION}/docker-compose.release.yml"
 curl -fL -o docker-compose.release.yml.sha256 \
