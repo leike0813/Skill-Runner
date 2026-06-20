@@ -72,6 +72,28 @@ class _AuditStub:
     pass
 
 
+def _layout_record(
+    run_dir: Path,
+    *,
+    request_id: str = "req-1",
+    run_id: str = "run-1",
+    skill_id: str = "skill-1",
+    namespace: str = "skill-1.1",
+    skill_source: str = "installed",
+) -> dict[str, Any]:
+    return {
+        "request_id": request_id,
+        "run_id": run_id,
+        "skill_id": skill_id,
+        "skill_source": skill_source,
+        "workspace_id": run_dir.name,
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+        "result_path": str(run_dir / "result" / namespace / "result.json"),
+        "input_manifest_path": str(run_dir / ".audit" / namespace / "input_manifest.json"),
+    }
+
+
 def _build_context(tmp_path: Path) -> RunAttemptContext:
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +105,7 @@ def _build_context(tmp_path: Path) -> RunAttemptContext:
             options={"execution_mode": "auto"},
         ),
         run_dir=run_dir,
-        request_record={"request_id": "req-1"},
+        request_record=_layout_record(run_dir),
         request_id="req-1",
         execution_mode="auto",
         conversation_mode="session",
@@ -186,7 +208,7 @@ def _build_finalize_input(
         context=context,
         execution=_build_execution(),
         outcome=outcome,
-        request_record=request_record if request_record is not None else {"skill_source": "installed"},
+        request_record=request_record if request_record is not None else _layout_record(context.run_dir),
         run_id="run-1",
         request_id="req-1",
         cache_key=cache_key,
@@ -272,11 +294,12 @@ async def test_projection_finalizer_writes_success_terminal_bundle_and_cache(tmp
     result = await RunAttemptProjectionFinalizer().finalize(inputs=finalize_input)
 
     assert len(projection.terminal_calls) == 1
-    assert result.result_path == finalize_input.context.run_dir / "result" / "result.json"
+    expected_path = finalize_input.context.run_dir / "result" / "skill-1.1" / "result.json"
+    assert result.result_path == expected_path
     assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
     assert bundles.calls == [
-        (finalize_input.context.run_dir, False, None),
-        (finalize_input.context.run_dir, True, None),
+        (finalize_input.context.run_dir, False, bundles.calls[0][2]),
+        (finalize_input.context.run_dir, True, bundles.calls[0][2]),
     ]
     assert run_store.cache_entries == [("cache-1", "run-1")]
     assert run_store.temp_cache_entries == []
@@ -340,7 +363,7 @@ async def test_projection_finalizer_feedback_sidecar_diagnostics_do_not_change_s
         outcome=outcome,
         cache_key="cache-1",
     )
-    sidecar = finalize_input.context.run_dir / "result" / "_skill_run_feedback.md"
+    sidecar = finalize_input.context.run_dir / "result" / "skill-1.1" / "_skill_run_feedback.md"
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar.write_text(feedback_text, encoding="utf-8")
 
@@ -350,8 +373,8 @@ async def test_projection_finalizer_feedback_sidecar_diagnostics_do_not_change_s
     assert result.final_status == RunStatus.SUCCEEDED
     assert run_store.status_updates == [("run-1", RunStatus.SUCCEEDED, str(result.result_path))]
     assert bundles.calls == [
-        (finalize_input.context.run_dir, False, None),
-        (finalize_input.context.run_dir, True, None),
+        (finalize_input.context.run_dir, False, bundles.calls[0][2]),
+        (finalize_input.context.run_dir, True, bundles.calls[0][2]),
     ]
     assert run_store.cache_entries == [("cache-1", "run-1")]
     assert expected_event in caplog.text
@@ -387,7 +410,7 @@ async def test_projection_finalizer_unreadable_feedback_sidecar_does_not_change_
         tmp_path,
         outcome=outcome,
     )
-    sidecar = finalize_input.context.run_dir / "result" / "_skill_run_feedback.md"
+    sidecar = finalize_input.context.run_dir / "result" / "skill-1.1" / "_skill_run_feedback.md"
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar.write_text("note", encoding="utf-8")
     original_read_text = Path.read_text
@@ -430,7 +453,7 @@ async def test_projection_finalizer_writes_failed_terminal_event_with_code_and_m
         "message": "Something broke",
     }
     assert run_store.status_updates == [
-        ("run-1", RunStatus.FAILED, str(finalize_input.context.run_dir / "result" / "result.json"))
+        ("run-1", RunStatus.FAILED, str(finalize_input.context.run_dir / "result" / "skill-1.1" / "result.json"))
     ]
     assert bundles.calls == []
     assert len(events) == 1
@@ -462,7 +485,7 @@ async def test_projection_finalizer_keeps_canceled_event_semantics(tmp_path: Pat
 
     assert len(projection.terminal_calls) == 1
     assert run_store.status_updates == [
-        ("run-1", RunStatus.CANCELED, str(finalize_input.context.run_dir / "result" / "result.json"))
+        ("run-1", RunStatus.CANCELED, str(finalize_input.context.run_dir / "result" / "skill-1.1" / "result.json"))
     ]
     assert len(events) == 1
     assert events[0]["type_name"] == "lifecycle.run.canceled"

@@ -12,8 +12,7 @@ from server.services.orchestration.manifest_artifact_inference import infer_mani
 from server.services.orchestration.run_folder_git_initializer import run_folder_git_initializer
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
 from server.services.orchestration.run_workspace_layout import (
-    layout_from_record,
-    record_has_workspace_layout,
+    require_layout_from_record,
 )
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.runtime_env_options import runtime_env_secret_service
@@ -241,14 +240,11 @@ class RunAttemptPreparationService:
             )
             if runtime_env:
                 run_options["__runtime_env"] = runtime_env
-        layout = layout_from_record(request_record or {}, run_dir)
-        if request_id and layout is None and record_has_workspace_layout(request_record or {}):
-            raise RuntimeError(WORKSPACE_LAYOUT_UNAVAILABLE)
-        if layout is not None:
-            run_options["__audit_dir"] = str(layout.audit_dir)
-            run_options["__input_manifest_path"] = str(layout.input_manifest_path)
-            run_options["__result_json_path"] = str(layout.result_path)
-        audit_dir = layout.audit_dir if layout is not None else None
+        layout = require_layout_from_record(request_record or {})
+        run_options["__audit_dir"] = str(layout.audit_dir)
+        run_options["__input_manifest_path"] = str(layout.input_manifest_path)
+        run_options["__result_json_path"] = str(layout.result_path)
+        audit_dir = layout.audit_dir
         run_option_fields = run_output_schema_service.build_run_option_fields(
             run_dir=run_dir,
             audit_dir=audit_dir,
@@ -259,7 +255,7 @@ class RunAttemptPreparationService:
                 execution_mode=execution_mode,
                 run_dir=run_dir,
                 audit_dir=audit_dir,
-                input_manifest_path=layout.input_manifest_path if layout is not None else None,
+                input_manifest_path=layout.input_manifest_path,
             )
             run_option_fields = run_output_schema_service.build_run_option_fields(
                 run_dir=run_dir,

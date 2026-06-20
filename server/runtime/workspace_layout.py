@@ -41,14 +41,6 @@ class RunWorkspaceLayout:
         return self.workspace_dir / ".audit" / self.namespace / "input_manifest.json"
 
     @property
-    def state_path(self) -> Path:
-        return self.workspace_dir / ".state" / self.namespace / "state.json"
-
-    @property
-    def dispatch_path(self) -> Path:
-        return self.workspace_dir / ".state" / self.namespace / "dispatch.json"
-
-    @property
     def audit_dir(self) -> Path:
         return self.workspace_dir / ".audit" / self.namespace
 
@@ -69,84 +61,27 @@ def default_namespace_for_run(skill_id: str, index: int = 1) -> str:
     return f"{safe_segment(skill_id, 'skill')}.{max(1, int(index))}"
 
 
-def legacy_layout(*, run_id: str, run_dir: Path, skill_id: str) -> RunWorkspaceLayout:
-    return RunWorkspaceLayout(
-        workspace_id=run_id,
-        workspace_dir=run_dir,
-        namespace=default_namespace_for_run(skill_id, 1),
-    )
-
-
-def layout_from_record(record: dict[str, Any], fallback_run_dir: Path | None = None) -> RunWorkspaceLayout | None:
+def layout_from_record(record: dict[str, Any]) -> RunWorkspaceLayout | None:
     run_id = str(record.get("run_id") or "").strip()
-    skill_id = str(record.get("skill_id") or "skill")
     workspace_id = str(record.get("workspace_id") or run_id).strip()
     namespace = str(record.get("workspace_namespace") or "").strip()
     workspace_dir_raw = record.get("workspace_dir")
-    has_layout_metadata = bool(namespace) or (
-        isinstance(workspace_dir_raw, str) and bool(workspace_dir_raw.strip())
-    )
-    if not has_layout_metadata:
-        return None
-    workspace_dir = Path(str(workspace_dir_raw)) if isinstance(workspace_dir_raw, str) and workspace_dir_raw else None
-    if workspace_dir is None:
-        workspace_dir = fallback_run_dir
-    if not workspace_id or workspace_dir is None:
+    if not (
+        workspace_id
+        and namespace
+        and isinstance(workspace_dir_raw, str)
+        and workspace_dir_raw.strip()
+    ):
         return None
     return RunWorkspaceLayout(
         workspace_id=workspace_id,
-        workspace_dir=workspace_dir,
-        namespace=namespace or default_namespace_for_run(skill_id, 1),
+        workspace_dir=Path(workspace_dir_raw),
+        namespace=namespace,
     )
 
 
-def record_has_workspace_layout(record: dict[str, Any]) -> bool:
-    namespace = str(record.get("workspace_namespace") or "").strip()
-    workspace_dir_raw = record.get("workspace_dir")
-    return bool(namespace) or (
-        isinstance(workspace_dir_raw, str) and bool(workspace_dir_raw.strip())
-    )
-
-
-def resolve_legacy_workspace_dir(
-    *,
-    workspace_backend: Any | None,
-    run_id: str,
-) -> Path | None:
-    if workspace_backend is None or not run_id:
-        return None
-    for method_name in ("get_workspace_dir", "get_legacy_run_dir", "get_run_dir"):
-        method = getattr(workspace_backend, method_name, None)
-        if not callable(method):
-            continue
-        try:
-            candidate = method(run_id)
-        except (OSError, RuntimeError, ValueError, TypeError):
-            continue
-        if candidate is None:
-            continue
-        path = candidate if isinstance(candidate, Path) else Path(str(candidate))
-        if path.exists():
-            return path
-    return None
-
-
-def resolve_workspace_dir_from_record(
-    record: dict[str, Any],
-    *,
-    workspace_backend: Any | None = None,
-    run_id: str | None = None,
-    fallback_workspace_dir: Path | None = None,
-) -> Path | None:
-    layout = layout_from_record(record, None)
-    if layout is not None:
-        return layout.workspace_dir if layout.workspace_dir.exists() else None
-    if record_has_workspace_layout(record):
-        return None
-    if fallback_workspace_dir is not None and fallback_workspace_dir.exists():
-        return fallback_workspace_dir
-    resolved_run_id = str(run_id or record.get("run_id") or "").strip()
-    return resolve_legacy_workspace_dir(
-        workspace_backend=workspace_backend,
-        run_id=resolved_run_id,
-    )
+def require_layout_from_record(record: dict[str, Any]) -> RunWorkspaceLayout:
+    layout = layout_from_record(record)
+    if layout is None:
+        raise RuntimeError("Run workspace layout is unavailable")
+    return layout

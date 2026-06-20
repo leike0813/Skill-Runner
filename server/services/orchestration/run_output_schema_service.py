@@ -288,7 +288,10 @@ class RunOutputSchemaService:
         input_manifest_path: Path | None = None,
         fields: dict[str, Any],
     ) -> None:
-        request_input_path = input_manifest_path or run_dir / ".audit" / "request_input.json"
+        _ = run_dir
+        if input_manifest_path is None:
+            raise RuntimeError("input_manifest_path is required")
+        request_input_path = input_manifest_path
         if not request_input_path.exists():
             return
         try:
@@ -302,14 +305,15 @@ class RunOutputSchemaService:
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
             logger.warning(
-                "Failed to append target output schema paths into request_input.json",
+                "Failed to append target output schema paths into input manifest",
                 exc_info=True,
             )
 
     def _artifact_path(self, run_dir: Path, audit_dir: Path | None = None) -> Path:
-        if audit_dir is not None:
-            return audit_dir / "contracts" / "target_output_schema.json"
-        return run_dir / TARGET_OUTPUT_SCHEMA_RELPATH
+        _ = run_dir
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        return audit_dir / "contracts" / "target_output_schema.json"
 
     def _normalize_execution_mode(self, execution_mode: str) -> str:
         mode = (execution_mode or "auto").strip().lower()

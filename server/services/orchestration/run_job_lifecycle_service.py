@@ -60,8 +60,7 @@ from server.services.orchestration.run_attempt_projection_finalizer import (
     RunAttemptFinalizeInput,
 )
 from server.services.orchestration.run_workspace_layout import (
-    layout_from_record,
-    resolve_workspace_dir_from_record,
+    require_layout_from_record,
 )
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.schema_validator import schema_validator
@@ -505,9 +504,9 @@ class _RunJobLifecyclePipeline:
             options: Execution options (e.g. runtime model config and policies).
 
         Side Effects:
-            - Updates `.state/state.json` and `.state/dispatch.json` in run_dir.
-            - Writes '.audit/stdout.{attempt}.log', '.audit/stderr.{attempt}.log'.
-            - Writes 'result/result.json'.
+            - Writes DB state/projection/dispatch as SSOT.
+            - Writes namespaced audit logs.
+            - Writes namespaced result.json from persisted layout.
         """
         run_id = request.run_id
         skill_id = request.skill_id
@@ -536,24 +535,10 @@ class _RunJobLifecyclePipeline:
         try:
             request_record = await run_store.get_request_by_run_id(run_id)
             request_id = request_record.get("request_id") if request_record else None
-            run_dir = resolve_workspace_dir_from_record(
-                request_record or {},
-                workspace_backend=workspace_manager,
-                run_id=run_id,
-            )
-            if not run_dir:
-                log_event(
-                    logger,
-                    event="run.lifecycle.failed",
-                    phase="run_lifecycle",
-                    outcome="error",
-                    level=logging.ERROR,
-                    request_id=None,
-                    run_id=run_id,
-                    engine=engine_name,
-                    error_code="RUN_DIR_NOT_FOUND",
-                )
-                return RunJobOutcome(run_id=run_id)
+            if not isinstance(request_record, dict):
+                raise RuntimeError("Request record is required for run lifecycle")
+            layout = require_layout_from_record(request_record)
+            run_dir = layout.workspace_dir
             effective_runtime_options = (
                 request_record.get("effective_runtime_options", {})
                 if isinstance(request_record, dict)
@@ -597,30 +582,25 @@ class _RunJobLifecyclePipeline:
                     request_id=request_id,
                     is_interactive=is_interactive,
                 )
-            layout = layout_from_record(request_record or {}, run_dir)
-            audit_dir = layout.audit_dir if layout is not None else None
-            input_manifest_path = layout.input_manifest_path if layout is not None else None
+            audit_dir = layout.audit_dir
+            input_manifest_path = layout.input_manifest_path
 
             def append_orchestrator_event(**kwargs: Any) -> None:
-                if audit_dir is not None:
-                    kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("audit_dir", audit_dir)
                 kwargs.setdefault("run_id", run_id)
                 orchestrator.audit_service.append_orchestrator_event(**kwargs)
 
             def append_output_repair_record(**kwargs: Any) -> None:
-                if audit_dir is not None:
-                    kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("audit_dir", audit_dir)
                 orchestrator.audit_service.append_output_repair_record(**kwargs)
 
             def append_internal_schema_warning(**kwargs: Any) -> None:
-                if audit_dir is not None:
-                    kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("audit_dir", audit_dir)
                 kwargs.setdefault("run_id", run_id)
                 orchestrator.audit_service.append_internal_schema_warning(**kwargs)
 
             def write_attempt_audit_artifacts(**kwargs: Any) -> None:
-                if audit_dir is not None:
-                    kwargs.setdefault("audit_dir", audit_dir)
+                kwargs.setdefault("audit_dir", audit_dir)
                 orchestrator.audit_service.write_attempt_audit_artifacts(**kwargs)
 
             audit_service = SimpleNamespace(
@@ -747,8 +727,10 @@ class _RunJobLifecyclePipeline:
             auth_session_meta: Dict[str, Any] | None = None
             if await run_store.is_cancel_requested(run_id):
                 canceled_error = orchestrator._build_canceled_error()
-                layout = layout_from_record(request_record or {}, run_dir)
-                result_path = layout.result_path if layout is not None else run_dir / "result" / "result.json"
+                if not request_id:
+                    raise RuntimeError("request_id is required for run lifecycle")
+                layout = require_layout_from_record(request_record)
+                result_path = layout.result_path
                 if request_id:
                     await run_projection_service.write_terminal_projection(
                         run_dir=run_dir,
@@ -769,16 +751,6 @@ class _RunJobLifecyclePipeline:
                         ),
                         error=canceled_error,
                         run_store_backend=run_store,
-                    )
-                else:
-                    result_path = orchestrator._write_canceled_result(run_dir, canceled_error)
-                    orchestrator._update_status(
-                        run_dir,
-                        RunStatus.CANCELED,
-                        error=canceled_error,
-                        effective_session_timeout_sec=(
-                            interactive_profile.session_timeout_sec if interactive_profile is not None else None
-                        ),
                     )
                 await run_store.update_run_status(
                     run_id,
@@ -817,13 +789,7 @@ class _RunJobLifecyclePipeline:
                     run_store_backend=run_store,
                 )
             else:
-                orchestrator._update_status(
-                    run_dir=run_dir,
-                    status=RunStatus.RUNNING,
-                    effective_session_timeout_sec=(
-                        interactive_profile.session_timeout_sec if interactive_profile is not None else None
-                    ),
-                )
+                raise RuntimeError("request_id is required for run lifecycle")
             append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=attempt_number,

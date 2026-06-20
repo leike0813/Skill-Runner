@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from server.models import InteractiveErrorCode, RunStatus
 from server.runtime.logging.structured_trace import log_event
 from server.runtime.session.statechart import SessionEvent, waiting_recovery_event
+from server.services.orchestration.run_workspace_layout import require_layout_from_record
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.process_supervisor import process_supervisor
 
@@ -108,9 +109,8 @@ class RunRecoveryService:
                 error_code="REQUEST_NOT_FOUND",
             )
             return False
-        resolved_workspace = workspace_backend or workspace_manager
-        run_dir = resolved_workspace.get_run_dir(run_id)
-        if run_dir is None or not run_dir.exists():
+        run_dir = require_layout_from_record(request_record).workspace_dir
+        if not run_dir.exists():
             logger.warning(
                 "Skip queued resume redrive because run_dir is missing: request_id=%s run_id=%s ticket_id=%s",
                 request_id,
@@ -200,10 +200,9 @@ class RunRecoveryService:
 
         await cleanup_orphan_bindings(records)
         active_run_dirs: list[Any] = []
-        for run_id in await run_store_backend.list_active_run_ids():
-            run_dir = workspace_backend.get_run_dir(run_id)
-            if run_dir:
-                active_run_dirs.append(run_dir)
+        for record in records:
+            if isinstance(record, dict):
+                active_run_dirs.append(require_layout_from_record(record).workspace_dir)
         try:
             trust_manager_backend.cleanup_stale_entries(active_run_dirs)
         except (OSError, RuntimeError, ValueError):
@@ -327,14 +326,16 @@ class RunRecoveryService:
         adapters: dict[str, Any],
     ) -> None:
         message = f"{error_code}: {reason}"
-        run_dir = workspace_backend.get_run_dir(run_id)
-        if run_dir:
-            update_status(
-                run_dir,
-                RunStatus.FAILED,
-                error={"code": error_code, "message": message},
-                effective_session_timeout_sec=await run_store_backend.get_effective_session_timeout(request_id),
-            )
+        request_record = await run_store_backend.get_request(request_id)
+        if not isinstance(request_record, dict):
+            raise RuntimeError("Request record is required for recovery projection")
+        run_dir = require_layout_from_record(request_record).workspace_dir
+        update_status(
+            run_dir,
+            RunStatus.FAILED,
+            error={"code": error_code, "message": message},
+            effective_session_timeout_sec=await run_store_backend.get_effective_session_timeout(request_id),
+        )
         await run_store_backend.update_run_status(run_id, RunStatus.FAILED)
         await run_store_backend.set_recovery_info(
             run_id,

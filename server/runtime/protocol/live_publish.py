@@ -150,7 +150,9 @@ class FcmpAuditMirrorWriter:
         run_id: str,
         audit_dir: Path | None = None,
     ) -> BufferedAsyncTextFileWriter:
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         path = target_audit_dir / f"fcmp_events.{attempt_number}.jsonl"
         key = str(path.resolve(strict=False))
         writer = self._writers_by_path.get(key)
@@ -171,7 +173,9 @@ class FcmpAuditMirrorWriter:
     ) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -208,7 +212,9 @@ class RaspAuditMirrorWriter:
         run_id: str,
         audit_dir: Path | None = None,
     ) -> BufferedAsyncTextFileWriter:
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         path = target_audit_dir / f"events.{attempt_number}.jsonl"
         key = str(path.resolve(strict=False))
         writer = self._writers_by_path.get(key)
@@ -229,7 +235,9 @@ class RaspAuditMirrorWriter:
     ) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -270,13 +278,11 @@ class FcmpEventPublisher:
     ) -> None:
         if run_id in self._next_seq_by_run:
             return
-        audit_dir = audit_dir or run_dir / ".audit"
-        legacy_audit_dir = run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         max_global = 0
         local_seq_by_attempt: dict[int, int] = defaultdict(int)
         paths = list(sorted(audit_dir.glob("fcmp_events.*.jsonl")))
-        if audit_dir != legacy_audit_dir and not any(_read_jsonl(path) for path in paths):
-            paths.extend(sorted(legacy_audit_dir.glob("fcmp_events.*.jsonl")))
         for path in paths:
             for row in _read_jsonl(path):
                 seq_obj = row.get("seq")
@@ -486,19 +492,15 @@ class RaspEventPublisher:
         key = (run_id, attempt_number)
         if key in self._next_seq_by_run_attempt:
             return
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         path = target_audit_dir / f"events.{attempt_number}.jsonl"
-        legacy_path = run_dir / ".audit" / f"events.{attempt_number}.jsonl"
         max_seq = 0
         for row in _read_jsonl(path):
             seq_obj = row.get("seq")
             if isinstance(seq_obj, int):
                 max_seq = max(max_seq, seq_obj)
-        if max_seq == 0 and path != legacy_path:
-            for row in _read_jsonl(legacy_path):
-                seq_obj = row.get("seq")
-                if isinstance(seq_obj, int):
-                    max_seq = max(max_seq, seq_obj)
         self._next_seq_by_run_attempt[key] = max_seq + 1
 
     def _gate_for_run(self, run_id: str) -> RuntimeEventOrderingGate:

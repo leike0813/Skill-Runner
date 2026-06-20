@@ -21,7 +21,7 @@ from server.models import (
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
 from . import run_source_adapter as run_source_ports
-from server.runtime.workspace_layout import layout_from_record
+from server.runtime.workspace_layout import require_layout_from_record
 from .run_source_adapter import (
     RunSourceAdapter,
     get_request_and_workspace_dir,
@@ -183,36 +183,24 @@ class RunReadFacade:
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        layout = layout_from_record(request_record, run_dir)
+        layout = require_layout_from_record(request_record)
         bundle_name = "run_bundle_debug.zip" if debug else "run_bundle.zip"
-        bundle_path = (
-            layout.bundle_path(debug=debug)
-            if layout is not None
-            else run_dir / "bundle" / bundle_name
-        )
+        bundle_path = layout.bundle_path(debug=debug)
         if not bundle_path.exists():
             control = self._job_control()
             if hasattr(control, "build_run_bundle"):
-                if layout is not None:
-                    try:
-                        control.build_run_bundle(run_dir, debug, layout=layout)
-                    except TypeError as exc:
-                        raise HTTPException(
-                            status_code=500,
-                            detail="Bundle builder does not support run workspace layout",
-                        ) from exc
-                else:
-                    control.build_run_bundle(run_dir, debug)
-            else:
-                if layout is not None:
+                try:
+                    control.build_run_bundle(run_dir, debug, layout=layout)
+                except TypeError as exc:
                     raise HTTPException(
                         status_code=500,
                         detail="Bundle builder does not support run workspace layout",
-                    )
-                # Backward-compatible fallback for legacy test doubles.
-                legacy_control = control
-                if isinstance(legacy_control, object):
-                    getattr(legacy_control, "_build_run_bundle")(run_dir, debug)
+                    ) from exc
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Bundle builder does not support run workspace layout",
+                )
 
         if not bundle_path.exists():
             raise HTTPException(status_code=404, detail="Bundle not found")
@@ -314,8 +302,8 @@ class RunReadFacade:
             source_adapter=source_adapter,
             request_id=request_id,
         )
-        layout = layout_from_record(request_record, run_dir)
-        audit_dir = layout.audit_dir if layout is not None else run_dir / ".audit"
+        layout = require_layout_from_record(request_record)
+        audit_dir = layout.audit_dir
         latest_attempt = _latest_attempt_from_audit(run_dir, audit_dir=audit_dir)
         if latest_attempt <= 0:
             return RunLogsResponse(request_id=request_id)
@@ -555,15 +543,7 @@ class RunReadFacade:
 
 
 def _read_status(run_dir: Path, *, request_record: dict[str, Any] | None = None) -> RunStatus:
-    if isinstance(request_record, dict) and layout_from_record(request_record, run_dir) is not None:
-        return RunStatus.QUEUED
-    candidates: list[Path] = []
-    candidates.append(run_dir / ".state" / "state.json")
-    for state_file in candidates:
-        if not state_file.exists():
-            continue
-        payload = json.loads(state_file.read_text(encoding="utf-8"))
-        return RunStatus(payload.get("status", RunStatus.QUEUED.value))
+    _ = run_dir, request_record
     return RunStatus.QUEUED
 
 
@@ -584,17 +564,15 @@ async def _read_status_for_request(
                 return RunStatus(status_obj)
             except ValueError:
                 pass
-    return _read_status(run_dir, request_record=request_record)
+    raise HTTPException(status_code=500, detail="Run state is unavailable")
 
 
 def _resolve_result_path(request_record: dict[str, Any], run_dir: Path) -> Path:
+    _ = run_dir
     result_path_obj = request_record.get("result_path")
     if isinstance(result_path_obj, str) and result_path_obj.strip():
         return Path(result_path_obj)
-    layout = layout_from_record(request_record, run_dir)
-    if layout is not None and layout.result_path.exists():
-        return layout.result_path
-    return run_dir / "result" / "result.json"
+    return require_layout_from_record(request_record).result_path
 
 
 def _read_log(path: Path) -> str | None:
@@ -604,7 +582,9 @@ def _read_log(path: Path) -> str | None:
 
 
 def _latest_attempt_from_audit(run_dir: Path, *, audit_dir: Path | None = None) -> int:
-    audit_dir = audit_dir or run_dir / ".audit"
+    _ = run_dir
+    if audit_dir is None:
+        raise RuntimeError("audit_dir is required")
     if not audit_dir.exists() or not audit_dir.is_dir():
         return 0
     latest = 0

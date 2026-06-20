@@ -3,23 +3,23 @@
 ## Purpose
 TBD - created by archiving change complete-runtime-file-contract-cutover-and-scan. Update Purpose after archive.
 ## Requirements
-### Requirement: State And Dispatch Are The Only Current Runtime Truth
+### Requirement: DB State And Dispatch Are The Only Current Runtime Truth
 
-For new runs, current runtime truth MUST come from `.state/state.json` and `.state/dispatch.json`.
+For request-bound runs, current runtime truth MUST come from DB state, projection, and dispatch rows.
 
 #### Scenario: non-terminal state is rendered
 - **WHEN** APIs, observability, or UI render a new run in `queued`, `running`, `waiting_auth`, or `waiting_user`
-- **THEN** they read `.state/state.json` first
-- **AND** they read `.state/dispatch.json` for dispatch phase details
-- **AND** they do not fallback to `status.json` or `current/projection.json`
+- **THEN** they read `request_run_state` and `request_current_projection`
+- **AND** they read `request_dispatch_state` for dispatch phase details
+- **AND** they do not fallback to `.state/*.json`, `status.json`, or `current/projection.json`
 
-### Requirement: New Runs Must Not Read Legacy Current Truth
+### Requirement: New Runs Must Not Read File Current Truth
 
-Legacy current-truth files MUST NOT be used for new runs.
+File-based current-truth artifacts MUST NOT be used for request-bound runs.
 
 #### Scenario: legacy files are missing for a new run
-- **WHEN** a new run lacks `status.json`, `current/projection.json`, and `interactions/*`
-- **THEN** status and pending reads still succeed from `.state/*`
+- **WHEN** a new run lacks `.state/*`, `status.json`, `current/projection.json`, and `interactions/*`
+- **THEN** status and pending reads still succeed from DB rows
 - **AND** no compatibility fallback is attempted
 
 

@@ -29,7 +29,7 @@ from server.runtime.protocol.schema_registry import (
     validate_terminal_run_result,
 )
 from server.services.orchestration.run_workspace_layout import (
-    layout_from_record,
+    require_layout_from_record,
     workspace_output_token,
 )
 from server.services.orchestration.run_execution_core import resolve_conversation_mode
@@ -106,11 +106,6 @@ class RunStateService:
             return
         await maybe_await(setter(request_id, projection_payload))
 
-    def _layout(self, request_record: Dict[str, Any] | None, run_dir: Path) -> Any | None:
-        if not isinstance(request_record, dict):
-            return None
-        return layout_from_record(request_record, run_dir)
-
     async def _get_request_record(self, run_store_backend: Any, request_id: str) -> Dict[str, Any] | None:
         getter = self._backend_method(run_store_backend, "get_request")
         if getter is None:
@@ -118,79 +113,9 @@ class RunStateService:
         payload = await maybe_await(getter(request_id))
         return dict(payload) if isinstance(payload, dict) else None
 
-    def _state_path(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Path:
-        layout = self._layout(request_record, run_dir)
-        return layout.state_path if layout is not None else run_dir / ".state" / "state.json"
-
-    def _dispatch_path(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Path:
-        layout = self._layout(request_record, run_dir)
-        return layout.dispatch_path if layout is not None else run_dir / ".state" / "dispatch.json"
-
-    def _result_path(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Path:
-        layout = self._layout(request_record, run_dir)
-        return layout.result_path if layout is not None else run_dir / "result" / "result.json"
-
-    def _should_use_legacy_state_files(
-        self,
-        run_dir: Path,
-        request_record: Dict[str, Any] | None = None,
-    ) -> bool:
-        return self._layout(request_record, run_dir) is None
-
-    def _write_state_json(
-        self,
-        run_dir: Path,
-        request_record: Dict[str, Any] | None,
-        payload: Dict[str, Any],
-    ) -> None:
-        if self._should_use_legacy_state_files(run_dir, request_record):
-            self._write_json(self._state_path(run_dir, request_record), payload)
-
-    def _write_dispatch_json(
-        self,
-        run_dir: Path,
-        request_record: Dict[str, Any] | None,
-        payload: Dict[str, Any],
-    ) -> None:
-        if self._should_use_legacy_state_files(run_dir, request_record):
-            self._write_json(self._dispatch_path(run_dir, request_record), payload)
-
     def _write_json(self, path: Path, payload: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _read_json_dict(self, path: Path) -> Dict[str, Any]:
-        if not path.exists():
-            return {}
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def _delete(self, path: Path) -> None:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            return
-
-    def read_state_file(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        if not self._should_use_legacy_state_files(run_dir, request_record):
-            return {}
-        state_path = self._state_path(run_dir, request_record)
-        payload = self._read_json_dict(state_path)
-        if payload or state_path == run_dir / ".state" / "state.json":
-            return payload
-        return self._read_json_dict(run_dir / ".state" / "state.json")
-
-    def read_dispatch_file(self, run_dir: Path, request_record: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        if not self._should_use_legacy_state_files(run_dir, request_record):
-            return {}
-        dispatch_path = self._dispatch_path(run_dir, request_record)
-        payload = self._read_json_dict(dispatch_path)
-        if payload or dispatch_path == run_dir / ".state" / "dispatch.json":
-            return payload
-        return self._read_json_dict(run_dir / ".state" / "dispatch.json")
 
     def _runtime_context(self, request_record: Dict[str, Any] | None) -> RunRuntimeState:
         request_payload = request_record or {}
@@ -316,10 +241,12 @@ class RunStateService:
         request_record: Dict[str, Any] | None = None,
         run_store_backend: Any = run_store,
     ) -> Dict[str, Any]:
-        if request_record is None or self._layout(request_record, run_dir) is None:
+        if request_record is None:
             fetched_request_record = await self._get_request_record(run_store_backend, request_id)
             if fetched_request_record is not None:
                 request_record = fetched_request_record
+        if isinstance(request_record, dict):
+            require_layout_from_record(request_record)
         updated_at = datetime.utcnow()
         state_model = RunStateEnvelope(
             request_id=request_id,
@@ -336,7 +263,6 @@ class RunStateService:
         validate_run_state_envelope(state_payload)
         await self._set_run_state(run_store_backend, request_id, state_payload)
         await self._update_run_status(run_store_backend, run_id, RunStatus.QUEUED)
-        self._write_state_json(run_dir, request_record, state_payload)
         projection_payload = self._state_to_projection(state_payload)
         validate_current_run_projection(projection_payload)
         await self._set_current_projection(run_store_backend, request_id, projection_payload)
@@ -395,7 +321,6 @@ class RunStateService:
         dispatch_payload = dispatch_model.model_dump(mode="json")
         validate_run_dispatch_envelope(dispatch_payload)
         await self._set_dispatch_state(run_store_backend, request_id, dispatch_payload)
-        self._write_dispatch_json(run_dir, request_record, dispatch_payload)
         state_payload = await self._get_run_state(run_store_backend, request_id)
         if isinstance(state_payload, dict):
             state_payload = dict(state_payload)
@@ -405,7 +330,6 @@ class RunStateService:
             state_payload["state_phase"] = phase_payload
             state_payload["updated_at"] = now.isoformat()
             await self._set_run_state(run_store_backend, request_id, state_payload)
-            self._write_state_json(run_dir, request_record, state_payload)
             projection_payload = self._state_to_projection(state_payload)
             validate_current_run_projection(projection_payload)
             await self._set_current_projection(run_store_backend, request_id, projection_payload)
@@ -460,10 +384,9 @@ class RunStateService:
         run_store_backend: Any = run_store,
     ) -> Dict[str, Any]:
         updated_at = datetime.utcnow()
-        existing_state = await self._get_run_state(run_store_backend, request_id) or self.read_state_file(
-            run_dir,
-            request_record,
-        )
+        if isinstance(request_record, dict):
+            require_layout_from_record(request_record)
+        existing_state = await self._get_run_state(run_store_backend, request_id) or {}
         runtime_state = self._runtime_context(request_record) if isinstance(request_record, dict) else RunRuntimeState.model_validate(
             existing_state.get("runtime") or {}
         )
@@ -521,11 +444,9 @@ class RunStateService:
         validate_run_state_envelope(state_payload)
         await self._set_run_state(run_store_backend, request_id, state_payload)
         await self._update_run_status(run_store_backend, run_id, status)
-        self._write_state_json(run_dir, request_record, state_payload)
         projection_payload = self._state_to_projection(state_payload)
         validate_current_run_projection(projection_payload)
         await self._set_current_projection(run_store_backend, request_id, projection_payload)
-        self._delete(self._result_path(run_dir, request_record))
         return state_payload
 
     async def write_terminal_projection(
@@ -543,6 +464,8 @@ class RunStateService:
         warnings: list[Any] | None = None,
         run_store_backend: Any = run_store,
     ) -> Dict[str, Any]:
+        if request_record is None:
+            request_record = await self._get_request_record(run_store_backend, request_id)
         state_payload = await self.write_non_terminal_projection(
             run_dir=run_dir,
             request_id=request_id,
@@ -575,8 +498,8 @@ class RunStateService:
         terminal_model = TerminalRunResult(status=terminal_status, **terminal_result)
         terminal_payload = terminal_model.model_dump(mode="json")
         validate_terminal_run_result(terminal_payload)
-        layout = layout_from_record(request_record or {}, run_dir)
-        result_path = layout.result_path if layout is not None else self._result_path(run_dir)
+        layout = require_layout_from_record(request_record or {})
+        result_path = layout.result_path
         self._write_json(result_path, terminal_payload)
         updater = self._backend_method(run_store_backend, "update_run_workspace_metadata")
         if updater is not None:

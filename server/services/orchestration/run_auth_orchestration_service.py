@@ -47,8 +47,7 @@ from server.services.engine_management.auth_import_service import (
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_projection_service import run_projection_service
-from server.services.orchestration.run_workspace_layout import resolve_workspace_dir_from_record
-from server.services.orchestration.workspace_manager import workspace_manager
+from server.services.orchestration.run_workspace_layout import require_layout_from_record
 from server.services.platform.async_compat import maybe_await
 from server.services.platform.concurrency_manager import concurrency_manager
 
@@ -328,13 +327,8 @@ class RunAuthOrchestrationService:
             raise HTTPException(status_code=404, detail="Request not found")
         run_id_obj = request_record.get("run_id")
         resolved_run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_id
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=resolved_run_id,
-        )
-        if run_dir is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+        _ = resolved_run_id
+        run_dir = require_layout_from_record(request_record).workspace_dir
         existing_pending = await maybe_await(run_store_backend.get_pending_auth(request_id))
         existing_selection = await maybe_await(run_store_backend.get_pending_auth_method_selection(request_id))
         has_pending_challenge = isinstance(existing_pending, dict)
@@ -477,13 +471,7 @@ class RunAuthOrchestrationService:
             request.kind == AuthSubmissionKind.CUSTOM_PROVIDER
             and auth_session_id.startswith("provider-config::")
         ):
-            run_dir = resolve_workspace_dir_from_record(
-                request_record,
-                workspace_backend=workspace_manager,
-                run_id=run_id,
-            )
-            if run_dir is None:
-                raise HTTPException(status_code=404, detail="Run not found")
+            run_dir = require_layout_from_record(request_record).workspace_dir
             source_attempt = self._resolve_source_attempt(pending_payload, None)
             await self._apply_custom_provider_submission(
                 request_id=request_id,
@@ -524,13 +512,7 @@ class RunAuthOrchestrationService:
             submission=request,
             resume_context=resume_context if isinstance(resume_context, dict) else None,
         )
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+        run_dir = require_layout_from_record(request_record).workspace_dir
         append_orchestrator_event(
             run_dir=run_dir,
             attempt_number=self._resolve_source_attempt(pending_payload, resume_context),
@@ -722,13 +704,7 @@ class RunAuthOrchestrationService:
         request_record = await maybe_await(run_store_backend.get_request(request_id))
         if not isinstance(request_record, dict):
             raise HTTPException(status_code=404, detail="Request not found")
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+        run_dir = require_layout_from_record(request_record).workspace_dir
         engine = self._normalize_string(request_record.get("engine")) or ""
         pending_provider_id = self._resolve_provider_id(
             pending_auth_payload,
@@ -1057,13 +1033,7 @@ class RunAuthOrchestrationService:
         run_id = self._normalize_string(request_record.get("run_id"))
         if run_id is None:
             return
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            return
+        run_dir = require_layout_from_record(request_record).workspace_dir
         pending_payload = await maybe_await(run_store_backend.get_pending_auth(request_id))
         resume_context = await maybe_await(run_store_backend.get_auth_resume_context(request_id))
         source_attempt = self._resolve_source_attempt(pending_payload, resume_context)
@@ -1204,13 +1174,7 @@ class RunAuthOrchestrationService:
         run_id = self._normalize_string(request_record.get("run_id"))
         if run_id is None:
             return
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            return
+        run_dir = require_layout_from_record(request_record).workspace_dir
         error = {
             "code": InteractiveErrorCode.SESSION_RESUME_FAILED.value,
             "message": f"{InteractiveErrorCode.SESSION_RESUME_FAILED.value}: {reason}",
@@ -2503,17 +2467,6 @@ class RunAuthOrchestrationService:
             return enum_type(value)
         except ValueError:
             return None
-
-    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _write_queued_result(self, run_dir: Path) -> None:
-        result_path = run_dir / "result" / "result.json"
-        try:
-            result_path.unlink()
-        except FileNotFoundError:
-            return
 
     def _delete_interactions_file(self, path: Path) -> None:
         try:

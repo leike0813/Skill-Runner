@@ -9,8 +9,7 @@ from fastapi import HTTPException  # type: ignore[import-not-found]
 from server.services.platform.async_compat import maybe_await
 from server.runtime.observability.contracts import RunStorePort, WorkspacePort
 from server.runtime.workspace_layout import (
-    record_has_workspace_layout,
-    resolve_workspace_dir_from_record,
+    require_layout_from_record,
 )
 
 class _UnconfiguredRunStore:
@@ -33,7 +32,7 @@ class _UnconfiguredRunStore:
 
 
 class _UnconfiguredWorkspace:
-    def get_run_dir(self, run_id: str):
+    def get_workspace_dir(self, run_id: str):
         _ = run_id
         raise RuntimeError("Run source workspace port is not configured")
 
@@ -189,16 +188,13 @@ async def get_request_and_optional_workspace_dir(
     run_id_obj = request_record.get("run_id")
     if not isinstance(run_id_obj, str) or not run_id_obj:
         return request_record, None
-    workspace_dir = resolve_workspace_dir_from_record(
-        request_record,
-        workspace_backend=_require_workspace(),
-        run_id=run_id_obj,
-    )
-    if workspace_dir is None:
-        if record_has_workspace_layout(request_record):
-            raise HTTPException(status_code=409, detail="Run workspace layout is unavailable")
-        return request_record, None
-    return request_record, workspace_dir
+    try:
+        layout = require_layout_from_record(request_record)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="Run workspace layout is unavailable") from exc
+    if not layout.workspace_dir.exists():
+        raise HTTPException(status_code=500, detail="Run workspace directory is unavailable")
+    return request_record, layout.workspace_dir
 
 
 async def get_request_and_optional_run_dir(

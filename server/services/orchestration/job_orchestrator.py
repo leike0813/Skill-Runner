@@ -229,13 +229,7 @@ class JobOrchestrator:
                 error=canceled_error,
             )
         else:
-            self._write_canceled_result(run_dir, canceled_error)
-            self._update_status(
-                run_dir,
-                RunStatus.CANCELED,
-                error=canceled_error,
-                effective_session_timeout_sec=effective_session_timeout_sec,
-            )
+            raise RuntimeError("request_id is required for cancel projection")
         await run_store.update_run_status(run_id, RunStatus.CANCELED)
 
         return changed
@@ -253,24 +247,8 @@ class JobOrchestrator:
         *,
         result_path: Path | None = None,
     ) -> Optional[Path]:
-        if run_dir is None:
-            return None
-        result_payload: Dict[str, Any] = {
-            "status": RunStatus.CANCELED.value,
-            "data": None,
-            "artifacts": [],
-            "repair_level": "none",
-            "validation_warnings": [],
-            "error": error,
-            "pending_interaction": None,
-        }
-        result_path = result_path or run_dir / "result" / "result.json"
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        result_path.write_text(
-            json.dumps(result_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return result_path
+        _ = run_dir, error, result_path
+        raise RuntimeError("request-bound layout result path is required")
 
     def _write_failed_result(
         self,
@@ -279,26 +257,8 @@ class JobOrchestrator:
         *,
         result_path: Path | None = None,
     ) -> Optional[Path]:
-        if run_dir is None:
-            return None
-        result_payload: Dict[str, Any] = {
-            "status": RunStatus.FAILED.value,
-            "data": None,
-            "artifacts": [],
-            "repair_level": "none",
-            "validation_warnings": [],
-            "error": error,
-            "pending_interaction": None,
-            "pending_auth_method_selection": None,
-            "pending_auth": None,
-        }
-        result_path = result_path or run_dir / "result" / "result.json"
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        result_path.write_text(
-            json.dumps(result_payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return result_path
+        _ = run_dir, error, result_path
+        raise RuntimeError("request-bound layout result path is required")
 
     def _update_status(
         self,
@@ -308,30 +268,8 @@ class JobOrchestrator:
         warnings: Optional[List[str]] = None,
         effective_session_timeout_sec: Optional[int] = None,
     ):
-        state_file = run_dir / ".state" / "state.json"
-        warnings_list = warnings or []
-        status_data = {}
-        if state_file.exists():
-            try:
-                status_data = json.loads(state_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError):
-                status_data = {}
-        if not isinstance(status_data, dict):
-            status_data = {}
-        runtime_obj = status_data.get("runtime")
-        runtime_payload: Dict[str, Any] = dict(runtime_obj) if isinstance(runtime_obj, dict) else {}
-        runtime_payload["effective_session_timeout_sec"] = effective_session_timeout_sec
-        status_data.update(
-            {
-                "status": status.value if isinstance(status, RunStatus) else str(status),
-                "updated_at": str(datetime.now()),
-                "error": error,
-                "warnings": warnings_list,
-                "runtime": runtime_payload,
-            }
-        )
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(json.dumps(status_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        _ = run_dir, status, error, warnings, effective_session_timeout_sec
+        raise RuntimeError("DB projection service is required for run status updates")
 
     def _update_latest_run_id(self, run_id: str):
         """Updates the latest_run_id file in the runs directory."""

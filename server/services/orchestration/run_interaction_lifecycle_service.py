@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from server.config import config
 from server.models import (
     EngineInteractiveProfile,
     InteractiveErrorCode,
@@ -31,8 +29,7 @@ from server.runtime.session.statechart import (
 from server.services.platform.async_compat import maybe_await
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_workspace_layout import (
-    layout_from_record,
-    resolve_workspace_dir_from_record,
+    require_layout_from_record,
 )
 
 logger = logging.getLogger(__name__)
@@ -377,25 +374,12 @@ class RunInteractionLifecycleService:
         request_record = await maybe_await(run_store_backend.get_request(request_id))
         if not request_record or request_record.get("run_id") != run_id:
             return
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_backend,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            return
+        run_dir = require_layout_from_record(request_record).workspace_dir
         state_payload = await maybe_await(run_store_backend.get_run_state(request_id))
         if isinstance(state_payload, dict) and isinstance(state_payload.get("status"), str):
             current_status = RunStatus(state_payload.get("status", RunStatus.QUEUED.value))
         else:
-            layout = layout_from_record(request_record, run_dir)
-            if layout is not None:
-                return
-            status_file = run_dir / ".state" / "state.json"
-            if not status_file.exists():
-                return
-            payload = json.loads(status_file.read_text(encoding="utf-8"))
-            current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
+            return
         if current_status != RunStatus.WAITING_USER:
             return
         pending_interaction = await maybe_await(run_store_backend.get_pending_interaction(request_id))
@@ -479,11 +463,7 @@ class RunInteractionLifecycleService:
             validate_resume_command(resume_command)
         except ProtocolSchemaViolation as exc:
             append_internal_schema_warning(
-                run_dir=resolve_workspace_dir_from_record(
-                    request_record,
-                    workspace_backend=workspace_backend,
-                    run_id=run_id,
-                ) or Path(config.SYSTEM.RUNS_DIR) / run_id,
+                run_dir=require_layout_from_record(request_record).workspace_dir,
                 attempt_number=await resolve_attempt_number(request_id=request_id, is_interactive=True),
                 schema_path="interactive_resume_command",
                 detail=str(exc),
@@ -503,13 +483,7 @@ class RunInteractionLifecycleService:
             return
 
         next_status = waiting_reply_target_status()
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_backend,
-            run_id=run_id,
-        )
-        if run_dir is None:
-            return
+        run_dir = require_layout_from_record(request_record).workspace_dir
         await maybe_await(run_store_backend.update_run_status(run_id, next_status))
 
         options = {

@@ -73,8 +73,7 @@ from ..services.orchestration.run_skill_materialization_service import run_folde
 from ..services.orchestration.run_state_service import run_state_service
 from ..services.orchestration.run_workspace_layout import (
     layout_from_record,
-    record_has_workspace_layout,
-    resolve_workspace_dir_from_record,
+    require_layout_from_record,
     workspace_output_token as build_workspace_output_token,
 )
 from ..services.platform.concurrency_manager import concurrency_manager
@@ -143,8 +142,8 @@ async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str,
     source_run_id = str(source_record.get("run_id") or "").strip()
     if not source_run_id:
         raise HTTPException(status_code=409, detail="Workspace source request has no run")
-    source_layout = layout_from_record(source_record, None)
-    if source_layout is None or not source_layout.workspace_dir.exists():
+    source_layout = require_layout_from_record(source_record)
+    if not source_layout.workspace_dir.exists():
         raise HTTPException(status_code=409, detail="Workspace source directory is unavailable")
     output_token = str(source_record.get("workspace_output_token") or "").strip()
     if not output_token:
@@ -162,18 +161,19 @@ async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str,
 
 
 def _workspace_response_fields(record: dict[str, Any], run_dir: Path | None) -> dict[str, str | None]:
-    layout = layout_from_record(record, run_dir)
+    _ = run_dir
+    layout = require_layout_from_record(record)
     result_path = record.get("result_path")
     input_manifest_path = record.get("run_input_manifest_path") or record.get("input_manifest_path")
     return {
-        "workspaceDir": str(layout.workspace_dir) if layout else (str(run_dir) if run_dir else None),
+        "workspaceDir": str(layout.workspace_dir),
         "resultJsonPath": str(result_path) if isinstance(result_path, str) and result_path else (
-            str(layout.result_path) if layout else None
+            str(layout.result_path)
         ),
         "inputManifestPath": (
             str(input_manifest_path)
             if isinstance(input_manifest_path, str) and input_manifest_path
-            else (str(layout.input_manifest_path) if layout else None)
+            else str(layout.input_manifest_path)
         ),
     }
 
@@ -419,14 +419,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             "workspace_dir": str(run_dir),
             "workspace_namespace": namespace,
         }
-        layout = layout_from_record(layout_record, run_dir)
-        if layout is None:
-            raise RuntimeError("Run workspace layout is unavailable")
+        layout = require_layout_from_record(layout_record)
         await run_store.create_run(
             run_status.run_id,
             run_cache_key,
             RunStatus.QUEUED,
-            result_path=str(layout.result_path) if layout else "",
+            result_path=str(layout.result_path),
             workspace_id=str(layout_record["workspace_id"]),
             workspace_dir=str(layout_record["workspace_dir"]),
             workspace_namespace=namespace,
@@ -435,7 +433,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 if workspace_reuse is not None
                 else None
             ),
-            input_manifest_path=str(layout.input_manifest_path) if layout else None,
+            input_manifest_path=str(layout.input_manifest_path),
             workspace_input_token=(
                 str(workspace_reuse.get("workspace_input_token") or "")
                 if workspace_reuse is not None
@@ -452,7 +450,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         )
         run_audit_contract_service.initialize_run_audit(
             run_dir=run_dir,
-            audit_dir=layout.audit_dir if layout is not None else None,
+            audit_dir=layout.audit_dir,
         )
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
@@ -466,7 +464,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=run_status.run_id,
-                    audit_dir=layout.audit_dir if layout is not None else None,
+                    audit_dir=layout.audit_dir,
                 )
             )
             logger.info(
@@ -478,7 +476,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             request_input_path = run_audit_contract_service.write_request_input_snapshot(
                 run_dir=run_dir,
                 request_payload=request_payload,
-                input_manifest_path=layout.input_manifest_path if layout else None,
+                input_manifest_path=layout.input_manifest_path,
             )
             await run_store.update_request_manifest(
                 request_id,
@@ -498,11 +496,11 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 collect_skill_run_feedback=collect_skill_run_feedback,
                 feedback_path=(
                     layout.result_path.parent / "_skill_run_feedback.md"
-                    if collect_skill_run_feedback and layout is not None
+                    if collect_skill_run_feedback
                     else None
                 ),
-                audit_dir=layout.audit_dir if layout is not None else None,
-                input_manifest_path=layout.input_manifest_path if layout is not None else None,
+                audit_dir=layout.audit_dir,
+                input_manifest_path=layout.input_manifest_path,
             )
             await run_state_service.initialize_queued_state(
                 run_dir=run_dir,
@@ -642,14 +640,11 @@ async def get_run_status(request_id: str):
             inputManifestPath=None,
             observability_ready=False,
         )
-    run_dir = resolve_workspace_dir_from_record(
-        request_record,
-        workspace_backend=workspace_manager,
-        run_id=str(run_id),
-    )
-    layout = layout_from_record(request_record, run_dir)
-    if run_dir is None or (record_has_workspace_layout(request_record) and layout is None):
-        raise HTTPException(status_code=409, detail="Run workspace layout is unavailable")
+    try:
+        layout = require_layout_from_record(request_record)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="Run workspace layout is unavailable") from exc
+    run_dir = layout.workspace_dir
     
     
     projection_payload: dict[str, Any] | None = await maybe_await(
@@ -1323,14 +1318,12 @@ async def upload_file(
                     "workspace_dir": str(run_dir),
                     "workspace_namespace": namespace,
                 }
-                layout = layout_from_record(layout_record, run_dir)
-                if layout is None:
-                    raise RuntimeError("Run workspace layout is unavailable")
+                layout = require_layout_from_record(layout_record)
                 await run_store.create_run(
                     run_status.run_id,
                     run_cache_key,
                     RunStatus.QUEUED,
-                    result_path=str(layout.result_path) if layout else "",
+                    result_path=str(layout.result_path),
                     workspace_id=str(layout_record["workspace_id"]),
                     workspace_dir=str(layout_record["workspace_dir"]),
                     workspace_namespace=namespace,
@@ -1339,7 +1332,7 @@ async def upload_file(
                         if workspace_reuse is not None
                         else None
                     ),
-                    input_manifest_path=str(layout.input_manifest_path) if layout else None,
+                    input_manifest_path=str(layout.input_manifest_path),
                     workspace_input_token=(
                         str(workspace_reuse.get("workspace_input_token") or "")
                         if workspace_reuse is not None
@@ -1366,7 +1359,7 @@ async def upload_file(
                 shutil.rmtree(stage_root, ignore_errors=True)
             run_audit_contract_service.initialize_run_audit(
                 run_dir=run_dir,
-                audit_dir=layout.audit_dir if layout is not None else None,
+                audit_dir=layout.audit_dir,
             )
             effective_execution_mode_obj = effective_runtime_options.get(
                 "execution_mode",
@@ -1390,7 +1383,7 @@ async def upload_file(
                     RunServiceLogMirrorSession.open_run_scope(
                         run_dir=run_dir,
                         run_id=run_status.run_id,
-                        audit_dir=layout.audit_dir if layout is not None else None,
+                        audit_dir=layout.audit_dir,
                     )
                 )
                 log_event(
@@ -1405,7 +1398,7 @@ async def upload_file(
                 request_input_path = run_audit_contract_service.write_request_input_snapshot(
                     run_dir=run_dir,
                     request_payload=request_record,
-                    input_manifest_path=layout.input_manifest_path if layout else None,
+                    input_manifest_path=layout.input_manifest_path,
                 )
                 await run_store.update_request_manifest(
                     request_id,
@@ -1418,7 +1411,7 @@ async def upload_file(
                 )
                 feedback_path = (
                     layout.result_path.parent / "_skill_run_feedback.md"
-                    if collect_skill_run_feedback and layout is not None
+                    if collect_skill_run_feedback
                     else None
                 )
                 if source == RequestSkillSource.TEMP_UPLOAD.value:
@@ -1430,8 +1423,8 @@ async def upload_file(
                         source=RunLocalSkillSource.TEMP_UPLOAD,
                         collect_skill_run_feedback=collect_skill_run_feedback,
                         feedback_path=feedback_path,
-                        audit_dir=layout.audit_dir if layout is not None else None,
-                        input_manifest_path=layout.input_manifest_path if layout is not None else None,
+                        audit_dir=layout.audit_dir,
+                        input_manifest_path=layout.input_manifest_path,
                     )
                 else:
                     run_folder_bootstrapper.materialize_skill(
@@ -1442,8 +1435,8 @@ async def upload_file(
                         source=RunLocalSkillSource.INSTALLED,
                         collect_skill_run_feedback=collect_skill_run_feedback,
                         feedback_path=feedback_path,
-                        audit_dir=layout.audit_dir if layout is not None else None,
-                        input_manifest_path=layout.input_manifest_path if layout is not None else None,
+                        audit_dir=layout.audit_dir,
+                        input_manifest_path=layout.input_manifest_path,
                     )
                 await run_state_service.initialize_queued_state(
                     run_dir=run_dir,

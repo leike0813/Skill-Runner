@@ -34,7 +34,7 @@ class RunStorePort(Protocol):
 
 
 class WorkspacePort(Protocol):
-    def get_run_dir(self, run_id: str) -> Path | None:
+    def get_workspace_dir(self, run_id: str) -> Path | None:
         ...
 
 

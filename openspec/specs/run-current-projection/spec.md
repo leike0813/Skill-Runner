@@ -18,30 +18,30 @@ The backend MUST keep current pending ownership aligned with the current status.
 #### Scenario: waiting owner is active
 - **GIVEN** the current projection is `waiting_user`
 - **THEN** `pending_owner` MUST be `waiting_user`
-- **AND** only `interactions/pending.json` may exist as current pending payload
+- **AND** the pending payload MUST be read from DB interaction rows
 
 #### Scenario: auth method selection is active
 - **GIVEN** the current projection is `waiting_auth` with auth method selection
 - **THEN** `pending_owner` MUST be `waiting_auth.method_selection`
-- **AND** only `interactions/pending_auth_method_selection.json` may exist as current pending payload
+- **AND** the pending payload MUST be read from DB auth method-selection rows
 
 #### Scenario: auth challenge is active
 - **GIVEN** the current projection is `waiting_auth` with an active auth challenge
 - **THEN** `pending_owner` MUST be `waiting_auth.challenge_active`
-- **AND** only `interactions/pending_auth.json` may exist as current pending payload
+- **AND** the pending payload MUST be read from DB auth challenge rows
 
 ### Requirement: terminal result MUST be terminal-only
-The backend MUST treat `result/result.json` as a terminal artifact, not as a current-state snapshot.
+The backend MUST treat the persisted `resultJsonPath` as a terminal artifact, not as a current-state snapshot.
 
 #### Scenario: run is non-terminal
 - **GIVEN** a run is in `queued`, `running`, `waiting_user`, or `waiting_auth`
 - **WHEN** the backend persists current state
-- **THEN** it MUST NOT write a non-terminal envelope to `result/result.json`
+- **THEN** it MUST NOT write a non-terminal envelope to `result/<namespace>/result.json`
 
 #### Scenario: run reaches terminal state
 - **GIVEN** a run reaches `succeeded`, `failed`, or `canceled`
 - **WHEN** terminal artifacts are written
-- **THEN** `result/result.json` MUST contain terminal truth only
+- **THEN** `result/<namespace>/result.json` MUST contain terminal truth only
 - **AND** current pending owner MUST be empty
 
 ### Requirement: Run projections MUST expose workspace diagnostics
@@ -73,19 +73,19 @@ The current-state read model MUST distinguish an unknown `request_id` from a kno
 
 ### Requirement: Read projections MUST resolve workspace layout first
 
-Status, list, detail, logs, events, chat, and management projections MUST prefer persisted workspace layout over legacy run directories.
+Status, list, detail, logs, events, chat, and management projections MUST require persisted workspace layout for bound request records.
 
 #### Scenario: Run list and detail read physical workspace
 - **GIVEN** a request record has `workspace_dir`
 - **WHEN** list or detail projections read current state
-- **THEN** they read `.state/<namespace>/state.json` under that workspace
+- **THEN** they read DB state/projection rows
 - **AND** they do not require `data/runs/<run_id>` to exist.
 
 #### Scenario: Logs read namespaced audit under workspace
 - **GIVEN** a request record has `workspace_dir` and `workspace_namespace`
 - **WHEN** log tail or log range is requested
 - **THEN** stdout/stderr are read from `.audit/<namespace>/`
-- **AND** legacy `.audit/stdout.*.log` is only a fallback.
+- **AND** legacy root `.audit/stdout.*.log` is not read.
 
 ### Requirement: Current run state MUST come from DB projection/state
 

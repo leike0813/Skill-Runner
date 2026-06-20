@@ -103,21 +103,6 @@ class WorkspaceManager:
         
         return status
 
-    def get_legacy_run_dir(self, run_id: str) -> Optional[Path]:
-        """Return legacy data/runs directory for historical no-layout records only."""
-        patched_get_run_dir = self.__dict__.get("get_run_dir")
-        if (
-            callable(patched_get_run_dir)
-            and getattr(patched_get_run_dir, "__func__", None) is not WorkspaceManager.get_run_dir
-        ):
-            return patched_get_run_dir(run_id)
-        path = Path(config.SYSTEM.RUNS_DIR) / run_id
-        return path if path.exists() else None
-
-    def get_run_dir(self, run_id: str) -> Optional[Path]:
-        """Compatibility wrapper for legacy no-layout callers."""
-        return self.get_legacy_run_dir(run_id)
-
     def get_workspace_dir(self, workspace_id: str) -> Optional[Path]:
         path = Path(config.SYSTEM.WORKSPACES_DIR) / workspace_id
         return path if path.exists() else None
@@ -141,15 +126,6 @@ class WorkspaceManager:
                     continue
         return f"{safe_skill_id}.{highest + 1}"
 
-    def delete_run_dir(self, run_id: str) -> None:
-        run_dir = self.get_legacy_run_dir(run_id)
-        if run_dir and run_dir.exists():
-            from shutil import rmtree
-            if run_dir.is_symlink():
-                run_dir.unlink(missing_ok=True)
-            else:
-                rmtree(run_dir, ignore_errors=True)
-
     def delete_workspace_dir(self, workspace_dir: Path) -> None:
         from shutil import rmtree
 
@@ -161,15 +137,6 @@ class WorkspaceManager:
             return
         if target.exists() and target.is_dir():
             rmtree(target, ignore_errors=True)
-
-    def purge_runs_dir(self) -> None:
-        runs_dir = Path(config.SYSTEM.RUNS_DIR)
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        for entry in runs_dir.iterdir():
-            if entry.is_dir():
-                self.delete_run_dir(entry.name)
-            else:
-                entry.unlink(missing_ok=True)
 
     def purge_workspaces_dir(self) -> None:
         from shutil import rmtree

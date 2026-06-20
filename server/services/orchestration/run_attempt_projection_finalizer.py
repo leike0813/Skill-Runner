@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from server.models import OrchestratorEventType, PendingOwner, RunStatus
 from server.runtime.logging.structured_trace import log_event
-from server.services.orchestration.run_workspace_layout import layout_from_record
+from server.services.orchestration.run_workspace_layout import require_layout_from_record
 
 from .run_attempt_execution_service import RunAttemptExecutionResult
 from .run_attempt_outcome_service import RunAttemptResolvedOutcome
@@ -188,8 +188,8 @@ class RunAttemptProjectionFinalizer:
             },
             run_store_backend=inputs.run_store_backend,
         )
-        layout = layout_from_record(inputs.request_record or {}, run_dir)
-        result_path = layout.result_path if layout is not None else run_dir / "result" / "result.json"
+        layout = require_layout_from_record(inputs.request_record or {})
+        result_path = layout.result_path
         await inputs.run_store_backend.update_run_status(
             inputs.run_id,
             final_status,

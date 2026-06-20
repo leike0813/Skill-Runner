@@ -11,7 +11,6 @@ from server.runtime.adapter.common.structured_output_pipeline import structured_
 from server.runtime.protocol.final_promotion_coordinator import resolve_message_id
 from server.runtime.auth_detection.types import AuthDetectionResult
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
-from server.services.orchestration.run_result_file_fallback import resolve_result_file_fallback
 from server.services.platform.async_compat import maybe_await
 
 
@@ -268,7 +267,7 @@ class RunOutputConvergenceService:
                     ),
                     branch_resolved=None,
                 )
-            fallback = self._apply_result_file_fallback(
+            fallback = self._empty_no_file_resolution(
                 skill=skill,
                 run_dir=run_dir,
                 execution_mode=execution_mode,
@@ -548,7 +547,7 @@ class RunOutputConvergenceService:
             candidate=last_candidate,
             repair_round_index=MAX_REPAIR_ROUNDS + 1,
         )
-        fallback = self._apply_result_file_fallback(
+        fallback = self._empty_no_file_resolution(
             skill=skill,
             run_dir=run_dir,
             execution_mode=execution_mode,
@@ -875,7 +874,7 @@ class RunOutputConvergenceService:
             branch_resolved="final",
         )
 
-    def _apply_result_file_fallback(
+    def _empty_no_file_resolution(
         self,
         *,
         skill: SkillManifest,
@@ -886,42 +885,15 @@ class RunOutputConvergenceService:
         validation_warnings: list[str],
         extract_pending_interaction: Callable[..., dict[str, Any] | None],
     ) -> _FallbackResolution:
-        fallback = resolve_result_file_fallback(skill=skill, run_dir=run_dir)
-        for warning in fallback.warnings:
-            if warning.code not in validation_warnings:
-                validation_warnings.append(warning.code)
-        if not isinstance(fallback.payload, dict):
-            return _FallbackResolution(
-                output_data={},
-                has_structured_output=False,
-                structured_output_source=None,
-                done_signal_found=False,
-                schema_output_errors=list(current_errors),
-                pending_interaction_candidate=None,
-                branch_resolved=None,
-            )
-        branch_resolved = "final"
-        pending_interaction_candidate = None
-        done_signal_found = True
-        if (
-            (execution_mode or "").strip().lower() == ExecutionMode.INTERACTIVE.value
-            and fallback.payload.get("__SKILL_DONE__") is False
-        ):
-            pending_interaction_candidate = extract_pending_interaction(
-                fallback.payload,
-                fallback_interaction_id=attempt_number,
-            )
-            if pending_interaction_candidate is not None:
-                branch_resolved = "pending"
-                done_signal_found = False
+        _ = skill, run_dir, execution_mode, attempt_number, validation_warnings, extract_pending_interaction
         return _FallbackResolution(
-            output_data={} if pending_interaction_candidate is not None else dict(fallback.payload),
-            has_structured_output=True,
-            structured_output_source="result_file_fallback",
-            done_signal_found=done_signal_found,
-            schema_output_errors=[],
-            pending_interaction_candidate=pending_interaction_candidate,
-            branch_resolved=branch_resolved,
+            output_data={},
+            has_structured_output=False,
+            structured_output_source=None,
+            done_signal_found=False,
+            schema_output_errors=list(current_errors),
+            pending_interaction_candidate=None,
+            branch_resolved=None,
         )
 
     def _build_repair_prompt(
@@ -1009,8 +981,6 @@ class RunOutputConvergenceService:
         )
         if normalized_source == "structured_output_result":
             return "structured_output_result"
-        if normalized_source == "result_file_fallback":
-            return "result_file_fallback"
         if has_structured_output and done_signal_found:
             return "done_signal_payload"
         if has_structured_output:

@@ -19,7 +19,6 @@ from server.runtime.adapter.common.prompt_builder_common import (
 from server.services.engine_management.engine_policy import apply_engine_policy_to_manifest
 from server.services.orchestration.manifest_artifact_inference import infer_manifest_artifacts
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
-from server.services.orchestration.run_workspace_layout import layout_from_record
 from server.services.skill.skill_package_validator import SkillPackageValidator
 from server.services.skill.skill_patcher import skill_patcher
 from server.runtime.adapter.common.structured_output_pipeline import structured_output_pipeline
@@ -241,6 +240,8 @@ class RunFolderBootstrapper:
             },
             canonical_prompt_contract_markdown=output_schema_materialization.prompt_contract_markdown,
         )
+        if collect_skill_run_feedback and feedback_path is None:
+            raise RuntimeError("feedback_path is required")
         skill_patcher.patch_skill_md(
             snapshot_dir,
             list(skill.artifacts or []),
@@ -249,7 +250,7 @@ class RunFolderBootstrapper:
             output_contract_details_markdown=prompt_contract_markdown,
             collect_skill_run_feedback=collect_skill_run_feedback,
             feedback_path=(
-                feedback_path or self._feedback_path(run_dir=run_dir, skill_id=skill.id)
+                feedback_path
                 if collect_skill_run_feedback
                 else None
             ),
@@ -284,22 +285,5 @@ class RunFolderBootstrapper:
             raise ValueError(f"Unsafe zip entry path: {clean_name}")
         if entry.parts and entry.parts[0].endswith(":"):
             raise ValueError(f"Unsafe zip entry path: {clean_name}")
-
-    def _result_json_path(self, *, run_dir: Path, skill_id: str) -> Path:
-        layout = layout_from_record(
-            {
-                "run_id": run_dir.name,
-                "skill_id": skill_id,
-                "workspace_id": run_dir.name,
-                "workspace_dir": str(run_dir),
-            },
-            run_dir,
-        )
-        if layout is not None:
-            return layout.result_path
-        return run_dir / "result" / "result.json"
-
-    def _feedback_path(self, *, run_dir: Path, skill_id: str) -> Path:
-        return self._result_json_path(run_dir=run_dir, skill_id=skill_id).parent / "_skill_run_feedback.md"
 
 run_folder_bootstrapper = RunFolderBootstrapper()

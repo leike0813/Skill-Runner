@@ -6,13 +6,13 @@ from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.run_workspace_layout import layout_from_record
 
 
-def test_layout_from_record_keeps_legacy_records_on_legacy_paths(tmp_path):
+def test_layout_from_record_rejects_records_without_workspace_layout(tmp_path):
     record = {
         "run_id": "run-legacy",
         "skill_id": "legacy skill",
     }
 
-    assert layout_from_record(record, tmp_path / "run-legacy") is None
+    assert layout_from_record(record) is None
 
 
 def test_layout_from_record_uses_persisted_workspace_metadata(tmp_path):
@@ -25,7 +25,7 @@ def test_layout_from_record_uses_persisted_workspace_metadata(tmp_path):
         "workspace_namespace": "skill-b.2",
     }
 
-    layout = layout_from_record(record, tmp_path / "run-b")
+    layout = layout_from_record(record)
 
     assert layout is not None
     assert layout.workspace_id == "workspace-a"
@@ -119,7 +119,7 @@ async def test_run_state_service_uses_db_state_when_layout_exists(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_state_service_refetches_layout_for_stale_request_record(tmp_path):
+async def test_run_state_service_rejects_stale_request_record_without_layout(tmp_path):
     store = RunStore(db_path=tmp_path / "runs.db")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -143,22 +143,23 @@ async def test_run_state_service_refetches_layout_for_stale_request_record(tmp_p
     )
     await store.bind_request_run_id("req-stale", "run-stale", status=RunStatus.QUEUED.value)
 
-    await run_state_service.initialize_queued_state(
-        run_dir=workspace,
-        request_id="req-stale",
-        run_id="run-stale",
-        request_record={
-            "request_id": "req-stale",
-            "run_id": "run-stale",
-            "skill_id": "skill-stale",
-            "runtime_options": {},
-            "effective_runtime_options": {},
-        },
-        run_store_backend=store,
-    )
+    with pytest.raises(RuntimeError, match="Run workspace layout is unavailable"):
+        await run_state_service.initialize_queued_state(
+            run_dir=workspace,
+            request_id="req-stale",
+            run_id="run-stale",
+            request_record={
+                "request_id": "req-stale",
+                "run_id": "run-stale",
+                "skill_id": "skill-stale",
+                "runtime_options": {},
+                "effective_runtime_options": {},
+            },
+            run_store_backend=store,
+        )
 
-    assert await store.get_run_state("req-stale") is not None
-    assert await store.get_dispatch_state("req-stale") is not None
+    assert await store.get_run_state("req-stale") is None
+    assert await store.get_dispatch_state("req-stale") is None
     assert not (workspace / ".state" / "skill-stale.1" / "state.json").exists()
     assert not (workspace / ".state" / "skill-stale.1" / "dispatch.json").exists()
     assert not (workspace / ".state" / "state.json").exists()

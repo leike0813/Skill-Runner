@@ -15,6 +15,17 @@ from server.services.orchestration.run_job_lifecycle_service import RunJobReques
 from server.services.platform.runtime_env_options import RuntimeEnvSecretService
 
 
+def _layout_fields(run_dir: Path, *, run_id: str, namespace: str = "prep-skill.1") -> dict[str, str]:
+    return {
+        "run_id": run_id,
+        "workspace_id": run_dir.name,
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+        "result_path": str(run_dir / "result" / namespace / "result.json"),
+        "input_manifest_path": str(run_dir / ".audit" / namespace / "input_manifest.json"),
+    }
+
+
 def _build_skill(
     tmp_path: Path,
     *,
@@ -200,6 +211,7 @@ async def test_prepare_builds_interactive_context_and_run_options(
     run_store = _FakeRunStore(
         request_record={
             "request_id": "req-1",
+            **_layout_fields(run_dir, run_id="run-1"),
             "input": {"paper_path": "uploads/paper.pdf"},
             "parameter": {"topic": "llm"},
             "client_metadata": {"conversation_mode": "session"},
@@ -265,8 +277,8 @@ async def test_prepare_builds_interactive_context_and_run_options(
     assert context.run_options["__request_id"] == "req-1"
     assert context.run_options["__engine_name"] == "claude"
     assert context.run_options["__runtime_env"] == {"FOO": "secret"}
-    assert context.run_options["__target_output_schema_relpath"] == ".audit/contracts/target_output_schema.json"
-    assert (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
+    assert context.run_options["__target_output_schema_relpath"] == ".audit/prep-skill.1/contracts/target_output_schema.json"
+    assert (run_dir / ".audit" / "prep-skill.1" / "contracts" / "target_output_schema.json").exists()
     assert len(orchestrator.inject_resume_calls) == 1
     assert orchestrator.inject_resume_calls[0]["request_id"] == "req-1"
     assert orchestrator.inject_resume_calls[0]["run_dir"] == run_dir
@@ -356,6 +368,7 @@ async def test_prepare_accepts_missing_input_and_parameter_schemas(tmp_path: Pat
         run_store=_FakeRunStore(
             request_record={
                 "request_id": "req-optional-schema",
+                **_layout_fields(run_dir, run_id="run-optional-schema"),
                 "input": {"ignored": "value"},
                 "parameter": {"ignored": True},
             }
@@ -398,7 +411,7 @@ async def test_prepare_accepts_missing_input_and_parameter_schemas(tmp_path: Pat
     )
 
     assert context.skill.id == skill.id
-    assert context.run_options["__target_output_schema_relpath"] == ".audit/contracts/target_output_schema.json"
+    assert context.run_options["__target_output_schema_relpath"] == ".audit/prep-skill.1/contracts/target_output_schema.json"
 
 
 @pytest.mark.asyncio
@@ -410,6 +423,7 @@ async def test_prepare_rejects_missing_output_schema(tmp_path: Path) -> None:
         run_store=_FakeRunStore(
             request_record={
                 "request_id": "req-missing-output-schema",
+                **_layout_fields(run_dir, run_id="run-missing-output-schema"),
                 "input": {},
                 "parameter": {},
             }
@@ -469,6 +483,7 @@ async def test_prepare_raises_on_invalid_input(tmp_path: Path) -> None:
         run_store=_FakeRunStore(
             request_record={
                 "request_id": "req-bad",
+                **_layout_fields(run_dir, run_id="run-invalid"),
                 "input": {"unknown": "value"},
                 "parameter": {},
             }

@@ -71,7 +71,7 @@ from ..services.platform.system_settings_service import (
 )
 from ..services.platform.system_log_explorer_service import system_log_explorer_service
 from ..services.skill.skill_registry import is_builtin_skill_path, skill_registry
-from ..services.orchestration.run_workspace_layout import resolve_workspace_dir_from_record
+from ..services.orchestration.run_workspace_layout import require_layout_from_record
 from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
@@ -81,11 +81,8 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_request_workspace_dir(request_record: dict[str, Any], run_id: str) -> Path | None:
-    return resolve_workspace_dir_from_record(
-        request_record,
-        workspace_backend=workspace_manager,
-        run_id=run_id,
-    )
+    _ = run_id
+    return require_layout_from_record(request_record).workspace_dir
 
 install_runtime_protocol_ports()
 install_runtime_observability_ports()

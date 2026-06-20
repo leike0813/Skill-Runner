@@ -43,8 +43,7 @@ from server.services.orchestration.run_execution_core import resolve_conversatio
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_workspace_layout import (
-    layout_from_record,
-    resolve_workspace_dir_from_record,
+    require_layout_from_record,
 )
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.async_compat import maybe_await
@@ -68,14 +67,13 @@ class RunInteractionService:
         run_id_obj = request_record.get("run_id")
         if not isinstance(run_id_obj, str) or not run_id_obj:
             raise HTTPException(status_code=404, detail="Run not found")
-        run_dir = resolve_workspace_dir_from_record(
-            request_record,
-            workspace_backend=workspace_manager,
-            run_id=run_id_obj,
-        )
-        if run_dir is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        return request_record, run_dir
+        try:
+            layout = require_layout_from_record(request_record)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail="Run workspace layout is unavailable") from exc
+        if not layout.workspace_dir.exists():
+            raise HTTPException(status_code=500, detail="Run workspace directory is unavailable")
+        return request_record, layout.workspace_dir
 
     async def get_pending(
         self,
@@ -156,8 +154,8 @@ class RunInteractionService:
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        layout = layout_from_record(request_record, run_dir)
-        audit_dir = layout.audit_dir if layout is not None else None
+        layout = require_layout_from_record(request_record)
+        audit_dir = layout.audit_dir
         append_orchestrator_event = _append_orchestrator_event_for_request(
             request_record=request_record,
             run_dir=run_dir,
@@ -534,8 +532,8 @@ class RunInteractionService:
             raise HTTPException(status_code=404, detail="Run not found")
         if status != RunStatus.WAITING_AUTH:
             raise HTTPException(status_code=409, detail="Run is not waiting for auth")
-        layout = layout_from_record(request_record, run_dir)
-        audit_dir = layout.audit_dir if layout is not None else None
+        layout = require_layout_from_record(request_record)
+        audit_dir = layout.audit_dir
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -582,8 +580,8 @@ class RunInteractionService:
         run_id = run_id_obj if isinstance(run_id_obj, str) else None
         if run_id is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        layout = layout_from_record(request_record, run_dir)
-        audit_dir = layout.audit_dir if layout is not None else None
+        layout = require_layout_from_record(request_record)
+        audit_dir = layout.audit_dir
         with contextlib.ExitStack() as run_log_stack:
             run_log_stack.enter_context(
                 bind_run_logging_context(
@@ -640,24 +638,19 @@ def _ensure_interactive_mode(request_record: dict[str, Any]) -> None:
         )
 
 
-def _state_file(run_dir: Path, request_record: dict[str, Any] | None = None) -> Path:
-    layout = layout_from_record(request_record or {}, run_dir)
-    return layout.state_path if layout is not None else run_dir / ".state" / "state.json"
-
-
 def _append_orchestrator_event_for_request(
     *,
     request_record: dict[str, Any],
     run_dir: Path,
 ) -> Any:
-    layout = layout_from_record(request_record, run_dir)
-    audit_dir = layout.audit_dir if layout is not None else None
+    _ = run_dir
+    layout = require_layout_from_record(request_record)
+    audit_dir = layout.audit_dir
     run_id_obj = request_record.get("run_id")
     logical_run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else None
 
     def append_orchestrator_event(**kwargs: Any) -> None:
-        if audit_dir is not None:
-            kwargs.setdefault("audit_dir", audit_dir)
+        kwargs.setdefault("audit_dir", audit_dir)
         if logical_run_id is not None:
             kwargs.setdefault("run_id", logical_run_id)
         job_orchestrator.audit_service.append_orchestrator_event(**kwargs)
@@ -673,53 +666,9 @@ def _update_status_for_request(*, request_record: dict[str, Any]) -> Any:
         warnings: list[str] | None = None,
         effective_session_timeout_sec: int | None = None,
     ) -> None:
-        run_id_obj = request_record.get("run_id")
-        resolved_run_dir = (
-            resolve_workspace_dir_from_record(
-                request_record,
-                workspace_backend=workspace_manager,
-                run_id=run_id_obj if isinstance(run_id_obj, str) else None,
-                fallback_workspace_dir=run_dir,
-            )
-            or run_dir
-        )
-        layout = layout_from_record(request_record, resolved_run_dir)
-        if layout is None:
-            job_orchestrator._update_status(
-                resolved_run_dir,
-                status,
-                error=error,
-                warnings=warnings,
-                effective_session_timeout_sec=effective_session_timeout_sec,
-            )
-            return
-        _ = layout
-        _ = status
-        _ = error
-        _ = warnings
-        _ = effective_session_timeout_sec
+        _ = request_record, run_dir, status, error, warnings, effective_session_timeout_sec
 
     return update_status
-
-
-def _read_run_status(
-    run_dir: Path,
-    request_record: dict[str, Any] | None = None,
-) -> tuple[RunStatus, list[Any], Any, str]:
-    status_file = _state_file(run_dir, request_record)
-    if not status_file.exists() and status_file != run_dir / ".state" / "state.json":
-        status_file = run_dir / ".state" / "state.json"
-    current_status = RunStatus.QUEUED
-    warnings: list[Any] = []
-    error: Any = None
-    updated_at = ""
-    if status_file.exists():
-        payload = json.loads(status_file.read_text(encoding="utf-8"))
-        current_status = RunStatus(payload.get("status", RunStatus.QUEUED.value))
-        warnings = payload.get("warnings", [])
-        error = payload.get("error")
-        updated_at = payload.get("updated_at", "")
-    return current_status, warnings, error, updated_at
 
 
 async def _read_run_status_for_request(
@@ -728,10 +677,11 @@ async def _read_run_status_for_request(
     run_dir: Path,
     request_record: dict[str, Any] | None = None,
 ) -> tuple[RunStatus, list[Any], Any, str]:
+    _ = run_dir, request_record
     state_payload = await maybe_await(run_store_backend.get_run_state(request_id))
     if isinstance(state_payload, dict) and isinstance(state_payload.get("status"), str):
         return _status_tuple_from_payload(state_payload)
-    return _read_run_status(run_dir, request_record)
+    raise RuntimeError("Run state is unavailable")
 
 
 def _status_tuple_from_payload(payload: dict[str, Any]) -> tuple[RunStatus, list[Any], Any, str]:
@@ -742,45 +692,6 @@ def _status_tuple_from_payload(payload: dict[str, Any]) -> tuple[RunStatus, list
         warnings if isinstance(warnings, list) else [],
         payload.get("error"),
         str(payload.get("updated_at") or ""),
-    )
-
-
-def _write_run_status(
-    run_dir: Path,
-    status: RunStatus,
-    warnings: list[Any] | None = None,
-    error: Any = None,
-    effective_session_timeout_sec: int | None = None,
-    request_record: dict[str, Any] | None = None,
-) -> None:
-    if layout_from_record(request_record or {}, run_dir) is not None:
-        return
-    status_file = _state_file(run_dir, request_record)
-    status_file.parent.mkdir(parents=True, exist_ok=True)
-    existing_timeout = None
-    if status_file.exists():
-        try:
-            existing = json.loads(status_file.read_text(encoding="utf-8"))
-            existing_runtime = existing.get("runtime") if isinstance(existing.get("runtime"), dict) else {}
-            existing_timeout = existing_runtime.get("effective_session_timeout_sec")
-        except (OSError, ValueError, TypeError):
-            existing_timeout = None
-    payload: dict[str, Any] = existing if status_file.exists() and isinstance(existing, dict) else {}
-    payload["status"] = status.value if isinstance(status, RunStatus) else str(status)
-    payload["updated_at"] = datetime.now().isoformat()
-    payload["warnings"] = warnings or []
-    payload["error"] = error
-    runtime_obj = payload.get("runtime")
-    runtime_payload: dict[str, Any] = cast(dict[str, Any], runtime_obj) if isinstance(runtime_obj, dict) else {}
-    runtime_payload["effective_session_timeout_sec"] = (
-        effective_session_timeout_sec
-        if effective_session_timeout_sec is not None
-        else existing_timeout
-    )
-    payload["runtime"] = runtime_payload
-    status_file.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
     )
 
 

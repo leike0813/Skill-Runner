@@ -214,19 +214,14 @@ class EngineExecutionAdapter:
         if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
         audit_dir_obj = (options or {}).get("__audit_dir")
-        audit_dir = (
-            Path(str(audit_dir_obj))
-            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
-            else run_dir / ".audit"
-        )
+        if not isinstance(audit_dir_obj, str) or not audit_dir_obj.strip():
+            raise RuntimeError("__audit_dir is required")
+        audit_dir = Path(str(audit_dir_obj))
         audit_dir.mkdir(parents=True, exist_ok=True)
         request_input_obj = (options or {}).get("__input_manifest_path")
-        request_input_path = (
-            Path(str(request_input_obj))
-            if isinstance(request_input_obj, str) and request_input_obj.strip()
-            else audit_dir / "request_input.json"
-        )
-        fallback_path = audit_dir / "prompt.1.txt"
+        if not isinstance(request_input_obj, str) or not request_input_obj.strip():
+            raise RuntimeError("__input_manifest_path is required")
+        request_input_path = Path(str(request_input_obj))
         field_name = "rendered_prompt_first_attempt"
         try:
             self._append_request_input_audit_fields(
@@ -236,18 +231,7 @@ class EngineExecutionAdapter:
             return
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
             logger.warning(
-                "[%s] failed to persist first-attempt prompt into request_input.json; writing fallback",
-                self.process_prefix,
-                exc_info=True,
-            )
-
-        try:
-            temp_path = fallback_path.with_name(f"{fallback_path.name}.tmp")
-            temp_path.write_text(prompt, encoding="utf-8")
-            temp_path.replace(fallback_path)
-        except OSError:
-            logger.warning(
-                "[%s] failed to persist first-attempt prompt fallback file",
+                "[%s] failed to persist first-attempt prompt into input manifest",
                 self.process_prefix,
                 exc_info=True,
             )
@@ -283,19 +267,14 @@ class EngineExecutionAdapter:
         if attempt_number != 1 or self._resolve_repair_round_index(options) >= 1:
             return
         audit_dir_obj = (options or {}).get("__audit_dir")
-        audit_dir = (
-            Path(str(audit_dir_obj))
-            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
-            else run_dir / ".audit"
-        )
+        if not isinstance(audit_dir_obj, str) or not audit_dir_obj.strip():
+            raise RuntimeError("__audit_dir is required")
+        audit_dir = Path(str(audit_dir_obj))
         audit_dir.mkdir(parents=True, exist_ok=True)
         request_input_obj = (options or {}).get("__input_manifest_path")
-        request_input_path = (
-            Path(str(request_input_obj))
-            if isinstance(request_input_obj, str) and request_input_obj.strip()
-            else audit_dir / "request_input.json"
-        )
-        fallback_path = audit_dir / "argv.1.json"
+        if not isinstance(request_input_obj, str) or not request_input_obj.strip():
+            raise RuntimeError("__input_manifest_path is required")
+        request_input_path = Path(str(request_input_obj))
         payload = {
             "spawn_command_original_first_attempt": list(original_command),
             "spawn_command_effective_first_attempt": list(effective_command),
@@ -310,21 +289,7 @@ class EngineExecutionAdapter:
             return
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
             logger.warning(
-                "[%s] failed to persist first-attempt spawn command into request_input.json; writing fallback",
-                self.process_prefix,
-                exc_info=True,
-            )
-
-        try:
-            temp_path = fallback_path.with_name(f"{fallback_path.name}.tmp")
-            temp_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            temp_path.replace(fallback_path)
-        except OSError:
-            logger.warning(
-                "[%s] failed to persist first-attempt spawn command fallback file",
+                "[%s] failed to persist first-attempt spawn command into input manifest",
                 self.process_prefix,
                 exc_info=True,
             )
@@ -803,11 +768,9 @@ class EngineExecutionAdapter:
         attempt_number_obj = options.get("__attempt_number")
         attempt_number = attempt_number_obj if isinstance(attempt_number_obj, int) and attempt_number_obj > 0 else 1
         audit_dir_obj = options.get("__audit_dir")
-        audit_dir = (
-            Path(str(audit_dir_obj))
-            if isinstance(audit_dir_obj, str) and audit_dir_obj.strip()
-            else run_dir / ".audit"
-        )
+        if not isinstance(audit_dir_obj, str) or not audit_dir_obj.strip():
+            raise RuntimeError("__audit_dir is required")
+        audit_dir = Path(str(audit_dir_obj))
         audit_dir.mkdir(parents=True, exist_ok=True)
         stdout_log_path = audit_dir / f"stdout.{attempt_number}.log"
         stderr_log_path = audit_dir / f"stderr.{attempt_number}.log"

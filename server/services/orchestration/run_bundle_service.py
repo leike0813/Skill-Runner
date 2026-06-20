@@ -17,22 +17,13 @@ class RunBundleService:
         run_dir: Path,
         debug: bool = False,
         *,
-        layout: RunWorkspaceLayout | None = None,
+        layout: RunWorkspaceLayout,
     ) -> str:
-        if layout is not None:
-            run_dir = layout.workspace_dir
-        bundle_dir = layout.bundle_dir if layout is not None else run_dir / "bundle"
+        run_dir = layout.workspace_dir
+        bundle_dir = layout.bundle_dir
         bundle_dir.mkdir(parents=True, exist_ok=True)
-        bundle_path = (
-            layout.bundle_path(debug=debug)
-            if layout is not None
-            else bundle_dir / ("run_bundle_debug.zip" if debug else "run_bundle.zip")
-        )
-        manifest_path = (
-            layout.bundle_manifest_path(debug=debug)
-            if layout is not None
-            else bundle_dir / ("manifest_debug.json" if debug else "manifest.json")
-        )
+        bundle_path = layout.bundle_path(debug=debug)
+        manifest_path = layout.bundle_manifest_path(debug=debug)
 
         entries: list[dict[str, object]] = []
         bundle_candidates = self.bundle_candidates(
@@ -76,23 +67,14 @@ class RunBundleService:
         debug: bool,
         bundle_path: Path,
         manifest_path: Path,
-        layout: RunWorkspaceLayout | None = None,
+        layout: RunWorkspaceLayout,
     ) -> list[Path]:
         if debug:
-            if layout is not None:
-                candidates = self._contract_driven_debug_candidates(run_dir, layout)
-            else:
-                candidates = []
-                for path in run_dir.rglob("*"):
-                    if not path.is_file():
-                        continue
-                    rel_path = path.relative_to(run_dir).as_posix()
-                    if run_file_filter_service.include_in_debug_bundle(rel_path):
-                        candidates.append(path)
+            candidates = self._contract_driven_debug_candidates(run_dir, layout)
         else:
             candidates = self._contract_driven_non_debug_candidates(
                 run_dir,
-                result_path=layout.result_path if layout is not None else None,
+                result_path=layout.result_path,
             )
 
         bundle_root = run_dir / "bundle"
@@ -112,10 +94,7 @@ class RunBundleService:
         result_path: Path | None = None,
     ) -> list[Path]:
         candidates: list[Path] = []
-        if result_path is not None:
-            result_candidates = [result_path] if result_path.exists() else []
-        else:
-            result_candidates = self._result_candidates(run_dir)
+        result_candidates = [result_path] if result_path is not None and result_path.exists() else []
         candidates.extend(result_candidates)
         candidates.extend(self._feedback_sidecar_candidates(result_candidates))
         if not result_candidates:
@@ -135,7 +114,6 @@ class RunBundleService:
         for root in (
             layout.result_path.parent,
             layout.audit_dir,
-            layout.state_path.parent,
         ):
             if not root.exists():
                 continue
@@ -168,18 +146,6 @@ class RunBundleService:
                 return True
         except OSError:
             return False
-
-    def _result_candidates(self, run_dir: Path) -> list[Path]:
-        result_root = run_dir / "result"
-        candidates: list[Path] = []
-        legacy = result_root / "result.json"
-        if legacy.exists():
-            candidates.append(legacy)
-        if result_root.exists():
-            for path in sorted(result_root.glob("*/result.json")):
-                if path.is_file():
-                    candidates.append(path)
-        return candidates
 
     def _artifact_candidates_from_result(
         self,

@@ -17,6 +17,25 @@ async def _request(method: str, path: str, **kwargs):
         return await client.request(method, path, **kwargs)
 
 
+_TEST_NAMESPACE = "demo.1"
+
+
+def _layout_fields(run_dir: Path, *, namespace: str = _TEST_NAMESPACE) -> dict:
+    return {
+        "workspace_id": run_dir.name,
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+        "result_path": str(run_dir / "result" / namespace / "result.json"),
+        "input_manifest_path": str(run_dir / ".audit" / namespace / "input_manifest.json"),
+    }
+
+
+def _audit_dir(run_dir: Path, *, namespace: str = _TEST_NAMESPACE) -> Path:
+    path = run_dir / ".audit" / namespace
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _write_state(
     run_dir: Path,
     status: str,
@@ -24,8 +43,6 @@ def _write_state(
     error: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
-    state_dir = run_dir / ".state"
-    state_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "request_id": f"req-{run_dir.name}",
         "run_id": run_dir.name,
@@ -59,7 +76,6 @@ def _write_state(
         "warnings": warnings or [],
         "error": error,
     }
-    (state_dir / "state.json").write_text(json.dumps(payload), encoding="utf-8")
     return payload
 
 
@@ -130,9 +146,9 @@ def _patch_projection_store(monkeypatch, *, recovery_info: dict | None = None) -
 @pytest.mark.asyncio
 async def test_interactive_reply_branches_success_conflict_and_not_waiting(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-branches"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    (run_dir / ".audit" / "stdout.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "stderr.1.log").write_text("", encoding="utf-8")
+    audit_dir = _audit_dir(run_dir)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     state_box = {"payload": _write_state(run_dir, "waiting_user")}
 
     request_record = {
@@ -142,6 +158,7 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
         "engine": "gemini",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     pending_state = {
         "pending": {
@@ -159,10 +176,6 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_run_state",
         lambda _request_id: state_box["payload"],
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_pending_interaction",
@@ -222,10 +235,10 @@ async def test_interactive_reply_branches_success_conflict_and_not_waiting(monke
 @pytest.mark.asyncio
 async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-e2e"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    (run_dir / ".audit" / "stdout.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "stderr.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "request_input.json").write_text(
+    audit_dir = _audit_dir(run_dir)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "input_manifest.json").write_text(
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
@@ -238,6 +251,7 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
         "engine": "gemini",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     pending_state = {
         "pending": {
@@ -263,10 +277,6 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_run_state",
         lambda _request_id: state_box["payload"],
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_pending_interaction",
@@ -330,10 +340,10 @@ async def test_client_pending_reply_flow_reaches_terminal(monkeypatch, tmp_path:
 @pytest.mark.asyncio
 async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-e2e-max-attempt"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    (run_dir / ".audit" / "stdout.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "stderr.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "request_input.json").write_text(
+    audit_dir = _audit_dir(run_dir)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "input_manifest.json").write_text(
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
@@ -346,6 +356,7 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
         "engine": "gemini",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     pending_state = {
         "pending": {
@@ -374,10 +385,6 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_run_state",
         lambda _request_id: state_box["payload"],
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_pending_interaction",
@@ -437,8 +444,8 @@ async def test_client_reply_flow_can_end_with_max_attempt_failed_reason(monkeypa
 @pytest.mark.asyncio
 async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-route"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    _write_state(run_dir, "waiting_auth")
+    audit_dir = _audit_dir(run_dir)
+    state_box = {"payload": _write_state(run_dir, "waiting_auth")}
 
     request_record = {
         "request_id": "req-auth-route",
@@ -447,6 +454,7 @@ async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tm
         "engine": "opencode",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     pending_auth = {
         "auth_session_id": "auth-1",
@@ -471,8 +479,8 @@ async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tm
         lambda _request_id: request_record,
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.routers.jobs.run_store.get_run_state",
+        lambda _request_id: state_box["payload"],
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_pending_auth",
@@ -527,7 +535,7 @@ async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tm
     body = reply.json()
     assert body["accepted"] is True
     assert body["status"] == "waiting_auth"
-    event_lines = (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+    event_lines = (audit_dir / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
     payloads = [json.loads(line) for line in event_lines if line.strip()]
     assert any(item["type"] == "auth.input.accepted" for item in payloads)
 
@@ -535,11 +543,10 @@ async def test_auth_reply_callback_submit_records_accepted_event(monkeypatch, tm
 @pytest.mark.asyncio
 async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-cancel"
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
-    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
-    _write_state(run_dir, "running")
+    audit_dir = _audit_dir(run_dir)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    state_box = {"payload": _write_state(run_dir, "running")}
 
     request_record = {
         "request_id": "req-cancel",
@@ -548,11 +555,12 @@ async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch
         "engine": "gemini",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     _patch_projection_store(monkeypatch)
 
     async def _cancel_run(**_kwargs):
-        _write_state(
+        state_box["payload"] = _write_state(
             run_dir,
             "canceled",
             error={"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
@@ -564,8 +572,8 @@ async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch
         lambda _request_id: request_record,
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.routers.jobs.run_store.get_run_state",
+        lambda _request_id: state_box["payload"],
     )
     monkeypatch.setattr(
         "server.routers.jobs.job_orchestrator.cancel_run",
@@ -618,11 +626,10 @@ async def test_cancel_observability_matches_canceled_event_semantics(monkeypatch
 @pytest.mark.asyncio
 async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-recovered"
-    logs_dir = run_dir / ".audit"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    (logs_dir / "stdout.1.log").write_text("", encoding="utf-8")
-    (logs_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    (run_dir / ".audit" / "request_input.json").write_text(
+    audit_dir = _audit_dir(run_dir)
+    (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "input_manifest.json").write_text(
         json.dumps({"skill_id": "demo", "engine": "gemini"}),
         encoding="utf-8",
     )
@@ -635,6 +642,7 @@ async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatc
         "engine": "gemini",
         "engine_options": {},
         "runtime_options": {"execution_mode": "interactive"},
+        **_layout_fields(run_dir),
     }
     pending_state = {"interaction_id": 42, "kind": "open_text", "prompt": "continue?"}
     _patch_projection_store(
@@ -648,7 +656,6 @@ async def test_recovered_waiting_user_still_supports_reply_and_cancel(monkeypatc
 
     monkeypatch.setattr("server.routers.jobs.run_store.get_request", lambda _request_id: request_record)
     monkeypatch.setattr("server.routers.jobs.run_store.get_run_state", lambda _request_id: state_box["payload"])
-    monkeypatch.setattr("server.routers.jobs.workspace_manager.get_run_dir", lambda _run_id: run_dir)
     monkeypatch.setattr("server.routers.jobs.run_store.get_pending_interaction", lambda _request_id: pending_state)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_recovery_info",

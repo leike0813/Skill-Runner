@@ -3,23 +3,23 @@
 ## Purpose
 TBD - created by archiving change complete-runtime-file-contract-cutover-and-scan. Update Purpose after archive.
 ## Requirements
-### Requirement: New Runs Emit Only Canonical Runtime Files
+### Requirement: New Runs Emit Only Canonical Runtime Directories
 
 New runs MUST emit only the canonical runtime file layout.
 
 #### Scenario: create-run initializes canonical directories only
 - **WHEN** a new run directory is created
-- **THEN** it contains `.state/`, `.audit/`, `result/`, `artifacts/`, `bundle/`, and `uploads/`
+- **THEN** it contains `.audit/`, `result/`, `artifacts/`, `bundle/`, and `uploads/`
 - **AND** it does not contain `interactions/`, `logs/`, `raw/`, `status.json`, `current/projection.json`, or root `input.json`
 
-### Requirement: Waiting Payload Lives Only In State
+### Requirement: Waiting Payload Lives Only In DB State
 
-Current waiting payload MUST live only inside `.state/state.json`.
+Current waiting payload MUST live only in DB-backed state/projection and interaction tables.
 
 #### Scenario: run enters waiting_auth or waiting_user
 - **WHEN** the run transitions into `waiting_auth` or `waiting_user`
-- **THEN** current waiting data is embedded under `.state/state.json.pending`
-- **AND** no `interactions/pending*.json` file exists
+- **THEN** current waiting data is persisted in `request_run_state`, `request_current_projection`, and the relevant interaction/auth rows
+- **AND** no `.state/*.json` or `interactions/pending*.json` file is required or created
 
 ### Requirement: New Runs Must Not Emit Legacy Output Files
 
@@ -27,7 +27,7 @@ New runs MUST NOT emit legacy output or mirror files.
 
 #### Scenario: process output is captured for a new run
 - **WHEN** attempt logs are written
-- **THEN** `.audit/stdout.<attempt>.log` and `.audit/stderr.<attempt>.log` are used
+- **THEN** `.audit/<namespace>/stdout.<attempt>.log` and `.audit/<namespace>/stderr.<attempt>.log` are used
 - **AND** `logs/stdout.txt`, `logs/stderr.txt`, and `raw/output.json` are absent
 
 ### Requirement: Artifact contract MUST be driven by output artifact-path fields
@@ -47,7 +47,7 @@ The system MUST validate required artifacts by checking the declared output fiel
 - **THEN** the run passes artifact validation
 
 ### Requirement: ordinary bundles MUST be contract-driven
-Non-debug bundles MUST include only `result/result.json` and resolved artifact files.
+Non-debug bundles MUST include the request's actual `resultJsonPath` and resolved artifact files.
 
 #### Scenario: uploads and temp files are excluded from normal bundle
 - **WHEN** a non-debug bundle is built
@@ -66,34 +66,6 @@ File inputs MUST be expressible as `uploads/`-relative paths in `POST /v1/jobs`.
 - **WHEN** a file input key is not explicitly provided in the request body
 - **THEN** runtime MAY still resolve `uploads/<input_key>` as a compatibility fallback
 
-### Requirement: run 工作目录结果文件 MUST 可作为终态输出恢复来源
-
-当 run 已成功执行但主路径结构化输出缺失或非法时，系统 MUST 能从 run 工作目录内恢复结果文件，而不依赖 `result/result.json` 或审计目录。
-
-#### Scenario: default result filename is discovered under run workspace
-- **GIVEN** skill 未声明自定义结果文件名
-- **AND** `run_dir` 子树中存在 `<skill-id>.result.json`
-- **WHEN** 主路径结构化输出失败且 lifecycle 进入结果恢复
-- **THEN** 系统必须将该文件视为候选结果文件
-
-#### Scenario: declared result filename overrides default
-- **GIVEN** `runner.json.entrypoint.result_json_filename` 声明了非空字符串
-- **WHEN** lifecycle 扫描 run 工作目录
-- **THEN** 系统必须只按该文件名匹配候选结果文件
-- **AND** 不再使用默认 `<skill-id>.result.json`
-
-#### Scenario: multiple candidate result files choose latest mtime
-- **GIVEN** `run_dir` 内存在多个同名候选结果文件
-- **WHEN** lifecycle 选择最终恢复来源
-- **THEN** 系统必须优先选择 `mtime` 最新的文件
-- **AND** 若 `mtime` 相同，则按浅层路径优先
-- **AND** 结果必须记录 `OUTPUT_RESULT_FILE_MULTIPLE_CANDIDATES`
-
-#### Scenario: audit and terminal result directories are excluded
-- **GIVEN** `.audit/` 或 `result/` 下存在同名 JSON 文件
-- **WHEN** lifecycle 扫描候选结果文件
-- **THEN** 这些文件不得参与候选选择
-
 ### Requirement: New runner-owned terminal results MUST use actual result path
 New runs SHALL write the runner-owned terminal result to the run's persisted `resultJsonPath`.
 
@@ -102,24 +74,12 @@ New runs SHALL write the runner-owned terminal result to the run's persisted `re
 - **THEN** its terminal result is written to `result/<safeSkillId>.<n>/result.json`
 - **AND** callers MUST read the persisted actual result path rather than deriving `result/result.json`
 
-#### Scenario: Legacy result path remains readable
-- **GIVEN** a historical run has no persisted actual result path
-- **WHEN** a caller reads the result
-- **THEN** the system may fall back to `result/result.json`
-
 ### Requirement: New input manifests MUST use actual input manifest path
 New runs SHALL write the runner-owned input manifest to the run's persisted `inputManifestPath`.
 
 #### Scenario: New run writes namespaced input manifest
 - **WHEN** a new logical run is allocated namespace `<safeSkillId>.<n>`
 - **THEN** its runner-owned input manifest is written to `.audit/<safeSkillId>.<n>/input_manifest.json`
-
-### Requirement: Package-owned result fallback MUST ignore runner-owned namespaces
-Package-owned result fallback discovery SHALL exclude runner-owned result and audit subtrees.
-
-#### Scenario: Fallback ignores runner-owned files
-- **WHEN** lifecycle scans a workspace for a package-owned fallback result file
-- **THEN** files under `result/` and `.audit/` do not participate in candidate selection
 
 ### Requirement: Skill run feedback sidecar MUST be optional and result-local
 
@@ -149,11 +109,6 @@ Normal run bundles SHALL include `_skill_run_feedback.md` when the file exists b
 - **WHEN** a bundle is built and `result/<namespace>/_skill_run_feedback.md` exists beside `result/<namespace>/result.json`
 - **THEN** the bundle includes `result/<namespace>/_skill_run_feedback.md`
 - **AND** existing business artifacts and result layout are unchanged
-
-#### Scenario: legacy feedback sidecar is bundled
-- **WHEN** a legacy run has `result/_skill_run_feedback.md` beside `result/result.json`
-- **THEN** the bundle includes `result/_skill_run_feedback.md`
-
 
 ### Requirement: New request-bound runs MUST use workspace_dir as file root
 
@@ -185,44 +140,6 @@ Runner-owned files in a shared workspace MUST use the request's persisted namesp
 - **WHEN** a request-bound bundle is generated
 - **THEN** bundle files and manifests are written under `bundle/<namespace>/`
 - **AND** root `bundle/run_bundle*.zip` is not current truth for that run.
-
-### Requirement: Legacy run dirs MUST remain readable as fallback
-
-Historical no-layout records MUST remain readable through `data/runs/<run_id>` fallback.
-
-#### Scenario: Legacy record has no workspace metadata
-- **GIVEN** a run record has no persisted `workspace_dir`
-- **WHEN** a read path resolves its files
-- **THEN** the backend may fall back to `data/runs/<run_id>`.
-
-### Requirement: Request-bound state files MUST use run-owned namespace
-
-Request-bound run state and dispatch files MUST use the persisted workspace namespace whenever layout metadata exists.
-
-#### Scenario: Queued and running state use namespaced state files
-- **WHEN** a request-bound run is initialized, admitted, scheduled, claimed, or marked running
-- **THEN** the backend writes `.state/<namespace>/state.json`
-- **AND** dispatch phase writes `.state/<namespace>/dispatch.json`
-- **AND** root `.state/state.json` is not updated as current truth for that request-bound run.
-
-#### Scenario: Queued initialization refetches layout after request binding
-- **GIVEN** a request was bound to a run after an earlier request record was loaded
-- **WHEN** queued state is initialized with that stale request record
-- **THEN** the backend refetches the bound request metadata before resolving state paths
-- **AND** initialization still writes `.state/<namespace>/state.json` and `.state/<namespace>/dispatch.json`.
-
-#### Scenario: Interaction and auth callbacks update namespaced state
-- **WHEN** reply, auth selection, auth input, auth import, auth status reconciliation, or auth timeout updates current status for a request-bound run
-- **THEN** the update targets `.state/<namespace>/state.json`
-- **AND** root `.state/state.json` is only used when no layout metadata exists.
-
-### Requirement: Package-owned fallback scans MUST not confuse runner-owned namespace files
-
-Fallback scans for package-owned outputs SHALL keep runner-owned state, audit, and result namespaces separate from package-owned artifacts.
-
-#### Scenario: Result fallback excludes runner-owned namespaces
-- **WHEN** lifecycle scans a workspace for package-owned fallback output
-- **THEN** files under `result/`, `.state/`, and `.audit/` are not treated as package-owned output candidates.
 
 ### Requirement: Request-bound bundles MUST use run-owned namespace
 
@@ -256,4 +173,4 @@ New request-bound runs MUST NOT rely on `.state/<namespace>/state.json` or `.sta
 #### Scenario: Legacy state files exist
 - **GIVEN** legacy `.state` files exist in a workspace
 - **WHEN** a request-bound API reads current state
-- **THEN** those files are treated as diagnostic/legacy data only.
+- **THEN** those files are ignored.

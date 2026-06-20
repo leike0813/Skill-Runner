@@ -29,11 +29,9 @@ class _ArtifactField:
 
 
 def collect_run_artifacts(run_dir: Path, result_path: Path | None = None) -> List[str]:
-    candidate_result_paths: list[Path] = []
-    if result_path is not None:
-        candidate_result_paths.append(result_path)
-    candidate_result_paths.append(run_dir / "result" / "result.json")
-    candidate_result_paths.extend(sorted((run_dir / "result").glob("*/result.json")))
+    if result_path is None:
+        raise RuntimeError("result_path is required")
+    candidate_result_paths: list[Path] = [result_path]
     seen_result_paths: set[str] = set()
     for candidate_result_path in candidate_result_paths:
         candidate_key = candidate_result_path.as_posix()

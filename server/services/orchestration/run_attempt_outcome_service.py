@@ -428,8 +428,6 @@ class RunAttemptOutcomeService:
             )
             if normalized_structured_source == "structured_output_result":
                 success_source = "structured_output_result"
-            elif normalized_structured_source == "result_file_fallback":
-                success_source = "result_file_fallback"
             elif has_structured_output and done_signal_found:
                 success_source = "done_signal_payload"
             elif has_structured_output:

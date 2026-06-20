@@ -16,78 +16,151 @@ from server.runtime.observability.rasp_live_journal import rasp_live_journal
 from server.runtime.observability.run_observability import RunObservabilityService
 
 
-def _write_state_file(run_dir: Path, status: str) -> None:
-    state_path = run_dir / ".state" / "state.json"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(
-            {
-                "request_id": run_dir.name,
-                "run_id": run_dir.name,
-                "status": status,
-                "updated_at": "2026-01-01T00:00:00",
-                "current_attempt": 1,
-                "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
-                "pending": {"owner": None, "interaction_id": None, "auth_session_id": None, "payload": None},
-                "resume": {
-                    "resume_ticket_id": None,
-                    "resume_cause": None,
-                    "source_attempt": None,
-                    "target_attempt": None,
-                },
-                "runtime": {},
-                "error": None,
-                "warnings": [],
-            }
-        ),
-        encoding="utf-8",
+_TEST_NAMESPACE = "demo.1"
+
+
+def _audit_dir(run_dir: Path, *, namespace: str = _TEST_NAMESPACE) -> Path:
+    path = run_dir / ".audit" / namespace
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _layout_fields(run_dir: Path, *, namespace: str = _TEST_NAMESPACE) -> dict[str, str]:
+    return {
+        "workspace_id": run_dir.name,
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+        "result_path": str(run_dir / "result" / namespace / "result.json"),
+        "input_manifest_path": str(run_dir / ".audit" / namespace / "input_manifest.json"),
+    }
+
+
+def _request_record(
+    *,
+    request_id: str,
+    run_id: str,
+    run_dir: Path,
+    skill_id: str = "demo",
+    engine: str = "codex",
+    status: str = "running",
+    namespace: str = _TEST_NAMESPACE,
+    **extra: object,
+) -> dict[str, object]:
+    return {
+        "request_id": request_id,
+        "run_id": run_id,
+        "skill_id": skill_id,
+        "engine": engine,
+        "request_created_at": "2026-01-01T00:00:00",
+        "run_status": status,
+        **_layout_fields(run_dir, namespace=namespace),
+        **extra,
+    }
+
+
+def _state_payload(
+    *,
+    request_id: str,
+    run_id: str,
+    status: str,
+    current_attempt: int = 1,
+    error: dict | None = None,
+) -> dict:
+    return {
+        "request_id": request_id,
+        "run_id": run_id,
+        "status": status,
+        "updated_at": "2026-01-01T00:00:00",
+        "current_attempt": current_attempt,
+        "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
+        "pending": {"owner": None, "interaction_id": None, "auth_session_id": None, "payload": None},
+        "resume": {
+            "resume_ticket_id": None,
+            "resume_cause": None,
+            "source_attempt": None,
+            "target_attempt": None,
+        },
+        "runtime": {},
+        "error": error,
+        "warnings": [],
+    }
+
+
+def _patch_request_bound(
+    monkeypatch,
+    *,
+    run_dir: Path,
+    request_id: str,
+    run_id: str,
+    status: str,
+    current_attempt: int = 1,
+    skill_id: str = "demo",
+    engine: str = "codex",
+    namespace: str = _TEST_NAMESPACE,
+    extra_record: dict | None = None,
+) -> tuple[dict, dict]:
+    record = _request_record(
+        request_id=request_id,
+        run_id=run_id,
+        run_dir=run_dir,
+        skill_id=skill_id,
+        engine=engine,
+        status=status,
+        namespace=namespace,
+        **(extra_record or {}),
     )
-
-
-def _set_current_attempt(run_dir: Path, current_attempt: int) -> None:
-    state_path = run_dir / ".state" / "state.json"
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
-    payload["current_attempt"] = current_attempt
-    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    state = _state_payload(
+        request_id=request_id,
+        run_id=run_id,
+        status=status,
+        current_attempt=current_attempt,
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request",
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=state),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_current_projection",
+        AsyncMock(return_value=None),
+    )
+    return record, state
 
 
 @pytest.mark.asyncio
 async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-1"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
-    (run_dir / ".audit" / "meta.1.json").write_text("{}", encoding="utf-8")
-    (run_dir / ".audit" / "stdout.1.log").write_text("line1\nline2\n", encoding="utf-8")
-    (run_dir / ".audit" / "stderr.1.log").write_text("err1\n", encoding="utf-8")
-    _write_state_file(run_dir, "running")
+    (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "stdout.1.log").write_text("line1\nline2\n", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("err1\n", encoding="utf-8")
+    row = _request_record(
+        request_id="req-1",
+        run_id="run-1",
+        run_dir=run_dir,
+        engine="gemini",
+        status="running",
+    )
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
-        AsyncMock(return_value=[
-            {
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo",
-                "engine": "gemini",
-                "request_created_at": "2026-01-01T00:00:00",
-                "run_status": "running",
-            }
-        ]),
+        AsyncMock(return_value=[row]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request_with_run",
-        AsyncMock(side_effect=lambda request_id: {
-            "request_id": request_id,
-            "run_id": "run-1",
-            "skill_id": "demo",
-            "engine": "gemini",
-            "request_created_at": "2026-01-01T00:00:00",
-            "run_status": "running",
-        }),
+        AsyncMock(return_value=row),
     )
     monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=_state_payload(request_id="req-1", run_id="run-1", status="running")),
     )
 
     service = RunObservabilityService()
@@ -105,43 +178,16 @@ async def test_list_runs_and_get_logs_tail(monkeypatch, tmp_path: Path):
 @pytest.mark.asyncio
 async def test_list_runs_prefers_namespaced_state_over_legacy_root_state(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-ns"
-    _write_state_file(run_dir, "running")
     namespace = "demo-skill.1"
-    namespaced_state = run_dir / ".state" / namespace / "state.json"
-    namespaced_state.parent.mkdir(parents=True, exist_ok=True)
-    namespaced_state.write_text(
-        json.dumps(
-            {
-                "request_id": "req-ns",
-                "run_id": "run-ns",
-                "status": "succeeded",
-                "updated_at": "2026-01-01T00:01:00",
-                "current_attempt": 1,
-                "state_phase": {"waiting_auth_phase": None, "dispatch_phase": None},
-                "pending": {"owner": None, "interaction_id": None, "auth_session_id": None, "payload": None},
-                "resume": {
-                    "resume_ticket_id": None,
-                    "resume_cause": None,
-                    "source_attempt": None,
-                    "target_attempt": None,
-                },
-                "runtime": {},
-                "error": None,
-                "warnings": [],
-            }
-        ),
-        encoding="utf-8",
+    row = _request_record(
+        request_id="req-ns",
+        run_id="run-ns",
+        run_dir=run_dir,
+        skill_id="demo-skill",
+        engine="codex",
+        status="succeeded",
+        namespace=namespace,
     )
-    row = {
-        "request_id": "req-ns",
-        "run_id": "run-ns",
-        "skill_id": "demo-skill",
-        "engine": "codex",
-        "request_created_at": "2026-01-01T00:00:00",
-        "run_status": "succeeded",
-        "workspace_dir": str(run_dir),
-        "workspace_namespace": namespace,
-    }
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
         AsyncMock(return_value=[row]),
@@ -155,8 +201,8 @@ async def test_list_runs_prefers_namespaced_state_over_legacy_root_state(monkeyp
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=_state_payload(request_id="req-ns", run_id="run-ns", status="succeeded")),
     )
 
     rows = await RunObservabilityService().list_runs()
@@ -168,35 +214,28 @@ async def test_list_runs_prefers_namespaced_state_over_legacy_root_state(monkeyp
 async def test_list_runs_does_not_reconcile_waiting_auth_before_render(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "waiting_auth")
+    row = _request_record(
+        request_id="req-auth",
+        run_id="run-auth",
+        run_dir=run_dir,
+        status="waiting_auth",
+    )
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_requests_with_runs",
-        AsyncMock(
-            return_value=[
-                {
-                    "request_id": "req-auth",
-                    "run_id": "run-auth",
-                    "skill_id": "demo",
-                    "engine": "codex",
-                    "request_created_at": "2026-01-01T00:00:00",
-                    "run_status": "waiting_auth",
-                }
-            ]
-        ),
+        AsyncMock(return_value=[row]),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=_state_payload(request_id="req-auth", run_id="run-auth", status="waiting_auth")),
     )
 
     async def _reconcile(request_id: str) -> bool:
         assert request_id == "req-auth"
-        _write_state_file(run_dir, "failed")
         return True
 
     monkeypatch.setattr(
@@ -214,37 +253,26 @@ async def test_list_runs_does_not_reconcile_waiting_auth_before_render(monkeypat
 async def test_get_run_detail_redrives_queued_resume_ticket(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-queued"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "queued")
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+    record = _request_record(
+        request_id="req-queued",
+        run_id="run-queued",
+        run_dir=run_dir,
+        status="queued",
+        runtime_options={"execution_mode": "interactive"},
+        effective_runtime_options={"execution_mode": "interactive"},
+        client_metadata={"conversation_mode": "session"},
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request_with_run",
-        AsyncMock(
-            return_value={
-                "request_id": "req-queued",
-                "run_id": "run-queued",
-                "skill_id": "demo",
-                "engine": "codex",
-                "request_created_at": "2026-01-01T00:00:00",
-                "run_status": "queued",
-                "runtime_options": {"execution_mode": "interactive"},
-                "effective_runtime_options": {"execution_mode": "interactive"},
-                "client_metadata": {"conversation_mode": "session"},
-            }
-        ),
+        AsyncMock(return_value=record),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(
-            return_value={
-                "request_id": "req-queued",
-                "run_id": "run-queued",
-                "skill_id": "demo",
-                "engine": "codex",
-            }
-        ),
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=_state_payload(request_id="req-queued", run_id="run-queued", status="queued")),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
@@ -269,7 +297,7 @@ async def test_get_run_detail_redrives_queued_resume_ticket(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detail(monkeypatch, tmp_path: Path):
+async def test_bound_request_missing_layout_fails_fast(monkeypatch, tmp_path: Path):
     local_store = RunStore(db_path=tmp_path / "runs.db")
     await local_store.create_request(
         request_id="req-orphan",
@@ -292,32 +320,13 @@ async def test_missing_run_dir_queued_resume_reconciles_failed_in_list_and_detai
         payload={"interaction_id": 1, "response": {"text": "hello"}, "resolution_mode": "user_reply"},
     )
 
-    async def _redrive(**kwargs):
-        return await run_recovery_service.redrive_resume_ticket_if_needed(
-            **kwargs,
-            workspace_backend=type("Workspace", (), {"get_run_dir": lambda self, _run_id: None})(),
-            resume_run_job=lambda **_payload: None,
-            recovery_reason="resume_ticket_redriven_online",
-        )
-
     monkeypatch.setattr("server.runtime.observability.run_observability.run_store", local_store)
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: None,
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.queued_resume_redriver",
-        _redrive,
-    )
 
     service = RunObservabilityService()
-    rows = await service.list_runs()
-    with pytest.raises(ValueError, match="Run workspace layout is unavailable"):
+    with pytest.raises(RuntimeError, match="Run workspace layout is unavailable"):
+        await service.list_runs()
+    with pytest.raises(RuntimeError, match="Run workspace layout is unavailable"):
         await service.get_run_detail("req-orphan")
-
-    assert rows[0]["status"] == "queued"
-    assert rows[0]["recovery_state"] == "none"
-    assert rows[0]["recovery_reason"] is None
 
 
 def test_timeline_protocol_summary_formats_output_repair_event() -> None:
@@ -346,28 +355,22 @@ def test_timeline_protocol_summary_formats_output_repair_event() -> None:
 async def test_get_run_detail_hides_denylisted_node_modules(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-tree"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
     (run_dir / "app").mkdir(parents=True, exist_ok=True)
     (run_dir / "app" / "main.py").write_text("print('ok')", encoding="utf-8")
     (run_dir / "workspace" / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
     (run_dir / "workspace" / "node_modules" / "pkg" / "index.js").write_text("module.exports={};", encoding="utf-8")
 
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+    record, state = _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-tree",
+        run_id="run-tree",
+        status="running",
+        engine="opencode",
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request_with_run",
-        AsyncMock(
-            return_value={
-                "request_id": "req-tree",
-                "run_id": "run-tree",
-                "skill_id": "demo",
-                "engine": "opencode",
-                "request_created_at": "2026-01-01T00:00:00",
-                "run_status": "running",
-            }
-        ),
+        AsyncMock(return_value=record),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
@@ -386,26 +389,20 @@ async def test_get_run_detail_hides_denylisted_node_modules(monkeypatch, tmp_pat
 async def test_run_file_preview_rejects_filtered_node_modules_path(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-preview"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
     (run_dir / "workspace" / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
     (run_dir / "workspace" / "node_modules" / "pkg" / "index.js").write_text("secret", encoding="utf-8")
 
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+    record, state = _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-preview",
+        run_id="run-preview",
+        status="running",
+        engine="opencode",
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request_with_run",
-        AsyncMock(
-            return_value={
-                "request_id": "req-preview",
-                "run_id": "run-preview",
-                "skill_id": "demo",
-                "engine": "opencode",
-                "request_created_at": "2026-01-01T00:00:00",
-                "run_status": "running",
-            }
-        ),
+        AsyncMock(return_value=record),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
@@ -433,7 +430,13 @@ def test_read_log_increment_supports_offsets_and_chunking(tmp_path: Path):
 async def test_event_history_prefers_live_journal_when_audit_missing(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-live-history"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-live-history",
+        run_id=run_dir.name,
+        status="running",
+    )
     fcmp_live_journal.clear(run_dir.name)
     fcmp_live_journal.publish(
         run_id=run_dir.name,
@@ -450,15 +453,10 @@ async def test_event_history_prefers_live_journal_when_audit_missing(monkeypatch
             "raw_ref": None,
         },
     )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value=None),
-    )
-
     service = RunObservabilityService()
     payload = await service.get_event_history_payload(
         run_dir=run_dir,
-        request_id=None,
+        request_id="req-live-history",
         from_seq=1,
         to_seq=None,
         from_ts=None,
@@ -473,7 +471,13 @@ async def test_event_history_prefers_live_journal_when_audit_missing(monkeypatch
 async def test_iter_sse_events_replays_live_journal_without_materializing_audit(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-live-sse"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "waiting_user")
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-live-sse",
+        run_id=run_dir.name,
+        status="waiting_user",
+    )
     fcmp_live_journal.clear(run_dir.name)
     fcmp_live_journal.publish(
         run_id=run_dir.name,
@@ -491,10 +495,6 @@ async def test_iter_sse_events_replays_live_journal_without_materializing_audit(
         },
     )
     monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
         RunObservabilityService,
         "_read_pending_interaction_id",
         AsyncMock(return_value=None),
@@ -506,7 +506,7 @@ async def test_iter_sse_events_replays_live_journal_without_materializing_audit(
     )
 
     service = RunObservabilityService()
-    iterator = service.iter_sse_events(run_dir=run_dir, request_id=None, cursor=0)
+    iterator = service.iter_sse_events(run_dir=run_dir, request_id="req-live-sse", cursor=0)
     events = []
     async for item in iterator:
         events.append(item)
@@ -519,8 +519,14 @@ async def test_iter_sse_events_replays_live_journal_without_materializing_audit(
 @pytest.mark.asyncio
 async def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-hist",
+        run_id="run-history",
+        status="succeeded",
+    )
     fcmp_path = audit_dir / "fcmp_events.1.jsonl"
     fcmp_path.write_text(
         "\n".join(
@@ -567,10 +573,6 @@ async def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_pat
         "server.runtime.observability.run_observability.RunObservabilityService._materialize_protocol_stream",
         _materialize,
     )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.RunObservabilityService._read_status_payload",
-        lambda self, _run_dir: {"status": "succeeded"},
-    )
     service = RunObservabilityService()
     rows = await service.list_event_history(run_dir=run_dir, request_id="req-hist")
     assert len(rows) == 1
@@ -581,6 +583,13 @@ async def test_list_event_history_filters_invalid_fcmp_rows(monkeypatch, tmp_pat
 async def test_list_event_history_delegates_to_fcmp_protocol_history(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history-delegate"
     run_dir.mkdir(parents=True, exist_ok=True)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-1",
+        run_id=run_dir.name,
+        status="running",
+    )
     service = RunObservabilityService()
     captured: dict[str, object] = {}
 
@@ -613,9 +622,14 @@ async def test_list_protocol_history_rejects_unknown_stream(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_list_protocol_history_rasp_terminal_uses_audit_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-terminal-rasp"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-terminal",
+        run_id=run_dir.name,
+        status="succeeded",
+    )
     write_jsonl(
         audit_dir / "events.1.jsonl",
         [
@@ -700,10 +714,15 @@ async def test_list_protocol_history_terminal_fcmp_falls_back_to_live_when_mirro
     tmp_path: Path,
 ):
     run_dir = tmp_path / "run-terminal-live-fcmp"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
-    _set_current_attempt(run_dir, 1)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-terminal-live",
+        run_id=run_dir.name,
+        status="succeeded",
+        current_attempt=1,
+    )
     write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
     write_jsonl(audit_dir / "events.1.jsonl", [])
     write_jsonl(audit_dir / "orchestrator_events.1.jsonl", [])
@@ -763,10 +782,15 @@ async def test_list_protocol_history_terminal_fcmp_falls_back_to_live_when_mirro
 @pytest.mark.asyncio
 async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-no-materialize"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
-    _set_current_attempt(run_dir, 2)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-no-materialize",
+        run_id=run_dir.name,
+        status="running",
+        current_attempt=2,
+    )
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -800,7 +824,7 @@ async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypat
 
     payload = await service.list_protocol_history(
         run_dir=run_dir,
-        request_id=None,
+        request_id="req-no-materialize",
         stream="fcmp",
         from_seq=None,
         to_seq=None,
@@ -817,10 +841,15 @@ async def test_list_protocol_history_fcmp_does_not_trigger_materialize(monkeypat
 @pytest.mark.asyncio
 async def test_list_protocol_history_fcmp_running_current_attempt_uses_live_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-live-fcmp"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
-    _set_current_attempt(run_dir, 2)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-live-fcmp",
+        run_id=run_dir.name,
+        status="running",
+        current_attempt=2,
+    )
     write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
     write_jsonl(audit_dir / "fcmp_events.2.jsonl", [])
     write_jsonl(audit_dir / "events.1.jsonl", [])
@@ -880,10 +909,15 @@ async def test_list_protocol_history_fcmp_running_current_attempt_uses_live_only
 @pytest.mark.asyncio
 async def test_list_protocol_history_rasp_running_current_attempt_uses_live_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-live-rasp"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
-    _set_current_attempt(run_dir, 2)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-live-rasp",
+        run_id=run_dir.name,
+        status="running",
+        current_attempt=2,
+    )
     write_jsonl(audit_dir / "fcmp_events.1.jsonl", [])
     write_jsonl(audit_dir / "fcmp_events.2.jsonl", [])
     write_jsonl(audit_dir / "events.1.jsonl", [])
@@ -948,10 +982,15 @@ async def test_list_protocol_history_rasp_running_current_attempt_uses_live_only
 @pytest.mark.asyncio
 async def test_list_protocol_history_running_old_attempt_still_uses_audit(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-old-attempt"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
-    _set_current_attempt(run_dir, 2)
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-old-attempt",
+        run_id=run_dir.name,
+        status="running",
+        current_attempt=2,
+    )
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1003,7 +1042,30 @@ async def test_list_protocol_history_running_old_attempt_still_uses_audit(monkey
     reindex_mock.assert_called_once()
 
 
-def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = "auto") -> None:
+def _patch_protocol_defaults(
+    monkeypatch,
+    *,
+    run_dir: Path,
+    request_id: str,
+    run_id: str,
+    status: str,
+    execution_mode: str = "auto",
+    current_attempt: int = 1,
+) -> None:
+    record = _request_record(
+        request_id=request_id,
+        run_id=run_id,
+        run_dir=run_dir,
+        status=status,
+        engine="codex",
+        runtime_options={"execution_mode": execution_mode},
+    )
+    state = _state_payload(
+        request_id=request_id,
+        run_id=run_id,
+        status=status,
+        current_attempt=current_attempt,
+    )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
         AsyncMock(return_value=None),
@@ -1014,7 +1076,15 @@ def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = 
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": execution_mode}}),
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=state),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
@@ -1028,14 +1098,12 @@ def _patch_protocol_defaults(monkeypatch, *, status: str, execution_mode: str = 
         "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
         AsyncMock(return_value=1200),
     )
-    _ = status
 
 
 @pytest.mark.asyncio
 async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-protocol"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1068,8 +1136,13 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "succeeded")
-    _patch_protocol_defaults(monkeypatch, status="succeeded")
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-protocol",
+        run_id=run_dir.name,
+        status="succeeded",
+    )
 
     service = RunObservabilityService()
     events = []
@@ -1098,8 +1171,7 @@ async def test_iter_sse_events_chat_only_for_terminal_status(monkeypatch, tmp_pa
 @pytest.mark.asyncio
 async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-wait"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1132,7 +1204,14 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "waiting_user")
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-wait",
+        run_id=run_dir.name,
+        status="waiting_user",
+        execution_mode="interactive",
+    )
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -1179,8 +1258,15 @@ async def test_iter_sse_events_waiting_user_chat_only(monkeypatch, tmp_path: Pat
 @pytest.mark.asyncio
 async def test_iter_sse_events_drains_trailing_waiting_user_chat_events(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-wait-drain"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "waiting_user")
+    _audit_dir(run_dir)
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-wait-drain",
+        run_id=run_dir.name,
+        status="waiting_user",
+        execution_mode="interactive",
+    )
 
     async def _get_event_history_payload(self, **kwargs):
         _ = self
@@ -1213,14 +1299,6 @@ async def test_iter_sse_events_drains_trailing_waiting_user_chat_events(monkeypa
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.RunObservabilityService.get_event_history_payload",
         _get_event_history_payload,
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.RunObservabilityService._read_status_payload",
-        lambda self, _run_dir: {"status": "waiting_user"},
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.RunObservabilityService._latest_attempt_number",
-        lambda self, _run_dir: 1,
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -1265,8 +1343,15 @@ async def test_iter_sse_events_drains_trailing_waiting_user_chat_events(monkeypa
 @pytest.mark.asyncio
 async def test_drain_trailing_chat_events_waits_for_expected_attempt(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-terminal-drain"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
+    _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-terminal-drain",
+        run_id=run_dir.name,
+        status="succeeded",
+        current_attempt=4,
+    )
 
     available_attempts = [3, 3, 4, 4]
 
@@ -1320,8 +1405,7 @@ async def test_drain_trailing_chat_events_waits_for_expected_attempt(monkeypatch
 @pytest.mark.asyncio
 async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-wait"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1366,7 +1450,14 @@ async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Pat
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "waiting_auth")
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-auth",
+        run_id=run_dir.name,
+        status="waiting_auth",
+        execution_mode="interactive",
+    )
 
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -1391,10 +1482,6 @@ async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Pat
                 "phase": "challenge_active",
             }
         ),
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "opencode", "runtime_options": {"execution_mode": "interactive"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
@@ -1432,8 +1519,7 @@ async def test_iter_sse_events_waiting_auth_chat_only(monkeypatch, tmp_path: Pat
 @pytest.mark.asyncio
 async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-cursor"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1466,8 +1552,13 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "succeeded")
-    _patch_protocol_defaults(monkeypatch, status="succeeded")
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-cursor",
+        run_id=run_dir.name,
+        status="succeeded",
+    )
 
     service = RunObservabilityService()
     first_pass = []
@@ -1500,8 +1591,7 @@ async def test_iter_sse_events_cursor_skips_old_chat_events(monkeypatch, tmp_pat
 @pytest.mark.asyncio
 async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-history"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = _audit_dir(run_dir)
     write_jsonl(
         audit_dir / "fcmp_events.1.jsonl",
         [
@@ -1556,8 +1646,13 @@ async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Pat
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "succeeded")
-    _patch_protocol_defaults(monkeypatch, status="succeeded")
+    _patch_protocol_defaults(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-history",
+        run_id=run_dir.name,
+        status="succeeded",
+    )
 
     service = RunObservabilityService()
     rows = await service.list_event_history(
@@ -1574,19 +1669,20 @@ async def test_list_event_history_filters_fcmp_by_seq(monkeypatch, tmp_path: Pat
 @pytest.mark.asyncio
 async def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-range"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-range",
+        run_id=run_dir.name,
+        status="succeeded",
+    )
     (audit_dir / "stdout.1.log").write_text("audit-stdout", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text(
         json.dumps({"completion": {"state": "completed", "reason_code": "DONE_MARKER_FOUND"}}),
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "auto"}}),
-    )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
         AsyncMock(return_value=0),
@@ -1607,16 +1703,16 @@ async def test_read_log_range_prefers_attempt_logs(monkeypatch, tmp_path: Path):
 async def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-no-fallback"
     logs_dir = run_dir / "logs"
-    audit_dir = run_dir / ".audit"
+    audit_dir = _audit_dir(run_dir)
     logs_dir.mkdir(parents=True, exist_ok=True)
-    audit_dir.mkdir(parents=True, exist_ok=True)
     (logs_dir / "stdout.txt").write_text("legacy-stdout", encoding="utf-8")
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
-    _write_state_file(run_dir, "running")
-
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "auto"}}),
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-no-fallback",
+        run_id=run_dir.name,
+        status="running",
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
@@ -1637,9 +1733,14 @@ async def test_read_log_range_does_not_fallback_to_legacy_logs(monkeypatch, tmp_
 @pytest.mark.asyncio
 async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-materialize-order"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "waiting_user")
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-materialize-order",
+        run_id=run_dir.name,
+        status="waiting_user",
+    )
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     (audit_dir / "orchestrator_events.1.jsonl").write_text(
@@ -1706,7 +1807,7 @@ async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeyp
     service = RunObservabilityService()
     payload = await service._materialize_protocol_stream(
         run_dir=run_dir,
-        request_id=None,
+        request_id="req-materialize-order",
         status_payload={"status": "waiting_user"},
         attempt_number=1,
     )
@@ -1729,9 +1830,15 @@ async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeyp
 @pytest.mark.asyncio
 async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-rebuild"
-    audit_dir = run_dir / ".audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-rebuild",
+        run_id=run_dir.name,
+        status="succeeded",
+        engine="unknown",
+    )
     (audit_dir / "meta.1.json").write_text(
         json.dumps({"engine": "unknown", "status": "succeeded", "completion": {"state": "completed"}}),
         encoding="utf-8",
@@ -1756,10 +1863,6 @@ async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(mon
         )
         + "\n",
         encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "unknown", "runtime_options": {"execution_mode": "auto"}}),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",
@@ -1831,7 +1934,14 @@ def test_load_io_chunks_for_strict_replay_uses_incremental_utf8_decoding(tmp_pat
 async def test_list_timeline_history_merges_protocol_chat_and_client(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-timeline"
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-timeline",
+        run_id=run_dir.name,
+        status="running",
+        current_attempt=2,
+    )
     service = RunObservabilityService()
 
     async def _resolve_attempt_number(**_kwargs):
@@ -1930,8 +2040,14 @@ async def test_list_timeline_history_reuses_cache_when_audit_signature_unchanged
     monkeypatch, tmp_path: Path
 ) -> None:
     run_dir = tmp_path / "run-timeline-cache"
-    (run_dir / ".audit").mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "running")
+    _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-cache",
+        run_id=run_dir.name,
+        status="running",
+    )
     service = RunObservabilityService()
     calls = {"count": 0}
 

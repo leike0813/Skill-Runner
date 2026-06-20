@@ -37,8 +37,10 @@ class OverflowSidecarRecorder:
         run_id: str | None = None,
         audit_dir: Path | None = None,
     ) -> None:
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         self._run_dir = run_dir
-        self._audit_dir = audit_dir or run_dir / ".audit"
+        self._audit_dir = audit_dir
         self._attempt_number = max(1, int(attempt_number))
         self._run_id = run_id or run_dir.name
         self._index_path = self._audit_dir / f"overflow_index.{self._attempt_number}.jsonl"

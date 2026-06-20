@@ -241,7 +241,8 @@ class RunAuditService:
         auth_session: dict[str, Any] | None = None,
         audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         suffix = f".{attempt_number}"
         meta_path = audit_dir / f"meta{suffix}.json"
@@ -453,7 +454,8 @@ class RunAuditService:
         audit_dir: Path | None = None,
         run_id: str | None = None,
     ) -> None:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         event_path = audit_dir / f"orchestrator_events.{attempt_number}.jsonl"
         event_seq = self.next_orchestrator_event_seq(event_path)
@@ -531,7 +533,8 @@ class RunAuditService:
         record: dict[str, Any],
         audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         record_path = audit_dir / f"output_repair.{attempt_number}.jsonl"
         with record_path.open("a", encoding="utf-8") as fp:

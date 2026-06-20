@@ -50,7 +50,7 @@ class RunCleanupManager:
             if isinstance(workspace_dir_obj, str) and workspace_dir_obj.strip():
                 workspace_manager.delete_workspace_dir(Path(workspace_dir_obj))
             else:
-                workspace_manager.delete_run_dir(run_id)
+                logger.warning("Skip workspace cleanup for run without workspace_dir: run_id=%s", run_id)
             deleted_runs += 1
         if deleted_runs or deleted_requests:
             logger.info(
@@ -63,7 +63,6 @@ class RunCleanupManager:
 
     async def clear_all(self) -> dict:
         counts = await run_store.clear_all()
-        workspace_manager.purge_runs_dir()
         workspace_manager.purge_workspaces_dir()
         runtime_env_secret_service.clear_all()
         return counts
@@ -83,8 +82,6 @@ class RunCleanupManager:
                     candidate = Path(workspace_dir_obj)
                     if candidate.exists():
                         run_dir = candidate
-            if run_dir is None:
-                run_dir = workspace_manager.get_run_dir(run_id)
             if run_dir:
                 active_run_dirs.append(run_dir)
         try:

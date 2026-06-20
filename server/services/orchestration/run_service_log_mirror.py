@@ -74,7 +74,8 @@ class RunServiceLogMirrorSession:
         strict_attempt_match: bool = True,
         audit_dir: Path | None = None,
     ) -> "RunServiceLogMirrorSession":
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         log_path = audit_dir / f"service.{attempt_number}.log"
 
@@ -117,7 +118,8 @@ class RunServiceLogMirrorSession:
         backup_count: int = DEFAULT_BACKUP_COUNT,
         audit_dir: Path | None = None,
     ) -> "RunServiceLogMirrorSession":
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         log_path = audit_dir / "service.run.log"
 

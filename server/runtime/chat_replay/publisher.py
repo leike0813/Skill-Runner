@@ -72,18 +72,14 @@ class ChatReplayPublisher:
     ) -> None:
         if run_id in self._next_seq_by_run:
             return
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         max_seq = 0
         for row in _read_jsonl(target_audit_dir / "chat_replay.jsonl"):
             seq_obj = row.get("seq")
             if isinstance(seq_obj, int):
                 max_seq = max(max_seq, seq_obj)
-        legacy_audit_dir = run_dir / ".audit"
-        if max_seq == 0 and target_audit_dir != legacy_audit_dir:
-            for row in _read_jsonl(legacy_audit_dir / "chat_replay.jsonl"):
-                seq_obj = row.get("seq")
-                if isinstance(seq_obj, int):
-                    max_seq = max(max_seq, seq_obj)
         self._next_seq_by_run[run_id] = max_seq + 1
 
     def publish(

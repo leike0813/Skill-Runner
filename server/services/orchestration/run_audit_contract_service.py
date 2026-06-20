@@ -18,12 +18,13 @@ class RunAuditContractService:
         request_input_path: Path | None = None,
         run_id: str | None = None,
     ) -> RunAuditContract:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         return RunAuditContract(
             request_id="",
             run_id=run_id or run_dir.name,
             attempt_number=attempt_number,
-            request_input_path=str(request_input_path or audit_dir / "request_input.json"),
+            request_input_path=str(request_input_path or audit_dir / "input_manifest.json"),
             run_service_log_path=str(audit_dir / "service.run.log"),
             meta_path=str(audit_dir / f"meta.{attempt_number}.json"),
             orchestrator_events_path=str(audit_dir / f"orchestrator_events.{attempt_number}.jsonl"),
@@ -50,7 +51,9 @@ class RunAuditContractService:
         request_payload: dict[str, object],
         input_manifest_path: Path | None = None,
     ) -> Path:
-        path = input_manifest_path or run_dir / ".audit" / "request_input.json"
+        if input_manifest_path is None:
+            raise RuntimeError("input_manifest_path is required")
+        path = input_manifest_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(request_payload, ensure_ascii=False, indent=2),
@@ -64,7 +67,8 @@ class RunAuditContractService:
         run_dir: Path,
         audit_dir: Path | None = None,
     ) -> None:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         audit_dir.mkdir(parents=True, exist_ok=True)
         run_service_log_path = audit_dir / "service.run.log"
         if not run_service_log_path.exists():
@@ -83,7 +87,8 @@ class RunAuditContractService:
         input_manifest_path: Path | None = None,
         run_id: str | None = None,
     ) -> None:
-        audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
         contract = self._contract(
             run_dir,
             attempt_number,

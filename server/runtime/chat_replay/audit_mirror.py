@@ -27,7 +27,9 @@ class ChatReplayAuditMirrorWriter:
         run_id: str,
         audit_dir: Path | None = None,
     ) -> BufferedAsyncTextFileWriter:
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         path = target_audit_dir / "chat_replay.jsonl"
         key = str(path.resolve(strict=False))
         writer = self._writers_by_path.get(key)
@@ -47,7 +49,9 @@ class ChatReplayAuditMirrorWriter:
     ) -> None:
         run_id_obj = row.get("run_id")
         run_id = run_id_obj if isinstance(run_id_obj, str) and run_id_obj else run_dir.name
-        target_audit_dir = audit_dir or run_dir / ".audit"
+        if audit_dir is None:
+            raise RuntimeError("audit_dir is required")
+        target_audit_dir = audit_dir
         try:
             asyncio.get_running_loop()
         except RuntimeError:

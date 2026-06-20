@@ -51,7 +51,7 @@ class _FakeWorkspace:
     def __init__(self, run_dir: Path) -> None:
         self._run_dir = run_dir
 
-    def get_run_dir(self, run_id: str):
+    def get_workspace_dir(self, run_id: str):
         _ = run_id
         return self._run_dir
 
@@ -95,7 +95,15 @@ async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
     run_id = "run-1"
     request_id = "req-1"
 
-    fake_store = _FakeRunStore(run_id, run_state={"status": "waiting_user"})
+    fake_store = _FakeRunStore(
+        run_id,
+        {
+            "workspace_id": run_id,
+            "workspace_dir": str(run_dir),
+            "workspace_namespace": "demo.1",
+        },
+        run_state={"status": "waiting_user"},
+    )
     fake_workspace = _FakeWorkspace(run_dir)
 
     previous_run_store = observability_module.run_store
@@ -124,7 +132,7 @@ async def test_runtime_observability_ports_are_injected(tmp_path: Path) -> None:
         assert RunObservabilityService()._workspace() is fake_workspace
         assert RunReadFacade()._job_control().__class__.__name__ == "_FakeJobControl"
         _ = await RunReadFacade().get_bundle(source_adapter=source_adapter, request_id=request_id)
-        assert (run_dir / "bundle" / "run_bundle.zip").exists()
+        assert (run_dir / "bundle" / "demo.1" / "run_bundle.zip").exists()
         assert fake_job_control.used_build_run_bundle is True
     finally:
         observability_module.run_store = previous_run_store
@@ -234,7 +242,15 @@ async def test_run_read_facade_result_requires_terminal_projection(tmp_path: Pat
     )
     run_id = "run-2"
     request_id = "req-2"
-    fake_store = _FakeRunStore(run_id)
+    fake_store = _FakeRunStore(
+        run_id,
+        {
+            "workspace_id": run_id,
+            "workspace_dir": str(run_dir),
+            "workspace_namespace": "demo.1",
+        },
+        run_state={"status": "waiting_user"},
+    )
     fake_workspace = _FakeWorkspace(run_dir)
 
     previous_source_store = source_adapter_module.run_store
@@ -256,12 +272,6 @@ async def test_run_read_facade_result_requires_terminal_projection(tmp_path: Pat
 async def test_run_read_facade_result_uses_namespaced_state(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-ns-result"
     namespace = "demo-skill.1"
-    root_state = run_dir / ".state" / "state.json"
-    root_state.parent.mkdir(parents=True, exist_ok=True)
-    root_state.write_text('{"status":"running"}', encoding="utf-8")
-    namespaced_state = run_dir / ".state" / namespace / "state.json"
-    namespaced_state.parent.mkdir(parents=True, exist_ok=True)
-    namespaced_state.write_text('{"status":"succeeded"}', encoding="utf-8")
     result_path = run_dir / "result" / namespace / "result.json"
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text('{"status":"success","data":{"ok":true}}', encoding="utf-8")
