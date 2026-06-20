@@ -182,7 +182,11 @@ def test_extract_pending_interaction_projects_pending_branch() -> None:
             "message": "Pick one.",
             "ui_hints": {
                 "kind": "single_select",
-                "options": [{"label": "A", "value": "a"}],
+                "options": [
+                    {"label": "A", "value": "a"},
+                    "Beta",
+                    "  ",
+                ],
             },
         },
         fallback_interaction_id=9,
@@ -190,6 +194,10 @@ def test_extract_pending_interaction_projects_pending_branch() -> None:
     assert pending is not None
     assert pending["kind"] == "choose_one"
     assert pending["prompt"] == "Pick one."
+    assert pending["options"] == [
+        {"label": "A", "value": "a"},
+        {"label": "Beta", "value": "Beta"},
+    ]
 
 
 def test_extract_pending_interaction_rejects_legacy_ask_user_object() -> None:

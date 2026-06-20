@@ -25,6 +25,7 @@ from server.runtime.protocol.live_publish import (
     LiveRuntimeEmitterImpl,
     RaspEventPublisher,
 )
+from tests.common.workspace_layout_helpers import make_layout
 
 
 class _NoopMirrorWriter:
@@ -32,6 +33,10 @@ class _NoopMirrorWriter:
         _ = run_dir
         _ = attempt_number
         _ = row
+
+
+def _audit_dir(run_dir: Path) -> Path:
+    return make_layout(run_dir, namespace="demo.1").audit_dir
 
 
 class _RecordingOverflowRecorder:
@@ -531,6 +536,7 @@ async def test_live_runtime_emitter_publishes_intermediate_then_final_on_exit(tm
         stream_parser=parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     await emitter.on_stream_chunk(
@@ -567,6 +573,7 @@ async def test_live_runtime_emitter_coalesces_raw_stderr_blocks(tmp_path: Path) 
         stream_parser=_RawOnlyStreamParser(),
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     await emitter.on_stream_chunk(
@@ -611,6 +618,7 @@ async def test_live_runtime_emitter_consumes_run_handle_immediately_and_warns_on
         run_handle_consumer=_consume,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     await emitter.on_stream_chunk(stream="stdout", text="{}\n", byte_from=0, byte_to=3)
@@ -649,6 +657,7 @@ async def test_live_runtime_emitter_delays_raw_until_finish_for_terminal_semanti
         stream_parser=_TerminalSemanticOnlyParser(),
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     payload = '{"session_id":"session-1","response":"structured response"}\n'
@@ -694,6 +703,7 @@ async def test_live_runtime_emitter_suppresses_claude_raw_stdout_when_semantics_
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     first_payload = (
@@ -795,6 +805,7 @@ async def test_live_runtime_emitter_projects_pending_display_for_claude_final_an
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     pending_text = (
@@ -857,6 +868,7 @@ async def test_live_runtime_emitter_uses_claude_result_text_only_as_fallback_mes
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     payload = (
@@ -900,6 +912,7 @@ async def test_live_runtime_emitter_does_not_emit_claude_result_text_when_struct
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     payload = (
@@ -941,6 +954,7 @@ async def test_live_runtime_emitter_repairs_overflowed_claude_tool_result_and_re
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     init_payload = '{"type":"system","subtype":"init","session_id":"session-claude-overflow"}\n'
@@ -1008,6 +1022,7 @@ async def test_live_runtime_emitter_preserves_oversized_claude_assistant_message
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     long_text = "assistant-" + ("C" * 5200)
@@ -1058,6 +1073,7 @@ async def test_live_runtime_emitter_emits_qwen_process_events_and_single_final(t
         stream_parser=adapter.stream_parser,
         fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
         rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
     )
 
     payload = (

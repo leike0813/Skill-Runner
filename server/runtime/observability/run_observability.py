@@ -1997,6 +1997,7 @@ class RunObservabilityService:
         *,
         run_dir: Path,
         request_id: Optional[str],
+        logical_run_id: str,
         engine_name: str,
         attempt_number: int,
         paths: Dict[str, Path],
@@ -2071,7 +2072,7 @@ class RunObservabilityService:
         replay_chunks = list(io_chunks_decode.get("rows") or [])
         orchestrator_rows = self._filter_valid_orchestrator_rows(
             rows=read_jsonl(paths["orchestrator"]),
-            context=f"strict-replay:{request_id or run_dir.name}:a{attempt_number}",
+            context=f"strict-replay:{request_id or logical_run_id}:a{attempt_number}",
         )
         process_obj = attempt_meta.get("process")
         process_payload = process_obj if isinstance(process_obj, dict) else {}
@@ -2099,7 +2100,7 @@ class RunObservabilityService:
         fcmp_publisher = FcmpEventPublisher()
         rasp_publisher = RaspEventPublisher()
         emitter = LiveRuntimeEmitterImpl(
-            run_id=run_dir.name,
+            run_id=logical_run_id,
             run_dir=temp_run_dir,
             audit_dir=temp_audit_dir,
             engine=engine_name,
@@ -2178,7 +2179,7 @@ class RunObservabilityService:
                     if not isinstance(spec_type_obj, str) or not isinstance(spec_data_obj, dict):
                         continue
                     fcmp_event = make_fcmp_event(
-                        run_id=run_dir.name,
+                        run_id=logical_run_id,
                         seq=1,
                         engine=engine_name,
                         type_name=spec_type_obj,
@@ -2202,8 +2203,8 @@ class RunObservabilityService:
             event_ts=finished_at,
         )
         await asyncio.gather(
-            fcmp_publisher.drain_mirror(run_id=run_dir.name),
-            rasp_publisher.drain_mirror(run_id=run_dir.name),
+            fcmp_publisher.drain_mirror(run_id=logical_run_id),
+            rasp_publisher.drain_mirror(run_id=logical_run_id),
         )
 
         temp_events_path = temp_audit_dir / f"{RASP_EVENTS_FILE_PREFIX}.{attempt_number}.jsonl"
@@ -2222,11 +2223,11 @@ class RunObservabilityService:
 
         rasp_rows = self._filter_valid_rasp_rows(
             rows=read_jsonl(temp_events_path),
-            context=f"strict-replay:rasp:{request_id or run_dir.name}:a{attempt_number}",
+            context=f"strict-replay:rasp:{request_id or logical_run_id}:a{attempt_number}",
         )
         fcmp_rows = self._filter_valid_fcmp_rows(
             rows=read_jsonl(temp_fcmp_path),
-            context=f"strict-replay:fcmp:{request_id or run_dir.name}:a{attempt_number}",
+            context=f"strict-replay:fcmp:{request_id or logical_run_id}:a{attempt_number}",
         )
         diagnostics_rows = [
             row
@@ -2340,6 +2341,7 @@ class RunObservabilityService:
     ) -> Dict[str, Any]:
         rebuild_mode = "strict_replay"
         layout = await self._resolve_layout_for_request(request_id, run_dir)
+        logical_run_id = await self._resolve_logical_run_id(request_id, run_dir)
         audit_dir = self._audit_dir_for_layout(run_dir, layout)
         attempts = self._list_available_attempts_for_audit(run_dir, audit_dir=audit_dir)
         if not attempts:
@@ -2367,6 +2369,7 @@ class RunObservabilityService:
                 replay_result = await self._strict_replay_attempt(
                     run_dir=run_dir,
                     request_id=request_id,
+                    logical_run_id=logical_run_id,
                     engine_name=attempt_engine,
                     attempt_number=attempt_number,
                     paths=paths,
@@ -2404,12 +2407,12 @@ class RunObservabilityService:
                 )
                 logger.exception(
                     "protocol rebuild failed run=%s attempt=%s",
-                    run_dir.name,
+                    logical_run_id,
                     attempt_number,
                 )
         return {
             "request_id": request_id,
-            "run_id": run_dir.name,
+            "run_id": logical_run_id,
             "mode": rebuild_mode,
             "success": success,
             "backup_dir": str(backup_root),
@@ -2429,7 +2432,7 @@ class RunObservabilityService:
     ) -> Dict[str, Any]:
         status_obj = status_payload.get("status")
         status = status_obj if isinstance(status_obj, str) and status_obj else "queued"
-        run_id = run_dir.name
+        run_id = await self._resolve_logical_run_id(request_id, run_dir)
         engine_name = await self._resolve_engine_name(request_id)
         layout = await self._resolve_layout_for_request(request_id, run_dir)
         audit_dir = self._audit_dir_for_layout(run_dir, layout)
@@ -2830,6 +2833,11 @@ class RunObservabilityService:
             updated_at = status_payload.get("updated_at")
             if not isinstance(updated_at, str):
                 updated_at = self._derive_updated_at(run_dir_path, row)
+            pending_obj = status_payload.get("pending")
+            pending_payload = pending_obj if isinstance(pending_obj, dict) else {}
+            pending_interaction_id = status_payload.get("pending_interaction_id")
+            if pending_interaction_id is None:
+                pending_interaction_id = pending_payload.get("interaction_id")
             results.append(
                 {
                     "request_id": request_id_obj,
@@ -2839,11 +2847,22 @@ class RunObservabilityService:
                     "model": self._resolve_model_from_row(row),
                     "status": run_status,
                     "updated_at": updated_at,
-                    "pending_interaction_id": status_payload.get("pending_interaction_id"),
+                    "pending_interaction_id": pending_interaction_id,
                     "effective_session_timeout_sec": status_payload.get("effective_session_timeout_sec"),
                     "recovery_state": row.get("recovery_state") or "none",
                     "recovered_at": row.get("recovered_at"),
                     "recovery_reason": row.get("recovery_reason"),
+                    "workspaceDir": str(layout.workspace_dir),
+                    "resultJsonPath": (
+                        str(row.get("result_path"))
+                        if isinstance(row.get("result_path"), str) and row.get("result_path")
+                        else str(layout.result_path)
+                    ),
+                    "inputManifestPath": (
+                        str(row.get("run_input_manifest_path") or row.get("input_manifest_path"))
+                        if row.get("run_input_manifest_path") or row.get("input_manifest_path")
+                        else str(layout.input_manifest_path)
+                    ),
                     "file_state": file_state,
                 }
             )

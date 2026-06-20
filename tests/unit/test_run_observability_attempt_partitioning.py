@@ -5,12 +5,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
+from tests.common.workspace_layout_helpers import layout_record, make_layout, state_payload
+
+RUN_ID = "run-observability-attempt-partition"
 
 
 def _fcmp_state_event(*, seq: int, attempt: int, to_state: str) -> dict:
     return {
         "protocol_version": "fcmp/1.0",
-        "run_id": "run-1",
+        "run_id": RUN_ID,
         "seq": seq,
         "ts": "2026-02-24T00:00:00",
         "engine": "codex",
@@ -28,8 +31,8 @@ def _fcmp_state_event(*, seq: int, attempt: int, to_state: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Path):
-    run_dir = tmp_path / "run-1"
-    audit_dir = run_dir / ".audit"
+    run_dir = tmp_path / RUN_ID
+    audit_dir = make_layout(run_dir).audit_dir
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "meta.1.json").write_text("{}", encoding="utf-8")
     (audit_dir / "meta.2.json").write_text("{}", encoding="utf-8")
@@ -51,14 +54,35 @@ async def test_protocol_history_partitioned_by_attempt(monkeypatch, tmp_path: Pa
         return {"rasp_events": [], "fcmp_events": []}
 
     monkeypatch.setattr(service, "_materialize_protocol_stream", _materialize)
-    monkeypatch.setattr(
-        service,
-        "_read_status_payload",
-        lambda _run_dir: {"status": "succeeded"},
+    request_id = "req-1"
+    record = layout_record(
+        request_id=request_id,
+        run_id=RUN_ID,
+        workspace=run_dir,
+        namespace="demo.1",
+        status="succeeded",
+    )
+    state = state_payload(
+        request_id=request_id,
+        run_id=RUN_ID,
+        status="succeeded",
+        current_attempt=2,
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"runtime_options": {"execution_mode": "interactive"}, "engine": "codex"}),
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_request_with_run",
+        AsyncMock(return_value=record),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(return_value=state),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_current_projection",
+        AsyncMock(return_value=state),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_interaction_count",

@@ -798,7 +798,6 @@ class _RunJobLifecyclePipeline:
                 data={"status": RunStatus.RUNNING.value},
                 engine_name=engine_name,
             )
-            orchestrator._update_latest_run_id(run_id)
 
             try:
                 preparation = await orchestrator.run_attempt_preparation_service.prepare(

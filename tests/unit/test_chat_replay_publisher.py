@@ -3,6 +3,7 @@ from pathlib import Path
 
 from server.runtime.chat_replay.live_journal import chat_replay_live_journal
 from server.runtime.chat_replay.publisher import ChatReplayPublisher
+from tests.common.workspace_layout_helpers import make_layout
 
 
 class _NoopMirrorWriter:
@@ -11,9 +12,13 @@ class _NoopMirrorWriter:
         _ = row
 
 
+def _audit_dir(run_dir: Path) -> Path:
+    return make_layout(run_dir, namespace="demo-skill.1").audit_dir
+
+
 def test_chat_replay_publisher_bootstraps_seq_from_audit(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-chat-publisher"
-    audit_dir = run_dir / ".audit"
+    audit_dir = _audit_dir(run_dir)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "chat_replay.jsonl").write_text(
         json.dumps(
@@ -37,6 +42,7 @@ def test_chat_replay_publisher_bootstraps_seq_from_audit(tmp_path: Path) -> None
 
     published = publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event={
             "protocol_version": "chat-replay/1.0",
             "seq": 0,
@@ -57,7 +63,7 @@ def test_chat_replay_publisher_bootstraps_seq_from_audit(tmp_path: Path) -> None
 
 def test_chat_replay_publisher_writes_to_namespaced_audit_dir(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-chat-namespaced"
-    audit_dir = run_dir / ".audit" / "demo-skill.1"
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     chat_replay_live_journal.clear("run-chat-namespaced")
     publisher = ChatReplayPublisher()

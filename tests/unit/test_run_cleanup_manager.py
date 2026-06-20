@@ -272,7 +272,8 @@ async def test_clear_all_removes_runs_and_requests(monkeypatch, temp_config_dirs
     assert second_counts["requests"] == 0
     assert second_counts["cache_entries"] == 0
 
-    assert not any(Path(config.SYSTEM.RUNS_DIR).iterdir())
+    runs_dir = Path(config.SYSTEM.RUNS_DIR)
+    assert not runs_dir.exists() or not any(runs_dir.iterdir())
     assert not any(Path(config.SYSTEM.WORKSPACES_DIR).iterdir())
 
 

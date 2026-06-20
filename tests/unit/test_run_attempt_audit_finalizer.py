@@ -24,6 +24,7 @@ from server.services.orchestration.run_attempt_projection_finalizer import (
     RunAttemptFinalizeInput,
 )
 from server.services.orchestration.run_audit_service import RunAuditService
+from tests.common.workspace_layout_helpers import make_layout
 from server.services.orchestration.run_job_lifecycle_service import RunJobRequest
 
 
@@ -141,6 +142,7 @@ def _build_outcome() -> RunAttemptResolvedOutcome:
 
 def _build_finalize_input(tmp_path: Path, *, audit_service: Any) -> RunAttemptFinalizeInput:
     context = _build_context(tmp_path)
+    layout = make_layout(context.run_dir, namespace="skill-1.1")
 
     return RunAttemptFinalizeInput(
         context=context,
@@ -160,6 +162,7 @@ def _build_finalize_input(tmp_path: Path, *, audit_service: Any) -> RunAttemptFi
         execution_mode="interactive",
         options={"execution_mode": "interactive"},
         adapter=None,
+        audit_dir=layout.audit_dir,
     )
 
 
@@ -171,7 +174,8 @@ def test_audit_finalizer_persists_meta_auth_detection_and_auth_session(tmp_path:
         finished_at=datetime(2026, 4, 16, 10, 5, 0),
     )
 
-    meta_path = finalize_input.context.run_dir / ".audit" / "meta.1.json"
+    assert finalize_input.audit_dir is not None
+    meta_path = finalize_input.audit_dir / "meta.1.json"
     assert meta_path.exists()
     meta_payload = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta_payload["status"] == "succeeded"

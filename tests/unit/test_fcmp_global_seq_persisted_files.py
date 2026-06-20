@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
+from tests.common.workspace_layout_helpers import layout_record, make_layout, state_payload
 
 
 def _event(*, attempt: int, seq: int, type_name: str) -> dict:
@@ -85,9 +87,8 @@ def _write_state_file(run_dir: Path, status: str) -> None:
 @pytest.mark.asyncio
 async def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-global-seq-file"
-    audit_dir = run_dir / ".audit"
+    audit_dir = make_layout(run_dir).audit_dir
     audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "waiting_user")
     (audit_dir / "fcmp_events.1.jsonl").write_text(
         "\n".join(
             [
@@ -123,9 +124,31 @@ async def test_fcmp_seq_is_global_and_local_seq_is_persisted(monkeypatch, tmp_pa
     )
 
     service = RunObservabilityService()
+    request_id = "req-fcmp-seq"
+    run_id = "run-fcmp-seq"
+    record = layout_record(
+        request_id=request_id,
+        run_id=run_id,
+        workspace=run_dir,
+        namespace="demo.1",
+        status="waiting_user",
+    )
+    state = state_payload(
+        request_id=request_id,
+        run_id=run_id,
+        status="waiting_user",
+        current_attempt=2,
+    )
+    store = type("Store", (), {})()
+    store.get_request_with_run = AsyncMock(return_value=record)
+    store.get_request = AsyncMock(return_value=record)
+    store.get_run_state = AsyncMock(return_value=state)
+    store.get_current_projection = AsyncMock(return_value=state)
+    store.get_interaction_count = AsyncMock(return_value=0)
+    monkeypatch.setattr(service, "_run_store", lambda: store)
     await service.list_protocol_history(
         run_dir=run_dir,
-        request_id=None,
+        request_id=request_id,
         stream="fcmp",
         attempt=2,
     )

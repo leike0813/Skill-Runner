@@ -14,6 +14,18 @@ def _stub_generate_config(_schema_name: str, _layers, output_path: Path):
     return output_path
 
 
+def _adapter_options(run_dir: Path, options: dict | None = None) -> dict:
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    request_input_path = audit_dir / "request_input.json"
+    if not request_input_path.exists():
+        request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
+    merged = dict(options or {})
+    merged.setdefault("__audit_dir", str(audit_dir))
+    merged.setdefault("__input_manifest_path", str(request_input_path))
+    return merged
+
+
 @pytest.fixture
 def adapter():
     adapter = GeminiExecutionAdapter()
@@ -167,7 +179,7 @@ async def test_run_prompt_generation_strict_files(adapter, mock_skill, tmp_path)
         # "input" dict in request is not used for files anymore in strict mode
     }
     
-    options = {}
+    options = _adapter_options(run_dir)
     
     # Create dummy template
     template_file = tmp_path / "template.j2"
@@ -275,7 +287,7 @@ async def test_run_persists_first_attempt_prompt_to_request_input(adapter, mock_
     request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {"__attempt_number": 1}
+    options = _adapter_options(run_dir, {"__attempt_number": 1})
     template_file = tmp_path / "template.j2"
     template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
     skill_with_prompt = mock_skill.model_copy(
@@ -322,7 +334,7 @@ async def test_run_does_not_persist_prompt_after_first_attempt(adapter, mock_ski
     request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {"__attempt_number": 2}
+    options = _adapter_options(run_dir, {"__attempt_number": 2})
     template_file = tmp_path / "template.j2"
     template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
     skill_with_prompt = mock_skill.model_copy(
@@ -363,7 +375,7 @@ async def test_run_first_attempt_prompt_override_replaces_assembled_prompt(adapt
     (uploads_dir / "input_file").write_text("content", encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {"__attempt_number": 1, "__prompt_override": "OVERRIDE PROMPT"}
+    options = _adapter_options(run_dir, {"__attempt_number": 1, "__prompt_override": "OVERRIDE PROMPT"})
 
     with patch(
         "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
@@ -394,7 +406,7 @@ async def test_run_non_first_attempt_prompt_override_does_not_get_global_prefix(
     (uploads_dir / "input_file").write_text("content", encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {"__attempt_number": 2, "__prompt_override": "OVERRIDE PROMPT"}
+    options = _adapter_options(run_dir, {"__attempt_number": 2, "__prompt_override": "OVERRIDE PROMPT"})
 
     with patch(
         "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
@@ -429,11 +441,14 @@ async def test_run_repair_round_prompt_override_skips_first_attempt_audit_and_pr
     request_input_path.write_text(json.dumps({"request_id": "req-1"}, ensure_ascii=False), encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {
-        "__attempt_number": 1,
-        "__repair_round_index": 1,
-        "__prompt_override": "RETURN ONLY JSON",
-    }
+    options = _adapter_options(
+        run_dir,
+        {
+            "__attempt_number": 1,
+            "__repair_round_index": 1,
+            "__prompt_override": "RETURN ONLY JSON",
+        },
+    )
 
     with patch(
         "server.engines.common.config.json_layer_config_generator.config_generator.generate_config",
@@ -525,7 +540,7 @@ async def test_run_persists_first_attempt_prompt_to_fallback_when_request_input_
     request_input_path.write_text("not-json", encoding="utf-8")
 
     input_data = {"parameter": {"divisor": 5}}
-    options = {"__attempt_number": 1}
+    options = _adapter_options(run_dir, {"__attempt_number": 1})
     template_file = tmp_path / "template.j2"
     template_file.write_text("input_file: {{ input.input_file }}\n", encoding="utf-8")
     skill_with_prompt = mock_skill.model_copy(
@@ -550,16 +565,10 @@ async def test_run_persists_first_attempt_prompt_to_fallback_when_request_input_
         prompt_content = args[-1]
         spawn_command = list(args)
 
-    fallback_path = audit_dir / "prompt.1.txt"
-    assert fallback_path.exists()
-    assert fallback_path.read_text(encoding="utf-8") == prompt_content
-    argv_fallback_path = audit_dir / "argv.1.json"
-    assert argv_fallback_path.exists()
-    argv_payload = json.loads(argv_fallback_path.read_text(encoding="utf-8"))
-    assert argv_payload["spawn_command_original_first_attempt"] == spawn_command
-    assert argv_payload["spawn_command_effective_first_attempt"] == spawn_command
-    assert argv_payload["spawn_command_normalization_applied_first_attempt"] is False
-    assert argv_payload["spawn_command_normalization_reason_first_attempt"] == "not_applicable"
+    assert prompt_content.startswith("/test-skill invoke\n")
+    assert spawn_command
+    assert not (audit_dir / "prompt.1.txt").exists()
+    assert not (audit_dir / "argv.1.json").exists()
 
 
 def test_extract_session_handle_missing_session_id_raises(adapter):
@@ -780,6 +789,8 @@ async def test_execute_resume_command_contains_resume_flag(adapter, mock_skill, 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
 
     mock_proc = MagicMock()
     mock_proc.stdout = MagicMock()
@@ -795,14 +806,17 @@ async def test_execute_resume_command_contains_resume_flag(adapter, mock_skill, 
             "resume prompt",
             run_dir,
             mock_skill,
-            options={
-                "__resume_session_handle": {
-                    "engine": "gemini",
-                    "handle_type": "session_id",
-                    "handle_value": "sess_1",
-                    "created_at_turn": 1,
-                }
-            },
+            options=_adapter_options(
+                run_dir,
+                {
+                    "__resume_session_handle": {
+                        "engine": "gemini",
+                        "handle_type": "session_id",
+                        "handle_value": "sess_1",
+                        "created_at_turn": 1,
+                    }
+                },
+            ),
         )
         args, _ = mock_exec.call_args
         assert "--resume" in args
@@ -815,6 +829,8 @@ async def test_execute_interactive_command_includes_yolo(adapter, mock_skill, tm
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
 
     mock_proc = MagicMock()
     mock_proc.stdout = MagicMock()
@@ -830,7 +846,7 @@ async def test_execute_interactive_command_includes_yolo(adapter, mock_skill, tm
             "interactive prompt",
             run_dir,
             mock_skill,
-            options={"execution_mode": "interactive"},
+            options=_adapter_options(run_dir, {"execution_mode": "interactive"}),
         )
         args, _ = mock_exec.call_args
         assert "--yolo" in args
@@ -841,6 +857,8 @@ async def test_execute_auto_command_includes_yolo(adapter, mock_skill, tmp_path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
 
     mock_proc = MagicMock()
     mock_proc.stdout = MagicMock()
@@ -856,7 +874,7 @@ async def test_execute_auto_command_includes_yolo(adapter, mock_skill, tmp_path)
             "auto prompt",
             run_dir,
             mock_skill,
-            options={"execution_mode": "auto"},
+            options=_adapter_options(run_dir, {"execution_mode": "auto"}),
         )
         args, _ = mock_exec.call_args
         assert "--yolo" in args

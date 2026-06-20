@@ -26,6 +26,7 @@ from server.services.orchestration.job_orchestrator import JobOrchestrator, Orch
 from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
 from tests.unit.auth_detection_test_utils import load_sample
+from tests.common.workspace_layout_helpers import make_layout
 
 
 class _NoopConcurrencyManager:
@@ -431,31 +432,26 @@ def _create_run(skill: SkillManifest, engine: str) -> str:
 
 
 def _read_state_data(run_dir: Path) -> dict:
-    state_path = run_dir / ".state" / "state.json"
-    if state_path.exists():
-        return json.loads(state_path.read_text(encoding="utf-8"))
     run_id = run_dir.name
     state_db_path = Path(config.SYSTEM.RUNS_DB).with_name("run_state.db")
     with sqlite3.connect(state_db_path) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT payload_json FROM request_current_projection WHERE run_id = ?",
+            """
+            SELECT payload_json
+            FROM request_run_state
+            WHERE run_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
             (run_id,),
         ).fetchone()
-        if row is None:
-            row = conn.execute(
-                "SELECT payload_json FROM request_run_state WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
     if row is None:
         raise FileNotFoundError(f"No state projection found for {run_id}")
     return json.loads(row["payload_json"])
 
 
 def _read_result_data(run_dir: Path) -> dict:
-    legacy_path = run_dir / "result" / "result.json"
-    if legacy_path.exists():
-        return json.loads(legacy_path.read_text(encoding="utf-8"))
     run_id = run_dir.name
     with sqlite3.connect(config.SYSTEM.RUNS_DB) as conn:
         conn.row_factory = sqlite3.Row
@@ -468,6 +464,13 @@ def _read_result_data(run_dir: Path) -> dict:
     return json.loads(Path(row["result_path"]).read_text(encoding="utf-8"))
 
 
+def _audit_dir(run_dir: Path) -> Path:
+    namespaced = sorted(path for path in (run_dir / ".audit").glob("*") if path.is_dir())
+    if not namespaced:
+        raise FileNotFoundError(f"No namespaced audit directory found for {run_dir.name}")
+    return namespaced[0]
+
+
 async def _seed_interactive_request(
     store: RunStore,
     *,
@@ -477,6 +480,8 @@ async def _seed_interactive_request(
     engine: str,
     engine_options: dict[str, object] | None = None,
 ) -> None:
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    layout = make_layout(run_dir, namespace=f"{skill_id}.1")
     await store.create_request(
         request_id=request_id,
         skill_id=skill_id,
@@ -487,7 +492,16 @@ async def _seed_interactive_request(
         input_data={},
     )
     await store.update_request_run_id(request_id, run_id)
-    await store.create_run(run_id, None, "queued")
+    await store.create_run(
+        run_id,
+        None,
+        "queued",
+        result_path=str(layout.result_path),
+        workspace_id=layout.workspace_id,
+        workspace_dir=str(layout.workspace_dir),
+        workspace_namespace=layout.namespace,
+        input_manifest_path=str(layout.input_manifest_path),
+    )
 
 
 def _build_orchestrator(
@@ -542,7 +556,7 @@ async def test_high_confidence_auth_detection_overrides_waiting_user(tmp_path: P
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
         pending_selection = state_data["pending"]["payload"]
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
         assert state_data["pending"]["owner"] == "waiting_auth.method_selection"
@@ -598,7 +612,7 @@ async def test_low_confidence_auth_detection_is_audited_without_forcing_waiting_
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         result_data = _read_result_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         assert result_data["error"]["code"] is None
         assert meta_data["auth_detection"]["classification"] == "auth_required"
         assert meta_data["auth_detection"]["subcategory"] is None
@@ -648,7 +662,7 @@ async def test_low_confidence_auth_signal_does_not_translate_terminal_failure_to
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         result_data = _read_result_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] is None
         assert result_data["error"]["message"] == "Exit code 143"
@@ -775,7 +789,7 @@ async def test_opencode_high_confidence_auth_with_null_detection_provider_uses_m
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["pending"]["payload"]["provider_id"] == "deepseek"
         assert meta_data["auth_detection"]["provider_id"] is None
@@ -827,7 +841,7 @@ async def test_codex_refresh_token_reauth_high_confidence_enters_waiting_auth(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         pending_selection = state_data["pending"]["payload"]
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
@@ -884,7 +898,7 @@ async def test_codex_logged_out_access_token_reauth_high_confidence_enters_waiti
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         pending_selection = state_data["pending"]["payload"]
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
@@ -942,7 +956,7 @@ async def test_codex_usage_limit_high_confidence_enters_waiting_auth_and_preserv
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         pending_selection = state_data["pending"]["payload"]
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
@@ -1016,7 +1030,7 @@ async def test_qwen_oauth_waiting_banner_enters_waiting_auth_without_protocol_sc
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         pending_auth = state_data["pending"]["payload"]
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
@@ -1078,7 +1092,7 @@ async def test_claude_not_logged_in_login_prompt_enters_waiting_auth(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
         pending_selection = state_data["pending"]["payload"]
         assert state_data["status"] == RunStatus.WAITING_AUTH.value
         assert state_data["error"] is None
@@ -1146,7 +1160,7 @@ async def test_opencode_high_confidence_auth_with_unresolved_model_audits_reason
         result_data = _read_result_data(run_dir)
         audit_rows = [
             json.loads(line)
-            for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in (_audit_dir(run_dir) / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
         warning = next(row for row in audit_rows if row["type"] == "diagnostic.warning")

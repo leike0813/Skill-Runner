@@ -1384,6 +1384,7 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
     request_id = "request-empty-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
+    run_dir = Path(str(run_response.workspace_dir))
 
     await store.create_request(
         request_id=request_id,
@@ -1392,6 +1393,14 @@ async def test_get_run_artifacts_empty(monkeypatch, temp_config_dirs):
         parameter={},
         engine_options={},
         runtime_options={}
+    )
+    await store.create_run(
+        run_response.run_id,
+        cache_key=None,
+        status=RunStatus.SUCCEEDED,
+        workspace_id=run_response.run_id,
+        workspace_dir=str(run_dir),
+        workspace_namespace="demo-skill.1",
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 
@@ -1408,11 +1417,12 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
     request_id = "request-bundle"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
+    run_dir = Path(str(run_response.workspace_dir))
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
-    (run_dir / "result").mkdir(parents=True, exist_ok=True)
-    (run_dir / "result" / "result.json").write_text(
+    result_path = run_dir / "result" / "demo-skill.1" / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
         '{"status":"success","artifacts":["artifacts/output.txt"]}'
     )
 
@@ -1423,6 +1433,15 @@ async def test_get_run_bundle_returns_zip(monkeypatch, temp_config_dirs):
         parameter={},
         engine_options={},
         runtime_options={}
+    )
+    await store.create_run(
+        run_response.run_id,
+        cache_key=None,
+        status=RunStatus.SUCCEEDED,
+        result_path=str(result_path),
+        workspace_id=run_response.run_id,
+        workspace_dir=str(run_dir),
+        workspace_namespace="demo-skill.1",
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 
@@ -1439,11 +1458,12 @@ async def test_get_run_artifacts_does_not_scan_unlisted_files(monkeypatch, temp_
     request_id = "request-unlisted-artifacts"
     run_request = RunCreateRequest(skill_id="demo-skill", engine="codex", parameter={})
     run_response = workspace_manager.create_run(run_request)
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_response.run_id
+    run_dir = Path(str(run_response.workspace_dir))
     (run_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts" / "output.txt").write_text("ok")
-    (run_dir / "result").mkdir(parents=True, exist_ok=True)
-    (run_dir / "result" / "result.json").write_text('{"status":"success","artifacts":[]}')
+    result_path = run_dir / "result" / "demo-skill.1" / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text('{"status":"success","artifacts":[]}')
 
     await store.create_request(
         request_id=request_id,
@@ -1452,6 +1472,15 @@ async def test_get_run_artifacts_does_not_scan_unlisted_files(monkeypatch, temp_
         parameter={},
         engine_options={},
         runtime_options={}
+    )
+    await store.create_run(
+        run_response.run_id,
+        cache_key=None,
+        status=RunStatus.SUCCEEDED,
+        result_path=str(result_path),
+        workspace_id=run_response.run_id,
+        workspace_dir=str(run_dir),
+        workspace_namespace="demo-skill.1",
     )
     await store.update_request_run_id(request_id, run_response.run_id)
 

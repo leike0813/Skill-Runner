@@ -7,6 +7,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
+from tests.common.workspace_layout_helpers import layout_record
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -21,11 +22,14 @@ async def test_management_timeline_history_success(monkeypatch, tmp_path: Path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-timeline"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            return_value=layout_record(
+                request_id="req-1",
+                run_id="run-timeline",
+                workspace=run_dir,
+                namespace="demo-skill.1",
+            )
+        ),
     )
 
     async def _list_timeline_history(**kwargs):
@@ -81,11 +85,14 @@ async def test_management_timeline_history_request_or_run_not_found(monkeypatch,
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-2", "run_id": "run-2"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: tmp_path / "does-not-exist",
+        AsyncMock(
+            return_value=layout_record(
+                request_id="req-2",
+                run_id="run-2",
+                workspace=tmp_path / "does-not-exist",
+                namespace="demo-skill.1",
+            )
+        ),
     )
     missing_run = await _request("GET", "/v1/management/runs/req-2/timeline/history")
     assert missing_run.status_code == 404

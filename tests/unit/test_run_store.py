@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 
+from server.runtime.workspace_layout import require_layout_from_record
 from server.services.orchestration.run_store import RunStore
 
 
@@ -59,6 +60,43 @@ async def test_update_run_status_with_result_path(tmp_path):
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT result_path FROM runs WHERE run_id = ?", ("run-1",)).fetchone()
     assert row["result_path"] == "/tmp/result.json"
+
+
+@pytest.mark.asyncio
+async def test_list_requests_with_runs_includes_workspace_layout(tmp_path):
+    store = RunStore(db_path=tmp_path / "runs.db")
+    workspace_dir = tmp_path / "workspaces" / "run-1"
+    await store.create_request(
+        request_id="req-1",
+        skill_id="skill",
+        engine="codex",
+        parameter={},
+        engine_options={},
+        runtime_options={},
+        input_data={},
+    )
+    await store.create_run(
+        "run-1",
+        None,
+        "waiting_user",
+        result_path=str(workspace_dir / "result" / "skill.1" / "result.json"),
+        workspace_id="run-1",
+        workspace_dir=str(workspace_dir),
+        workspace_namespace="skill.1",
+        input_manifest_path=str(workspace_dir / ".audit" / "skill.1" / "input_manifest.json"),
+    )
+    await store.update_request_run_id("req-1", "run-1")
+
+    rows = await store.list_requests_with_runs_page(page=1, page_size=20)
+
+    assert len(rows) == 1
+    layout = require_layout_from_record(rows[0])
+    assert layout.workspace_dir == workspace_dir
+    assert layout.namespace == "skill.1"
+    assert rows[0]["result_path"] == str(workspace_dir / "result" / "skill.1" / "result.json")
+    assert rows[0]["run_input_manifest_path"] == str(
+        workspace_dir / ".audit" / "skill.1" / "input_manifest.json"
+    )
 
 
 @pytest.mark.asyncio

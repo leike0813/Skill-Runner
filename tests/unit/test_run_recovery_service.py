@@ -98,6 +98,9 @@ async def test_redrive_resume_ticket_existing_run_dir_schedules_resume_once(tmp_
                 "engine_options": {},
                 "runtime_options": {"execution_mode": "interactive"},
                 "effective_runtime_options": {"execution_mode": "interactive"},
+                "workspace_id": "run-1",
+                "workspace_dir": str(run_dir),
+                "workspace_namespace": "skill-1.1",
             }
         ),
         set_recovery_info=AsyncMock(),
@@ -125,7 +128,8 @@ async def test_redrive_resume_ticket_existing_run_dir_schedules_resume_once(tmp_
 
 
 @pytest.mark.asyncio
-async def test_redrive_resume_ticket_missing_run_dir_reconciles_failed():
+async def test_redrive_resume_ticket_missing_run_dir_reconciles_failed(tmp_path: Path):
+    run_dir = tmp_path / "missing-run-1"
     backend = SimpleNamespace(
         get_resume_ticket=AsyncMock(
             return_value={
@@ -142,6 +146,9 @@ async def test_redrive_resume_ticket_missing_run_dir_reconciles_failed():
                 "engine_options": {},
                 "runtime_options": {"execution_mode": "interactive"},
                 "effective_runtime_options": {"execution_mode": "interactive"},
+                "workspace_id": "run-1",
+                "workspace_dir": str(run_dir),
+                "workspace_namespace": "skill-1.1",
             }
         ),
         update_run_status=AsyncMock(),

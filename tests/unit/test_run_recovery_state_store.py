@@ -1,5 +1,6 @@
 import pytest
 
+from server.runtime.workspace_layout import require_layout_from_record
 from server.services.orchestration.run_store_database import RunStoreDatabase
 from server.services.orchestration.run_store_request_store import RunRegistryStore, RunRequestStore
 from server.services.orchestration.run_store_state_store import RunRecoveryStateStore
@@ -49,7 +50,17 @@ async def test_run_recovery_state_store_roundtrip_incomplete_runs(tmp_path):
         runtime_options={"execution_mode": "interactive"},
         input_data={},
     )
-    await run_store.create_run("run-1", None, "waiting_user")
+    workspace_dir = tmp_path / "workspaces" / "run-1"
+    await run_store.create_run(
+        "run-1",
+        None,
+        "waiting_user",
+        result_path=str(workspace_dir / "result" / "skill.1" / "result.json"),
+        workspace_id="run-1",
+        workspace_dir=str(workspace_dir),
+        workspace_namespace="skill.1",
+        input_manifest_path=str(workspace_dir / ".audit" / "skill.1" / "input_manifest.json"),
+    )
     await request_store.update_request_run_id("req-1", "run-1")
     await recovery_store.set_recovery_info(
         "run-1",
@@ -62,3 +73,11 @@ async def test_run_recovery_state_store_roundtrip_incomplete_runs(tmp_path):
     assert len(rows) == 1
     assert rows[0]["run_status"] == "waiting_user"
     assert rows[0]["recovery_state"] == "recovered_waiting"
+    layout = require_layout_from_record(rows[0])
+    assert layout.workspace_id == "run-1"
+    assert layout.workspace_dir == workspace_dir
+    assert layout.namespace == "skill.1"
+    assert rows[0]["result_path"] == str(workspace_dir / "result" / "skill.1" / "result.json")
+    assert rows[0]["run_input_manifest_path"] == str(
+        workspace_dir / ".audit" / "skill.1" / "input_manifest.json"
+    )

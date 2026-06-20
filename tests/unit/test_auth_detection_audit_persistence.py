@@ -6,11 +6,13 @@ from pathlib import Path
 
 from server.models import RunStatus
 from server.services.orchestration.run_audit_service import RunAuditService
+from tests.common.workspace_layout_helpers import make_layout
 
 
 def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-auth-audit"
     run_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = make_layout(run_dir, namespace="auth-audit.1").audit_dir
     service = RunAuditService()
     service.write_attempt_audit_artifacts(
         run_dir=run_dir,
@@ -32,6 +34,7 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
         validation_warnings=[],
         terminal_error_code="AUTH_REQUIRED",
         options={},
+        audit_dir=audit_dir,
         auth_detection={
             "classification": "auth_required",
             "subcategory": None,
@@ -48,7 +51,6 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
         },
     )
 
-    audit_dir = run_dir / ".audit"
     meta_payload = json.loads((audit_dir / "meta.1.json").read_text(encoding="utf-8"))
     assert meta_payload["auth_detection"]["classification"] == "auth_required"
     assert meta_payload["auth_detection"]["subcategory"] is None
@@ -67,6 +69,7 @@ def test_write_attempt_audit_artifacts_persists_auth_detection_and_diagnostic(tm
 def test_write_attempt_audit_artifacts_uses_canonical_waiting_auth_completion_state(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-waiting-auth-audit"
     run_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = make_layout(run_dir, namespace="waiting-auth.1").audit_dir
     service = RunAuditService()
     service.write_attempt_audit_artifacts(
         run_dir=run_dir,
@@ -88,8 +91,9 @@ def test_write_attempt_audit_artifacts_uses_canonical_waiting_auth_completion_st
         validation_warnings=[],
         terminal_error_code=None,
         options={},
+        audit_dir=audit_dir,
     )
 
-    meta_payload = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
+    meta_payload = json.loads((audit_dir / "meta.1.json").read_text(encoding="utf-8"))
     assert meta_payload["completion"]["state"] == "waiting_auth"
     assert meta_payload["completion"]["reason_code"] == "WAITING_AUTH_REQUIRED"

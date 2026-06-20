@@ -1828,6 +1828,55 @@ async def test_materialize_protocol_stream_preserves_existing_fcmp_order(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_materialize_protocol_stream_uses_logical_run_id_for_reused_workspace(monkeypatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "workspace-source-run"
+    audit_dir = _audit_dir(run_dir)
+    _patch_request_bound(
+        monkeypatch,
+        run_dir=run_dir,
+        request_id="req-materialize-logical",
+        run_id="logical-reuse-run",
+        status="succeeded",
+        engine="codex",
+    )
+    (audit_dir / "meta.1.json").write_text(
+        json.dumps({"engine": "codex", "status": "succeeded", "completion": {"state": "completed"}}),
+        encoding="utf-8",
+    )
+    (audit_dir / "stdout.1.log").write_text("ok\n", encoding="utf-8")
+    (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
+    (audit_dir / "orchestrator_events.1.jsonl").write_text("", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _capture_rasp_events(**kwargs):
+        captured["run_id"] = kwargs.get("run_id")
+        return []
+
+    monkeypatch.setattr("server.runtime.observability.run_observability.build_rasp_events", _capture_rasp_events)
+    monkeypatch.setattr("server.runtime.observability.run_observability.build_fcmp_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("server.runtime.observability.run_observability.compute_protocol_metrics", lambda _rows: {})
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.list_interaction_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "server.runtime.observability.run_observability.run_store.get_effective_session_timeout",
+        AsyncMock(return_value=None),
+    )
+
+    service = RunObservabilityService()
+    await service._materialize_protocol_stream(
+        run_dir=run_dir,
+        request_id="req-materialize-logical",
+        status_payload={"status": "succeeded"},
+        attempt_number=1,
+    )
+
+    assert captured["run_id"] == "logical-reuse-run"
+
+
+@pytest.mark.asyncio
 async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-rebuild"
     audit_dir = _audit_dir(run_dir)
@@ -1835,7 +1884,7 @@ async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(mon
         monkeypatch,
         run_dir=run_dir,
         request_id="req-rebuild",
-        run_id=run_dir.name,
+        run_id="logical-rebuild-run",
         status="succeeded",
         engine="unknown",
     )
@@ -1885,12 +1934,14 @@ async def test_rebuild_protocol_history_prefers_io_chunks_and_creates_backup(mon
     payload = await service.rebuild_protocol_history(run_dir=run_dir, request_id="req-rebuild")
 
     assert payload["success"] is True
+    assert payload["run_id"] == "logical-rebuild-run"
     assert payload["mode"] == "strict_replay"
     assert payload["attempts"][0]["source"] == "io_chunks"
     assert payload["attempts"][0]["written"] is True
     assert payload["attempts"][0]["reason"] == "OK"
     assert payload["attempts"][0]["mode"] == "strict_replay"
     strict_replay_mock.assert_awaited_once()
+    assert strict_replay_mock.await_args.kwargs["logical_run_id"] == "logical-rebuild-run"
     backup_dir = Path(payload["backup_dir"]) / "attempt-1"
     assert (backup_dir / "events.1.jsonl").exists()
     assert (backup_dir / "fcmp_events.1.jsonl").exists()

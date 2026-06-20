@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
+from tests.common.workspace_layout_helpers import make_layout
 
 
 class _Model:
@@ -19,7 +20,8 @@ class _Model:
 @pytest.mark.asyncio
 async def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run-materialize-context"
-    audit_dir = run_dir / ".audit"
+    layout = make_layout(run_dir, namespace="materialize.1")
+    audit_dir = layout.audit_dir
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
@@ -53,7 +55,19 @@ async def test_materialize_uses_attempt_meta_and_attempt_pending(monkeypatch, tm
     monkeypatch.setattr("server.runtime.observability.run_observability.validate_fcmp_event", lambda _row: None)
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_request",
-        AsyncMock(return_value={"engine": "codex", "runtime_options": {"execution_mode": "interactive"}}),
+        AsyncMock(
+            return_value={
+                "request_id": "req-ctx",
+                "run_id": "run-materialize-context",
+                "engine": "codex",
+                "runtime_options": {"execution_mode": "interactive"},
+                "workspace_id": layout.workspace_id,
+                "workspace_dir": str(layout.workspace_dir),
+                "workspace_namespace": layout.namespace,
+                "result_path": str(layout.result_path),
+                "run_input_manifest_path": str(layout.input_manifest_path),
+            }
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.list_interaction_history",

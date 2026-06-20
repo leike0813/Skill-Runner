@@ -13,6 +13,15 @@ from server.runtime.adapter.common.live_stream_parser_common import (
     RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED,
     RUNTIME_STREAM_LINE_OVERFLOW_SANITIZED,
 )
+from tests.common.workspace_layout_helpers import adapter_options, make_layout
+
+
+def _layout(run_dir: Path):
+    return make_layout(run_dir, namespace="demo.1")
+
+
+def _options(run_dir: Path, **extra):
+    return adapter_options(_layout(run_dir), run_id=run_dir.name, request_id=f"req-{run_dir.name}", **extra)
 
 
 @pytest.mark.asyncio
@@ -31,13 +40,13 @@ async def test_capture_process_output_writes_io_chunks_journal(tmp_path: Path) -
     result = await adapter._capture_process_output(  # noqa: SLF001
         proc=proc,
         run_dir=run_dir,
-        options={"__attempt_number": 1},
+        options=_options(run_dir, __attempt_number=1),
         prefix="Test",
         live_runtime_emitter=None,
     )
 
     assert result.exit_code == 0
-    audit_dir = run_dir / ".audit"
+    audit_dir = _layout(run_dir).audit_dir
     io_chunks_path = audit_dir / "io_chunks.1.jsonl"
     stdout_path = audit_dir / "stdout.1.log"
     stderr_path = audit_dir / "stderr.1.log"
@@ -114,12 +123,12 @@ async def test_capture_process_output_sanitizes_oversized_ndjson_before_io_chunk
     result = await adapter._capture_process_output(  # noqa: SLF001
         proc=proc,
         run_dir=run_dir,
-        options={"__attempt_number": 1, "__engine_name": "claude"},
+        options=_options(run_dir, __attempt_number=1, __engine_name="claude"),
         prefix="Test",
         live_runtime_emitter=emitter,
     )
 
-    audit_dir = run_dir / ".audit"
+    audit_dir = _layout(run_dir).audit_dir
     io_chunks_path = audit_dir / "io_chunks.1.jsonl"
     stdout_path = audit_dir / "stdout.1.log"
     rows = [
@@ -221,12 +230,12 @@ async def test_capture_process_output_preserves_oversized_qwen_assistant_message
     result = await adapter._capture_process_output(  # noqa: SLF001
         proc=proc,
         run_dir=run_dir,
-        options={"__attempt_number": 1, "__engine_name": "qwen"},
+        options=_options(run_dir, __attempt_number=1, __engine_name="qwen"),
         prefix="Test",
         live_runtime_emitter=emitter,
     )
 
-    audit_dir = run_dir / ".audit"
+    audit_dir = _layout(run_dir).audit_dir
     io_chunks_path = audit_dir / "io_chunks.1.jsonl"
     stdout_path = audit_dir / "stdout.1.log"
     rows = [
@@ -266,13 +275,13 @@ async def test_capture_process_output_quarantines_unrepairable_overflow_into_sid
     result = await adapter._capture_process_output(  # noqa: SLF001
         proc=proc,
         run_dir=run_dir,
-        options={"__attempt_number": 1, "__engine_name": "claude"},
+        options=_options(run_dir, __attempt_number=1, __engine_name="claude"),
         prefix="Test",
         live_runtime_emitter=None,
     )
 
     assert result.exit_code == 0
-    audit_dir = run_dir / ".audit"
+    audit_dir = _layout(run_dir).audit_dir
     stdout_path = audit_dir / "stdout.1.log"
     stdout_payload = json.loads(stdout_path.read_text(encoding="utf-8").strip())
     assert stdout_payload["code"] == RUNTIME_STREAM_LINE_OVERFLOW_DIAGNOSTIC_SUBSTITUTED

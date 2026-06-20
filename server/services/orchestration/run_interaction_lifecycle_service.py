@@ -174,6 +174,11 @@ class RunInteractionLifecycleService:
         options_normalized: list[dict[str, Any]] = []
         if isinstance(options_payload, list):
             for item in options_payload:
+                if isinstance(item, str):
+                    label = item.strip()
+                    if label:
+                        options_normalized.append({"label": label, "value": label})
+                    continue
                 if not isinstance(item, dict):
                     continue
                 label = item.get("label")

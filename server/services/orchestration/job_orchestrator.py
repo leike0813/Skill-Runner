@@ -227,6 +227,7 @@ class JobOrchestrator:
                 request_record=request_record,
                 effective_session_timeout_sec=effective_session_timeout_sec,
                 error=canceled_error,
+                run_store_backend=run_store,
             )
         else:
             raise RuntimeError("request_id is required for cancel projection")
@@ -272,13 +273,8 @@ class JobOrchestrator:
         raise RuntimeError("DB projection service is required for run status updates")
 
     def _update_latest_run_id(self, run_id: str):
-        """Updates the latest_run_id file in the runs directory."""
-        runs_dir = Path(config.SYSTEM.RUNS_DIR)
-        try:
-            with open(runs_dir / "latest_run_id", "w") as f:
-                f.write(run_id)
-        except OSError:
-            logger.exception("Failed to update latest_run_id")
+        """Deprecated compatibility hook; latest_run_id file is no longer maintained."""
+        _ = run_id
 
     def build_run_bundle(self, run_dir: Path, debug: bool = False, **kwargs: Any) -> str:
         return self.bundle_service.build_run_bundle(run_dir=run_dir, debug=debug, **kwargs)

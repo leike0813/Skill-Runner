@@ -591,6 +591,19 @@ async def list_management_runs(
                 recovery_reason=_coerce_str_or_none(row.get("recovery_reason")),
                 poll_logs=bool(row.get("status") in {"queued", "running"}),
                 error=None,
+                interactive_auto_reply=(
+                    row.get("interactive_auto_reply")
+                    if isinstance(row.get("interactive_auto_reply"), bool)
+                    else None
+                ),
+                interactive_reply_timeout_sec=(
+                    row.get("interactive_reply_timeout_sec")
+                    if isinstance(row.get("interactive_reply_timeout_sec"), int)
+                    else None
+                ),
+                workspaceDir=_coerce_str_or_none(row.get("workspaceDir")),
+                resultJsonPath=_coerce_str_or_none(row.get("resultJsonPath")),
+                inputManifestPath=_coerce_str_or_none(row.get("inputManifestPath")),
             )
         )
     return ManagementRunListResponse(

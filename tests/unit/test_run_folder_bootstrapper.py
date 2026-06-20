@@ -109,6 +109,7 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     audit_dir = run_dir / ".audit" / "demo-skill.1"
+    feedback_path = run_dir / "result" / "demo-skill.1" / "_skill_run_feedback.md"
 
     manifest, ref = run_folder_bootstrapper.materialize_temp_skill_package(
         package_bytes=package_bytes.getvalue(),
@@ -117,6 +118,7 @@ def test_run_folder_bootstrapper_materializes_temp_skill_package(tmp_path: Path)
         execution_mode="interactive",
         source=RunLocalSkillSource.TEMP_UPLOAD,
         collect_skill_run_feedback=True,
+        feedback_path=feedback_path,
         audit_dir=audit_dir,
         input_manifest_path=audit_dir / "input_manifest.json",
     )

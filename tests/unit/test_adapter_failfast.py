@@ -16,6 +16,7 @@ from server.runtime.adapter.common.stream_text_decoder import IncrementalUtf8Tex
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.types import ProcessExecutionResult
 from server.runtime.common import async_audit_writer as async_audit_writer_module
+from tests.common.workspace_layout_helpers import adapter_options, make_layout
 
 
 class _NoopComposer:
@@ -138,12 +139,25 @@ class _TestAdapter(EngineExecutionAdapter):
 
     async def _execute_process(self, prompt: str, run_dir: Path, skill: SkillManifest, options) -> ProcessExecutionResult:
         _ = prompt, skill
+        merged_options = _options(run_dir, **options)
         proc = await self._create_subprocess(
-            *options["command"],
+            *merged_options["command"],
             cwd=run_dir,
             env=os.environ.copy(),
         )
-        return await self._capture_process_output(proc, run_dir, options, "Test")
+        return await self._capture_process_output(proc, run_dir, merged_options, "Test")
+
+
+def _layout(run_dir: Path):
+    return make_layout(run_dir, namespace="test.1")
+
+
+def _audit_dir(run_dir: Path) -> Path:
+    return _layout(run_dir).audit_dir
+
+
+def _options(run_dir: Path, **extra):
+    return adapter_options(_layout(run_dir), run_id=run_dir.name, request_id=f"req-{run_dir.name}", **extra)
 
 
 @pytest.mark.asyncio
@@ -333,7 +347,7 @@ async def test_capture_process_output_auth_required_does_not_depend_on_live_diag
         result = await adapter._capture_process_output(
             proc,
             run_dir,
-            {"__engine_name": "iflow", "hard_timeout_seconds": 30},
+            _options(run_dir, __engine_name="iflow", hard_timeout_seconds=30),
             "Test",
             live_runtime_emitter=_MinimalLiveEmitter(),
         )
@@ -360,9 +374,11 @@ async def test_capture_process_output_stream_writes_logs_during_run(tmp_path: Pa
         stderr=asyncio.subprocess.PIPE,
         cwd=str(run_dir),
     )
-    task = asyncio.create_task(adapter._capture_process_output(proc, run_dir, {"hard_timeout_seconds": 10}, "Test"))
+    task = asyncio.create_task(
+        adapter._capture_process_output(proc, run_dir, _options(run_dir, hard_timeout_seconds=10), "Test")
+    )
     await asyncio.sleep(0.2)
-    stdout_log = run_dir / ".audit" / "stdout.1.log"
+    stdout_log = _audit_dir(run_dir) / "stdout.1.log"
     assert stdout_log.exists()
     partial = stdout_log.read_text(encoding="utf-8")
     assert "tick" in partial
@@ -437,7 +453,7 @@ async def test_capture_process_output_uses_incremental_utf8_decoding_for_logs_an
     result = await adapter._capture_process_output(
         proc,
         run_dir,
-        {"hard_timeout_seconds": 10},
+        _options(run_dir, hard_timeout_seconds=10),
         "Test",
         live_runtime_emitter=live_emitter,
     )
@@ -445,8 +461,8 @@ async def test_capture_process_output_uses_incremental_utf8_decoding_for_logs_an
     expected_stdout = stdout_bytes.decode("utf-8", errors="replace")
     expected_stderr = stderr_bytes.decode("utf-8", errors="replace")
 
-    assert (run_dir / ".audit" / "stdout.1.log").read_text(encoding="utf-8") == expected_stdout
-    assert (run_dir / ".audit" / "stderr.1.log").read_text(encoding="utf-8") == expected_stderr
+    assert (_audit_dir(run_dir) / "stdout.1.log").read_text(encoding="utf-8") == expected_stdout
+    assert (_audit_dir(run_dir) / "stderr.1.log").read_text(encoding="utf-8") == expected_stderr
     assert result.raw_stdout == expected_stdout
     assert result.raw_stderr == expected_stderr
     assert "".join(live_emitter.by_stream["stdout"]) == expected_stdout
@@ -581,10 +597,11 @@ async def test_auth_completed_resume_revalidates_run_folder_before_execute(tmp_p
         SkillManifest(id="x", path=run_dir),
         input_data={},
         run_dir=run_dir,
-        options={
-            "__resume_ticket_id": "ticket-1",
-            "__resume_cause": "auth_completed",
-        },
+        options=_options(
+            run_dir,
+            __resume_ticket_id="ticket-1",
+            __resume_cause="auth_completed",
+        ),
     )
 
     assert validator.calls == [(run_dir, run_dir / "dummy.json")]
@@ -631,7 +648,7 @@ async def test_runtime_dependencies_probe_success_wraps_command(tmp_path: Path):
         "noop",
         run_dir,
         skill,
-        {},
+        _options(run_dir),
     )
     assert result.runtime_warnings == []
     assert captured["cmd"] == [
@@ -698,7 +715,7 @@ async def test_runtime_dependencies_probe_success_wraps_normalized_command(tmp_p
         "noop",
         run_dir,
         skill,
-        {},
+        _options(run_dir),
     )
 
     assert result.runtime_warnings == []
@@ -759,7 +776,7 @@ async def test_runtime_dependencies_probe_failure_falls_back_and_warns(tmp_path:
         "noop",
         run_dir,
         skill,
-        {},
+        _options(run_dir),
     )
     assert captured["cmd"] == ["python", "-c", "print('ok')"]
     assert len(result.runtime_warnings) == 1

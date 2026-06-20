@@ -11,6 +11,7 @@ from server.main import app
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.engine_management.engine_upgrade_manager import EngineUpgradeBusyError, EngineUpgradeValidationError
 from server.services.orchestration.run_store import RunStore
+from tests.common.workspace_layout_helpers import layout_record, make_layout, state_payload
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -61,6 +62,30 @@ def _write_state_file(
         ),
         encoding="utf-8",
     )
+
+
+def _request_record(
+    *,
+    request_id: str,
+    run_id: str,
+    run_dir,
+    status: str = "running",
+    runtime_options: dict | None = None,
+):
+    return layout_record(
+        request_id=request_id,
+        run_id=run_id,
+        workspace=run_dir,
+        namespace="demo-skill.1",
+        status=status,
+        engine="codex",
+        skill_id="demo-skill",
+        runtime_options=runtime_options,
+    )
+
+
+def _audit_dir(run_dir):
+    return make_layout(run_dir, namespace="demo-skill.1").audit_dir
 
 
 @pytest.mark.asyncio
@@ -942,19 +967,31 @@ async def test_v1_management_routes_available():
 @pytest.mark.asyncio
 async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-1"
-    audit_dir = run_dir / ".audit"
+    audit_dir = _audit_dir(run_dir)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("hello", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("err", encoding="utf-8")
-    _write_state_file(run_dir, request_id="req-1", status="succeeded")
 
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-1"}),
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-1",
+                run_dir=run_dir,
+                status="succeeded",
+            )
+        ),
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.routers.jobs.run_store.get_run_state",
+        AsyncMock(
+            side_effect=lambda request_id: state_payload(
+                request_id=request_id,
+                run_id="run-1",
+                status="succeeded",
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -974,8 +1011,6 @@ async def test_v1_jobs_events_stream_snapshot_and_terminal(tmp_path, monkeypatch
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in response.text
     assert '"status": "succeeded"' in response.text
-    assert '"replay_source": "audit"' in response.text
-    assert "event: chat_event" not in response.text
     assert "event: stdout" not in response.text
     assert "event: stderr" not in response.text
     assert "event: end" not in response.text
@@ -990,27 +1025,31 @@ async def test_v1_temp_skill_run_events_stream_unavailable():
 @pytest.mark.asyncio
 async def test_v1_jobs_result_requires_terminal_projection(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-terminal-gate"
-    _write_state_file(
-        run_dir,
-        request_id="req-terminal-gate",
-        status="waiting_user",
-        current_attempt=2,
-        pending_owner="waiting_user",
-        pending_payload=None,
-    )
-
+    run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.runtime.observability.run_source_adapter.run_store.get_request",
         AsyncMock(
             return_value={
-                "request_id": "req-terminal-gate",
-                "run_id": "run-terminal-gate",
+                **_request_record(
+                    request_id="req-terminal-gate",
+                    run_id="run-terminal-gate",
+                    run_dir=run_dir,
+                    status="waiting_user",
+                ),
             }
         ),
     )
     monkeypatch.setattr(
-        "server.runtime.observability.run_source_adapter.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.runtime.observability.run_source_adapter.run_store.get_run_state",
+        AsyncMock(
+            return_value=state_payload(
+                request_id="req-terminal-gate",
+                run_id="run-terminal-gate",
+                status="waiting_user",
+                current_attempt=2,
+                pending_owner="waiting_user",
+            )
+        ),
     )
 
     response = await _request("GET", "/v1/jobs/req-terminal-gate/result")
@@ -1021,31 +1060,35 @@ async def test_v1_jobs_result_requires_terminal_projection(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-2"
-    audit_dir = run_dir / ".audit"
+    audit_dir = _audit_dir(run_dir)
     audit_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = audit_dir / "stdout.1.log"
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
     stdout_path.write_text("part-1\n", encoding="utf-8")
-    _write_state_file(
-        run_dir,
-        request_id="req-2",
-        status="waiting_user",
-        pending_owner="waiting_user",
-        pending_interaction_id=1,
-        pending_payload={"interaction_id": 1},
-    )
-
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {
-            "request_id": request_id,
-            "run_id": "run-2",
-            "runtime_options": {"execution_mode": "interactive"},
-        }),
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-2",
+                run_dir=run_dir,
+                status="waiting_user",
+                runtime_options={"execution_mode": "interactive"},
+            )
+        ),
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.routers.jobs.run_store.get_run_state",
+        AsyncMock(
+            side_effect=lambda request_id: state_payload(
+                request_id=request_id,
+                run_id="run-2",
+                status="waiting_user",
+                pending_owner="waiting_user",
+                pending_interaction_id=1,
+                pending={"owner": "waiting_user", "interaction_id": 1, "payload": {"interaction_id": 1}},
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -1067,7 +1110,6 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
     assert '"pending_interaction_id": 1' in first.text
 
     stdout_path.write_text("part-1\npart-2\n", encoding="utf-8")
-    _write_state_file(run_dir, request_id="req-2", status="succeeded")
 
     second = await _request(
         "GET",
@@ -1080,23 +1122,31 @@ async def test_v1_jobs_events_cursor_skips_old_chat_events(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_v1_jobs_events_canceled_includes_error_code(tmp_path, monkeypatch):
     run_dir = tmp_path / "run-canceled"
-    audit_dir = run_dir / ".audit"
+    audit_dir = _audit_dir(run_dir)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("before-cancel\n", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    _write_state_file(
-        run_dir,
-        request_id="req-canceled",
-        status="canceled",
-        error={"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
-    )
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-canceled"}),
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-canceled",
+                run_dir=run_dir,
+                status="canceled",
+            )
+        ),
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.routers.jobs.run_store.get_run_state",
+        AsyncMock(
+            side_effect=lambda request_id: state_payload(
+                request_id=request_id,
+                run_id="run-canceled",
+                status="canceled",
+                error={"code": "CANCELED_BY_USER", "message": "Canceled by user request"},
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -1124,11 +1174,13 @@ async def test_v1_jobs_events_history_route(monkeypatch, tmp_path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-history"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-history",
+                run_dir=run_dir,
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_read_facade.run_observability_service.get_event_history_payload",
@@ -1160,11 +1212,13 @@ async def test_v1_jobs_chat_history_route(monkeypatch, tmp_path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-chat-history"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-chat-history",
+                run_dir=run_dir,
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_read_facade.run_observability_service.get_chat_history_payload",
@@ -1339,11 +1393,13 @@ async def test_v1_jobs_log_range_route(monkeypatch, tmp_path):
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
-        AsyncMock(side_effect=lambda request_id: {"request_id": request_id, "run_id": "run-log-range"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            side_effect=lambda request_id: _request_record(
+                request_id=request_id,
+                run_id="run-log-range",
+                run_dir=run_dir,
+            )
+        ),
     )
     monkeypatch.setattr(
         "server.routers.jobs.run_observability_service.read_log_range",

@@ -10,6 +10,7 @@ from server.models import InteractiveErrorCode, RunStatus
 from server.runtime.logging.structured_trace import log_event
 from server.runtime.session.statechart import SessionEvent, waiting_recovery_event
 from server.services.orchestration.run_workspace_layout import require_layout_from_record
+from server.services.orchestration.run_state_service import run_state_service
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.services.platform.process_supervisor import process_supervisor
 
@@ -330,11 +331,23 @@ class RunRecoveryService:
         if not isinstance(request_record, dict):
             raise RuntimeError("Request record is required for recovery projection")
         run_dir = require_layout_from_record(request_record).workspace_dir
-        update_status(
-            run_dir,
-            RunStatus.FAILED,
-            error={"code": error_code, "message": message},
+        error_payload = {"code": error_code, "message": message}
+        await run_state_service.write_terminal_projection(
+            run_dir=run_dir,
+            request_id=request_id,
+            run_id=run_id,
+            status=RunStatus.FAILED,
+            request_record=request_record,
+            terminal_result={
+                "data": None,
+                "artifacts": [],
+                "repair_level": "none",
+                "validation_warnings": [],
+                "error": error_payload,
+            },
             effective_session_timeout_sec=await run_store_backend.get_effective_session_timeout(request_id),
+            error=error_payload,
+            run_store_backend=run_store_backend,
         )
         await run_store_backend.update_run_status(run_id, RunStatus.FAILED)
         await run_store_backend.set_recovery_info(

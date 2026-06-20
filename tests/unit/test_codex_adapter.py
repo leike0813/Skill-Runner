@@ -33,6 +33,10 @@ async def test_execute_constructs_correct_command(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
 
     skill = SkillManifest(id="test-skill", path=tmp_path)
     prompt = "Hello Codex"
@@ -48,7 +52,12 @@ async def test_execute_constructs_correct_command(tmp_path):
     with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
         mock_exec.return_value = mock_proc
         with patch.object(adapter, "_resolve_codex_command", return_value=Path("/usr/bin/codex")):
-            await adapter._execute_process(prompt, run_dir, skill, options={})
+            await adapter._execute_process(
+                prompt,
+                run_dir,
+                skill,
+                options={"__audit_dir": str(audit_dir), "__input_manifest_path": str(request_input_path)},
+            )
 
         args, _ = mock_exec.call_args
         assert Path(args[0]).name.startswith("codex")
@@ -320,8 +329,11 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
-    contracts_dir = run_dir / ".audit" / "contracts"
+    audit_dir = run_dir / ".audit"
+    contracts_dir = audit_dir / "contracts"
     contracts_dir.mkdir(parents=True)
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
     (contracts_dir / "target_output_schema.json").write_text(
         json.dumps(
             {
@@ -357,6 +369,8 @@ async def test_execute_resume_command_thread_id_before_prompt(tmp_path):
                         "handle_value": "th_resume",
                         "created_at_turn": 1,
                     },
+                    "__audit_dir": str(audit_dir),
+                    "__input_manifest_path": str(request_input_path),
                     "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
                 },
             )
@@ -375,6 +389,10 @@ async def test_run_interactive_reply_rebuilds_config_and_environment_setup(tmp_p
     adapter = CodexExecutionAdapter(config_manager=MagicMock())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
     skill = SkillManifest(id="test-skill", path=skill_dir)
@@ -405,6 +423,8 @@ async def test_run_interactive_reply_rebuilds_config_and_environment_setup(tmp_p
             run_dir,
             options={
                 "__interactive_reply_payload": {"text": "continue"},
+                "__audit_dir": str(audit_dir),
+                "__input_manifest_path": str(request_input_path),
                 "__resume_session_handle": {
                     "engine": "codex",
                     "handle_type": "session_id",
@@ -424,6 +444,10 @@ async def test_execute_interactive_command_includes_auto_flags(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "logs").mkdir()
+    audit_dir = run_dir / ".audit"
+    audit_dir.mkdir()
+    request_input_path = audit_dir / "request_input.json"
+    request_input_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
     skill = SkillManifest(id="test-skill", path=tmp_path)
 
     mock_proc = MagicMock()
@@ -441,7 +465,11 @@ async def test_execute_interactive_command_includes_auto_flags(tmp_path):
                 "interactive prompt",
                 run_dir,
                 skill,
-                options={"execution_mode": "interactive"},
+                options={
+                    "execution_mode": "interactive",
+                    "__audit_dir": str(audit_dir),
+                    "__input_manifest_path": str(request_input_path),
+                },
             )
         args, _ = mock_exec.call_args
         assert "--full-auto" in args or "--yolo" in args
@@ -505,6 +533,8 @@ async def test_execute_persists_first_attempt_spawn_command_with_output_schema(t
                 skill,
                 options={
                     "__attempt_number": 1,
+                    "__audit_dir": str(audit_dir),
+                    "__input_manifest_path": str(request_input_path),
                     "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
                 },
             )

@@ -42,7 +42,7 @@ async def test_resumable_reacquires_slot_on_reply(monkeypatch, tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await _seed_interactive_request(local_store, run_id, skill.id)
         orchestrator = JobOrchestrator()
@@ -102,23 +102,17 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
-        await local_store.create_request(
-            request_id="req-auto-resume",
-            skill_id=skill.id,
-            engine="codex",
-            parameter={},
-            engine_options={},
-            runtime_options={
+        request_id = f"req-{run_id}"
+        await local_store.update_request_effective_runtime_options(
+            request_id,
+            {
                 "execution_mode": "interactive",
                 "interactive_auto_reply": True,
                 "interactive_reply_timeout_sec": 1,
             },
-            input_data={},
         )
-        await local_store.update_request_run_id("req-auto-resume", run_id)
-        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveTwoTurnAdapter()}
@@ -143,7 +137,7 @@ async def test_resumable_strict_false_auto_decides_and_resumes(monkeypatch, tmp_
 
         status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)
         assert status_data["status"] == "succeeded"
-        stats = await local_store.get_auto_decision_stats("req-auto-resume")
+        stats = await local_store.get_auto_decision_stats(request_id)
         assert stats["auto_decision_count"] == 1
         assert isinstance(stats["last_auto_decision_at"], str)
         assert events == ["acquire", "release", "acquire", "release"]
@@ -165,7 +159,7 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-missing-handle",
@@ -177,7 +171,6 @@ async def test_run_job_interactive_missing_handle_maps_session_resume_failed(tmp
             input_data={},
         )
         await local_store.update_request_run_id("req-missing-handle", run_id)
-        await local_store.create_run(run_id, None, "queued")
 
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": InteractiveAskMissingHandleAdapter()}

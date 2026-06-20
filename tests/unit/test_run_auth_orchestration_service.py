@@ -22,6 +22,7 @@ from server.runtime.protocol.schema_registry import validate_orchestrator_event,
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError
 from server.services.orchestration.run_audit_service import RunAuditService
 from server.services.orchestration.run_auth_orchestration_service import RunAuthOrchestrationService
+from tests.common.workspace_layout_helpers import make_layout
 
 
 def _build_detection(**overrides) -> AuthDetectionResult:
@@ -42,6 +43,38 @@ def _build_detection(**overrides) -> AuthDetectionResult:
 
 def _read_state_payload(run_dir: Path) -> dict[str, object]:
     return json.loads((run_dir / ".state" / "state.json").read_text(encoding="utf-8"))
+
+
+def _state_payload_from_backend(backend: SimpleNamespace) -> dict[str, object]:
+    backend.set_run_state.assert_awaited()
+    return backend.set_run_state.await_args.args[1]
+
+
+def _request_record(
+    run_dir: Path,
+    *,
+    request_id: str = "req-1",
+    run_id: str = "run-1",
+    skill_id: str = "demo-skill",
+    engine: str = "codex",
+    engine_options: dict[str, object] | None = None,
+    runtime_options: dict[str, object] | None = None,
+) -> dict[str, object]:
+    layout = make_layout(run_dir, namespace=f"{skill_id}.1")
+    return {
+        "request_id": request_id,
+        "run_id": run_id,
+        "skill_id": skill_id,
+        "engine": engine,
+        "engine_options": engine_options or {},
+        "runtime_options": runtime_options or {"execution_mode": "interactive"},
+        "effective_runtime_options": runtime_options or {"execution_mode": "interactive"},
+        "workspace_id": layout.workspace_id,
+        "workspace_dir": str(layout.workspace_dir),
+        "workspace_namespace": layout.namespace,
+        "result_path": str(layout.result_path),
+        "run_input_manifest_path": str(layout.input_manifest_path),
+    }
 
 
 def test_available_methods_for_uses_strategy_service(monkeypatch) -> None:
@@ -155,7 +188,8 @@ async def test_create_custom_provider_pending_auth_persists_provider_config_chal
         clear_auth_resume_context=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
-        set_current_projection=AsyncMock(),
+            set_current_projection=AsyncMock(),
+            set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     appended: list[dict[str, object]] = []
@@ -192,7 +226,7 @@ async def test_create_custom_provider_pending_auth_persists_provider_config_chal
             "data": appended[0]["data"],
         }
     )
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
 
@@ -212,6 +246,7 @@ async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, t
         clear_auth_resume_context=AsyncMock(),
         set_pending_auth_method_selection=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     appended: list[dict[str, object]] = []
@@ -249,7 +284,7 @@ async def test_create_pending_auth_multi_method_returns_selection(monkeypatch, t
     start_session.assert_not_awaited()
     backend.set_pending_auth_method_selection.assert_awaited_once()
     assert appended[0]["type_name"] == "auth.method.selection.required"
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.method_selection"
 
@@ -269,6 +304,7 @@ async def test_create_pending_auth_multi_method_preserves_last_error_message(mon
         clear_auth_resume_context=AsyncMock(),
         set_pending_auth_method_selection=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
 
@@ -320,6 +356,7 @@ async def test_create_pending_auth_single_method_starts_session(monkeypatch, tmp
         clear_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     appended: list[dict[str, object]] = []
@@ -348,7 +385,7 @@ async def test_create_pending_auth_single_method_starts_session(monkeypatch, tmp
     backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.WAITING_AUTH)
     assert updated == []
     assert appended[0]["type_name"] == "auth.session.created"
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "waiting_auth"
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
 
@@ -378,6 +415,7 @@ async def test_create_pending_auth_single_method_preserves_last_error_message(mo
         clear_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
 
@@ -429,6 +467,7 @@ async def test_create_pending_auth_qwen_oauth_proxy_auto_poll_hides_chat_input(m
         clear_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
 
@@ -490,6 +529,7 @@ async def test_create_pending_auth_opencode_prefers_canonical_provider_over_dete
         set_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     service = RunAuthOrchestrationService()
@@ -551,6 +591,7 @@ async def test_create_pending_auth_single_method_busy_reprojects_active_challeng
         clear_pending_auth_method_selection=AsyncMock(),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     appended: list[dict[str, object]] = []
@@ -576,7 +617,7 @@ async def test_create_pending_auth_single_method_busy_reprojects_active_challeng
     assert selection.phase == AuthSessionPhase.CHALLENGE_ACTIVE
     backend.set_pending_auth.assert_awaited_once()
     assert appended[0]["type_name"] == "auth.challenge.updated"
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
 
 
@@ -620,12 +661,8 @@ async def test_cancel_request_auth_sessions_clears_pending_and_durable(monkeypat
 async def test_select_auth_method_rejects_when_challenge_already_active(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-active"
     run_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
     backend = SimpleNamespace(
-        get_request=AsyncMock(return_value={"run_id": "run-1", "engine": "opencode"}),
+        get_request=AsyncMock(return_value=_request_record(run_dir, engine="opencode")),
         get_pending_auth=AsyncMock(
             return_value={
                 "auth_session_id": "auth-1",
@@ -678,10 +715,6 @@ async def test_submit_auth_input_retry_does_not_persist_raw_secret(monkeypatch, 
     }
 
     monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.input_session",
         lambda *_args, **_kwargs: {
             "session_id": "auth-1",
@@ -698,9 +731,11 @@ async def test_submit_auth_input_retry_does_not_persist_raw_secret(monkeypatch, 
     )
 
     backend = SimpleNamespace(
+        get_request=AsyncMock(return_value=_request_record(run_dir, engine="opencode")),
         get_pending_auth=AsyncMock(return_value=pending_auth),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         get_auth_resume_context=AsyncMock(return_value={"source_attempt": 1, "runtime_input_kind": "api_key"}),
         update_run_status=AsyncMock(),
     )
@@ -725,7 +760,7 @@ async def test_submit_auth_input_retry_does_not_persist_raw_secret(monkeypatch, 
     assert appended[1]["type_name"] == "auth.challenge.updated"
     serialized = str(appended) + str(backend.set_pending_auth.await_args)
     assert "SECRET-123" not in serialized
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["pending"]["owner"] == "waiting_auth.challenge_active"
 
 
@@ -756,10 +791,6 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     }
 
     monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.input_session",
         lambda *_args, **_kwargs: {
             "session_id": "auth-1",
@@ -782,18 +813,17 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     backend = SimpleNamespace(
         get_pending_auth=AsyncMock(return_value=pending_auth),
         get_request=AsyncMock(
-            return_value={
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "iflow",
-                "engine_options": {"model": "iflow-default"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="iflow",
+                engine_options={"model": "iflow-default"},
+            )
         ),
         clear_pending_auth=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-1"}),
         mark_resume_ticket_dispatched=AsyncMock(return_value=True),
         update_run_status=AsyncMock(),
@@ -833,7 +863,7 @@ async def test_submit_auth_input_completed_schedules_resume_attempt(monkeypatch,
     assert len(background_tasks.tasks) == 1
     assert background_tasks.tasks[0].kwargs["options"]["__resume_ticket_id"] == "ticket-1"
     assert background_tasks.tasks[0].kwargs["options"]["__attempt_number_override"] == 2
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "queued"
     assert state_payload["pending"]["owner"] is None
 
@@ -854,11 +884,6 @@ async def test_submit_custom_provider_input_updates_provider_store_and_retries(m
         "source_attempt": 1,
         "phase": "challenge_active",
     }
-
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
 
     provider_rows = [
         SimpleNamespace(
@@ -893,20 +918,18 @@ async def test_submit_custom_provider_input_updates_provider_store_and_retries(m
     backend = SimpleNamespace(
         get_pending_auth=AsyncMock(return_value=pending_auth),
         get_request=AsyncMock(
-            return_value={
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "claude",
-                "engine_options": {"model": "openrouter/qwen-3"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="claude",
+                engine_options={"model": "openrouter/qwen-3"},
+            )
         ),
         update_request_engine_options=AsyncMock(),
         clear_pending_auth=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-claude-1"}),
         mark_resume_ticket_dispatched=AsyncMock(return_value=True),
         update_run_status=AsyncMock(),
@@ -968,7 +991,7 @@ async def test_submit_custom_provider_input_updates_provider_store_and_retries(m
         }
     )
     assert len(background_tasks.tasks) == 1
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "queued"
 
 
@@ -994,10 +1017,6 @@ async def test_submit_auth_input_writes_schema_valid_accepted_event(monkeypatch,
     }
 
     monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.input_session",
         lambda *_args, **_kwargs: {
             "session_id": "auth-1",
@@ -1014,14 +1033,17 @@ async def test_submit_auth_input_writes_schema_valid_accepted_event(monkeypatch,
     )
 
     backend = SimpleNamespace(
+        get_request=AsyncMock(return_value=_request_record(run_dir, engine="opencode")),
         get_pending_auth=AsyncMock(return_value=pending_auth),
         set_pending_auth=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         get_auth_resume_context=AsyncMock(return_value={"source_attempt": 1, "runtime_input_kind": "text"}),
         update_run_status=AsyncMock(),
     )
     service = RunAuthOrchestrationService()
     audit_service = RunAuditService()
+    layout = make_layout(run_dir, namespace="demo-skill.1")
 
     response = await service.submit_auth_input(
         request_id="req-1",
@@ -1033,13 +1055,17 @@ async def test_submit_auth_input_writes_schema_valid_accepted_event(monkeypatch,
         auth_session_id="auth-1",
         background_tasks=BackgroundTasks(),
         run_store_backend=backend,
-        append_orchestrator_event=audit_service.append_orchestrator_event,
+        append_orchestrator_event=lambda **kwargs: audit_service.append_orchestrator_event(
+            audit_dir=layout.audit_dir,
+            run_id="run-1",
+            **kwargs,
+        ),
         update_status=lambda *_args, **_kwargs: None,
         resume_run_job=AsyncMock(),
     )
 
     assert response.status == RunStatus.WAITING_AUTH
-    event_lines = (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+    event_lines = (layout.audit_dir / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
     payloads = [json.loads(line) for line in event_lines if line.strip()]
     accepted = next(item for item in payloads if item["type"] == "auth.input.accepted")
     assert accepted["data"]["submission_kind"] == "callback_url"
@@ -1091,10 +1117,6 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
     run_dir = tmp_path / "run-auth-status-reconcile"
     run_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.get_session",
         lambda _session_id: {
             "session_id": "auth-1",
@@ -1145,14 +1167,11 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
         ),
         get_request_id_for_auth_session=AsyncMock(return_value="req-1"),
         get_request=AsyncMock(
-            return_value={
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "codex",
-                "engine_options": {"model": "gpt-5"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="codex",
+                engine_options={"model": "gpt-5"},
+            )
         ),
         get_pending_auth=AsyncMock(return_value=None),
         get_auth_resume_context=AsyncMock(return_value=None),
@@ -1160,6 +1179,7 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-2"}),
         mark_resume_ticket_dispatched=AsyncMock(return_value=True),
         update_run_status=AsyncMock(),
@@ -1185,7 +1205,7 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
     backend.issue_resume_ticket.assert_awaited_once()
     backend.mark_resume_ticket_dispatched.assert_awaited_once_with("req-1", "ticket-2")
     backend.update_run_status.assert_awaited_once_with("run-1", RunStatus.QUEUED)
-    state_payload = _read_state_payload(run_dir)
+    state_payload = _state_payload_from_backend(backend)
     assert state_payload["status"] == "queued"
     assert state_payload["pending"]["owner"] is None
 
@@ -1194,10 +1214,6 @@ async def test_get_auth_session_status_reconciles_completed_callback(monkeypatch
 async def test_reconcile_waiting_auth_non_terminal_snapshot_is_noop(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-status-noop"
     run_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.get_session",
         lambda _session_id: {
@@ -1211,6 +1227,7 @@ async def test_reconcile_waiting_auth_non_terminal_snapshot_is_noop(monkeypatch,
         },
     )
     backend = SimpleNamespace(
+        get_request=AsyncMock(return_value=_request_record(run_dir, engine="opencode")),
         get_auth_session_status=AsyncMock(
             return_value={
                 "waiting_auth": True,
@@ -1255,10 +1272,6 @@ async def test_reconcile_waiting_auth_non_terminal_snapshot_is_noop(monkeypatch,
 async def test_get_auth_session_status_reconciles_completed_qwen_auto_poll(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-status-qwen-complete"
     run_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.get_session",
         lambda _session_id: {
@@ -1306,14 +1319,11 @@ async def test_get_auth_session_status_reconciles_completed_qwen_auto_poll(monke
         ),
         get_request_id_for_auth_session=AsyncMock(return_value="req-1"),
         get_request=AsyncMock(
-            return_value={
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "qwen",
-                "engine_options": {"model": "coder-model", "provider_id": "qwen-oauth"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="qwen",
+                engine_options={"model": "coder-model", "provider_id": "qwen-oauth"},
+            )
         ),
         get_pending_auth=AsyncMock(return_value=None),
         get_auth_resume_context=AsyncMock(return_value=None),
@@ -1321,6 +1331,7 @@ async def test_get_auth_session_status_reconciles_completed_qwen_auto_poll(monke
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-qwen-2"}),
         mark_resume_ticket_dispatched=AsyncMock(return_value=True),
         update_run_status=AsyncMock(),
@@ -1369,10 +1380,6 @@ async def test_submit_auth_input_completed_session_returns_conflict_not_500(monk
     }
 
     monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-    monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.input_session",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("Auth session already finished")),
     )
@@ -1398,19 +1405,17 @@ async def test_submit_auth_input_completed_session_returns_conflict_not_500(monk
         get_auth_resume_context=AsyncMock(return_value={"source_attempt": 1, "runtime_input_kind": "text"}),
         get_request_id_for_auth_session=AsyncMock(return_value="req-1"),
         get_request=AsyncMock(
-            return_value={
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "codex",
-                "engine_options": {"model": "gpt-5"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="codex",
+                engine_options={"model": "gpt-5"},
+            )
         ),
         clear_pending_auth=AsyncMock(),
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         issue_resume_ticket=AsyncMock(return_value={"ticket_id": "ticket-3"}),
         mark_resume_ticket_dispatched=AsyncMock(return_value=True),
         update_run_status=AsyncMock(),
@@ -1444,11 +1449,6 @@ async def test_submit_auth_input_completed_session_returns_conflict_not_500(monk
 async def test_get_auth_session_status_times_out_missing_session_marks_failed(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-auth-timeout"
     run_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        "server.services.orchestration.run_auth_orchestration_service.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
-    )
-
     def _missing_session(_session_id: str) -> dict[str, object]:
         raise KeyError("auth-1")
 
@@ -1491,14 +1491,11 @@ async def test_get_auth_session_status_times_out_missing_session_marks_failed(mo
             ]
         ),
         get_request=AsyncMock(
-            return_value={
-                "request_id": "req-1",
-                "run_id": "run-1",
-                "skill_id": "demo-skill",
-                "engine": "codex",
-                "engine_options": {"model": "gpt-5"},
-                "runtime_options": {"execution_mode": "interactive"},
-            }
+            return_value=_request_record(
+                run_dir,
+                engine="codex",
+                engine_options={"model": "gpt-5"},
+            )
         ),
         get_pending_auth=AsyncMock(
             return_value={
@@ -1513,6 +1510,7 @@ async def test_get_auth_session_status_times_out_missing_session_marks_failed(mo
         clear_pending_auth_method_selection=AsyncMock(),
         clear_auth_resume_context=AsyncMock(),
         set_current_projection=AsyncMock(),
+        set_run_state=AsyncMock(),
         update_run_status=AsyncMock(),
     )
     appended: list[dict[str, object]] = []

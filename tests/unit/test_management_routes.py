@@ -608,11 +608,10 @@ async def test_management_run_files_and_preview(monkeypatch):
 @pytest.mark.asyncio
 async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-events"
-    audit_dir = run_dir / ".audit"
+    audit_dir = run_dir / ".audit" / "skill.1"
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stdout.1.log").write_text("hello", encoding="utf-8")
     (audit_dir / "stderr.1.log").write_text("", encoding="utf-8")
-    _write_state_file(run_dir, "succeeded")
     monkeypatch.setattr(
         "server.routers.jobs.run_store.get_request",
         AsyncMock(
@@ -620,12 +619,23 @@ async def test_management_run_events_stream(monkeypatch, tmp_path: Path):
                 "request_id": request_id,
                 "run_id": "run-events",
                 "engine": "codex",
+                "workspace_id": "run-events",
+                "workspace_dir": str(run_dir),
+                "workspace_namespace": "skill.1",
             }
         ),
     )
     monkeypatch.setattr(
-        "server.routers.jobs.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        "server.runtime.observability.run_observability.run_store.get_run_state",
+        AsyncMock(
+            return_value={
+                "request_id": "req-events",
+                "run_id": "run-events",
+                "status": "succeeded",
+                "current_attempt": 1,
+                "updated_at": "2026-02-16T00:00:00",
+            }
+        ),
     )
     monkeypatch.setattr(
         "server.runtime.observability.run_observability.run_store.get_pending_interaction",
@@ -749,13 +759,16 @@ async def test_management_run_log_range_delegate(monkeypatch):
 async def test_management_run_protocol_rebuild_route(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-rebuild-route"
     run_dir.mkdir(parents=True, exist_ok=True)
+    request_record = {
+        "request_id": "req-rebuild",
+        "run_id": "run-rebuild-route",
+        "workspace_id": "run-rebuild-route",
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": "skill.1",
+    }
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-rebuild", "run_id": "run-rebuild-route"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(return_value=request_record),
     )
     monkeypatch.setattr(
         "server.routers.management.run_observability_service.rebuild_protocol_history",

@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from server.runtime.observability.run_observability import RunObservabilityService
+from tests.common.workspace_layout_helpers import layout_record, make_layout, state_payload
 
 
 def _write_state_file(run_dir: Path, status: str) -> None:
@@ -52,9 +54,8 @@ def _write_state_file(run_dir: Path, status: str) -> None:
 @pytest.mark.asyncio
 async def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "run-orchestrator"
-    audit_dir = run_dir / ".audit"
+    audit_dir = make_layout(run_dir).audit_dir
     audit_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_file(run_dir, "succeeded")
     (audit_dir / "events.1.jsonl").write_text("", encoding="utf-8")
     (audit_dir / "fcmp_events.1.jsonl").write_text("", encoding="utf-8")
     (audit_dir / "orchestrator_events.1.jsonl").write_text(
@@ -91,9 +92,31 @@ async def test_list_protocol_history_backfills_orchestrator_seq(monkeypatch, tmp
         _materialize,
     )
     service = RunObservabilityService()
+    request_id = "req-orchestrator"
+    run_id = "run-orchestrator"
+    record = layout_record(
+        request_id=request_id,
+        run_id=run_id,
+        workspace=run_dir,
+        namespace="demo.1",
+        status="succeeded",
+    )
+    state = state_payload(
+        request_id=request_id,
+        run_id=run_id,
+        status="succeeded",
+        current_attempt=1,
+    )
+    store = type("Store", (), {})()
+    store.get_request_with_run = AsyncMock(return_value=record)
+    store.get_request = AsyncMock(return_value=record)
+    store.get_run_state = AsyncMock(return_value=state)
+    store.get_current_projection = AsyncMock(return_value=state)
+    store.get_interaction_count = AsyncMock(return_value=0)
+    monkeypatch.setattr(service, "_run_store", lambda: store)
     payload = await service.list_protocol_history(
         run_dir=run_dir,
-        request_id=None,
+        request_id=request_id,
         stream="orchestrator",
         attempt=1,
     )

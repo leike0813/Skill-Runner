@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from server.runtime.observability.run_observability import RunObservabilityService
 from server.models import RuntimeEventCategory, RuntimeEventSource
 from server.runtime.observability.fcmp_live_journal import fcmp_live_journal
 from server.runtime.observability.rasp_live_journal import rasp_live_journal
@@ -16,6 +15,7 @@ from server.runtime.protocol.live_publish import (
     fcmp_event_publisher,
 )
 from server.services.orchestration.job_orchestrator import JobOrchestrator
+from tests.common.workspace_layout_helpers import make_layout
 
 
 class _NoopMirrorWriter:
@@ -23,6 +23,10 @@ class _NoopMirrorWriter:
         _ = run_dir
         _ = attempt_number
         _ = row
+
+
+def _audit_dir(run_dir: Path) -> Path:
+    return make_layout(run_dir, namespace="demo-skill.1").audit_dir
 
 
 def _fcmp_row(*, run_id: str, type_name: str, data: dict, correlation: dict | None = None) -> dict:
@@ -89,12 +93,14 @@ def test_live_publish_writes_protocol_mirrors_to_namespaced_audit_dir(tmp_path: 
 def test_fcmp_publisher_buffers_challenge_until_method_selection_is_published(tmp_path: Path) -> None:
     run_id = "run-auth-order"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear(run_id)
     publisher = FcmpEventPublisher(mirror_writer=_NoopMirrorWriter())
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="auth.challenge.updated",
@@ -119,6 +125,7 @@ def test_fcmp_publisher_buffers_challenge_until_method_selection_is_published(tm
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="auth.required",
@@ -142,12 +149,14 @@ def test_fcmp_publisher_buffers_challenge_until_method_selection_is_published(tm
 def test_fcmp_publisher_allows_single_method_challenge_without_selection(tmp_path: Path) -> None:
     run_id = "run-auth-single-method"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear(run_id)
     publisher = FcmpEventPublisher(mirror_writer=_NoopMirrorWriter())
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="auth.challenge.updated",
@@ -173,12 +182,14 @@ def test_fcmp_publisher_allows_single_method_challenge_without_selection(tmp_pat
 def test_fcmp_publisher_buffers_success_terminal_until_assistant_message_is_published(tmp_path: Path) -> None:
     run_id = "run-terminal-order"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear(run_id)
     publisher = FcmpEventPublisher(mirror_writer=_NoopMirrorWriter())
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="conversation.state.changed",
@@ -197,6 +208,7 @@ def test_fcmp_publisher_buffers_success_terminal_until_assistant_message_is_publ
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="assistant.message.final",
@@ -218,12 +230,22 @@ async def test_fcmp_publisher_drain_mirror_flushes_audit_file(
 ) -> None:
     run_id = "run-drain-mirror"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     drain_calls: list[str | None] = []
 
     class _DrainAwareMirrorWriter:
-        def enqueue(self, *, run_dir: Path, attempt_number: int, row: dict) -> None:
-            path = run_dir / ".audit" / f"fcmp_events.{attempt_number}.jsonl"
+        def enqueue(
+            self,
+            *,
+            run_dir: Path,
+            attempt_number: int,
+            row: dict,
+            audit_dir: Path | None = None,
+        ) -> None:
+            if audit_dir is None:
+                raise RuntimeError("audit_dir is required")
+            path = audit_dir / f"fcmp_events.{attempt_number}.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as fp:
                 fp.write(json.dumps(row, ensure_ascii=False))
@@ -240,6 +262,7 @@ async def test_fcmp_publisher_drain_mirror_flushes_audit_file(
 
     publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="assistant.message.final",
@@ -248,7 +271,7 @@ async def test_fcmp_publisher_drain_mirror_flushes_audit_file(
     )
     await publisher.drain_mirror(run_id=run_id)
 
-    audit_path = run_dir / ".audit" / "fcmp_events.1.jsonl"
+    audit_path = audit_dir / "fcmp_events.1.jsonl"
     assert audit_path.exists()
     rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(rows) == 1
@@ -259,6 +282,7 @@ async def test_fcmp_publisher_drain_mirror_flushes_audit_file(
 @pytest.mark.asyncio
 async def test_rasp_audit_mirror_writer_persists_jsonl_rows(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-rasp-writer"
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     writer = RaspAuditMirrorWriter()
     attempt_number = 1
@@ -285,10 +309,10 @@ async def test_rasp_audit_mirror_writer_persists_jsonl_rows(tmp_path: Path) -> N
     ]
 
     for row in rows:
-        writer.enqueue(run_dir=run_dir, attempt_number=attempt_number, row=row)
+        writer.enqueue(run_dir=run_dir, audit_dir=audit_dir, attempt_number=attempt_number, row=row)
     await writer.drain(run_id=run_dir.name)
 
-    path = run_dir / ".audit" / "events.1.jsonl"
+    path = audit_dir / "events.1.jsonl"
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == len(rows)
     decoded = [json.loads(line) for line in lines]
@@ -302,12 +326,8 @@ async def test_orchestrator_waiting_user_event_keeps_prompt_before_state_in_live
 ) -> None:
     run_id = "run-waiting-order"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / ".state").mkdir(parents=True, exist_ok=True)
-    (run_dir / ".state" / "state.json").write_text(
-        '{"status":"waiting_user","current_attempt":1}',
-        encoding="utf-8",
-    )
     fcmp_live_journal.clear(run_id)
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
 
@@ -322,6 +342,8 @@ async def test_orchestrator_waiting_user_event_keeps_prompt_before_state_in_live
             "kind": "open_text",
         },
         engine_name="codex",
+        audit_dir=audit_dir,
+        run_id=run_id,
     )
 
     live_replay = fcmp_live_journal.replay(run_id=run_id, after_seq=0)
@@ -331,19 +353,6 @@ async def test_orchestrator_waiting_user_event_keeps_prompt_before_state_in_live
     ]
     assert live_replay["events"][1]["data"]["to"] == "waiting_user"
 
-    history_payload = await RunObservabilityService().get_event_history_payload(
-        run_dir=run_dir,
-        request_id=None,
-        from_seq=1,
-        to_seq=None,
-        from_ts=None,
-        to_ts=None,
-    )
-    assert [row["type"] for row in history_payload["events"]] == [
-        "user.input.required",
-        "conversation.state.changed",
-    ]
-
 
 def test_orchestrator_auth_selection_is_published_before_challenge(
     tmp_path: Path,
@@ -351,6 +360,7 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
 ) -> None:
     run_id = "run-auth-orchestrator-order"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear(run_id)
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
@@ -371,6 +381,8 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
             "source_attempt": 1,
         },
         engine_name="codex",
+        audit_dir=audit_dir,
+        run_id=run_id,
     )
 
     orchestrator.audit_service.append_orchestrator_event(
@@ -391,6 +403,8 @@ def test_orchestrator_auth_selection_is_published_before_challenge(
             "source_attempt": 1,
         },
         engine_name="codex",
+        audit_dir=audit_dir,
+        run_id=run_id,
     )
 
     replay = fcmp_live_journal.replay(run_id=run_id, after_seq=0)
@@ -407,6 +421,7 @@ def test_chat_replay_publish_is_fcmp_derived_and_happens_after_fcmp_commit(
 ) -> None:
     run_id = "run-chat-fcmp-guard"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     publisher = FcmpEventPublisher(mirror_writer=_NoopMirrorWriter())
     call_order: list[tuple[str, str, int | None]] = []
@@ -431,6 +446,7 @@ def test_chat_replay_publish_is_fcmp_derived_and_happens_after_fcmp_commit(
 
     published = publisher.publish(
         run_dir=run_dir,
+        audit_dir=audit_dir,
         event=_fcmp_row(
             run_id=run_id,
             type_name="assistant.message.intermediate",
@@ -457,6 +473,7 @@ def test_orchestrator_auth_busy_maps_to_diagnostic_instead_of_challenge(
 ) -> None:
     run_id = "run-auth-busy-diagnostic"
     run_dir = tmp_path / run_id
+    audit_dir = _audit_dir(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     fcmp_live_journal.clear(run_id)
     monkeypatch.setattr(fcmp_event_publisher, "_mirror_writer", _NoopMirrorWriter())
@@ -479,6 +496,8 @@ def test_orchestrator_auth_busy_maps_to_diagnostic_instead_of_challenge(
             "ui_hints": {"widget": "choice"},
         },
         engine_name="opencode",
+        audit_dir=audit_dir,
+        run_id=run_id,
     )
 
     replay = fcmp_live_journal.replay(run_id=run_id, after_seq=0)

@@ -22,6 +22,7 @@ from server.services.orchestration.run_output_convergence_service import (
     run_output_convergence_service,
 )
 from server.services.orchestration.run_output_schema_service import run_output_schema_service
+from tests.common.workspace_layout_helpers import adapter_options, make_layout
 
 
 class _HandleStore:
@@ -124,15 +125,60 @@ def _auth_result() -> AuthDetectionResult:
 def _append_orchestrator_event(audit_service: RunAuditService):
     def _append(*, run_dir, attempt_number, category, type_name, data, engine_name=None):
         _ = engine_name
+        layout = make_layout(run_dir)
         audit_service.append_orchestrator_event(
             run_dir=run_dir,
             attempt_number=attempt_number,
             category=category,
             type_name=type_name,
             data=data,
+            audit_dir=layout.audit_dir,
+            run_id="run-1",
         )
 
     return _append
+
+
+def _append_output_repair_record(audit_service: RunAuditService):
+    def _append(*, run_dir, attempt_number, record):
+        layout = make_layout(run_dir)
+        audit_service.append_output_repair_record(
+            run_dir=run_dir,
+            attempt_number=attempt_number,
+            record=record,
+            audit_dir=layout.audit_dir,
+        )
+
+    return _append
+
+
+def _materialize_schema(skill: SkillManifest, *, execution_mode: str, run_dir: Path):
+    layout = make_layout(run_dir)
+    run_output_schema_service.materialize(
+        skill=skill,
+        execution_mode=execution_mode,
+        run_dir=run_dir,
+        audit_dir=layout.audit_dir,
+        input_manifest_path=layout.input_manifest_path,
+    )
+    layout.input_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    if not layout.input_manifest_path.exists():
+        layout.input_manifest_path.write_text(json.dumps({"request_id": "req-1"}), encoding="utf-8")
+    return layout
+
+
+def _convergence_options(layout, **extra):
+    schema_relpath = (layout.audit_dir / "contracts" / "target_output_schema.json").relative_to(
+        layout.workspace_dir
+    ).as_posix()
+    return adapter_options(
+        layout,
+        run_id="run-1",
+        request_id="req-1",
+        engine="codex",
+        __target_output_schema_relpath=schema_relpath,
+        **extra,
+    )
 
 
 @pytest.mark.asyncio
@@ -140,7 +186,7 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path)
-    run_output_schema_service.materialize(skill=skill, execution_mode="auto", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="auto", run_dir=run_dir)
     adapter = _FakeRepairAdapter(
         ['```json\n{"__SKILL_DONE__": true, "value": "fixed"}\n```']
     )
@@ -166,7 +212,7 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
         engine_name="codex",
         execution_mode="auto",
         attempt_number=1,
-        options={},
+        options=_convergence_options(layout),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"not-json", stderr_raw=b""),
         auth_detection_result=_auth_result(),
@@ -175,7 +221,7 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
@@ -186,12 +232,12 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     assert adapter.repair_run_count == 1
     repair_rows = [
         json.loads(line)
-        for line in (run_dir / ".audit" / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (layout.audit_dir / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     orchestrator_rows = [
         json.loads(line)
-        for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (layout.audit_dir / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert repair_rows[0]["deterministic_repair_applied"] is True
@@ -208,7 +254,7 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path)
-    run_output_schema_service.materialize(skill=skill, execution_mode="auto", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="auto", run_dir=run_dir)
     adapter = _FakeRepairAdapter([])
     audit_service = RunAuditService()
     interaction_service = RunInteractionLifecycleService()
@@ -225,7 +271,7 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
         engine_name="codex",
         execution_mode="auto",
         attempt_number=1,
-        options={},
+        options=_convergence_options(layout),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"still not json", stderr_raw=b""),
         auth_detection_result=_auth_result(),
@@ -234,7 +280,7 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
@@ -244,7 +290,7 @@ async def test_convergence_skips_repair_without_session_handle(tmp_path: Path) -
     assert adapter.repair_run_count == 0
     repair_rows = [
         json.loads(line)
-        for line in (run_dir / ".audit" / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (layout.audit_dir / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert repair_rows[0]["outcome"] == "skipped"
@@ -255,7 +301,7 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path, interactive=True)
-    run_output_schema_service.materialize(skill=skill, execution_mode="interactive", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="interactive", run_dir=run_dir)
     adapter = _FakeRepairAdapter(
         ['```json\n{"__SKILL_DONE__": false, "message": "Need your choice", "ui_hints": {"kind": "choose_one", "options": [{"label": "A", "value": "a"}]}}\n```']
     )
@@ -281,7 +327,7 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
         engine_name="codex",
         execution_mode="interactive",
         attempt_number=1,
-        options={},
+        options=_convergence_options(layout),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(
             stdout_raw=b"<ASK_USER_YAML>legacy</ASK_USER_YAML>",
@@ -293,7 +339,7 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
@@ -309,7 +355,7 @@ async def test_convergence_canonicalizes_codex_compat_final_before_validation(tm
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path, interactive=True)
-    run_output_schema_service.materialize(skill=skill, execution_mode="interactive", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="interactive", run_dir=run_dir)
     adapter = _FakeRepairAdapter([])
     audit_service = RunAuditService()
     interaction_service = RunInteractionLifecycleService()
@@ -339,7 +385,7 @@ async def test_convergence_canonicalizes_codex_compat_final_before_validation(tm
         engine_name="codex",
         execution_mode="interactive",
         attempt_number=3,
-        options={"execution_mode": "interactive"},
+        options=_convergence_options(layout, execution_mode="interactive"),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(
             stdout_raw=compat_final.encode("utf-8"),
@@ -351,7 +397,7 @@ async def test_convergence_canonicalizes_codex_compat_final_before_validation(tm
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
@@ -369,7 +415,7 @@ async def test_convergence_canonicalizes_codex_compat_pending_before_validation(
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path, interactive=True)
-    run_output_schema_service.materialize(skill=skill, execution_mode="interactive", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="interactive", run_dir=run_dir)
     adapter = _FakeRepairAdapter([])
     audit_service = RunAuditService()
     interaction_service = RunInteractionLifecycleService()
@@ -413,7 +459,7 @@ async def test_convergence_canonicalizes_codex_compat_pending_before_validation(
         engine_name="codex",
         execution_mode="interactive",
         attempt_number=3,
-        options={"execution_mode": "interactive"},
+        options=_convergence_options(layout, execution_mode="interactive"),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(
             stdout_raw=compat_pending.encode("utf-8"),
@@ -425,7 +471,7 @@ async def test_convergence_canonicalizes_codex_compat_pending_before_validation(
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
@@ -443,7 +489,7 @@ async def test_convergence_exhausted_emits_supersede_for_last_invalid_final(tmp_
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skill = _build_skill(tmp_path)
-    run_output_schema_service.materialize(skill=skill, execution_mode="auto", run_dir=run_dir)
+    layout = _materialize_schema(skill, execution_mode="auto", run_dir=run_dir)
     adapter = _FakeRepairAdapter(["still bad", "still bad again", "still bad third"])
     audit_service = RunAuditService()
     interaction_service = RunInteractionLifecycleService()
@@ -467,7 +513,7 @@ async def test_convergence_exhausted_emits_supersede_for_last_invalid_final(tmp_
         engine_name="codex",
         execution_mode="auto",
         attempt_number=1,
-        options={},
+        options=_convergence_options(layout),
         initial_result=initial_result,
         initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"not-json", stderr_raw=b""),
         auth_detection_result=_auth_result(),
@@ -476,14 +522,14 @@ async def test_convergence_exhausted_emits_supersede_for_last_invalid_final(tmp_
         strip_done_marker_for_output_validation=interaction_service.strip_done_marker_for_output_validation,
         extract_pending_interaction=interaction_service.extract_pending_interaction,
         append_orchestrator_event=_append_orchestrator_event(audit_service),
-        append_output_repair_record=audit_service.append_output_repair_record,
+        append_output_repair_record=_append_output_repair_record(audit_service),
         live_runtime_emitter_factory=lambda: SimpleNamespace(),
     )
 
     assert result.convergence_state == "exhausted"
     orchestrator_rows = [
         json.loads(line)
-        for line in (run_dir / ".audit" / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (layout.audit_dir / "orchestrator_events.1.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     superseded_rows = [row for row in orchestrator_rows if row["type"] == "assistant.message.superseded"]

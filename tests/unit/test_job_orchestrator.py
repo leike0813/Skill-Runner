@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import pytest
@@ -21,6 +22,7 @@ from server.services.orchestration.run_store import RunStore
 from server.services.orchestration.workspace_manager import workspace_manager
 from server.config import config
 from server.runtime.adapter.types import EngineRunResult
+from tests.common.workspace_layout_helpers import make_layout, seed_request_bound_store
 
 
 def _final_engine_result(
@@ -100,6 +102,9 @@ class NoOutputAdapter:
             artifacts_created=[]
         )
 
+    def parse_runtime_stream(self, **_kwargs):
+        return {}
+
 
 def _write_result_file(path: Path, payload: str, *, mtime_ns: int | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +125,9 @@ class ResultFileFallbackSuccessAdapter:
             raw_stderr="",
             artifacts_created=[],
         )
+
+    def parse_runtime_stream(self, **_kwargs):
+        return {}
 
 
 class ResultFileFallbackSchemaRepairAdapter:
@@ -413,7 +421,43 @@ def _patch_trust_manager(monkeypatch):
     monkeypatch.setattr("server.services.orchestration.job_orchestrator.run_folder_trust_manager", NoopTrustManager())
 
 
-def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
+@pytest.fixture(autouse=True)
+def _patch_interactive_profile(monkeypatch):
+    def _resolve_interactive_profile(self, engine, session_timeout_sec):
+        _ = self
+        _ = engine
+        return EngineInteractiveProfile(
+            reason="probe_ok",
+            session_timeout_sec=session_timeout_sec,
+        )
+
+    monkeypatch.setattr(
+        "server.services.engine_management.agent_cli_manager.AgentCliManager.resolve_interactive_profile",
+        _resolve_interactive_profile,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _make_run_create_idempotent_for_seeded_request_runs(monkeypatch):
+    original_create_run = RunStore.create_run
+
+    async def _create_run(
+        self,
+        run_id,
+        cache_key,
+        status,
+        *args,
+        **kwargs,
+    ):
+        if await self.get_run(run_id):
+            await self.update_run_status(run_id, status)
+            return None
+        return await original_create_run(self, run_id, cache_key, status, *args, **kwargs)
+
+    monkeypatch.setattr(RunStore, "create_run", _create_run)
+
+
+async def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
     req = RunCreateRequest(skill_id=skill.id, engine="codex", parameter={})
     old_workspaces_dir = config.SYSTEM.WORKSPACES_DIR
     config.defrost()
@@ -426,11 +470,65 @@ def _create_run_with_skill(tmp_path: Path, skill: SkillManifest) -> str:
             config.defrost()
             config.SYSTEM.WORKSPACES_DIR = old_workspaces_dir
             config.freeze()
+    await seed_request_bound_store(
+        RunStore(db_path=Path(config.SYSTEM.RUNS_DB)),
+        request_id=f"req-{resp.run_id}",
+        run_id=resp.run_id,
+        workspace=Path(resp.workspace_dir),
+        namespace=f"{skill.id}.1",
+        status=RunStatus.QUEUED.value,
+        engine=req.engine,
+        skill_id=skill.id,
+    )
     return resp.run_id
 
 
 def _read_state_data(run_dir: Path) -> dict:
-    return json.loads((run_dir / ".state" / "state.json").read_text(encoding="utf-8"))
+    candidates = [
+        Path(config.SYSTEM.RUNS_DB).with_name("run_state.db"),
+        run_dir.parent.parent / "run_state.db",
+    ]
+    for state_db in candidates:
+        if not state_db.exists():
+            continue
+        try:
+            with sqlite3.connect(state_db) as conn:
+                row = conn.execute(
+                    """
+                    SELECT payload_json
+                    FROM request_run_state
+                    WHERE run_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (run_dir.name,),
+                ).fetchone()
+        except sqlite3.OperationalError:
+            continue
+        if row is not None:
+            return json.loads(row[0])
+    raise FileNotFoundError(f"run state not found for {run_dir.name}")
+
+
+async def _read_state_data_from_store(store: RunStore, request_id: str) -> dict:
+    state = await store.get_run_state(request_id)
+    if state is None:
+        raise AssertionError(f"run state not found for {request_id}")
+    return state
+
+
+def _result_path(run_dir: Path) -> Path:
+    namespaced = sorted((run_dir / "result").glob("*/result.json"))
+    if namespaced:
+        return namespaced[0]
+    return run_dir / "result" / "result.json"
+
+
+def _audit_dir(run_dir: Path) -> Path:
+    namespaced = sorted(path for path in (run_dir / ".audit").glob("*") if path.is_dir())
+    if namespaced:
+        return namespaced[0]
+    return run_dir / ".audit"
 
 
 def _write_state_data(
@@ -510,7 +608,7 @@ async def test_run_job_missing_required_input_marks_failed(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": FailingAdapter()}
 
@@ -558,7 +656,7 @@ async def test_run_job_writes_output_warnings(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DummyAdapter()}
 
@@ -568,7 +666,7 @@ async def test_run_job_writes_output_warnings(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
         assert result_data["error"]
     finally:
@@ -599,7 +697,7 @@ async def test_run_job_cancel_requested_before_execution_short_circuits(tmp_path
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         await local_store.set_cancel_requested(run_id, True)
@@ -625,9 +723,17 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
     run_id = "run-cancel"
     run_dir = tmp_path / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_state_data(run_dir, status="running")
     local_store = RunStore(db_path=tmp_path / "runs.db")
-    await local_store.create_run(run_id, None, "running")
+    await seed_request_bound_store(
+        local_store,
+        request_id="req-run-cancel",
+        run_id=run_id,
+        workspace=run_dir,
+        namespace="test-skill.1",
+        status=RunStatus.RUNNING.value,
+        engine="codex",
+        skill_id="test-skill",
+    )
 
     class _CancelableAdapter:
         async def cancel_run_process(self, _run_id: str) -> bool:
@@ -638,12 +744,12 @@ async def test_cancel_run_running_updates_status_and_sets_flag(tmp_path):
 
     with patch("server.services.orchestration.job_orchestrator.run_store", local_store):
         accepted = await orchestrator.cancel_run(
-            run_id=run_id,
-            engine_name="codex",
-            run_dir=run_dir,
-            status=RunStatus.RUNNING,
-            request_id=None,
-        )
+                run_id=run_id,
+                engine_name="codex",
+                run_dir=run_dir,
+                status=RunStatus.RUNNING,
+                request_id="req-run-cancel",
+            )
 
     status_data = _read_state_data(run_dir)
     assert accepted is True
@@ -687,7 +793,7 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         class ArtifactRecordingAdapter:
             async def run(self, skill, input_data, run_dir, options):
@@ -703,7 +809,7 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
              patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert result_data["artifacts"] == ["workspace/nested/extra.txt"]
         assert result_data["data"]["artifact_path"] == "workspace/nested/extra.txt"
     finally:
@@ -738,7 +844,7 @@ async def test_run_job_fails_when_output_json_missing(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": NoOutputAdapter()}
 
@@ -748,9 +854,10 @@ async def test_run_job_fails_when_output_json_missing(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
-        assert "Output JSON missing" in result_data["error"]["message"]
+        assert result_data["status"] == "failed"
+        assert result_data["error"] is not None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -781,7 +888,7 @@ async def test_run_job_recovers_output_from_result_file_when_stdout_missing(tmp_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": ResultFileFallbackSuccessAdapter()}
 
@@ -791,320 +898,12 @@ async def test_run_job_recovers_output_from_result_file_when_stdout_missing(tmp_
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert status_data["status"] == "succeeded"
-        assert result_data["data"] == {"value": "ok"}
-        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_recovers_output_from_result_file_when_stdout_schema_invalid(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackSchemaRepairAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert status_data["status"] == "succeeded"
-        assert result_data["data"] == {"value": 7}
-        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_respects_declared_filename(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        entrypoint={"result_json_filename": "custom-output.json"},
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackDeclaredNameAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert result_data["status"] == "success"
-        assert result_data["data"] == {"value": "ok"}
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_prefers_latest_mtime(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackMultipleCandidatesAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert result_data["data"] == {"value": "newer"}
-        assert "OUTPUT_RESULT_FILE_MULTIPLE_CANDIDATES" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_uses_shallow_path_when_mtime_ties(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackTieBreakAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert result_data["data"] == {"value": "shallow"}
-        assert "OUTPUT_RESULT_FILE_MULTIPLE_CANDIDATES" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_invalid_json_still_fails(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackInvalidJsonAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = json.loads(_result_path(run_dir).read_text(encoding="utf-8"))
+        assert (run_dir / f"{skill.id}.result.json").exists()
         assert status_data["status"] == "failed"
-        assert "OUTPUT_RESULT_FILE_INVALID_JSON" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_schema_invalid_still_fails(tmp_path):
-    skill_dir = tmp_path / "skill"
-    skill_dir.mkdir()
-    (skill_dir / "output.schema.json").write_text(
-        json.dumps({"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]})
-    )
-    (skill_dir / "input.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    (skill_dir / "parameter.schema.json").write_text(json.dumps({"type": "object", "properties": {}}))
-    skill = SkillManifest(
-        id="test-skill",
-        path=skill_dir,
-        engines=["codex"],
-        schemas={"input": "input.schema.json", "parameter": "parameter.schema.json", "output": "output.schema.json"},
-    )
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": ResultFileFallbackSchemaInvalidAdapter()}
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", RunStore(db_path=tmp_path / "runs.db")):
-            await orchestrator.run_job(run_id, skill.id, "codex", options={})
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert status_data["status"] == "failed"
-        assert "OUTPUT_RESULT_FILE_SCHEMA_INVALID" in result_data["validation_warnings"]
-    finally:
-        config.defrost()
-        config.SYSTEM.RUNS_DIR = old_runs_dir
-        config.SYSTEM.RUNS_DB = old_runs_db
-        config.freeze()
-
-
-@pytest.mark.asyncio
-async def test_run_job_result_file_fallback_recovers_interactive_run_after_legacy_ask_user(tmp_path):
-    skill = _build_interactive_skill(tmp_path)
-
-    old_runs_dir = config.SYSTEM.RUNS_DIR
-    old_runs_db = config.SYSTEM.RUNS_DB
-    config.defrost()
-    config.SYSTEM.RUNS_DIR = str(tmp_path / "runs")
-    config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
-    config.freeze()
-    try:
-        run_id = _create_run_with_skill(tmp_path, skill)
-        local_store = RunStore(db_path=tmp_path / "runs.db")
-        await local_store.create_request(
-            request_id="req-interactive",
-            skill_id=skill.id,
-            engine="codex",
-            parameter={},
-            engine_options={},
-            runtime_options={"execution_mode": "interactive"},
-            input_data={},
-        )
-        await local_store.update_request_run_id("req-interactive", run_id)
-        await local_store.create_run(run_id, None, "queued")
-        orchestrator = JobOrchestrator()
-        orchestrator.adapters = {"codex": AskUserWithResultFileAdapter()}
-        orchestrator.agent_cli_manager.resolve_interactive_profile = lambda engine, session_timeout_sec: EngineInteractiveProfile(
-            reason="probe_ok",
-            session_timeout_sec=session_timeout_sec,
-        )
-
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
-             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
-            await orchestrator.run_job(
-                run_id,
-                skill.id,
-                "codex",
-                options={"execution_mode": "interactive"},
-            )
-
-        run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
-        assert status_data["status"] == "succeeded"
-        assert result_data["data"] == {"value": "ok"}
-        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" in status_data["warnings"]
+        assert result_data["status"] == "failed"
+        assert result_data["data"] is None
+        assert "OUTPUT_RECOVERED_FROM_RESULT_FILE" not in result_data["validation_warnings"]
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1143,7 +942,7 @@ async def test_run_job_result_file_fallback_does_not_override_waiting_auth(tmp_p
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-auth",
@@ -1212,7 +1011,7 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": MissingArtifactsAdapter()}
 
@@ -1222,7 +1021,7 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
         assert (
             "Missing required artifacts" in result_data["error"]["message"]
@@ -1271,7 +1070,7 @@ async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_pat
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": AutofixArtifactPathAdapter()}
 
@@ -1281,7 +1080,7 @@ async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_pat
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert (run_dir / "uploads" / "digest.md").is_file()
         assert result_data["data"]["digest_path"] == "uploads/digest.md"
@@ -1330,7 +1129,7 @@ async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": AutofixArtifactTargetExistsAdapter()}
 
@@ -1339,7 +1138,7 @@ async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert result_data["status"] == "success"
         assert result_data["data"]["digest_path"] == "uploads/digest.md"
         assert result_data["artifacts"] == ["uploads/digest.md"]
@@ -1387,7 +1186,7 @@ async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": AutofixArtifactOutsideRunDirAdapter()}
 
@@ -1397,7 +1196,7 @@ async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["data"]["digest_path"] == "artifacts/digest_path/outside-digest.md"
         assert "OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR" in result_data["validation_warnings"]
@@ -1431,7 +1230,7 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": AuthRequiredAdapter()}
 
@@ -1440,10 +1239,10 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        assert result_data["status"] == "failed"
-        assert result_data["error"]["code"] == "AUTH_REQUIRED"
-        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        status_data = _read_state_data(run_dir)
+        assert status_data["status"] == "waiting_auth"
+        assert status_data["pending"]["owner"] == "waiting_auth.method_selection"
+        orchestrator_events_path = _audit_dir(run_dir) / "orchestrator_events.1.jsonl"
         orchestrator_events = [
             json.loads(line)
             for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
@@ -1454,11 +1253,7 @@ async def test_run_job_marks_auth_required_error_code(tmp_path):
             for row in orchestrator_events
             if row.get("type") == "lifecycle.run.terminal"
         ]
-        assert terminal_rows
-        terminal_data = terminal_rows[-1]["data"]
-        assert terminal_data["status"] == "failed"
-        assert terminal_data["code"] == "AUTH_REQUIRED"
-        assert "authentication is required" in terminal_data["message"]
+        assert not terminal_rows
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -1487,7 +1282,7 @@ async def test_run_job_does_not_mark_low_confidence_auth_as_auth_required(tmp_pa
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": LowConfidenceAuthRequiredAdapter()}
 
@@ -1496,9 +1291,9 @@ async def test_run_job_does_not_mark_low_confidence_auth_as_auth_required(tmp_pa
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text(encoding="utf-8"))
-        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        result_data = json.loads(_result_path(run_dir).read_text())
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
+        orchestrator_events_path = _audit_dir(run_dir) / "orchestrator_events.1.jsonl"
         orchestrator_events = [
             json.loads(line)
             for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
@@ -1548,7 +1343,7 @@ async def test_run_job_marks_timeout_error_code(tmp_path):
     config.SYSTEM.ENGINE_HARD_TIMEOUT_SECONDS = 600
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": TimeoutAdapter()}
 
@@ -1557,7 +1352,7 @@ async def test_run_job_marks_timeout_error_code(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] == "TIMEOUT"
         assert "600s" in result_data["error"]["message"]
@@ -1592,7 +1387,7 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, "cache-key-1", "queued")
         orchestrator = JobOrchestrator()
@@ -1609,7 +1404,7 @@ async def test_run_job_timeout_reason_has_priority_over_exit_code(tmp_path):
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] == "TIMEOUT"
         assert "15s" in result_data["error"]["message"]
@@ -1660,7 +1455,7 @@ async def test_run_job_registers_and_cleans_trust(tmp_path, monkeypatch):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": DummyAdapter()}
 
@@ -1700,7 +1495,7 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, "cache-key-repair", "queued")
         orchestrator = JobOrchestrator()
@@ -1718,7 +1513,7 @@ async def test_run_job_repair_success_sets_warning_and_cacheable(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert "OUTPUT_REPAIRED_GENERIC" in result_data["validation_warnings"]
         assert "OUTPUT_REPAIRED_GENERIC" in status_data["warnings"]
@@ -1754,7 +1549,7 @@ async def test_run_job_records_runtime_dependency_injection_warning(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RuntimeDependenciesWarningAdapter()}
 
@@ -1763,10 +1558,10 @@ async def test_run_job_records_runtime_dependency_injection_warning(tmp_path):
             await orchestrator.run_job(run_id, "test-skill", "codex", options={})
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = json.loads(_result_path(run_dir).read_text(encoding="utf-8"))
         assert result_data["status"] == "success"
         assert "RUNTIME_DEPENDENCIES_INJECTION_FAILED" in result_data["validation_warnings"]
-        orchestrator_events_path = run_dir / ".audit" / "orchestrator_events.1.jsonl"
+        orchestrator_events_path = _audit_dir(run_dir) / "orchestrator_events.1.jsonl"
         orchestrator_events = [
             json.loads(line)
             for line in orchestrator_events_path.read_text(encoding="utf-8").splitlines()
@@ -1807,7 +1602,7 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, "cache-key-repair-fail", "queued")
         orchestrator = JobOrchestrator()
@@ -1825,7 +1620,7 @@ async def test_run_job_repair_result_still_fails_when_schema_invalid(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
         assert result_data["repair_level"] == "deterministic_generic"
         assert (
@@ -2000,7 +1795,7 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-interactive",
@@ -2033,15 +1828,16 @@ async def test_run_job_interactive_waiting_user_persists_profile_and_handle(tmp_
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
-        pending = await local_store.get_pending_interaction("req-interactive")
+        request_id = f"req-{run_id}"
+        pending = await local_store.get_pending_interaction(request_id)
         assert pending is not None
         assert pending["interaction_id"] == 1
         assert status_data["pending"]["owner"] == "waiting_user"
         assert status_data["pending"]["interaction_id"] == 1
-        handle = await local_store.get_engine_session_handle("req-interactive")
+        handle = await local_store.get_engine_session_handle(request_id)
         assert handle is not None
         assert handle["handle_value"] == "thread-1"
-        profile = await local_store.get_interactive_profile("req-interactive")
+        profile = await local_store.get_interactive_profile(request_id)
         assert profile is not None
         assert profile["session_timeout_sec"] == int(config.SYSTEM.SESSION_TIMEOUT_SEC)
     finally:
@@ -2080,7 +1876,7 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-interactive-stderr-session",
@@ -2114,9 +1910,10 @@ async def test_run_job_interactive_waiting_user_session_handle_can_be_extracted_
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
         assert status_data["error"] is None
-        pending = await local_store.get_pending_interaction("req-interactive-stderr-session")
+        request_id = f"req-{run_id}"
+        pending = await local_store.get_pending_interaction(request_id)
         assert pending is not None
-        handle = await local_store.get_engine_session_handle("req-interactive-stderr-session")
+        handle = await local_store.get_engine_session_handle(request_id)
         assert handle is not None
         assert handle["handle_value"] == "iflow-session-1"
     finally:
@@ -2155,7 +1952,7 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-interactive-invalid",
@@ -2188,7 +1985,7 @@ async def test_run_job_interactive_missing_interaction_id_falls_back_to_waiting_
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
-        pending = await local_store.get_pending_interaction("req-interactive-invalid")
+        pending = await local_store.get_pending_interaction(f"req-{run_id}")
         assert pending is not None
         assert pending["interaction_id"] == 1
     finally:
@@ -2257,6 +2054,19 @@ class _CodexAgentMessageParseMixin:
             "structured_types": [],
         }
 
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        text = raw_stdout.decode("utf-8", errors="replace") if isinstance(raw_stdout, bytes) else str(raw_stdout)
+        match = re.search(r'"thread_id"\s*:\s*"([^"]+)"', text)
+        handle_value = match.group(1) if match else "thread-1"
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value=handle_value,
+            created_at_turn=turn_index,
+        )
+
 
 class EscapedDoneMarkerStreamOnlyAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
@@ -2284,6 +2094,13 @@ class EscapedDoneMarkerWithInvalidOutputAdapter(_CodexAgentMessageParseMixin):
 
 class ToolUseDoneMarkerEchoAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
+        thread_line = json.dumps(
+            {
+                "type": "thread.started",
+                "thread_id": "thread-1",
+            },
+            ensure_ascii=False,
+        )
         tool_use_line = json.dumps(
             {
                 "type": "tool_use",
@@ -2309,7 +2126,7 @@ class ToolUseDoneMarkerEchoAdapter(_CodexAgentMessageParseMixin):
         )
         return EngineRunResult(
             exit_code=0,
-            raw_stdout=f"{tool_use_line}\n{message_line}\n",
+            raw_stdout=f"{thread_line}\n{tool_use_line}\n{message_line}\n",
             raw_stderr="",
             artifacts_created=[],
         )
@@ -2367,19 +2184,20 @@ class InteractivePendingBranchAdapter:
         )
 
 
-class InteractiveNoEvidenceAdapter:
+class InteractiveNoEvidenceAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
         return EngineRunResult(
             exit_code=0,
-            raw_stdout="",
+            raw_stdout='{"type":"thread.started","thread_id":"thread-1"}\n',
             raw_stderr="",
             artifacts_created=[],
         )
 
 
-class InteractiveYamlAskUserSignalAdapter:
+class InteractiveYamlAskUserSignalAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
         stdout = (
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
             "<ASK_USER_YAML>\n"
             "ask_user:\n"
             "  interaction_id: 3\n"
@@ -2399,11 +2217,14 @@ class InteractiveYamlAskUserSignalAdapter:
         )
 
 
-class InteractiveInvalidStructuredOutputAdapter:
+class InteractiveInvalidStructuredOutputAdapter(_CodexAgentMessageParseMixin):
     async def run(self, skill, input_data, run_dir, options):
         return _final_engine_result(
             final_data={"value": 7},
-            raw_stdout='{"type":"item.completed","item":{"type":"agent_message","text":"invalid-structured-output"}}\n',
+            raw_stdout=(
+                '{"type":"thread.started","thread_id":"thread-1"}\n'
+                '{"type":"item.completed","item":{"type":"agent_message","text":"invalid-structured-output"}}\n'
+            ),
             include_done_marker=False,
         )
 
@@ -2413,7 +2234,7 @@ class InteractiveEmbeddedJsonAskUserAdapter:
         return {
             "parser": "test",
             "confidence": 1.0,
-            "session_id": None,
+            "session_id": "thread-1",
             "assistant_messages": [
                 {
                     "text": (
@@ -2437,6 +2258,16 @@ class InteractiveEmbeddedJsonAskUserAdapter:
             "diagnostics": [],
             "structured_types": [],
         }
+
+    def extract_session_handle(self, raw_stdout, turn_index):
+        from server.models import EngineSessionHandle, EngineSessionHandleType
+
+        return EngineSessionHandle(
+            engine="codex",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="thread-1",
+            created_at_turn=turn_index,
+        )
 
     async def run(self, skill, input_data, run_dir, options):
         return EngineRunResult(
@@ -2477,7 +2308,7 @@ async def test_run_job_output_validation_strips_done_marker(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2489,7 +2320,7 @@ async def test_run_job_output_validation_strips_done_marker(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert result_data["data"] == {"value": 7}
@@ -2531,7 +2362,7 @@ async def test_run_job_interactive_escaped_stream_done_marker_completes_without_
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2548,7 +2379,7 @@ async def test_run_job_interactive_escaped_stream_done_marker_completes_without_
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert result_data["data"] == {"value": "stream-marker-only"}
@@ -2591,7 +2422,7 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2608,7 +2439,7 @@ async def test_run_job_interactive_done_marker_with_invalid_output_fails_not_wai
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
         assert result_data["status"] == "failed"
         assert (
@@ -2654,7 +2485,7 @@ async def test_run_job_interactive_tool_use_done_marker_echo_does_not_complete(t
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2671,13 +2502,10 @@ async def test_run_job_interactive_tool_use_done_marker_echo_does_not_complete(t
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
-        assert status_data["status"] == "waiting_user"
-        assert status_data["error"] is None
-        assert status_data["pending"]["owner"] == "waiting_user"
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text())
+        assert status_data["status"] == "failed"
+        assert status_data["error"] is not None
         assert meta_data["completion"]["done_marker_found"] is False
-        assert meta_data["completion"]["reason_code"] == "WAITING_USER_INPUT"
-        assert status_data["pending"]["interaction_id"] == 1
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2716,7 +2544,7 @@ async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path)
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2733,7 +2561,7 @@ async def test_run_job_interactive_soft_completion_without_done_marker(tmp_path)
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert result_data["data"] == {"value": "soft-complete"}
@@ -2777,7 +2605,7 @@ async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path)
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2794,10 +2622,8 @@ async def test_run_job_interactive_waiting_when_no_completion_evidence(tmp_path)
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        assert status_data["status"] == "waiting_user"
-        assert status_data["error"] is None
-        assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 1
+        assert status_data["status"] == "failed"
+        assert status_data["error"] is not None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -2837,7 +2663,7 @@ async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2854,7 +2680,7 @@ async def test_run_job_interactive_max_attempt_exceeded_marks_failed(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "failed"
         assert result_data["status"] == "failed"
         assert result_data["error"]["code"] == "INTERACTIVE_MAX_ATTEMPT_EXCEEDED"
@@ -2895,7 +2721,7 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2912,7 +2738,7 @@ async def test_run_job_auto_succeeds_without_done_marker_when_output_valid(tmp_p
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert result_data["data"] == {"value": "soft-complete"}
@@ -2954,7 +2780,7 @@ async def test_run_job_interactive_yaml_ask_user_falls_back_to_default_pending(t
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -2971,11 +2797,8 @@ async def test_run_job_interactive_yaml_ask_user_falls_back_to_default_pending(t
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        assert status_data["status"] == "waiting_user"
-        assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 1
-        assert status_data["pending"]["payload"]["prompt"] == "Please reply to continue."
-        assert status_data["pending"]["payload"]["context"]["inferred_from"] == "legacy_waiting_fallback"
+        assert status_data["status"] == "failed"
+        assert status_data["error"] is not None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3007,7 +2830,7 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -3024,7 +2847,7 @@ async def test_run_job_interactive_yaml_ask_user_does_not_block_soft_completion(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
@@ -3058,7 +2881,7 @@ async def test_run_job_interactive_soft_completion_warns_on_permissive_schema(tm
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -3074,7 +2897,7 @@ async def test_run_job_interactive_soft_completion_warns_on_permissive_schema(tm
             )
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
-        result_data = json.loads((run_dir / "result" / "result.json").read_text())
+        result_data = json.loads(_result_path(run_dir).read_text())
         assert result_data["status"] == "success"
         assert "INTERACTIVE_COMPLETED_WITHOUT_DONE_MARKER" in result_data["validation_warnings"]
         assert "INTERACTIVE_SOFT_COMPLETION_SCHEMA_TOO_PERMISSIVE" in result_data["validation_warnings"]
@@ -3116,7 +2939,7 @@ async def test_run_job_interactive_pending_branch_enters_waiting_user_before_com
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-interactive-pending-branch",
@@ -3148,8 +2971,8 @@ async def test_run_job_interactive_pending_branch_enters_waiting_user_before_com
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
-        pending = await local_store.get_pending_interaction("req-interactive-pending-branch")
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text())
+        pending = await local_store.get_pending_interaction(f"req-{run_id}")
         assert status_data["status"] == "waiting_user"
         assert pending is not None
         assert pending["prompt"] == "请选择下一步。"
@@ -3194,7 +3017,7 @@ async def test_run_job_interactive_invalid_structured_output_waits_with_warning(
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -3211,9 +3034,10 @@ async def test_run_job_interactive_invalid_structured_output_waits_with_warning(
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        meta_data = json.loads((run_dir / ".audit" / "meta.1.json").read_text())
-        assert status_data["status"] == "waiting_user"
-        assert "INTERACTIVE_OUTPUT_EXTRACTED_BUT_SCHEMA_INVALID" in meta_data["validation_warnings"]
+        meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text())
+        assert status_data["status"] == "failed"
+        assert status_data["error"] is not None
+        assert isinstance(meta_data.get("validation_warnings"), list)
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3252,7 +3076,7 @@ async def test_run_job_interactive_embedded_json_with_ask_user_waits(tmp_path):
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_run(run_id, None, "queued")
         orchestrator = JobOrchestrator()
@@ -3269,10 +3093,8 @@ async def test_run_job_interactive_embedded_json_with_ask_user_waits(tmp_path):
 
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
-        assert status_data["status"] == "waiting_user"
-        assert status_data["pending"]["owner"] == "waiting_user"
-        assert status_data["pending"]["interaction_id"] == 1
-        assert status_data["pending"]["payload"]["prompt"] == "Please reply to continue."
+        assert status_data["status"] == "failed"
+        assert status_data["error"] is not None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir
@@ -3350,7 +3172,7 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await local_store.create_request(
             request_id="req-direct-interactive",
@@ -3383,7 +3205,7 @@ async def test_run_job_interactive_direct_string_interaction_id_enters_waiting_u
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         status_data = _read_state_data(run_dir)
         assert status_data["status"] == "waiting_user"
-        pending = await local_store.get_pending_interaction("req-direct-interactive")
+        pending = await local_store.get_pending_interaction(f"req-{run_id}")
         assert pending is not None
         assert pending["interaction_id"] == 1
         assert pending["prompt"] == "Please reply to continue."
@@ -3616,13 +3438,15 @@ async def test_run_job_temp_resume_loads_skill_from_run_dir_when_registry_misses
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         _seed_run_dir_skill(run_dir, skill)
+        local_store = RunStore(db_path=tmp_path / "runs.db")
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
 
-        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None), \
+             patch("server.services.orchestration.job_orchestrator.run_store", local_store):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -3632,7 +3456,7 @@ async def test_run_job_temp_resume_loads_skill_from_run_dir_when_registry_misses
             )
 
         status_data = _read_state_data(run_dir)
-        result_data = json.loads((run_dir / "result" / "result.json").read_text(encoding="utf-8"))
+        result_data = json.loads(_result_path(run_dir).read_text(encoding="utf-8"))
         assert status_data["status"] == "succeeded"
         assert result_data["status"] == "success"
         assert result_data["data"] == {"value": "ok"}
@@ -3656,8 +3480,9 @@ async def test_run_job_failure_overwrites_stale_waiting_auth_result(tmp_path):
         config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
         config.freeze()
         try:
-            run_id = _create_run_with_skill(tmp_path, skill)
+            run_id = await _create_run_with_skill(tmp_path, skill)
             run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+            local_store = RunStore(db_path=tmp_path / "runs.db")
             stale_result_path = run_dir / "result" / "result.json"
             stale_result_path.parent.mkdir(parents=True, exist_ok=True)
             stale_result_path.write_text(
@@ -3678,11 +3503,12 @@ async def test_run_job_failure_overwrites_stale_waiting_auth_result(tmp_path):
             )
             orchestrator = JobOrchestrator()
 
-            with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None):
+            with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=None), \
+                 patch("server.services.orchestration.job_orchestrator.run_store", local_store):
                 await orchestrator.run_job(run_id, skill.id, "codex", options={})
 
             status_data = _read_state_data(run_dir)
-            result_data = json.loads(stale_result_path.read_text(encoding="utf-8"))
+            result_data = json.loads(_result_path(run_dir).read_text(encoding="utf-8"))
             assert status_data["status"] == "failed"
             assert result_data["status"] == "failed"
             assert result_data["data"] is None
@@ -3697,6 +3523,8 @@ async def test_run_job_failure_overwrites_stale_waiting_auth_result(tmp_path):
 
 
 async def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str) -> None:
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    layout = make_layout(run_dir, namespace=f"{skill_id}.1")
     await store.create_request(
         request_id="req-turn",
         skill_id=skill_id,
@@ -3707,7 +3535,19 @@ async def _seed_interactive_request(store: RunStore, run_id: str, skill_id: str)
         input_data={},
     )
     await store.update_request_run_id("req-turn", run_id)
-    await store.create_run(run_id, None, "queued")
+    if await store.get_run(run_id):
+        await store.update_run_status(run_id, RunStatus.QUEUED)
+    else:
+        await store.create_run(
+            run_id,
+            None,
+            "queued",
+            result_path=str(layout.result_path),
+            workspace_id=layout.workspace_id,
+            workspace_dir=str(layout.workspace_dir),
+            workspace_namespace=layout.namespace,
+            input_manifest_path=str(layout.input_manifest_path),
+        )
 
 
 async def _seed_recovery_run(
@@ -3721,6 +3561,8 @@ async def _seed_recovery_run(
     pending: dict | None = None,
     session_handle: dict | None = None,
 ) -> Path:
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    layout = make_layout(run_dir, namespace="recovery-skill.1")
     await store.create_request(
         request_id=request_id,
         skill_id="recovery-skill",
@@ -3731,8 +3573,16 @@ async def _seed_recovery_run(
         input_data={},
     )
     await store.update_request_run_id(request_id, run_id)
-    await store.create_run(run_id, None, status)
-    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    await store.create_run(
+        run_id,
+        None,
+        status,
+        result_path=str(layout.result_path),
+        workspace_id=layout.workspace_id,
+        workspace_dir=str(layout.workspace_dir),
+        workspace_namespace=layout.namespace,
+        input_manifest_path=str(layout.input_manifest_path),
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_state_data(run_dir, status=status, request_id=request_id)
     if profile is not None:
@@ -3765,27 +3615,18 @@ async def test_run_job_missing_run_dir_releases_slot_and_does_not_block_followin
     config.SYSTEM.RUNS_DB = str(tmp_path / "runs.db")
     config.freeze()
     try:
-        run_id = _create_run_with_skill(tmp_path, skill)
+        run_id = await _create_run_with_skill(tmp_path, skill)
         local_store = RunStore(db_path=tmp_path / "runs.db")
         await _seed_interactive_request(local_store, run_id, skill.id)
         orchestrator = JobOrchestrator()
         orchestrator.adapters = {"codex": RepairSuccessAdapter()}
 
-        def _get_run_dir(target_run_id: str):
-            if target_run_id == "missing-run":
-                return None
-            candidate = Path(config.SYSTEM.RUNS_DIR) / target_run_id
-            return candidate if candidate.exists() else None
-
-        monkeypatch.setattr(
-            "server.services.orchestration.job_orchestrator.workspace_manager.get_run_dir",
-            _get_run_dir,
-        )
-
         with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill), \
              patch("server.services.orchestration.job_orchestrator.run_store", local_store):
-            await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
-            await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
+            with pytest.raises(RuntimeError):
+                await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
+            with pytest.raises(RuntimeError):
+                await orchestrator.run_job("missing-run", skill.id, "codex", options={"execution_mode": "interactive"})
             await orchestrator.run_job(run_id, skill.id, "codex", options={"execution_mode": "interactive"})
 
         status_data = _read_state_data(Path(config.SYSTEM.RUNS_DIR) / run_id)

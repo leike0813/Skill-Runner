@@ -7,6 +7,7 @@ fastapi = pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from server.main import app
+from tests.common.workspace_layout_helpers import layout_record
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -23,11 +24,14 @@ async def test_management_protocol_history_streams(monkeypatch, tmp_path: Path, 
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            return_value=layout_record(
+                request_id="req-1",
+                run_id="run-protocol",
+                workspace=run_dir,
+                namespace="demo-skill.1",
+            )
+        ),
     )
 
     async def _list_protocol_history(**kwargs):
@@ -65,11 +69,14 @@ async def test_management_protocol_history_filters(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            return_value=layout_record(
+                request_id="req-1",
+                run_id="run-protocol",
+                workspace=run_dir,
+                namespace="demo-skill.1",
+            )
+        ),
     )
 
     async def _list_protocol_history(**kwargs):
@@ -113,11 +120,14 @@ async def test_management_protocol_history_rejects_invalid_stream(monkeypatch, t
 
     monkeypatch.setattr(
         "server.routers.management.run_store.get_request",
-        AsyncMock(return_value={"request_id": "req-1", "run_id": "run-protocol"}),
-    )
-    monkeypatch.setattr(
-        "server.routers.management.workspace_manager.get_run_dir",
-        lambda _run_id: run_dir,
+        AsyncMock(
+            return_value=layout_record(
+                request_id="req-1",
+                run_id="run-protocol",
+                workspace=run_dir,
+                namespace="demo-skill.1",
+            )
+        ),
     )
 
     response = await _request(

@@ -997,6 +997,12 @@ Interactive pending payloads MUST continue exposing compatibility fields such as
 - **AND** the pending card MUST use `ui_hints.prompt` as its main card text
 - **AND** the pending card MUST NOT repeat the chat `message`
 
+#### Scenario: string choice hints remain API-compatible
+- **WHEN** a valid pending branch provides `ui_hints.options` as non-empty string values
+- **THEN** the pending API MUST normalize each string choice into a `pending.options`
+  item whose `label` and `value` both equal that string
+- **AND** blank string choices MUST be ignored
+
 #### Scenario: missing `ui_hints.prompt`
 - **WHEN** a pending payload lacks `ui_hints.prompt`
 - **THEN** the pending card MUST fall back to the stable default open-text prompt
@@ -1081,4 +1087,3 @@ After a job request has been accepted, the system MUST tolerate clients polling 
 - **GIVEN** no request exists for the supplied `request_id`
 - **WHEN** the client calls a status, event, or chat endpoint
 - **THEN** the system returns `404`
-

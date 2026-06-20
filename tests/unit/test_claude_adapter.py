@@ -55,6 +55,8 @@ async def test_execute_persists_first_attempt_spawn_command_with_json_schema(tmp
                 skill,
                 options={
                     "__attempt_number": 1,
+                    "__audit_dir": str(audit_dir),
+                    "__input_manifest_path": str(request_input_path),
                     "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
                 },
             )
@@ -100,6 +102,8 @@ async def test_execute_skips_json_schema_when_materialized_schema_is_missing(tmp
                 skill,
                 options={
                     "__attempt_number": 1,
+                    "__audit_dir": str(audit_dir),
+                    "__input_manifest_path": str(request_input_path),
                     "__target_output_schema_relpath": ".audit/contracts/target_output_schema.json",
                 },
             )
