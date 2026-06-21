@@ -46,7 +46,7 @@
 - [x] **添加 MCP 配置功能**
 - [ ] 对单元测试进行全面审查、规范化、去重
 - [ ] **全局级 sticky session 功能，实现常驻会话/管理/服务化**
-- [ ] **MCP 支持**
+- [x] **MCP 支持**
 - [ ] skill-to-skill
 - [ ] joint-execution
 - [ ] CI/CD流水线
