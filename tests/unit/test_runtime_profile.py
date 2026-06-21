@@ -48,4 +48,35 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     assert env["ZOTERO_BRIDGE_PROFILE"] == str(
         profile.agent_cache_root / "zotero-bridge" / "bridge-profile.json"
     )
+    assert env["ZOTERO_BRIDGE_BIN"] == str(profile.npm_prefix / "bin" / "zotero-bridge")
     assert env["OPENCODE_ENABLE_EXA"] == "1"
+
+
+def test_runtime_profile_preserves_explicit_zotero_bridge_bin(monkeypatch, tmp_path):
+    monkeypatch.setenv("SKILL_RUNNER_RUNTIME_MODE", "local")
+    monkeypatch.setenv("SKILL_RUNNER_AGENT_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("SKILL_RUNNER_NPM_PREFIX", str(tmp_path / "npm"))
+    runtime_profile.reset_runtime_profile_cache()
+
+    profile = runtime_profile.get_runtime_profile()
+    explicit = str(tmp_path / "custom" / "zotero-bridge")
+    env = profile.build_subprocess_env({"ZOTERO_BRIDGE_BIN": explicit})
+
+    assert env["ZOTERO_BRIDGE_BIN"] == explicit
+
+
+def test_runtime_profile_windows_zotero_bridge_bin_path(tmp_path):
+    profile = runtime_profile.RuntimeProfile(
+        mode="local",
+        platform="windows",
+        data_dir=tmp_path / "data",
+        agent_cache_root=tmp_path / "cache",
+        agent_home=tmp_path / "cache" / "agent-home",
+        npm_prefix=tmp_path / "cache" / "npm",
+        uv_cache_dir=tmp_path / "cache" / "uv_cache",
+        uv_project_environment=tmp_path / "cache" / "uv_venv",
+    )
+
+    env = profile.build_subprocess_env({})
+
+    assert env["ZOTERO_BRIDGE_BIN"] == str(profile.npm_prefix / "bin" / "zotero-bridge.exe")

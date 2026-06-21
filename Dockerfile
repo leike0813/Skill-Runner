@@ -13,6 +13,7 @@ ENV PYTHONUNBUFFERED=1 \
     SKILL_RUNNER_AGENT_HOME=/opt/cache/skill-runner/agent-home \
     SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm \
     NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm \
+    ZOTERO_BRIDGE_BIN=/opt/cache/skill-runner/npm/bin/zotero-bridge \
     PATH=/opt/venv/bin:/opt/cache/skill-runner/npm/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache \
     UV_PROJECT_ENVIRONMENT=/opt/cache/skill-runner/uv_venv \

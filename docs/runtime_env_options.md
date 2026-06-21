@@ -58,6 +58,6 @@ Expired run cleanup and manual `/v1/jobs/cleanup` remove matching env secret fil
 
 ## Zotero Bridge Usage
 
-Zotero Bridge connection values are request-scoped env values. The managed deployment supplies only `ZOTERO_BRIDGE_PROFILE`; callers pass `ZOTERO_BRIDGE_ENDPOINT`, `ZOTERO_BRIDGE_TOKEN`, and optionally `ZOTERO_BRIDGE_CONNECTION_MODE` through `runtime_options.env`.
+Zotero Bridge connection values are request-scoped env values. The managed deployment supplies `ZOTERO_BRIDGE_PROFILE` and `ZOTERO_BRIDGE_BIN`; callers pass `ZOTERO_BRIDGE_ENDPOINT`, `ZOTERO_BRIDGE_TOKEN`, and optionally `ZOTERO_BRIDGE_CONNECTION_MODE` through `runtime_options.env`.
 
 The token is treated like any other runtime env secret: raw values stay in the vault and are not exposed through DB records, status/detail APIs, audit files, or bundles.

@@ -20,11 +20,13 @@ The system SHALL install the current platform's `zotero-bridge` executable from 
 - **THEN** bootstrap copies the declared binary to `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge`
 - **AND** the installed file is executable
 - **AND** agent subprocess PATH resolution can find `zotero-bridge`
+- **AND** agent subprocess env includes `ZOTERO_BRIDGE_BIN=<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge`
 
 #### Scenario: Windows platform install
 - **WHEN** the manifest contains a `win32-x64` entry
 - **THEN** bootstrap copies the declared executable to `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge.exe`
 - **AND** writes `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge.cmd` as a command shim
+- **AND** agent subprocess env includes `ZOTERO_BRIDGE_BIN=<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge.exe`
 
 #### Scenario: sha256 mismatch fails fast
 - **WHEN** the bundled binary content does not match the manifest SHA256

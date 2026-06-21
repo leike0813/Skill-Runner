@@ -144,6 +144,7 @@ The entrypoint and application startup refresh engine versions and persist statu
 - Engine CLI install/upgrade/check always use managed prefix:
   - `SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm`
   - `NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm`
+  - `ZOTERO_BRIDGE_BIN=/opt/cache/skill-runner/npm/bin/zotero-bridge`
 - Cache locations are centralized under `/opt/cache/skill-runner`:
   - `SKILL_RUNNER_AGENT_CACHE_DIR=/opt/cache/skill-runner`
   - `UV_CACHE_DIR=/opt/cache/skill-runner/uv_cache`
@@ -391,6 +392,7 @@ docker run --rm -p 9813:9813 \
   -e SKILL_RUNNER_AGENT_HOME=/opt/cache/skill-runner/agent-home \
   -e SKILL_RUNNER_NPM_PREFIX=/opt/cache/skill-runner/npm \
   -e NPM_CONFIG_PREFIX=/opt/cache/skill-runner/npm \
+  -e ZOTERO_BRIDGE_BIN=/opt/cache/skill-runner/npm/bin/zotero-bridge \
   -e SKILL_RUNNER_DATA_DIR=/data \
   -v "$(pwd)/skills:/app/skills" \
   -v skillrunner_cache:/opt/cache \

@@ -189,6 +189,7 @@ Containerized harness entrypoint:
 | `SKILL_RUNNER_AGENT_HOME` | Isolated agent config home | auto |
 | `SKILL_RUNNER_AGENT_CACHE_DIR` | Agent cache root | auto |
 | `SKILL_RUNNER_NPM_PREFIX` | Managed CLI install prefix | auto |
+| `ZOTERO_BRIDGE_BIN` | Managed Zotero Bridge CLI executable path | `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge` |
 | `SKILL_RUNNER_RUNTIME_MODE` | `local` or `container` | auto |
 | `SKILL_RUNNER_LOCAL_PORT` | `skill-runnerctl` local default port | `29813` |
 | `SKILL_RUNNER_LOCAL_PORT_FALLBACK_SPAN` | `skill-runnerctl` local fallback span | `10` |

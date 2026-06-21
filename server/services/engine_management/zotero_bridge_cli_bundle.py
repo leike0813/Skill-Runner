@@ -13,7 +13,6 @@ from server.services.engine_management.runtime_profile import RuntimeProfile
 logger = logging.getLogger(__name__)
 
 PLUGIN_SUBMODULE_RELATIVE_PATH = Path("plugins") / "zotero-bridge-cli-bundle"
-ZOTERO_BRIDGE_COMMAND = "zotero-bridge"
 ZOTERO_BRIDGE_PROFILE_ENV = "ZOTERO_BRIDGE_PROFILE"
 ZOTERO_BRIDGE_ENDPOINT_ENV = "ZOTERO_BRIDGE_ENDPOINT"
 ZOTERO_BRIDGE_TOKEN_ENV = "ZOTERO_BRIDGE_TOKEN"
@@ -45,6 +44,10 @@ class ZoteroBridgeInstallResult:
 
 def zotero_bridge_profile_path(profile: RuntimeProfile) -> Path:
     return profile.agent_cache_root / ZOTERO_BRIDGE_PROFILE_RELATIVE_PATH
+
+
+def zotero_bridge_bin_path(profile: RuntimeProfile) -> Path:
+    return profile.zotero_bridge_bin_path
 
 
 def find_default_bundle_root() -> Path:
@@ -219,8 +222,7 @@ def _install_cli(
 
     bin_dir = profile.npm_prefix / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    target_name = "zotero-bridge.exe" if platform_key.startswith("win32-") else ZOTERO_BRIDGE_COMMAND
-    target = bin_dir / target_name
+    target = zotero_bridge_bin_path(profile)
     _copy_file_atomically(source, target)
     if not platform_key.startswith("win32-"):
         os.chmod(target, 0o755)

@@ -12,6 +12,7 @@ from server.services.engine_management.zotero_bridge_cli_bundle import (
     ZoteroBridgeBundleError,
     ensure_zotero_bridge_managed_plugin,
     resolve_bundle_platform_key,
+    zotero_bridge_bin_path,
 )
 
 
@@ -115,10 +116,11 @@ def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(tmp_p
         machine="x86_64",
     )
 
-    installed = profile.npm_prefix / "bin" / "zotero-bridge"
+    installed = zotero_bridge_bin_path(profile)
     assert result.cli_installed is True
     assert result.platform_key == "linux-x64"
     assert installed.exists()
+    assert profile.build_subprocess_env({})["ZOTERO_BRIDGE_BIN"] == str(installed)
     assert stat.S_IMODE(installed.stat().st_mode) & stat.S_IXUSR
     profile_payload = json.loads(
         (profile.agent_cache_root / "zotero-bridge" / "bridge-profile.json").read_text(
@@ -150,7 +152,10 @@ def test_ensure_zotero_bridge_installs_windows_exe_and_cmd_shim(tmp_path: Path) 
         machine="AMD64",
     )
 
-    assert (profile.npm_prefix / "bin" / "zotero-bridge.exe").exists()
+    assert zotero_bridge_bin_path(profile).exists()
+    assert profile.build_subprocess_env({})["ZOTERO_BRIDGE_BIN"] == str(
+        zotero_bridge_bin_path(profile)
+    )
     shim = profile.npm_prefix / "bin" / "zotero-bridge.cmd"
     assert shim.exists()
     assert "zotero-bridge.exe" in shim.read_text(encoding="utf-8")
@@ -203,3 +208,20 @@ def test_zotero_bridge_submodule_and_docker_wiring_are_declared() -> None:
 
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
     assert "COPY plugins ./plugins" in dockerfile
+    assert "ZOTERO_BRIDGE_BIN=/opt/cache/skill-runner/npm/bin/zotero-bridge" in dockerfile
+
+    for compose_path in ("docker-compose.yml", "docker-compose.release.tmpl.yml"):
+        compose = Path(compose_path).read_text(encoding="utf-8")
+        assert "ZOTERO_BRIDGE_BIN: /opt/cache/skill-runner/npm/bin/zotero-bridge" in compose
+
+    for script_path in ("scripts/skill-runnerctl", "scripts/deploy_local.sh"):
+        script = Path(script_path).read_text(encoding="utf-8")
+        assert (
+            'ZOTERO_BRIDGE_BIN="${ZOTERO_BRIDGE_BIN:-$SKILL_RUNNER_NPM_PREFIX/bin/zotero-bridge}"'
+            in script
+        )
+
+    for script_path in ("scripts/skill-runnerctl.ps1", "scripts/deploy_local.ps1"):
+        script = Path(script_path).read_text(encoding="utf-8")
+        assert "ZOTERO_BRIDGE_BIN" in script
+        assert "zotero-bridge.exe" in script

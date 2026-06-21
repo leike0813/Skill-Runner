@@ -27,6 +27,14 @@ The binary hash must match the manifest `sha256`. A mismatch fails the install s
 
 Local deployment uses the prefix prepared by `scripts/skill-runnerctl`. Docker deployment uses `/opt/cache/skill-runner/npm/bin`, which is already on PATH in the image.
 
+Agent subprocess environments include the absolute managed executable path:
+
+```text
+ZOTERO_BRIDGE_BIN=<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge
+```
+
+On Windows, the value points at `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge.exe`.
+
 ## Global Wrapper Skill
 
 Bootstrap syncs the bundled wrapper skill into managed agent homes:

@@ -604,6 +604,7 @@ Run 状态字段：
 | `SKILL_RUNNER_AGENT_CACHE_DIR` | Agent CLI 缓存根目录 | 平台相关（容器内 `/opt/cache/skill-runner`） |
 | `SKILL_RUNNER_AGENT_HOME` | Agent 隔离 HOME 目录 | `<cache_dir>/agent-home` |
 | `SKILL_RUNNER_NPM_PREFIX` | 引擎 CLI 的 npm 安装前缀 | 自动检测 |
+| `ZOTERO_BRIDGE_BIN` | Zotero Bridge CLI 可执行文件路径 | `<SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge` |
 | `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` | 引擎执行硬超时 | `1200` |
 | `SKILL_RUNNER_SESSION_TIMEOUT_SEC` | 会话超时 | `1200` |
 | `ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED` | 是否持久化写入 `data/engine_auth_sessions`（调试用途） | `false` |

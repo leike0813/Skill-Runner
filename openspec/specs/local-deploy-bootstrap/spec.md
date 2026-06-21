@@ -47,6 +47,7 @@
 #### Scenario: Zotero Bridge uses the deployment managed prefix
 - **WHEN** 本地或 Docker bootstrap 初始化 managed layout
 - **THEN** Zotero Bridge CLI 被安装到当前 `SKILL_RUNNER_NPM_PREFIX` 对应的 bin 目录
+- **AND** 部署环境提供 `ZOTERO_BRIDGE_BIN` 指向该 managed 可执行文件
 - **AND** wrapper skill 被安装到当前 `SKILL_RUNNER_AGENT_HOME` 下的各 agent 全局 skill 目录
 - **AND** managed profile 被安装到当前 `SKILL_RUNNER_AGENT_CACHE_DIR`
 
@@ -423,4 +424,3 @@ Default managed bootstrap/ensure SHALL include `qwen` as a supported engine targ
 - **WHEN** 用户查看容器化部署文档
 - **THEN** 文档 MAY 提供诸如 `chmod 777 ./data` 的本地/调试兜底示例
 - **AND** MUST 明确这属于部署者自管的可选配置而不是系统默认行为
-
