@@ -96,3 +96,86 @@ def test_resolve_output_artifact_paths_rejects_nested_artifact_manifest(tmp_path
     assert result.assembly_errors
     assert BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT in result.assembly_errors[0]
 
+
+def test_resolve_output_artifact_paths_reads_matching_one_of_branch(tmp_path):
+    run_dir = tmp_path / "run"
+    (run_dir / "result" / "sections").mkdir(parents=True)
+    (run_dir / "result" / "deep-reading.html").write_text("<html></html>", encoding="utf-8")
+    (run_dir / "result" / "sections" / "diagnostics.json").write_text("{}", encoding="utf-8")
+    (run_dir / "result" / "deep-reading-artifacts.json").write_text(
+        json.dumps(
+            {
+                "html": "result/deep-reading.html",
+                "diagnostics": "result/sections/diagnostics.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    skill = _skill_with_output_schema(
+        tmp_path,
+        {
+            "type": "object",
+            "oneOf": [
+                {
+                    "title": "final",
+                    "type": "object",
+                    "required": [
+                        "kind",
+                        "status",
+                        "diagnostics_path",
+                        "html_path",
+                        "artifact_manifest_path",
+                    ],
+                    "properties": {
+                        "kind": {"const": "literature_deep_reading_finalized"},
+                        "status": {"const": "completed"},
+                        "diagnostics_path": {
+                            "type": "string",
+                            "x-type": "artifact",
+                            "x-role": "diagnostics",
+                        },
+                        "html_path": {
+                            "type": "string",
+                            "x-type": "artifact",
+                            "x-role": "deep-reading-html",
+                        },
+                        "artifact_manifest_path": {
+                            "type": "string",
+                            "x-type": "artifact",
+                            "x-role": "artifact-manifest",
+                        },
+                    },
+                },
+                {
+                    "title": "error",
+                    "type": "object",
+                    "required": ["kind", "status", "diagnostics_path"],
+                    "properties": {
+                        "kind": {"const": "literature_deep_reading_error"},
+                        "status": {"const": "failed"},
+                        "diagnostics_path": {"type": "string"},
+                    },
+                },
+            ],
+        },
+    )
+
+    result = resolve_output_artifact_paths(
+        skill=skill,
+        run_dir=run_dir,
+        output_data={
+            "kind": "literature_deep_reading_finalized",
+            "status": "completed",
+            "diagnostics_path": "result/sections/diagnostics.json",
+            "html_path": "result/deep-reading.html",
+            "artifact_manifest_path": "result/deep-reading-artifacts.json",
+        },
+    )
+
+    assert result.artifacts == [
+        "result/deep-reading-artifacts.json",
+        "result/deep-reading.html",
+        "result/sections/diagnostics.json",
+    ]
+    assert result.missing_required_fields == []
+    assert result.assembly_errors == []

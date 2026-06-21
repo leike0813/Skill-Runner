@@ -78,7 +78,7 @@ def resolve_output_artifact_paths(
     assembly_errors: List[str] = []
     normalized_run_dir = run_dir.resolve()
 
-    for field in _load_output_artifact_fields(skill):
+    for field in _load_output_artifact_fields(skill, output_data=updated_output):
         raw_value = updated_output.get(field.name)
         if not isinstance(raw_value, str) or not raw_value.strip():
             if field.required:
@@ -142,34 +142,125 @@ def _append_unique_warning(warnings: List[str], code: str) -> None:
         warnings.append(code)
 
 
-def _load_output_artifact_fields(skill: SkillManifest) -> List[_ArtifactField]:
+def _load_output_artifact_fields(
+    skill: SkillManifest,
+    *,
+    output_data: Dict[str, Any] | None = None,
+) -> List[_ArtifactField]:
     schema = _load_output_schema(skill)
     if not isinstance(schema, dict):
         return []
+    output_payload = output_data if isinstance(output_data, dict) else {}
+    fields: List[_ArtifactField] = []
+    _collect_output_artifact_fields(
+        schema=schema,
+        output_data=output_payload,
+        fields=fields,
+    )
+    merged: dict[str, _ArtifactField] = {}
+    for field in fields:
+        existing = merged.get(field.name)
+        if existing is None:
+            merged[field.name] = field
+            continue
+        merged[field.name] = _ArtifactField(
+            name=field.name,
+            required=existing.required or field.required,
+            role=existing.role or field.role,
+        )
+    return list(merged.values())
+
+
+def _collect_output_artifact_fields(
+    *,
+    schema: Dict[str, Any],
+    output_data: Dict[str, Any],
+    fields: List[_ArtifactField],
+) -> None:
     properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        return []
     required_fields = {
         field.strip()
         for field in schema.get("required", [])
         if isinstance(field, str) and field.strip()
     }
-    fields: List[_ArtifactField] = []
+    if isinstance(properties, dict):
+        for field_name, field_schema in properties.items():
+            if not isinstance(field_name, str) or not isinstance(field_schema, dict):
+                continue
+            if str(field_schema.get("x-type") or "").strip().lower() not in {"artifact", "file"}:
+                continue
+            role_obj = field_schema.get("x-role")
+            role = role_obj.strip() if isinstance(role_obj, str) and role_obj.strip() else None
+            fields.append(
+                _ArtifactField(
+                    name=field_name,
+                    required=field_name in required_fields,
+                    role=role,
+                )
+            )
+
+    for sub_schema in _schema_list(schema.get("allOf")):
+        _collect_output_artifact_fields(
+            schema=sub_schema,
+            output_data=output_data,
+            fields=fields,
+        )
+
+    for keyword in ("oneOf", "anyOf"):
+        branch_schemas = _schema_list(schema.get(keyword))
+        if not branch_schemas:
+            continue
+        matching = [
+            branch_schema
+            for branch_schema in branch_schemas
+            if _schema_branch_matches_output(branch_schema, output_data)
+        ]
+        for branch_schema in matching or branch_schemas:
+            _collect_output_artifact_fields(
+                schema=branch_schema,
+                output_data=output_data,
+                fields=fields,
+            )
+
+
+def _schema_list(raw_value: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_value, list):
+        return []
+    return [item for item in raw_value if isinstance(item, dict)]
+
+
+def _schema_branch_matches_output(
+    schema: Dict[str, Any],
+    output_data: Dict[str, Any],
+) -> bool:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return True
+
+    discriminators_seen = 0
     for field_name, field_schema in properties.items():
         if not isinstance(field_name, str) or not isinstance(field_schema, dict):
             continue
-        if str(field_schema.get("x-type") or "").strip().lower() not in {"artifact", "file"}:
+        if field_name not in output_data:
             continue
-        role_obj = field_schema.get("x-role")
-        role = role_obj.strip() if isinstance(role_obj, str) and role_obj.strip() else None
-        fields.append(
-            _ArtifactField(
-                name=field_name,
-                required=field_name in required_fields,
-                role=role,
-            )
-        )
-    return fields
+        field_value = output_data.get(field_name)
+        if "const" in field_schema:
+            discriminators_seen += 1
+            if field_value != field_schema.get("const"):
+                return False
+        enum_value = field_schema.get("enum")
+        if isinstance(enum_value, list):
+            discriminators_seen += 1
+            if field_value not in enum_value:
+                return False
+
+    if discriminators_seen > 0:
+        return True
+
+    for sub_schema in _schema_list(schema.get("allOf")):
+        if not _schema_branch_matches_output(sub_schema, output_data):
+            return False
+    return True
 
 
 def _load_output_schema(skill: SkillManifest) -> Dict[str, Any] | None:
