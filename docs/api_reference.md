@@ -561,7 +561,7 @@
 - `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
   - `output` schema 必须可解析；`input` / `parameter` schema 可选，缺失时跳过对应校验；
   - `input.schema.json` 的 `x-input-source` 仅允许 `file` / `inline`；
-  - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`；
+  - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`，且 `x-type: "artifact"` 必须声明非空 `x-role`；
   - 所有解析到的 schema 均需满足对象型 JSON Schema 基本结构约束。
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json.engines` 为可选字段；缺失时默认按系统支持的全部引擎处理。
@@ -665,6 +665,13 @@
   - file 类型输入的路径声明也通过请求体 `input` 提交；
   - `/upload` 仅负责上传 zip 并解压到 `uploads/`；
   - 旧的 `uploads/<input_key>` 严格键匹配仅作为兼容回退，不再是主协议。
+- **Workspace file bindings**:
+  - `runtime_options.workspace.mode="reuse"` 时可声明 `runtime_options.workspace.file_bindings`，把同一物理 workspace 内已有文件 materialize 到当前 run 的 `uploads/<target_path>`。
+  - 每个 binding 包含 `input_key`、`source_request_id`、`source_path`、`target_path`。
+  - `input[input_key]` 必须存在且等于 `target_path`；`source_path` 是 workspace-relative path；`target_path` 是 uploads-relative path。
+  - `source_request_id` 必须解析为 succeeded request，且其物理 workspace 必须与复用 workspace 相同。
+  - 同一请求内重复 `input_key` 或 `target_path`、非法/越界路径、缺失源文件或目录目标都会返回 4xx。
+  - upload flow 中 bindings 在 Zip 解压后 materialize，因此同 target 时 binding 覆盖 Zip 文件；manifest/cache key 使用覆盖后的 uploads 内容。
 - **input.json**: 系统会将请求保存下来（包含 `input` 与 `parameter`），用于审计。
 - **严格校验**: 缺少 required 的输入/参数/输出字段时会标记为 failed（不会仅给 warning）。
 - **并发保护**: 当执行队列已满时，`POST /v1/jobs` 或 `POST /v1/jobs/{request_id}/upload` 会返回 `429`。
@@ -919,6 +926,8 @@
 **说明**:
 - 普通 bundle 采用 contract-driven 语义。新 run 读取当前 request 的实际 `resultJsonPath`，物理 zip/manifest 位于 `bundle/<safeSkillId>.<n>/`；旧 `result/result.json` 与 root `bundle/` 只作为 legacy fallback。
 - bundle 内容仅包含当前 run 的 result、同目录 feedback sidecar（存在时）以及该 result payload 引用的 resolved artifact 文件。
+- `x-role: "artifact-manifest"` 的 output artifact 字段会展开为 manifest 文件本身和 manifest 内所有 workspace-relative 文件路径。
+- 若 `result.json.artifacts` 或 artifact manifest 中的路径缺失、非法、非字符串，或 manifest 不是扁平 object，后端返回明确 `BUNDLE_ASSEMBLY_*` diagnostic，不会静默生成缺项 bundle。
 
 ### 下载 Debug Bundle (Get Debug Bundle)
 `GET /v1/jobs/{request_id}/bundle/debug`

@@ -325,6 +325,58 @@ def test_rejects_invalid_output_schema_artifact_marker(tmp_path):
         )
 
 
+def test_rejects_output_schema_artifact_without_role(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "missing_artifact_role.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            output_schema_override={
+                "type": "object",
+                "properties": {
+                    "out_path": {"type": "string", "x-type": "artifact"}
+                },
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_missing_artifact_role")
+    with pytest.raises(ValueError, match="Invalid output schema"):
+        validator.validate_skill_dir(
+            tmp_path / "stage_missing_artifact_role" / top,
+            top,
+            require_version=False,
+        )
+
+
+def test_accepts_output_schema_artifact_manifest_role(tmp_path):
+    validator = SkillPackageValidator()
+    zip_path = tmp_path / "artifact_manifest_role.zip"
+    zip_path.write_bytes(
+        _build_skill_zip(
+            output_schema_override={
+                "type": "object",
+                "properties": {
+                    "manifest_path": {
+                        "type": "string",
+                        "x-type": "artifact",
+                        "x-role": "artifact-manifest",
+                    }
+                },
+                "required": ["manifest_path"],
+            }
+        )
+    )
+    top = validator.inspect_zip_top_level_from_path(zip_path)
+    validator.extract_zip_safe(zip_path, tmp_path / "stage_artifact_manifest_role")
+    skill_id, version = validator.validate_skill_dir(
+        tmp_path / "stage_artifact_manifest_role" / top,
+        top,
+        require_version=False,
+    )
+    assert skill_id == "demo-temp-skill"
+    assert version is None
+
+
 def test_accepts_output_schema_with_root_object_union(tmp_path):
     validator = SkillPackageValidator()
     zip_path = tmp_path / "object_union_output_schema.zip"

@@ -217,6 +217,13 @@ def _describe_type(field_schema: Dict[str, Any]) -> str:
 
 
 def _describe_field(field_schema: Dict[str, Any]) -> str:
+    if (
+        field_schema.get("x-type") == "artifact"
+        and field_schema.get("x-role") == "artifact-manifest"
+    ):
+        return (
+            "Artifact manifest path. Write a flat JSON object whose values are workspace-relative final artifact paths; runtime includes the manifest and every listed file in the bundle."
+        )
     if field_schema.get("x-type") in {"artifact", "file"}:
         return (
             "Artifact output path. Prefer writing final deliverables under `<cwd>/artifacts/`; runtime resolves the final path into a bundle-relative path."
@@ -314,6 +321,11 @@ def _build_skeleton(properties: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _skeleton_value(field_schema: Dict[str, Any]) -> Any:
+    if (
+        field_schema.get("x-type") == "artifact"
+        and field_schema.get("x-role") == "artifact-manifest"
+    ):
+        return "artifacts/manifest.json"
     if field_schema.get("x-type") in {"artifact", "file"}:
         return "artifacts/..."
 

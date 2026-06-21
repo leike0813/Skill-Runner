@@ -4,6 +4,10 @@ from pathlib import Path
 
 from server.runtime.workspace_layout import RunWorkspaceLayout
 from server.services.orchestration.job_orchestrator import JobOrchestrator
+from server.services.orchestration.run_bundle_service import (
+    BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING,
+    BundleAssemblyError,
+)
 
 
 def _layout(run_dir: Path, namespace: str = "demo-skill.1") -> RunWorkspaceLayout:
@@ -77,6 +81,25 @@ def test_bundle_manifest_debug_false_filters_logs(tmp_path):
         assert "artifacts/text.md" in entries
         assert "result/demo-skill.1/result.json" in entries
         assert "uploads/input.txt" not in entries
+
+
+def test_bundle_manifest_rejects_missing_result_artifact_entry(tmp_path):
+    run_dir = tmp_path / "run"
+    layout = _layout(run_dir)
+    layout.result_path.parent.mkdir(parents=True)
+    layout.result_path.write_text(
+        '{"status":"success","artifacts":["artifacts/missing.txt"]}',
+        encoding="utf-8",
+    )
+
+    orchestrator = JobOrchestrator()
+    try:
+        orchestrator.build_run_bundle(run_dir, debug=False, layout=layout)
+    except BundleAssemblyError as exc:
+        assert exc.code == BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING
+        assert exc.path == "artifacts/missing.txt"
+    else:
+        raise AssertionError("missing artifact entry should fail bundle assembly")
 
 
 def test_bundle_manifest_includes_namespaced_feedback_sidecar(tmp_path):

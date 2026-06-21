@@ -39,6 +39,48 @@
           "minLength": 1
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "x-type": {
+                "const": "artifact"
+              }
+            },
+            "required": [
+              "x-type"
+            ]
+          },
+          "then": {
+            "required": [
+              "x-role"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "x-type": {
+                "const": "artifact"
+              },
+              "x-role": {
+                "const": "artifact-manifest"
+              }
+            },
+            "required": [
+              "x-type",
+              "x-role"
+            ]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "const": "string"
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": true
     }
   }

@@ -149,6 +149,48 @@ def _create_inline_input_skill(base_dir: Path, skill_id: str) -> SkillManifest:
     )
 
 
+def _create_file_binding_skill(
+    base_dir: Path,
+    skill_id: str,
+    *,
+    required_keys: list[str] | None = None,
+) -> SkillManifest:
+    skill_dir = base_dir / skill_id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("skill")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": skill_id,
+                "engines": ["codex"],
+                "execution_modes": ["auto", "interactive"],
+            }
+        )
+    )
+    if required_keys is None:
+        required_keys = ["artifact_file"]
+    (assets_dir / "input.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    key: {"type": "string", "x-input-source": "file"}
+                    for key in required_keys
+                },
+                "required": required_keys,
+            }
+        )
+    )
+    return SkillManifest(
+        id=skill_id,
+        path=skill_dir,
+        schemas={"input": "assets/input.schema.json"},
+        engines=["codex"],
+        execution_modes=["auto", "interactive"],
+    )
+
+
 def _patch_skill_registry(monkeypatch: pytest.MonkeyPatch, skill: SkillManifest) -> None:
     def _get_skill(skill_id: str) -> SkillManifest | None:
         return skill if skill_id == skill.id else None
@@ -167,6 +209,133 @@ def _manifest_hash_for_content(tmp_path: Path, filename: str, content: str) -> s
     (uploads_dir / filename).write_text(content)
     manifest = build_input_manifest(uploads_dir)
     return compute_input_manifest_hash(manifest)
+
+
+async def _create_cached_succeeded_run(
+    store: RunStore,
+    *,
+    cache_key: str,
+    skill_id: str = "demo-skill",
+) -> dict[str, Any]:
+    run_id = f"cached-{cache_key[:16]}"
+    run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    namespace = f"{skill_id}.1"
+    artifact_path = run_dir / "artifacts" / "output.txt"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("ok", encoding="utf-8")
+    result_path = run_dir / "result" / namespace / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "success",
+                "data": {"ok": True},
+                "artifacts": ["artifacts/output.txt"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    input_manifest_path = run_dir / ".audit" / namespace / "input_manifest.json"
+    input_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    input_manifest_path.write_text("{}", encoding="utf-8")
+    await store.create_run(
+        run_id,
+        cache_key,
+        RunStatus.SUCCEEDED,
+        result_path=str(result_path),
+        workspace_id=run_id,
+        workspace_dir=str(run_dir),
+        workspace_namespace=namespace,
+        input_manifest_path=str(input_manifest_path),
+        workspace_output_token=f"token-{run_id}",
+    )
+    await store.record_cache_entry(cache_key, run_id)
+    return {
+        "run_id": run_id,
+        "workspace_dir": str(run_dir),
+        "workspace_namespace": namespace,
+        "result_path": str(result_path),
+    }
+
+
+async def _create_succeeded_workspace_request(
+    store: RunStore,
+    *,
+    request_id: str,
+    run_id: str,
+    skill_id: str = "demo-skill",
+    workspace_dir: Path | None = None,
+    workspace_output_token: str | None = None,
+) -> Path:
+    if workspace_dir is None:
+        workspace_dir = Path(config.SYSTEM.WORKSPACES_DIR) / run_id
+    namespace = f"{skill_id}.1"
+    result_path = workspace_dir / "result" / namespace / "result.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text('{"status":"success","data":{"ok":true}}', encoding="utf-8")
+    await store.create_request(
+        request_id=request_id,
+        skill_id=skill_id,
+        engine="codex",
+        parameter={},
+        engine_options={},
+        runtime_options={},
+        input_data={},
+    )
+    await store.create_run(
+        run_id,
+        None,
+        RunStatus.SUCCEEDED,
+        result_path=str(result_path),
+        workspace_id=workspace_dir.name,
+        workspace_dir=str(workspace_dir),
+        workspace_namespace=namespace,
+        workspace_output_token=workspace_output_token or f"token-{run_id}",
+    )
+    await store.bind_request_run_id(
+        request_id,
+        run_id,
+        status=RunStatus.SUCCEEDED.value,
+    )
+    return workspace_dir
+
+
+async def _assert_cached_request_routes(
+    store: RunStore,
+    *,
+    request_id: str,
+    cached_run: dict[str, Any],
+) -> None:
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    assert request_record["run_id"] == cached_run["run_id"]
+    assert request_record["workspace_dir"] == cached_run["workspace_dir"]
+    assert request_record["workspace_namespace"] == cached_run["workspace_namespace"]
+    assert request_record["result_path"] == cached_run["result_path"]
+
+    state = await store.get_run_state(request_id)
+    projection = await store.get_current_projection(request_id)
+    assert state is not None
+    assert projection is not None
+    assert state["request_id"] == request_id
+    assert projection["request_id"] == request_id
+    assert state["run_id"] == cached_run["run_id"]
+    assert projection["run_id"] == cached_run["run_id"]
+    assert state["status"] == RunStatus.SUCCEEDED.value
+    assert projection["status"] == RunStatus.SUCCEEDED.value
+
+    result_response = await jobs_router.get_run_result(request_id)
+    assert result_response.request_id == request_id
+    assert result_response.result["data"] == {"ok": True}
+
+    artifacts_response = await jobs_router.get_run_artifacts(request_id)
+    assert artifacts_response.request_id == request_id
+    assert artifacts_response.artifacts == ["artifacts/output.txt"]
+
+    bundle_response = await jobs_router.get_run_bundle(request_id)
+    assert str(bundle_response.path).endswith("run_bundle.zip")
+    assert Path(bundle_response.path).exists()
 
 
 class _RejectConcurrency:
@@ -252,7 +421,7 @@ def _create_temp_equivalent_installed_skill(
 @pytest.mark.asyncio
 async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs):
     store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
-    monkeypatch.setattr(jobs_router, "run_store", store)
+    _patch_run_store(monkeypatch, store)
 
     skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
     _patch_skill_registry(monkeypatch, skill)
@@ -275,7 +444,7 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
-    await store.record_cache_entry(cache_key, "run-cached")
+    cached_run = await _create_cached_succeeded_run(store, cache_key=cache_key, skill_id=skill.id)
 
     background_tasks = BackgroundTasks()
     response = await jobs_router.create_run(
@@ -292,12 +461,59 @@ async def test_create_run_cache_hit_without_input(monkeypatch, temp_config_dirs)
     assert response.status == RunStatus.SUCCEEDED
     assert background_tasks.tasks == []
 
-    runs_dir = Path(config.SYSTEM.RUNS_DIR)
-    assert not runs_dir.exists() or not any(runs_dir.iterdir())
+    await _assert_cached_request_routes(
+        store,
+        request_id=response.request_id,
+        cached_run=cached_run,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_run_stale_cache_entry_falls_back_to_cache_miss(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_skill(temp_config_dirs, "demo-skill", with_input_schema=False)
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model}
+    )
+
+    skill_fp = compute_skill_fingerprint(skill, "codex")
+    skill_package_hash = compute_skill_package_hash(skill.path)
+    manifest_hash = compute_input_manifest_hash({"files": []})
+    model_name = "gpt-5.4-mini"
+    cache_key = compute_cache_key(
+        skill_id=skill.id,
+        engine="codex",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options=_normalized_engine_options(engine="codex", model=model_name),
+        input_manifest_hash=manifest_hash,
+        skill_package_hash=skill_package_hash,
+    )
+    await store.record_cache_entry(cache_key, "missing-run")
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="codex",
+            parameter={"a": 1},
+            model=model_name
+        ),
+        background_tasks
+    )
+
+    assert response.cache_hit is False
+    assert response.status == RunStatus.QUEUED
+    assert len(background_tasks.tasks) == 1
 
     request_record = await store.get_request(response.request_id)
     assert request_record is not None
-    assert request_record["run_id"] == "run-cached"
+    assert request_record["run_id"] != "missing-run"
 
 
 @pytest.mark.asyncio
@@ -517,6 +733,334 @@ async def test_create_run_reuses_succeeded_request_workspace(monkeypatch, temp_c
     assert c_record["workspace_namespace"] == "demo-skill.3"
     assert c_record["workspace_source_request_id"] == response.request_id
     assert c_record["workspace_input_token"] == "token-b"
+
+
+@pytest.mark.asyncio
+async def test_create_run_materializes_workspace_file_binding_without_upload(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_file_binding_skill(temp_config_dirs, "binding-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    workspace_dir = await _create_succeeded_workspace_request(
+        store,
+        request_id="source-req",
+        run_id="source-run",
+        skill_id=skill.id,
+        workspace_output_token="token-source",
+    )
+    source_file = workspace_dir / "runtime" / "sequence-file-handoff-artifact.json"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text('{"from":"source"}', encoding="utf-8")
+
+    background_tasks = BackgroundTasks()
+    response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="codex",
+            input={"artifact_file": "inputs/artifact_file/sequence-file-handoff-artifact.json"},
+            parameter={},
+            model="gpt-5.4-mini",
+            runtime_options={
+                "no_cache": True,
+                "workspace": {
+                    "mode": "reuse",
+                    "request_id": "source-req",
+                    "file_bindings": [
+                        {
+                            "input_key": "artifact_file",
+                            "source_request_id": "source-req",
+                            "source_path": "runtime/sequence-file-handoff-artifact.json",
+                            "target_path": "inputs/artifact_file/sequence-file-handoff-artifact.json",
+                        }
+                    ],
+                },
+            },
+        ),
+        background_tasks,
+    )
+
+    assert response.status == RunStatus.QUEUED
+    assert len(background_tasks.tasks) == 1
+    request_record = await store.get_request(response.request_id)
+    assert request_record is not None
+    assert request_record["request_upload_mode"] == "uploaded"
+    run_upload = (
+        Path(str(request_record["workspace_dir"]))
+        / "uploads"
+        / "inputs/artifact_file/sequence-file-handoff-artifact.json"
+    )
+    assert run_upload.read_text(encoding="utf-8") == '{"from":"source"}'
+    manifest = build_input_manifest(Path(str(request_record["workspace_dir"])) / "uploads")
+    assert [item["path"] for item in manifest["files"]] == [
+        "inputs/artifact_file/sequence-file-handoff-artifact.json"
+    ]
+    assert manifest["files"][0]["size"] == len('{"from":"source"}')
+
+
+@pytest.mark.asyncio
+async def test_workspace_file_binding_content_changes_cache_key(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_file_binding_skill(temp_config_dirs, "binding-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    workspace_dir = await _create_succeeded_workspace_request(
+        store,
+        request_id="anchor-req",
+        run_id="anchor-run",
+        skill_id=skill.id,
+        workspace_output_token="stable-token",
+    )
+    await _create_succeeded_workspace_request(
+        store,
+        request_id="source-b-req",
+        run_id="source-b-run",
+        skill_id=skill.id,
+        workspace_dir=workspace_dir,
+        workspace_output_token="other-token",
+    )
+    source_a = workspace_dir / "runtime" / "a.json"
+    source_b = workspace_dir / "runtime" / "b.json"
+    source_a.parent.mkdir(parents=True, exist_ok=True)
+    source_a.write_text("alpha", encoding="utf-8")
+    source_b.write_text("bravo", encoding="utf-8")
+
+    async def _create_with_source(source_request_id: str, source_path: str) -> dict[str, Any]:
+        response = await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="codex",
+                input={"artifact_file": "inputs/artifact_file/file.json"},
+                parameter={},
+                model="gpt-5.4-mini",
+                runtime_options={
+                    "no_cache": True,
+                    "workspace": {
+                        "mode": "reuse",
+                        "request_id": "anchor-req",
+                        "file_bindings": [
+                            {
+                                "input_key": "artifact_file",
+                                "source_request_id": source_request_id,
+                                "source_path": source_path,
+                                "target_path": "inputs/artifact_file/file.json",
+                            }
+                        ],
+                    },
+                },
+            ),
+            BackgroundTasks(),
+        )
+        record = await store.get_request(response.request_id)
+        assert record is not None
+        return record
+
+    first = await _create_with_source("anchor-req", "runtime/a.json")
+    second = await _create_with_source("source-b-req", "runtime/b.json")
+
+    assert first["input_manifest_hash"] != second["input_manifest_hash"]
+    assert first["cache_key"] != second["cache_key"]
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_unsafe_workspace_file_binding(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_file_binding_skill(temp_config_dirs, "binding-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    await _create_succeeded_workspace_request(
+        store,
+        request_id="source-req",
+        run_id="source-run",
+        skill_id=skill.id,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="codex",
+                input={"artifact_file": "inputs/artifact_file/file.json"},
+                parameter={},
+                model="gpt-5.4-mini",
+                runtime_options={
+                    "workspace": {
+                        "mode": "reuse",
+                        "request_id": "source-req",
+                        "file_bindings": [
+                            {
+                                "input_key": "artifact_file",
+                                "source_request_id": "source-req",
+                                "source_path": "../runtime/file.json",
+                                "target_path": "inputs/artifact_file/file.json",
+                            }
+                        ],
+                    },
+                },
+            ),
+            BackgroundTasks(),
+        )
+
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_workspace_file_binding_from_other_workspace(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_file_binding_skill(temp_config_dirs, "binding-skill")
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    await _create_succeeded_workspace_request(
+        store,
+        request_id="reuse-req",
+        run_id="reuse-run",
+        skill_id=skill.id,
+    )
+    other_workspace = await _create_succeeded_workspace_request(
+        store,
+        request_id="other-req",
+        run_id="other-run",
+        skill_id=skill.id,
+    )
+    other_file = other_workspace / "runtime" / "file.json"
+    other_file.parent.mkdir(parents=True, exist_ok=True)
+    other_file.write_text("other", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await jobs_router.create_run(
+            RunCreateRequest(
+                skill_id=skill.id,
+                engine="codex",
+                input={"artifact_file": "inputs/artifact_file/file.json"},
+                parameter={},
+                model="gpt-5.4-mini",
+                runtime_options={
+                    "workspace": {
+                        "mode": "reuse",
+                        "request_id": "reuse-req",
+                        "file_bindings": [
+                            {
+                                "input_key": "artifact_file",
+                                "source_request_id": "other-req",
+                                "source_path": "runtime/file.json",
+                                "target_path": "inputs/artifact_file/file.json",
+                            }
+                        ],
+                    },
+                },
+            ),
+            BackgroundTasks(),
+        )
+
+    assert excinfo.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upload_workspace_file_binding_overwrites_zip_target(monkeypatch, temp_config_dirs):
+    store = RunStore(db_path=Path(config.SYSTEM.RUNS_DB))
+    _patch_run_store(monkeypatch, store)
+
+    skill = _create_file_binding_skill(
+        temp_config_dirs,
+        "binding-skill",
+        required_keys=["artifact_file", "extra_file"],
+    )
+    _patch_skill_registry(monkeypatch, skill)
+    monkeypatch.setattr(
+        jobs_router.model_registry,
+        "validate_model",
+        lambda engine, model: {"model": model},
+    )
+
+    workspace_dir = await _create_succeeded_workspace_request(
+        store,
+        request_id="source-req",
+        run_id="source-run",
+        skill_id=skill.id,
+    )
+    source_file = workspace_dir / "runtime" / "artifact.json"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text("bound-content", encoding="utf-8")
+
+    create_response = await jobs_router.create_run(
+        RunCreateRequest(
+            skill_id=skill.id,
+            engine="codex",
+            input={
+                "artifact_file": "inputs/artifact_file/file.json",
+                "extra_file": "inputs/extra_file/file.txt",
+            },
+            parameter={},
+            model="gpt-5.4-mini",
+            runtime_options={
+                "no_cache": True,
+                "workspace": {
+                    "mode": "reuse",
+                    "request_id": "source-req",
+                    "file_bindings": [
+                        {
+                            "input_key": "artifact_file",
+                            "source_request_id": "source-req",
+                            "source_path": "runtime/artifact.json",
+                            "target_path": "inputs/artifact_file/file.json",
+                        }
+                    ],
+                },
+            },
+        ),
+        BackgroundTasks(),
+    )
+    assert create_response.status is None
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("inputs/artifact_file/file.json", "zip-content")
+        zf.writestr("inputs/extra_file/file.txt", "extra-content")
+    buffer.seek(0)
+    file_obj = SpooledTemporaryFile()
+    file_obj.write(buffer.getvalue())
+    file_obj.seek(0)
+    upload = UploadFile(filename="input.zip", file=file_obj)
+
+    upload_response = await jobs_router.upload_file(
+        create_response.request_id,
+        background_tasks=BackgroundTasks(),
+        file=upload,
+    )
+
+    assert upload_response.status == RunStatus.QUEUED
+    request_record = await store.get_request(create_response.request_id)
+    assert request_record is not None
+    uploads_dir = Path(str(request_record["workspace_dir"])) / "uploads"
+    assert (uploads_dir / "inputs/artifact_file/file.json").read_text(encoding="utf-8") == "bound-content"
+    assert (uploads_dir / "inputs/extra_file/file.txt").read_text(encoding="utf-8") == "extra-content"
 
 
 @pytest.mark.asyncio
@@ -844,7 +1388,7 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
         input_manifest_hash=manifest_hash,
         skill_package_hash=skill_package_hash,
     )
-    await store.record_cache_entry(cache_key, "run-cached")
+    cached_run = await _create_cached_succeeded_run(store, cache_key=cache_key, skill_id=skill.id)
 
     upload = _build_upload_zip("input.txt", "hello")
 
@@ -857,12 +1401,11 @@ async def test_upload_file_cache_hit(monkeypatch, temp_config_dirs):
     assert upload_response.cache_hit is True
     assert "input.txt" in upload_response.extracted_files
 
-    runs_dir = Path(config.SYSTEM.RUNS_DIR)
-    assert not runs_dir.exists() or not any(runs_dir.iterdir())
-
-    request_record = await store.get_request(create_response.request_id)
-    assert request_record is not None
-    assert request_record["run_id"] == "run-cached"
+    await _assert_cached_request_routes(
+        store,
+        request_id=create_response.request_id,
+        cached_run=cached_run,
+    )
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1721,11 @@ async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(
         inline_input_hash=compute_inline_input_hash({"query": "same"}),
         skill_package_hash=package_hash,
     )
-    await store.record_cache_entry(cache_key, "run-installed-cached")
+    cached_run = await _create_cached_succeeded_run(
+        store,
+        cache_key=cache_key,
+        skill_id=installed_skill.id,
+    )
 
     create_response = await jobs_router.create_run(
         RunCreateRequest(
@@ -1200,7 +1747,10 @@ async def test_upload_temp_skill_can_hit_installed_cache_with_same_package_hash(
 
     assert upload_response.cache_hit is True
     assert request_record is not None
-    assert request_record["run_id"] == "run-installed-cached"
+    assert request_record["run_id"] == cached_run["run_id"]
+    state = await store.get_run_state(create_response.request_id)
+    assert state is not None
+    assert state["status"] == RunStatus.SUCCEEDED.value
 
 
 @pytest.mark.asyncio

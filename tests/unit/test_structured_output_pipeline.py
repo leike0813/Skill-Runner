@@ -19,7 +19,11 @@ def _write_canonical_interactive_schema(run_dir: Path) -> str:
                         "properties": {
                             "__SKILL_DONE__": {"const": True},
                             "value": {"type": "string"},
-                            "report_path": {"type": "string", "x-type": "artifact"},
+                            "report_path": {
+                                "type": "string",
+                                "x-type": "artifact",
+                                "x-role": "report",
+                            },
                         },
                         "required": ["__SKILL_DONE__", "value"],
                         "additionalProperties": False,

@@ -516,6 +516,11 @@ class RunAttemptOutcomeService:
                     "Missing required artifacts: "
                     + ", ".join(resolution_result.missing_required_fields)
                 )
+            artifact_errors.extend(
+                str(error)
+                for error in getattr(resolution_result, "assembly_errors", [])
+                if isinstance(error, str) and error.strip()
+            )
 
         waiting_auth_reason_message = extract_waiting_auth_reason_message(runtime_parse_result)
 

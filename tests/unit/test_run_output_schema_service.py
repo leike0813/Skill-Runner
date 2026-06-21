@@ -54,7 +54,11 @@ def _build_skill_dir(
                     "required": ["value", "report_path"],
                     "properties": {
                         "value": {"type": "string", "description": "result value"},
-                        "report_path": {"type": "string", "x-type": "artifact"},
+                        "report_path": {
+                            "type": "string",
+                            "x-type": "artifact",
+                            "x-role": "report",
+                        },
                     },
                     "additionalProperties": False,
                 }

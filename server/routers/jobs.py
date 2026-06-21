@@ -76,6 +76,13 @@ from ..services.orchestration.run_workspace_layout import (
     require_layout_from_record,
     workspace_output_token as build_workspace_output_token,
 )
+from ..services.orchestration.workspace_file_binding_service import (
+    WorkspaceFileBinding,
+    WorkspaceFileBindingError,
+    binding_input_keys,
+    get_workspace_file_bindings,
+    materialize_workspace_file_bindings,
+)
 from ..services.platform.concurrency_manager import concurrency_manager
 from ..runtime.observability.run_observability import run_observability_service
 from ..services.engine_management.engine_policy import resolve_skill_engine_policy
@@ -177,6 +184,86 @@ def _workspace_response_fields(record: dict[str, Any], run_dir: Path | None) -> 
         ),
     }
 
+
+async def _bind_cached_run_and_materialize_state(
+    *,
+    request_id: str,
+    cached_run_id: str,
+    cache_key: str,
+    skill_source: str,
+) -> bool:
+    cached_record = await maybe_await(run_store.get_run(cached_run_id))
+    if not isinstance(cached_record, dict):
+        logger.warning(
+            "cache_hit_stale run_id=%s request_id=%s cache_key=%s skill_source=%s reason=missing_run",
+            cached_run_id,
+            request_id,
+            cache_key,
+            skill_source,
+        )
+        return False
+    if str(cached_record.get("status") or "").strip().lower() != RunStatus.SUCCEEDED.value:
+        logger.warning(
+            "cache_hit_stale run_id=%s request_id=%s cache_key=%s skill_source=%s reason=run_not_succeeded",
+            cached_run_id,
+            request_id,
+            cache_key,
+            skill_source,
+        )
+        return False
+    try:
+        cached_layout = require_layout_from_record(cached_record)
+    except RuntimeError:
+        logger.warning(
+            "cache_hit_stale run_id=%s request_id=%s cache_key=%s skill_source=%s reason=invalid_layout",
+            cached_run_id,
+            request_id,
+            cache_key,
+            skill_source,
+        )
+        return False
+    result_path_obj = cached_record.get("result_path")
+    if not isinstance(result_path_obj, str) or not result_path_obj.strip():
+        logger.warning(
+            "cache_hit_stale run_id=%s request_id=%s cache_key=%s skill_source=%s reason=missing_result_path",
+            cached_run_id,
+            request_id,
+            cache_key,
+            skill_source,
+        )
+        return False
+    result_path = Path(result_path_obj)
+    if not cached_layout.workspace_dir.exists() or not result_path.exists():
+        logger.warning(
+            "cache_hit_stale run_id=%s request_id=%s cache_key=%s skill_source=%s reason=missing_workspace_or_result",
+            cached_run_id,
+            request_id,
+            cache_key,
+            skill_source,
+        )
+        return False
+
+    await run_store.bind_request_run_id(
+        request_id,
+        cached_run_id,
+        status=RunStatus.SUCCEEDED.value,
+    )
+    request_record = await maybe_await(run_store.get_request(request_id))
+    if not isinstance(request_record, dict):
+        raise HTTPException(status_code=500, detail="Request record not found")
+    request_layout = require_layout_from_record(request_record)
+    await run_state_service.write_non_terminal_projection(
+        run_dir=request_layout.workspace_dir,
+        request_id=request_id,
+        run_id=cached_run_id,
+        status=RunStatus.SUCCEEDED,
+        request_record=request_record,
+        current_attempt=1,
+        run_store_backend=run_store,
+    )
+    return True
+
+
 install_runtime_protocol_ports()
 install_runtime_observability_ports()
 
@@ -221,9 +308,25 @@ def _copy_tree(src: Path, dst: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(path.read_bytes())
 
+
+def _ensure_copy_tree_targets_are_files(src: Path, dst: Path) -> None:
+    if not src.exists():
+        return
+    for path in src.rglob("*"):
+        if path.is_dir():
+            continue
+        rel = path.relative_to(src)
+        target = dst / rel
+        if target.exists() and target.is_dir():
+            raise HTTPException(
+                status_code=422,
+                detail=f"workspace file binding target_path already exists as a directory: {rel.as_posix()}",
+            )
+
 @router.post("", response_model=RunCreateResponse)
 async def create_run(request: RunCreateRequest, background_tasks: BackgroundTasks):
     request_id: str | None = None
+    stage_root: Path | None = None
     try:
         skill = None
         if request.skill_source == RequestSkillSource.INSTALLED:
@@ -295,22 +398,59 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         request_payload["engine_options"] = engine_opts
         request_payload["runtime_options"] = runtime_opts
         request_payload["effective_runtime_options"] = effective_runtime_opts
+        file_bindings: list[WorkspaceFileBinding] = get_workspace_file_bindings(effective_runtime_opts)
+        if file_bindings and workspace_reuse is None:
+            raise HTTPException(
+                status_code=422,
+                detail="runtime_options.workspace.file_bindings requires workspace.mode reuse",
+            )
 
-        declared_file_input_present = False
-        has_required_file_inputs = False
+        file_input_keys_needing_files: set[str] = set()
         if skill and resolve_schema_asset(skill, "input").path is not None:
             file_keys = set(schema_validator.get_input_keys_by_source(skill, "file"))
-            has_required_file_inputs = bool(
-                schema_validator.has_required_file_inputs(skill)
+            required_file_keys = set(
+                schema_validator.get_input_keys_by_source(skill, "file", required_only=True)
             )
-            declared_file_input_present = any(
-                key in inline_input for key in file_keys
-            )
+            declared_file_keys = {key for key in file_keys if key in inline_input}
+            file_input_keys_needing_files = required_file_keys | declared_file_keys
+        bound_input_keys = binding_input_keys(file_bindings)
+        file_bindings_cover_inputs = (
+            bool(file_bindings)
+            and bool(file_input_keys_needing_files)
+            and file_input_keys_needing_files.issubset(bound_input_keys)
+        )
         requires_upload = (
             request.skill_source == RequestSkillSource.TEMP_UPLOAD
-            or has_required_file_inputs
-            or declared_file_input_present
+            or (bool(file_input_keys_needing_files) and not file_bindings_cover_inputs)
         )
+
+        uploads_dir: Path | None = None
+        materialized_files: list[str] = []
+        if not requires_upload and file_bindings:
+            stage_root = Path(config.SYSTEM.TMP_UPLOADS_DIR) / request_id
+            uploads_dir = stage_root / "uploads"
+            if stage_root.exists():
+                shutil.rmtree(stage_root, ignore_errors=True)
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            assert workspace_reuse is not None
+            materialized_files = await materialize_workspace_file_bindings(
+                bindings=file_bindings,
+                inline_input=inline_input,
+                reuse_workspace_dir=Path(workspace_reuse["workspace_dir"]),
+                uploads_dir=uploads_dir,
+                run_store_backend=run_store,
+            )
+            if skill is not None:
+                declared_file_path_errors = schema_validator.validate_declared_file_input_paths(
+                    skill,
+                    {"input": inline_input},
+                    uploads_dir,
+                )
+                if declared_file_path_errors:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Input validation failed: {declared_file_path_errors}",
+                    )
 
         await run_store.create_request(
             request_id=request_id,
@@ -337,7 +477,8 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         if skill is None:
             raise HTTPException(status_code=500, detail="temp_upload request must go through upload flow")
 
-        manifest_hash = compute_input_manifest_hash({"files": []})
+        manifest = build_input_manifest(uploads_dir) if uploads_dir is not None else {"files": []}
+        manifest_hash = compute_input_manifest_hash(manifest)
         skill_fingerprint = compute_skill_fingerprint(skill, request.engine)
         skill_package_hash = await skill_package_identity_service.get_or_refresh_hash(
             skill,
@@ -376,16 +517,21 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         if cache_enabled:
             cached_run = await run_store.get_cached_run_for_source(cache_key, request.skill_source.value)
             if cached_run:
-                await run_store.bind_request_run_id(
-                    request_id,
-                    cached_run,
-                    status=RunStatus.SUCCEEDED.value,
-                )
-                return RunCreateResponse(
+                cache_hit_ready = await _bind_cached_run_and_materialize_state(
                     request_id=request_id,
-                    cache_hit=True,
-                    status=RunStatus.SUCCEEDED,
+                    cached_run_id=cached_run,
+                    cache_key=cache_key,
+                    skill_source=request.skill_source.value,
                 )
+                if cache_hit_ready:
+                    if stage_root is not None:
+                        shutil.rmtree(stage_root, ignore_errors=True)
+                        stage_root = None
+                    return RunCreateResponse(
+                        request_id=request_id,
+                        cache_hit=True,
+                        status=RunStatus.SUCCEEDED,
+                    )
 
         run_request = RunCreateRequest(
             skill_source=RequestSkillSource.INSTALLED,
@@ -407,6 +553,15 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         run_dir = Path(str(run_status.workspace_dir or ""))
         if not run_dir.exists():
             raise HTTPException(status_code=500, detail="Run directory not found")
+        if uploads_dir is not None:
+            _ensure_copy_tree_targets_are_files(uploads_dir, run_dir / "uploads")
+            _copy_tree(uploads_dir, run_dir / "uploads")
+            logger.info(
+                "workspace_file_bindings_copied request_id=%s run_id=%s files=%d",
+                request_id,
+                run_status.run_id,
+                len(materialized_files),
+            )
         namespace = workspace_manager.allocate_namespace(workspace_dir=run_dir, skill_id=skill.id)
         layout_record = {
             "run_id": run_status.run_id,
@@ -543,18 +698,32 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             options=merged_options,
             cache_key=run_cache_key
         )
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+            stage_root = None
         return RunCreateResponse(
             request_id=request_id,
             cache_hit=False,
             status=run_status.status
         )
+    except WorkspaceFileBindingError as e:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        await _cleanup_unpersisted_runtime_env_secret(request_id)
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except ValueError as e:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
         raise
     except Exception as e:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
         # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
         logger.exception(
@@ -1127,6 +1296,12 @@ async def upload_file(
                 effective_runtime_options
             )
             workspace_reuse = await _resolve_workspace_reuse(effective_runtime_options)
+            file_bindings = get_workspace_file_bindings(effective_runtime_options)
+            if file_bindings and workspace_reuse is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="runtime_options.workspace.file_bindings requires workspace.mode reuse",
+                )
             await run_store.update_request_effective_runtime_options(
                 request_id,
                 effective_runtime_options,
@@ -1161,6 +1336,15 @@ async def upload_file(
                 if file is not None:
                     content = await file.read()
                     extracted_files = _extract_zip_to_dir(content, uploads_dir)
+                materialized_files = await materialize_workspace_file_bindings(
+                    bindings=file_bindings,
+                    inline_input=request_record.get("input", {}),
+                    reuse_workspace_dir=Path(workspace_reuse["workspace_dir"]) if workspace_reuse is not None else uploads_dir,
+                    uploads_dir=uploads_dir,
+                    run_store_backend=run_store,
+                )
+                if materialized_files:
+                    extracted_files.extend(materialized_files)
 
                 declared_file_path_errors = schema_validator.validate_declared_file_input_paths(
                     skill,
@@ -1239,27 +1423,29 @@ async def upload_file(
                 if cache_enabled:
                     cached_run = await run_store.get_cached_run_for_source(cache_key, source)
                     if cached_run:
-                        await run_store.bind_request_run_id(
-                            request_id,
-                            cached_run,
-                            status=RunStatus.SUCCEEDED.value,
-                        )
-                        log_event(
-                            logger,
-                            event="upload.cache.hit",
-                            phase="upload",
-                            outcome="ok",
+                        cache_hit_ready = await _bind_cached_run_and_materialize_state(
                             request_id=request_id,
-                            run_id=cached_run,
+                            cached_run_id=cached_run,
                             cache_key=cache_key,
                             skill_source=source,
                         )
-                        return RunUploadResponse(
-                            request_id=request_id,
-                            cache_hit=True,
-                            status=RunStatus.SUCCEEDED,
-                            extracted_files=extracted_files,
-                        )
+                        if cache_hit_ready:
+                            log_event(
+                                logger,
+                                event="upload.cache.hit",
+                                phase="upload",
+                                outcome="ok",
+                                request_id=request_id,
+                                run_id=cached_run,
+                                cache_key=cache_key,
+                                skill_source=source,
+                            )
+                            return RunUploadResponse(
+                                request_id=request_id,
+                                cache_hit=True,
+                                status=RunStatus.SUCCEEDED,
+                                extracted_files=extracted_files,
+                            )
                 log_event(
                     logger,
                     event="upload.cache.miss",
@@ -1304,6 +1490,7 @@ async def upload_file(
                 run_dir = Path(str(run_status.workspace_dir or ""))
                 if not run_dir.exists():
                     raise HTTPException(status_code=500, detail="Run directory not found")
+                _ensure_copy_tree_targets_are_files(uploads_dir, run_dir / "uploads")
                 _copy_tree(uploads_dir, run_dir / "uploads")
                 run_cache_key: str | None = cache_key if cache_enabled else None
                 namespace = workspace_manager.allocate_namespace(workspace_dir=run_dir, skill_id=skill.id)
@@ -1488,6 +1675,21 @@ async def upload_file(
                 status=run_status.status,
                 extracted_files=extracted_files,
             )
+    except WorkspaceFileBindingError as e:
+        log_event(
+            logger,
+            event="upload.failed",
+            phase="upload",
+            outcome="error",
+            level=logging.ERROR,
+            request_id=request_id,
+            run_id=run_id_for_log,
+            error_code="WORKSPACE_FILE_BINDING_ERROR",
+            error_type=type(e).__name__,
+            detail=str(e),
+            skill_source=source,
+        )
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except ValueError as e:
         log_event(
             logger,

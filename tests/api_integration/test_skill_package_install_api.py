@@ -52,7 +52,11 @@ def _build_skill_zip(
     output_schema = {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "x-type": "artifact"}
+            "summary": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-role": "summary"
+            }
         },
         "required": ["summary"]
     }

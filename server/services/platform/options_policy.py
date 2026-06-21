@@ -130,6 +130,22 @@ class OptionsPolicy:
         request_id = value.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():
             raise ValueError("runtime_options.workspace.request_id must be a non-empty string")
+        if "file_bindings" not in value:
+            return
+        file_bindings = value.get("file_bindings")
+        if not isinstance(file_bindings, list):
+            raise ValueError("runtime_options.workspace.file_bindings must be an array")
+        for index, binding in enumerate(file_bindings):
+            if not isinstance(binding, dict):
+                raise ValueError(
+                    f"runtime_options.workspace.file_bindings[{index}] must be an object"
+                )
+            for field in ("input_key", "source_request_id", "source_path", "target_path"):
+                field_value = binding.get(field)
+                if not isinstance(field_value, str) or not field_value.strip():
+                    raise ValueError(
+                        f"runtime_options.workspace.file_bindings[{index}].{field} must be a non-empty string"
+                    )
 
     def _validate_env(self, runtime_options: Dict[str, Any]) -> None:
         if "env" not in runtime_options:

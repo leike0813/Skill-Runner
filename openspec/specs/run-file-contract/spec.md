@@ -31,12 +31,27 @@ New runs MUST NOT emit legacy output or mirror files.
 - **AND** `logs/stdout.txt`, `logs/stderr.txt`, and `raw/output.json` are absent
 
 ### Requirement: Artifact contract MUST be driven by output artifact-path fields
-The system MUST treat output fields marked with `x-type: artifact|file` as the canonical artifact contract.
+The system MUST treat output fields marked with `x-type: artifact|file` as the canonical artifact contract. Fields marked `x-type: "artifact"` MUST declare a non-empty `x-role`.
 
-#### Scenario: terminal result resolves artifact paths
+#### Scenario: terminal result resolves ordinary artifact paths
 - **WHEN** a run reaches terminal normalization
-- **THEN** the system resolves each output artifact-path field to a run-local file
-- **AND** rewrites the field to a bundle-relative path
+- **AND** an output field has `x-type: "artifact"` with `x-role` other than `artifact-manifest`
+- **THEN** the system resolves the field value to a run-local file
+- **AND** rewrites the field to a workspace-relative bundle entry path
+- **AND** records that path in `result.json.artifacts`
+
+#### Scenario: terminal result expands artifact manifest paths
+- **WHEN** a run reaches terminal normalization
+- **AND** an output field has `x-type: "artifact"` and `x-role: "artifact-manifest"`
+- **AND** the field points to a flat JSON object whose values are workspace-relative file paths
+- **THEN** the system records the manifest file path in `result.json.artifacts`
+- **AND** records every manifest value path in `result.json.artifacts`
+- **AND** bundle zip entries match the path strings recorded in JSON
+
+#### Scenario: artifact manifest assembly diagnostic
+- **WHEN** an artifact manifest is unreadable, invalid JSON, not a flat object, contains non-string path values, contains invalid paths, or references missing files
+- **THEN** terminal normalization MUST fail the run
+- **AND** the terminal result MUST include a clear `BUNDLE_ASSEMBLY_*` diagnostic
 
 ### Requirement: required artifact validation MUST use resolved file existence
 The system MUST validate required artifacts by checking the declared output field and the resolved file, rather than a fixed `artifacts/<pattern>` path.
@@ -49,10 +64,11 @@ The system MUST validate required artifacts by checking the declared output fiel
 ### Requirement: ordinary bundles MUST be contract-driven
 Non-debug bundles MUST include the request's actual `resultJsonPath` and resolved artifact files.
 
-#### Scenario: uploads and temp files are excluded from normal bundle
-- **WHEN** a non-debug bundle is built
-- **THEN** uploads and unrelated working files are excluded
-- **AND** resolved artifact files are included regardless of whether they live under `artifacts/`
+#### Scenario: declared artifact path is missing during bundle assembly
+- **WHEN** a bundle is built
+- **AND** `result.json.artifacts` contains an invalid or missing workspace-relative file path
+- **THEN** bundle assembly MUST fail with a structured `BUNDLE_ASSEMBLY_*` diagnostic
+- **AND** the backend MUST NOT silently omit the declared entry
 
 ### Requirement: file inputs MUST support declarative uploads-relative paths
 File inputs MUST be expressible as `uploads/`-relative paths in `POST /v1/jobs`.
@@ -65,6 +81,29 @@ File inputs MUST be expressible as `uploads/`-relative paths in `POST /v1/jobs`.
 #### Scenario: file path omitted falls back to strict-key compatibility
 - **WHEN** a file input key is not explicitly provided in the request body
 - **THEN** runtime MAY still resolve `uploads/<input_key>` as a compatibility fallback
+
+### Requirement: File inputs MUST resolve from uploads-relative paths
+Skill file inputs MUST continue to resolve from `run_dir/uploads/<input value>`.
+Workspace file bindings MUST preserve this contract by materializing the source file to `uploads/<target_path>` while keeping `input[input_key]` equal to `target_path`.
+
+#### Scenario: bound file input resolves at execution time
+- **WHEN** a workspace file binding materializes `source_path` to `uploads/<target_path>`
+- **AND** `input[input_key]` equals `target_path`
+- **THEN** execution-time input context resolves the file input from `run_dir/uploads/<target_path>`
+
+### Requirement: Workspace file binding paths MUST be safe relative paths
+`source_path` MUST be a safe workspace-relative file path.
+`target_path` MUST be a safe uploads-relative file path.
+Both MUST reject absolute paths, empty paths, `.`, `..`, traversal, and directory targets.
+
+#### Scenario: unsafe binding path is rejected
+- **WHEN** a binding path is absolute or contains traversal
+- **THEN** the backend rejects the request before creating a run
+
+#### Scenario: binding target overwrites uploaded file
+- **WHEN** an upload zip contains `target_path`
+- **AND** a workspace file binding targets the same path
+- **THEN** the binding materialized file is used for the final uploads content and input manifest
 
 ### Requirement: New runner-owned terminal results MUST use actual result path
 New runs SHALL write the runner-owned terminal result to the run's persisted `resultJsonPath`.

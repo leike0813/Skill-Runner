@@ -3,8 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from server.runtime.bundle_errors import (
+    BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID,
+    BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING,
+    BundleAssemblyError,
+)
 from server.runtime.workspace_layout import RunWorkspaceLayout
 from server.services.platform.run_file_filter_service import run_file_filter_service
 
@@ -163,14 +168,35 @@ class RunBundleService:
         run_dir_resolved = run_dir.resolve()
         for rel_path in artifacts_obj:
             if not isinstance(rel_path, str) or not rel_path.strip():
-                continue
-            path = (run_dir / rel_path.strip()).resolve()
+                raise BundleAssemblyError(
+                    code=BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID,
+                    message="result artifacts must contain non-empty workspace-relative path strings",
+                    path=str(rel_path),
+                )
+            rel_path = rel_path.strip()
+            normalized = PurePosixPath(rel_path.replace("\\", "/"))
+            if normalized.is_absolute() or any(part in {"", ".", ".."} for part in normalized.parts):
+                raise BundleAssemblyError(
+                    code=BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID,
+                    message="result artifact path must be workspace-relative",
+                    path=rel_path,
+                )
+            path = (run_dir / rel_path).resolve()
             try:
                 path.relative_to(run_dir_resolved)
             except ValueError:
-                continue
-            if path.exists() and path.is_file():
-                candidates.append(path)
+                raise BundleAssemblyError(
+                    code=BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID,
+                    message="result artifact path escapes the workspace",
+                    path=rel_path,
+                )
+            if not path.exists() or not path.is_file():
+                raise BundleAssemblyError(
+                    code=BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING,
+                    message="result artifact path does not reference an existing file",
+                    path=rel_path,
+                )
+            candidates.append(path)
         return candidates
 
     def _dedupe_candidates(self, run_dir: Path, candidates: list[Path]) -> list[Path]:

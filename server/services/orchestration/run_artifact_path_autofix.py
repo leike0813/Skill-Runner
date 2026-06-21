@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -12,6 +13,12 @@ WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN = "OUTPUT_ARTIFACT_PATH_REWRITTEN"
 WARNING_OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR = "OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR"
 WARNING_OUTPUT_ARTIFACT_PATH_INVALID = "OUTPUT_ARTIFACT_PATH_INVALID"
 WARNING_OUTPUT_ARTIFACT_PATH_MISSING = "OUTPUT_ARTIFACT_PATH_MISSING"
+BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID = "BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID"
+BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING = "BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING"
+BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID = "BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID"
+BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT = "BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT"
+BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH = "BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH"
+ARTIFACT_MANIFEST_ROLE = "artifact-manifest"
 
 
 @dataclass(frozen=True)
@@ -20,12 +27,14 @@ class ArtifactResolutionResult:
     artifacts: List[str]
     warnings: List[str]
     missing_required_fields: List[str]
+    assembly_errors: List[str]
 
 
 @dataclass(frozen=True)
 class _ArtifactField:
     name: str
     required: bool
+    role: str | None
 
 
 def collect_run_artifacts(run_dir: Path, result_path: Path | None = None) -> List[str]:
@@ -66,6 +75,7 @@ def resolve_output_artifact_paths(
     warnings: List[str] = []
     artifacts: List[str] = []
     missing_required_fields: List[str] = []
+    assembly_errors: List[str] = []
     normalized_run_dir = run_dir.resolve()
 
     for field in _load_output_artifact_fields(skill):
@@ -107,12 +117,23 @@ def resolve_output_artifact_paths(
             updated_output[field.name] = rel_path
             _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN)
         artifacts.append(rel_path)
+        if field.role == ARTIFACT_MANIFEST_ROLE:
+            manifest_result = _expand_artifact_manifest(
+                run_dir=run_dir,
+                manifest_path=resolved_source,
+                field_name=field.name,
+            )
+            for warning_code in manifest_result.warnings:
+                _append_unique_warning(warnings, warning_code)
+            assembly_errors.extend(manifest_result.errors)
+            artifacts.extend(manifest_result.artifacts)
 
     return ArtifactResolutionResult(
         output_data=updated_output,
         artifacts=sorted(dict.fromkeys(artifacts)),
         warnings=warnings,
         missing_required_fields=missing_required_fields,
+        assembly_errors=assembly_errors,
     )
 
 
@@ -139,7 +160,15 @@ def _load_output_artifact_fields(skill: SkillManifest) -> List[_ArtifactField]:
             continue
         if str(field_schema.get("x-type") or "").strip().lower() not in {"artifact", "file"}:
             continue
-        fields.append(_ArtifactField(name=field_name, required=field_name in required_fields))
+        role_obj = field_schema.get("x-role")
+        role = role_obj.strip() if isinstance(role_obj, str) and role_obj.strip() else None
+        fields.append(
+            _ArtifactField(
+                name=field_name,
+                required=field_name in required_fields,
+                role=role,
+            )
+        )
     return fields
 
 
@@ -172,3 +201,90 @@ def _normalize_relative_path(raw_path: str) -> str:
 def _fallback_target_path(*, run_dir: Path, field_name: str, source_path: Path) -> Path:
     file_name = source_path.name or field_name
     return run_dir / "artifacts" / field_name / file_name
+
+
+@dataclass(frozen=True)
+class _ManifestExpansionResult:
+    artifacts: List[str]
+    warnings: List[str]
+    errors: List[str]
+
+
+def _expand_artifact_manifest(
+    *,
+    run_dir: Path,
+    manifest_path: Path,
+    field_name: str,
+) -> _ManifestExpansionResult:
+    warnings: List[str] = []
+    errors: List[str] = []
+    artifacts: List[str] = []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        _append_unique_warning(warnings, BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID)
+        errors.append(
+            f"{BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID}: artifact manifest field "
+            f"{field_name!r} is not readable JSON ({exc})"
+        )
+        return _ManifestExpansionResult(artifacts=artifacts, warnings=warnings, errors=errors)
+
+    if not isinstance(manifest, dict):
+        _append_unique_warning(warnings, BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT)
+        errors.append(
+            f"{BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT}: artifact manifest field "
+            f"{field_name!r} must contain a flat JSON object"
+        )
+        return _ManifestExpansionResult(artifacts=artifacts, warnings=warnings, errors=errors)
+
+    run_dir_resolved = run_dir.resolve()
+    for manifest_key, raw_path in manifest.items():
+        key_label = str(manifest_key)
+        if isinstance(raw_path, (dict, list)):
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT}: artifact manifest field "
+                f"{field_name!r} entry {key_label!r} must not contain nested values"
+            )
+            continue
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH}: artifact manifest field "
+                f"{field_name!r} entry {key_label!r} must be a non-empty path string"
+            )
+            continue
+        try:
+            rel_path = _normalize_relative_path(raw_path)
+        except ValueError as exc:
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID}: artifact manifest field "
+                f"{field_name!r} entry {key_label!r} has invalid path {raw_path!r} ({exc})"
+            )
+            continue
+
+        artifact_path = (run_dir / rel_path).resolve()
+        try:
+            artifact_path.relative_to(run_dir_resolved)
+        except ValueError:
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID}: artifact manifest field "
+                f"{field_name!r} entry {key_label!r} escapes the workspace"
+            )
+            continue
+        if not artifact_path.exists() or not artifact_path.is_file():
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING}: artifact manifest field "
+                f"{field_name!r} entry {key_label!r} references missing file {rel_path!r}"
+            )
+            continue
+        artifacts.append(rel_path)
+
+    return _ManifestExpansionResult(
+        artifacts=sorted(dict.fromkeys(artifacts)),
+        warnings=warnings,
+        errors=errors,
+    )

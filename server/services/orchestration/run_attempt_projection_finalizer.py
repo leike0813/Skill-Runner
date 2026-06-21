@@ -8,6 +8,7 @@ from typing import Any, Callable
 from server.models import OrchestratorEventType, PendingOwner, RunStatus
 from server.runtime.logging.structured_trace import log_event
 from server.services.orchestration.run_workspace_layout import require_layout_from_record
+from server.services.orchestration.run_bundle_service import BundleAssemblyError
 
 from .run_attempt_execution_service import RunAttemptExecutionResult
 from .run_attempt_outcome_service import RunAttemptResolvedOutcome
@@ -64,6 +65,9 @@ class RunAttemptProjectionFinalizer:
         attempt_number = context.attempt_number
         final_status = outcome.final_status
         warnings = list(outcome.warnings)
+        normalized_error = outcome.normalized_error
+        final_error_code = outcome.final_error_code
+        terminal_error_summary = outcome.terminal_error_summary
         projection_request_id = inputs.request_id or f"run:{inputs.run_id}"
         effective_session_timeout_sec = outcome.effective_session_timeout_sec
         result_path: Path | None = None
@@ -177,14 +181,14 @@ class RunAttemptProjectionFinalizer:
             current_attempt=attempt_number,
             effective_session_timeout_sec=effective_session_timeout_sec,
             warnings=warnings,
-            error=outcome.normalized_error,
+            error=normalized_error,
             terminal_result={
                 "data": outcome.output_data if final_status == RunStatus.SUCCEEDED else None,
                 "success_source": outcome.success_source,
                 "artifacts": list(outcome.artifacts),
                 "repair_level": outcome.repair_level,
                 "validation_warnings": warnings,
-                "error": outcome.normalized_error,
+                "error": normalized_error,
             },
             run_store_backend=inputs.run_store_backend,
         )
@@ -197,6 +201,64 @@ class RunAttemptProjectionFinalizer:
         )
 
         if final_status == RunStatus.SUCCEEDED:
+            bundle_kwargs: dict[str, Any] = {}
+            if layout is not None:
+                bundle_kwargs["layout"] = layout
+            try:
+                inputs.build_run_bundle(run_dir, False, **bundle_kwargs)
+                inputs.build_run_bundle(run_dir, True, **bundle_kwargs)
+                bundle_written = True
+            except BundleAssemblyError as exc:
+                final_status = RunStatus.FAILED
+                final_error_code = exc.code
+                terminal_error_summary = str(exc)
+                normalized_error = {
+                    "code": exc.code,
+                    "message": str(exc),
+                    "stderr": "",
+                }
+                if exc.code not in warnings:
+                    warnings.append(exc.code)
+                await inputs.run_projection_service.write_terminal_projection(
+                    run_dir=run_dir,
+                    request_id=projection_request_id,
+                    run_id=inputs.run_id,
+                    status=final_status,
+                    request_record=inputs.request_record,
+                    current_attempt=attempt_number,
+                    effective_session_timeout_sec=effective_session_timeout_sec,
+                    warnings=warnings,
+                    error=normalized_error,
+                    terminal_result={
+                        "data": None,
+                        "success_source": outcome.success_source,
+                        "artifacts": list(outcome.artifacts),
+                        "repair_level": outcome.repair_level,
+                        "validation_warnings": warnings,
+                        "error": normalized_error,
+                    },
+                    run_store_backend=inputs.run_store_backend,
+                )
+                await inputs.run_store_backend.update_run_status(
+                    inputs.run_id,
+                    final_status,
+                    str(result_path),
+                )
+                log_event(
+                    logger,
+                    event="run.bundle_assembly.failed",
+                    phase="run_lifecycle",
+                    outcome="error",
+                    level=logging.ERROR,
+                    request_id=inputs.request_id,
+                    run_id=inputs.run_id,
+                    attempt=attempt_number,
+                    engine=engine_name,
+                    error_code=exc.code,
+                    path=exc.path,
+                )
+
+        if final_status == RunStatus.SUCCEEDED:
             log_event(
                 logger,
                 event="run.lifecycle.succeeded",
@@ -207,7 +269,7 @@ class RunAttemptProjectionFinalizer:
                 run_id=inputs.run_id,
                 attempt=attempt_number,
                 engine=engine_name,
-                error_code=outcome.final_error_code,
+                error_code=final_error_code,
             )
             self._diagnose_skill_run_feedback_sidecar(
                 result_path=result_path,
@@ -227,17 +289,9 @@ class RunAttemptProjectionFinalizer:
                 run_id=inputs.run_id,
                 attempt=attempt_number,
                 engine=engine_name,
-                error_code=outcome.final_error_code,
+                error_code=final_error_code,
                 error_type=failure_error_type,
             )
-
-        if final_status == RunStatus.SUCCEEDED:
-            bundle_kwargs: dict[str, Any] = {}
-            if layout is not None:
-                bundle_kwargs["layout"] = layout
-            inputs.build_run_bundle(run_dir, False, **bundle_kwargs)
-            inputs.build_run_bundle(run_dir, True, **bundle_kwargs)
-            bundle_written = True
 
         if final_status == RunStatus.CANCELED:
             inputs.audit_service.append_orchestrator_event(
@@ -255,10 +309,10 @@ class RunAttemptProjectionFinalizer:
             if isinstance(outcome.success_source, str) and outcome.success_source:
                 terminal_payload["completion_source"] = outcome.success_source
             if final_status == RunStatus.FAILED:
-                if isinstance(outcome.final_error_code, str) and outcome.final_error_code:
-                    terminal_payload["code"] = outcome.final_error_code
-                if isinstance(outcome.terminal_error_summary, str) and outcome.terminal_error_summary:
-                    terminal_payload["message"] = outcome.terminal_error_summary
+                if isinstance(final_error_code, str) and final_error_code:
+                    terminal_payload["code"] = final_error_code
+                if isinstance(terminal_error_summary, str) and terminal_error_summary:
+                    terminal_payload["message"] = terminal_error_summary
             inputs.audit_service.append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=attempt_number,
@@ -278,12 +332,12 @@ class RunAttemptProjectionFinalizer:
                 type_name=OrchestratorEventType.ERROR_RUN_FAILED.value,
                 data={
                     "message": inputs.summarize_terminal_error_message(
-                        outcome.normalized_error.get("message")
-                        if isinstance(outcome.normalized_error, dict)
+                        normalized_error.get("message")
+                        if isinstance(normalized_error, dict)
                         else None
                     )
                     or "unknown",
-                    "code": outcome.final_error_code or "ORCHESTRATOR_ERROR",
+                    "code": final_error_code or "ORCHESTRATOR_ERROR",
                 },
                 engine_name=engine_name,
                 audit_dir=inputs.audit_dir,

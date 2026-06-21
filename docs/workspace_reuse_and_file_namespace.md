@@ -19,6 +19,40 @@ Clients request reuse through `runtime_options.workspace`:
 
 Only `request_id` is accepted as the public reuse handle. The source request must exist, be bound to a run, have succeeded, and still have an available workspace.
 
+## File Bindings
+
+Reused workspaces can materialize an existing workspace file as the current run's file input:
+
+```json
+{
+  "input": {
+    "artifact_file": "inputs/artifact_file/file.json"
+  },
+  "runtime_options": {
+    "workspace": {
+      "mode": "reuse",
+      "request_id": "previous-request-id",
+      "file_bindings": [
+        {
+          "input_key": "artifact_file",
+          "source_request_id": "emitting-request-id",
+          "source_path": "runtime/file.json",
+          "target_path": "inputs/artifact_file/file.json"
+        }
+      ]
+    }
+  }
+}
+```
+
+`source_request_id` must resolve to a succeeded request in the same physical workspace as `workspace.request_id`.
+`source_path` is workspace-relative. `target_path` is uploads-relative, and `input[input_key]` must equal that target path.
+Both paths must be non-empty relative file paths and must not be absolute, `.`, `..`, traversal paths, or directories.
+
+The backend materializes each binding into staging uploads before manifest and cache-key calculation.
+For upload requests, the uploaded zip is extracted first and bindings are materialized afterward, so a binding overwrites a zip entry at the same `target_path`.
+On Windows the backend copies the file. On other platforms it tries a hard link first and falls back to copying.
+
 ## Workspace Identity
 
 Each skill execution keeps its own logical `run_id`. When workspace reuse is requested, the new run shares the source request's physical workspace while receiving its own run record and runner-owned file namespace.
@@ -45,3 +79,4 @@ result/<safeSkillId>.<n>/result.json
 ## Cache Lineage
 
 Reused-workspace runs include the source request's workspace output token in their cache key. This prevents a downstream step from reusing a cached result produced from a different upstream workspace state, while still allowing a fully identical chain to benefit from cache hits.
+Materialized file bindings are also included in the input manifest, so different bound file contents produce different cache identities.

@@ -81,6 +81,7 @@ def test_build_output_contract_details_markdown_artifact_field_description_and_s
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
+                "x-role": "digest",
             }
         },
     }

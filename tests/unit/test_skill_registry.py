@@ -45,6 +45,11 @@ def test_scan_artifacts_from_output_schema(tmp_path):
                 "type": "string",
                 "x-type": "file",
             },
+            "manifest_path": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-role": "artifact-manifest",
+            },
             "meta": {"type": "object"},
         },
         "required": ["text_path"],
@@ -61,13 +66,15 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         registry.scan_skills()
         skill = registry.get_skill("demo-skill")
         assert skill is not None
-        assert len(skill.artifacts) == 2
+        assert len(skill.artifacts) == 3
 
         artifacts = {a.role: a for a in skill.artifacts}
         assert artifacts["text"].pattern == "text_path"
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False
+        assert artifacts["artifact-manifest"].pattern == "manifest_path"
+        assert artifacts["artifact-manifest"].required is False
 
 
 def test_scan_skips_excluded_and_invalid_dirs(tmp_path):

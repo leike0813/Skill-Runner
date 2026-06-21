@@ -142,6 +142,51 @@ def test_runtime_env_redacted_projection_allowed_for_persisted_options():
     assert runtime_opts["env"] == {"FOO": {"redacted": True}}
 
 
+def test_workspace_file_bindings_shape_allowed():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options(
+        {
+            "workspace": {
+                "mode": "reuse",
+                "request_id": "req-a",
+                "file_bindings": [
+                    {
+                        "input_key": "artifact_file",
+                        "source_request_id": "req-a",
+                        "source_path": "runtime/artifact.json",
+                        "target_path": "inputs/artifact_file/artifact.json",
+                    }
+                ],
+            }
+        }
+    )
+    assert runtime_opts["workspace"]["file_bindings"][0]["input_key"] == "artifact_file"
+
+
+@pytest.mark.parametrize(
+    "workspace",
+    [
+        {"mode": "reuse", "request_id": "req-a", "file_bindings": "bad"},
+        {"mode": "reuse", "request_id": "req-a", "file_bindings": ["bad"]},
+        {
+            "mode": "reuse",
+            "request_id": "req-a",
+            "file_bindings": [
+                {
+                    "input_key": "artifact_file",
+                    "source_request_id": "req-a",
+                    "source_path": "runtime/artifact.json",
+                }
+            ],
+        },
+    ],
+)
+def test_workspace_file_bindings_invalid_shape_rejected(workspace):
+    policy = OptionsPolicy()
+    with pytest.raises(ValueError):
+        policy.validate_runtime_options({"workspace": workspace})
+
+
 @pytest.mark.parametrize(
     "env",
     [

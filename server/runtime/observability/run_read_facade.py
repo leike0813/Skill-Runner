@@ -21,6 +21,7 @@ from server.models import (
 from server.runtime.observability.job_control_port import JobControlPort
 from .run_observability import run_observability_service
 from . import run_source_adapter as run_source_ports
+from server.runtime.bundle_errors import BundleAssemblyError
 from server.runtime.workspace_layout import require_layout_from_record
 from .run_source_adapter import (
     RunSourceAdapter,
@@ -191,6 +192,15 @@ class RunReadFacade:
             if hasattr(control, "build_run_bundle"):
                 try:
                     control.build_run_bundle(run_dir, debug, layout=layout)
+                except BundleAssemblyError as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": exc.code,
+                            "message": exc.message,
+                            "path": exc.path,
+                        },
+                    ) from exc
                 except TypeError as exc:
                     raise HTTPException(
                         status_code=500,

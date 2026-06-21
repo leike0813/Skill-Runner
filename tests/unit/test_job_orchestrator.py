@@ -769,7 +769,11 @@ async def test_run_job_records_artifacts_in_result(tmp_path):
             {
                 "type": "object",
                 "properties": {
-                    "artifact_path": {"type": "string", "x-type": "artifact"},
+                    "artifact_path": {
+                        "type": "string",
+                        "x-type": "artifact",
+                        "x-role": "artifact",
+                    },
                 },
                 "required": ["artifact_path"],
             }
@@ -986,7 +990,11 @@ async def test_run_job_fails_when_required_artifacts_missing(tmp_path):
     output_schema = {
         "type": "object",
         "properties": {
-            "required_path": {"type": "string", "x-type": "artifact"},
+            "required_path": {
+                "type": "string",
+                "x-type": "artifact",
+                "x-role": "required",
+            },
         },
         "required": ["required_path"],
     }
@@ -1044,6 +1052,7 @@ async def test_run_job_autofix_moves_required_artifact_to_canonical_path(tmp_pat
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
+                "x-role": "digest",
             }
         },
         "required": ["digest_path"],
@@ -1103,6 +1112,7 @@ async def test_run_job_autofix_target_exists_keeps_existing_and_warns(tmp_path):
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
+                "x-role": "digest",
             }
         },
         "required": ["digest_path"],
@@ -1160,6 +1170,7 @@ async def test_run_job_autofix_rejects_outside_run_dir_path(tmp_path):
             "digest_path": {
                 "type": "string",
                 "x-type": "artifact",
+                "x-role": "digest",
             }
         },
         "required": ["digest_path"],
