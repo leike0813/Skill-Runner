@@ -561,7 +561,7 @@
 - `input/parameter/output` schema 会在上传阶段执行服务端 meta-schema 预检：
   - `output` schema 必须可解析；`input` / `parameter` schema 可选，缺失时跳过对应校验；
   - `input.schema.json` 的 `x-input-source` 仅允许 `file` / `inline`；
-  - `output.schema.json` 的 `x-type` 仅允许 `artifact` / `file`，且 `x-type: "artifact"` 必须声明非空 `x-role`；
+- `output.schema.json` 的 `x-type` 仅允许 `artifact` / `artifact-manifest` / `file`，且 `x-type: "artifact"` 与 `x-type: "artifact-manifest"` 必须声明非空 `x-role`；`x-role` 是自由 role 字符串，不承载 manifest 语义；
   - 所有解析到的 schema 均需满足对象型 JSON Schema 基本结构约束。
 - `SKILL.md` frontmatter 的 `name`、`assets/runner.json` 的 `id`、顶层目录名必须完全一致。
 - `runner.json.engines` 为可选字段；缺失时默认按系统支持的全部引擎处理。
@@ -926,7 +926,7 @@
 **说明**:
 - 普通 bundle 采用 contract-driven 语义。新 run 读取当前 request 的实际 `resultJsonPath`，物理 zip/manifest 位于 `bundle/<safeSkillId>.<n>/`；旧 `result/result.json` 与 root `bundle/` 只作为 legacy fallback。
 - bundle 内容仅包含当前 run 的 result、同目录 feedback sidecar（存在时）以及该 result payload 引用的 resolved artifact 文件。
-- `x-role: "artifact-manifest"` 的 output artifact 字段会展开为 manifest 文件本身和 manifest 内所有 workspace-relative 文件路径。
+- `x-type: "artifact-manifest"` 的 output artifact 字段会展开为 manifest 文件本身和 manifest 内所有文件路径；manifest 内 workspace-local 绝对路径会在终态前写回为 workspace-relative 路径。
 - 若 `result.json.artifacts` 或 artifact manifest 中的路径缺失、非法、非字符串，或 manifest 不是扁平 object，后端返回明确 `BUNDLE_ASSEMBLY_*` diagnostic，不会静默生成缺项 bundle。
 
 ### 下载 Debug Bundle (Get Debug Bundle)

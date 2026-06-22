@@ -108,7 +108,7 @@ AutoSkill 包是“可被 Skill-Runner 稳定自动执行”的 Skill 包。
 
 `x-filename` 已废弃。artifact 真源是 output JSON 中对应字段的路径值；运行时会在终态前 resolve 为 bundle-relative path 并写回 `result.json`。
 
-若产物数量动态变化，可声明 `x-type: "artifact"` + `x-role: "artifact-manifest"`。该字段值必须指向一个扁平 JSON object，object 的值是 workspace-relative 产物路径；runtime 会把 manifest 文件和其中列出的所有文件加入 bundle。
+若产物数量动态变化，可声明 `x-type: "artifact-manifest"` 与非空 `x-role`。该字段值必须指向一个扁平 JSON object，object 的值可以是 workspace-relative 产物路径或 workspace 内绝对路径；runtime 会把 manifest 文件内容规范化为 workspace-relative 路径，并把 manifest 文件和其中列出的所有文件加入 bundle。`x-role` 是自由 role 字符串，不承载 manifest 语义。
 
 ### 2.5 自动执行友好性要求
 
@@ -234,7 +234,7 @@ interactive 模式关键约束：
 - [ ] `runner.json.engines` 非空或缺失（缺失按全量引擎处理）
 - [ ] `runner.json.schemas.output` 若声明则路径有效；若未声明，固定 fallback 文件存在
 - [ ] `runner.json.engine_configs` 若声明，则路径有效；否则确认固定 fallback 或可接受地缺省
-- [ ] `output.schema.json` 对 artifact 字段已标注 `x-type: "artifact"` 和非空 `x-role`
+- [ ] `output.schema.json` 对普通 artifact 字段已标注 `x-type: "artifact"` 和非空 `x-role`；动态清单字段使用 `x-type: "artifact-manifest"` 和非空 `x-role`
 - [ ] 必填字段可被真实执行路径产出
 - [ ] interactive skill 的 SKILL.md 包含 `__SKILL_DONE__` 标记指引
 - [ ] 在目标引擎与目标执行模式下完成至少一次试跑

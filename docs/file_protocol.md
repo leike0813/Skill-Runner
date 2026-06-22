@@ -8,7 +8,7 @@
   - `file`：来自上传 Zip，运行时注入为绝对路径字符串。
   - `inline`：来自 `POST /v1/jobs` 请求体的 `input` JSON 值。
 - `parameter`：业务参数/配置，来自 `POST /v1/jobs` 请求体的 `parameter`。
-- `artifact`：output JSON 中被 `x-type: "artifact" | "file"` 标记的文件路径字段；终态前会被统一 resolve 为 bundle 内相对路径。
+- `artifact`：output JSON 中被 `x-type: "artifact" | "artifact-manifest" | "file"` 标记的文件路径字段；终态前会被统一 resolve 为 bundle 内相对路径。
 
 ## 2. `runner.json` 合同（当前实现）
 
@@ -110,9 +110,10 @@
 - 多种业务结果形态应写成顶层 object union：`{"type": "object", "oneOf": [...]}` 或 `{"type": "object", "anyOf": [...]}`。
 - object union 建议每个分支使用同一个 `const` discriminator 字段，例如 `kind`。
 - 支持在属性上声明：
-  - `x-type: "artifact"` 或 `x-type: "file"`
-  - `x-type: "artifact"` 必须声明非空 `x-role`
-  - `x-role: "artifact-manifest"` 表示该字段值是产物清单 JSON 路径
+  - `x-type: "artifact"`、`x-type: "artifact-manifest"` 或 `x-type: "file"`
+  - `x-type: "artifact"` 与 `x-type: "artifact-manifest"` 必须声明非空 `x-role`
+  - `x-role` 是自由 role 字符串，不承载 artifact manifest 语义
+  - `x-type: "artifact-manifest"` 表示该字段值是产物清单 JSON 路径
 
 ## 4. 输入校验与注入流程
 
@@ -200,10 +201,10 @@
 
 ### 7.1 声明来源
 
-- Artifact 字段由 `output.schema.json` 中的 `x-type in {"artifact","file"}` 标记。
-- `x-type: "artifact"` 必须声明非空 `x-role`；普通 role 表示字段值是单个产物路径。
-- `x-role: "artifact-manifest"` 是保留 role，表示字段值是一个扁平 JSON object 清单路径，例如 `{"html": "artifacts/report.html"}`。
-- manifest object 的值必须是 workspace-relative 文件路径；绝对路径、空路径、`..`、目录、缺失文件、嵌套 object/array 或非字符串值都会产生 `BUNDLE_ASSEMBLY_*` diagnostic。
+- Artifact 字段由 `output.schema.json` 中的 `x-type in {"artifact","artifact-manifest","file"}` 标记。
+- `x-type: "artifact"` 与 `x-type: "artifact-manifest"` 必须声明非空 `x-role`；`x-role` 是自由 role 字符串，不承载 artifact manifest 语义。
+- `x-type: "artifact-manifest"` 表示字段值是一个扁平 JSON object 清单路径，例如 `{"html": "artifacts/report.html"}`。
+- manifest object 的值可以是 workspace-relative 文件路径或 workspace 内绝对路径；runtime 会在终态前把 manifest 文件内容规范化为 workspace-relative 路径。workspace 外绝对路径、空路径、`..`、目录、缺失文件、嵌套 object/array 或非字符串值都会产生 `BUNDLE_ASSEMBLY_*` diagnostic。
 - `x-filename` 已废弃，不再参与运行期校验与目标路径推断。
 - `runner.json.artifacts` 若保留，仅作为兼容元数据；artifact 真源是 output JSON 中对应字段的路径值。
 
@@ -214,7 +215,7 @@
   2. 解析为 run 内实际文件；
   3. 若文件在 run 目录外，则执行唯一兜底移动到 run 内安全位置；
   4. 将字段值覆写为 bundle-relative path，并写回 `result.json`。
-- 对 `x-role: "artifact-manifest"` 字段，系统会将 manifest 文件本身以及 manifest 内所有路径写入 `result.json.artifacts`。
+- 对 `x-type: "artifact-manifest"` 字段，系统会将 manifest 文件本身以及 manifest 内所有路径写入 `result.json.artifacts`。
 - required artifact 的校验基于：
   - required 字段是否存在；
   - 以及 resolved 文件是否真实存在。

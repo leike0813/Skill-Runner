@@ -31,6 +31,7 @@
           "type": "string",
           "enum": [
             "artifact",
+            "artifact-manifest",
             "file"
           ]
         },
@@ -44,7 +45,10 @@
           "if": {
             "properties": {
               "x-type": {
-                "const": "artifact"
+                "enum": [
+                  "artifact",
+                  "artifact-manifest"
+                ]
               }
             },
             "required": [
@@ -61,18 +65,17 @@
           "if": {
             "properties": {
               "x-type": {
-                "const": "artifact"
-              },
-              "x-role": {
                 "const": "artifact-manifest"
               }
             },
             "required": [
-              "x-type",
-              "x-role"
+              "x-type"
             ]
           },
           "then": {
+            "required": [
+              "x-role"
+            ],
             "properties": {
               "type": {
                 "const": "string"

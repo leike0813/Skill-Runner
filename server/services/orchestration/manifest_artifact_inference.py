@@ -15,6 +15,7 @@ def scan_output_schema_artifacts(schema_path: Path) -> List[Dict[str, Any]]:
 
     Compatible markers:
     - x-type: artifact
+    - x-type: artifact-manifest
     - x-type: file
     """
     artifacts: List[Dict[str, Any]] = []
@@ -29,7 +30,7 @@ def scan_output_schema_artifacts(schema_path: Path) -> List[Dict[str, Any]]:
         required_keys = set(schema.get("required", []))
         for key, val in props.items():
             x_type = val.get("x-type")
-            if x_type not in {"artifact", "file"}:
+            if x_type not in {"artifact", "artifact-manifest", "file"}:
                 continue
             pattern = key
             role = val.get("x-role", "output")

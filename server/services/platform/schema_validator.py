@@ -87,7 +87,7 @@ class SchemaValidator:
             if not isinstance(prop_schema, dict):
                 return False
             x_type = str(prop_schema.get("x-type") or "").strip().lower()
-            if x_type not in {"artifact", "file"}:
+            if x_type not in {"artifact", "artifact-manifest", "file"}:
                 return False
         return True
 

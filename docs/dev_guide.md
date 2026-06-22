@@ -362,7 +362,7 @@ _parse_output(raw_stdout) → AdapterTurnResult
 - 失败：进入规范化链。
 
 ### Artifact Resolve
-- `output.schema.json` 中被 `x-type: "artifact" | "file"` 标记的字段视为 artifact 真源。
+- `output.schema.json` 中被 `x-type: "artifact" | "artifact-manifest" | "file"` 标记的字段视为 artifact 真源。
 - `x-filename` 已废弃，不再作为运行期校验真源。
 - 终态前系统会将这些路径 resolve 为 bundle-relative path，并覆写 `result/result.json`。
 - required artifact 校验基于“字段存在且 resolved 文件存在”，而不是固定 `artifacts/<pattern>` 命名。
@@ -388,7 +388,7 @@ N2 Skill Fallback（可选，非LLM）
 8. Artifacts 管理与返回
 ================================================================================
 Artifact 索引规则：
-- 依据 `output.schema.json` 中 `x-type: "artifact" | "file"` 标记的字段进行 artifact path resolve。
+- 依据 `output.schema.json` 中 `x-type: "artifact" | "artifact-manifest" | "file"` 标记的字段进行 artifact path resolve。
 - artifact 真源是 output JSON 中对应字段的路径值，而非固定 `artifacts/` 命名空间。
 - 对每个匹配文件计算 sha256、size、mime（后缀映射）。
 - 生成 `bundle/manifest.json`：

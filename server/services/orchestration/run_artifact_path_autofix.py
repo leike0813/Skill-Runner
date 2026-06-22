@@ -13,12 +13,13 @@ WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN = "OUTPUT_ARTIFACT_PATH_REWRITTEN"
 WARNING_OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR = "OUTPUT_ARTIFACT_MOVED_INSIDE_RUN_DIR"
 WARNING_OUTPUT_ARTIFACT_PATH_INVALID = "OUTPUT_ARTIFACT_PATH_INVALID"
 WARNING_OUTPUT_ARTIFACT_PATH_MISSING = "OUTPUT_ARTIFACT_PATH_MISSING"
+WARNING_OUTPUT_ARTIFACT_MANIFEST_PATH_REWRITTEN = "OUTPUT_ARTIFACT_MANIFEST_PATH_REWRITTEN"
 BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID = "BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID"
 BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING = "BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING"
 BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID = "BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID"
 BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT = "BUNDLE_ASSEMBLY_MANIFEST_NOT_FLAT_OBJECT"
 BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH = "BUNDLE_ASSEMBLY_MANIFEST_VALUE_NOT_PATH"
-ARTIFACT_MANIFEST_ROLE = "artifact-manifest"
+ARTIFACT_MANIFEST_TYPE = "artifact-manifest"
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class ArtifactResolutionResult:
 class _ArtifactField:
     name: str
     required: bool
+    x_type: str
     role: str | None
 
 
@@ -117,7 +119,7 @@ def resolve_output_artifact_paths(
             updated_output[field.name] = rel_path
             _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_PATH_REWRITTEN)
         artifacts.append(rel_path)
-        if field.role == ARTIFACT_MANIFEST_ROLE:
+        if field.x_type == ARTIFACT_MANIFEST_TYPE:
             manifest_result = _expand_artifact_manifest(
                 run_dir=run_dir,
                 manifest_path=resolved_source,
@@ -166,6 +168,9 @@ def _load_output_artifact_fields(
         merged[field.name] = _ArtifactField(
             name=field.name,
             required=existing.required or field.required,
+            x_type=existing.x_type
+            if existing.x_type == ARTIFACT_MANIFEST_TYPE
+            else field.x_type,
             role=existing.role or field.role,
         )
     return list(merged.values())
@@ -187,7 +192,8 @@ def _collect_output_artifact_fields(
         for field_name, field_schema in properties.items():
             if not isinstance(field_name, str) or not isinstance(field_schema, dict):
                 continue
-            if str(field_schema.get("x-type") or "").strip().lower() not in {"artifact", "file"}:
+            x_type = str(field_schema.get("x-type") or "").strip().lower()
+            if x_type not in {"artifact", "file", ARTIFACT_MANIFEST_TYPE}:
                 continue
             role_obj = field_schema.get("x-role")
             role = role_obj.strip() if isinstance(role_obj, str) and role_obj.strip() else None
@@ -195,6 +201,7 @@ def _collect_output_artifact_fields(
                 _ArtifactField(
                     name=field_name,
                     required=field_name in required_fields,
+                    x_type=x_type,
                     role=role,
                 )
             )
@@ -329,6 +336,7 @@ def _expand_artifact_manifest(
         return _ManifestExpansionResult(artifacts=artifacts, warnings=warnings, errors=errors)
 
     run_dir_resolved = run_dir.resolve()
+    normalized_manifest: Dict[str, str] = {}
     for manifest_key, raw_path in manifest.items():
         key_label = str(manifest_key)
         if isinstance(raw_path, (dict, list)):
@@ -346,7 +354,11 @@ def _expand_artifact_manifest(
             )
             continue
         try:
-            rel_path = _normalize_relative_path(raw_path)
+            artifact_path, rel_path = _resolve_manifest_entry_path(
+                run_dir=run_dir,
+                run_dir_resolved=run_dir_resolved,
+                raw_path=raw_path,
+            )
         except ValueError as exc:
             _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID)
             errors.append(
@@ -355,16 +367,6 @@ def _expand_artifact_manifest(
             )
             continue
 
-        artifact_path = (run_dir / rel_path).resolve()
-        try:
-            artifact_path.relative_to(run_dir_resolved)
-        except ValueError:
-            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID)
-            errors.append(
-                f"{BUNDLE_ASSEMBLY_ARTIFACT_PATH_INVALID}: artifact manifest field "
-                f"{field_name!r} entry {key_label!r} escapes the workspace"
-            )
-            continue
         if not artifact_path.exists() or not artifact_path.is_file():
             _append_unique_warning(warnings, BUNDLE_ASSEMBLY_ARTIFACT_PATH_MISSING)
             errors.append(
@@ -372,10 +374,49 @@ def _expand_artifact_manifest(
                 f"{field_name!r} entry {key_label!r} references missing file {rel_path!r}"
             )
             continue
+        normalized_manifest[manifest_key] = rel_path
         artifacts.append(rel_path)
+
+    if not errors and normalized_manifest != manifest:
+        try:
+            manifest_path.write_text(
+                json.dumps(normalized_manifest, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            _append_unique_warning(warnings, WARNING_OUTPUT_ARTIFACT_MANIFEST_PATH_REWRITTEN)
+        except OSError as exc:
+            _append_unique_warning(warnings, BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID)
+            errors.append(
+                f"{BUNDLE_ASSEMBLY_MANIFEST_JSON_INVALID}: artifact manifest field "
+                f"{field_name!r} could not be rewritten ({exc})"
+            )
 
     return _ManifestExpansionResult(
         artifacts=sorted(dict.fromkeys(artifacts)),
         warnings=warnings,
         errors=errors,
     )
+
+
+def _resolve_manifest_entry_path(
+    *,
+    run_dir: Path,
+    run_dir_resolved: Path,
+    raw_path: str,
+) -> tuple[Path, str]:
+    candidate = Path(raw_path.strip())
+    if candidate.is_absolute():
+        artifact_path = candidate.resolve()
+        try:
+            rel_path = artifact_path.relative_to(run_dir_resolved).as_posix()
+        except ValueError as exc:
+            raise ValueError("absolute path escapes the workspace") from exc
+        return artifact_path, rel_path
+
+    rel_path = _normalize_relative_path(raw_path)
+    artifact_path = (run_dir / rel_path).resolve()
+    try:
+        artifact_path.relative_to(run_dir_resolved)
+    except ValueError as exc:
+        raise ValueError("path escapes the workspace") from exc
+    return artifact_path, rel_path

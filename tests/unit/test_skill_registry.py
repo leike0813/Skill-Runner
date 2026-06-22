@@ -47,8 +47,8 @@ def test_scan_artifacts_from_output_schema(tmp_path):
             },
             "manifest_path": {
                 "type": "string",
-                "x-type": "artifact",
-                "x-role": "artifact-manifest",
+                "x-type": "artifact-manifest",
+                "x-role": "manifest",
             },
             "meta": {"type": "object"},
         },
@@ -73,8 +73,8 @@ def test_scan_artifacts_from_output_schema(tmp_path):
         assert artifacts["text"].required is True
         assert artifacts["output"].pattern == "info_path"
         assert artifacts["output"].required is False
-        assert artifacts["artifact-manifest"].pattern == "manifest_path"
-        assert artifacts["artifact-manifest"].required is False
+        assert artifacts["manifest"].pattern == "manifest_path"
+        assert artifacts["manifest"].required is False
 
 
 def test_scan_skips_excluded_and_invalid_dirs(tmp_path):

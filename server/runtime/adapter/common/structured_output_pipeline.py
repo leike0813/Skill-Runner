@@ -663,7 +663,7 @@ class StructuredOutputPipeline:
 
     def _translate_schema(self, schema: dict[str, Any]) -> dict[str, Any]:
         raw_type = schema.get("type")
-        if schema.get("x-type") in {"artifact", "file"}:
+        if schema.get("x-type") in {"artifact", "artifact-manifest", "file"}:
             return {
                 "type": "string",
                 "description": str(schema.get("description") or "Artifact output path."),

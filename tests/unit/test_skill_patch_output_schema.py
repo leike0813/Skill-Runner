@@ -91,6 +91,23 @@ def test_build_output_contract_details_markdown_artifact_field_description_and_s
     assert "artifacts/..." in patch
 
 
+def test_build_output_contract_details_markdown_artifact_manifest_type_description_and_skeleton():
+    schema = {
+        "type": "object",
+        "properties": {
+            "manifest_path": {
+                "type": "string",
+                "x-type": "artifact-manifest",
+                "x-role": "manifest",
+            }
+        },
+    }
+    patch = build_output_contract_details_markdown(schema)
+    assert "Artifact manifest path." in patch
+    assert "workspace-relative or workspace-local absolute" in patch
+    assert "artifacts/manifest.json" in patch
+
+
 def test_build_output_contract_details_markdown_array_item_count_constraints_and_valid_skeleton():
     schema = {
         "type": "object",
