@@ -124,7 +124,7 @@ class ConfigGenerator:
         # 1. Load Schema
         schema_path = self._resolve_schema_path(schema_name)
             
-        with open(schema_path, "r") as f:
+        with open(schema_path, "r", encoding="utf-8") as f:
             schema = json.load(f)
 
         # 2. Merge Layers
@@ -137,7 +137,7 @@ class ConfigGenerator:
         
         # 4. Write
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(final_config, f, indent=2)
             
         return output_path

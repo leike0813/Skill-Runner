@@ -1,3 +1,4 @@
+import builtins
 import json
 import logging
 from pathlib import Path
@@ -13,7 +14,7 @@ def test_unknown_config_key_logs_warning(tmp_path, caplog):
     generator._engine_schemas_glob = tmp_path  # type: ignore[attr-defined]
 
     schema = {"known": "str"}
-    (tmp_path / "schema.json").write_text(json.dumps(schema))
+    (tmp_path / "schema.json").write_text(json.dumps(schema), encoding="utf-8")
 
     output_path = tmp_path / "settings.json"
     with caplog.at_level(logging.WARNING):
@@ -24,8 +25,45 @@ def test_unknown_config_key_logs_warning(tmp_path, caplog):
         )
 
     assert output_path.exists()
-    assert "unknown" in output_path.read_text()
+    assert "unknown" in output_path.read_text(encoding="utf-8")
     assert any("unknown" in record.message for record in caplog.records)
+
+
+def test_generate_config_uses_utf8_for_schema_and_output(tmp_path, monkeypatch):
+    generator = ConfigGenerator()
+    generator._contract_schemas_dir = tmp_path  # type: ignore[attr-defined]
+    generator._engine_schemas_glob = tmp_path  # type: ignore[attr-defined]
+
+    schema_path = tmp_path / "schema.json"
+    output_path = tmp_path / "settings.json"
+    schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "UTF-8 schema text with smart quote “",
+        "type": "object",
+        "properties": {"label": {"type": "string"}},
+    }
+    schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
+
+    real_open = builtins.open
+    observed_encodings: dict[Path, str | None] = {}
+
+    def tracked_open(file, *args, **kwargs):
+        path = Path(file)
+        if path in {schema_path, output_path}:
+            observed_encodings[path] = kwargs.get("encoding")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", tracked_open)
+
+    generator.generate_config(
+        schema_name=schema_path.name,
+        config_layers=[{"label": "含中文的配置值"}],
+        output_path=output_path,
+    )
+
+    assert observed_encodings[schema_path] == "utf-8"
+    assert observed_encodings[output_path] == "utf-8"
+    assert json.loads(output_path.read_text(encoding="utf-8"))["label"] == "含中文的配置值"
 
 
 def test_json_schema_config_accepts_claude_env_without_unknown_key_warning(tmp_path, caplog):
