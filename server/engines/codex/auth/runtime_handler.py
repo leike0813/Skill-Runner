@@ -197,6 +197,8 @@ class CodexAuthRuntimeHandler:
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 start_new_session=True,
             )
         return self._manager._new_session(  # noqa: SLF001

@@ -26,6 +26,8 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("SKILL_RUNNER_AGENT_HOME", str(tmp_path / "agent-home"))
     monkeypatch.setenv("SKILL_RUNNER_NPM_PREFIX", str(tmp_path / "npm"))
     monkeypatch.setenv("ZDOTDIR", str(tmp_path / "host-zdot"))
+    monkeypatch.delenv("LANG", raising=False)
+    monkeypatch.delenv("LC_ALL", raising=False)
     runtime_profile.reset_runtime_profile_cache()
 
     profile = runtime_profile.get_runtime_profile()
@@ -50,6 +52,37 @@ def test_runtime_profile_local_env_overrides(monkeypatch, tmp_path):
     )
     assert env["ZOTERO_BRIDGE_BIN"] == str(profile.npm_prefix / "bin" / "zotero-bridge")
     assert env["OPENCODE_ENABLE_EXA"] == "1"
+    assert env["PYTHONUTF8"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+    assert env["LANG"] == "C.UTF-8"
+    assert env["LC_ALL"] == "C.UTF-8"
+
+
+def test_runtime_profile_preserves_explicit_utf8_env(tmp_path):
+    profile = runtime_profile.RuntimeProfile(
+        mode="local",
+        platform="linux",
+        data_dir=tmp_path / "data",
+        agent_cache_root=tmp_path / "cache",
+        agent_home=tmp_path / "cache" / "agent-home",
+        npm_prefix=tmp_path / "cache" / "npm",
+        uv_cache_dir=tmp_path / "cache" / "uv_cache",
+        uv_project_environment=tmp_path / "cache" / "uv_venv",
+    )
+
+    env = profile.build_subprocess_env(
+        {
+            "PYTHONUTF8": "0",
+            "PYTHONIOENCODING": "utf-8:surrogateescape",
+            "LANG": "zh_CN.UTF-8",
+            "LC_ALL": "zh_CN.UTF-8",
+        }
+    )
+
+    assert env["PYTHONUTF8"] == "0"
+    assert env["PYTHONIOENCODING"] == "utf-8:surrogateescape"
+    assert env["LANG"] == "zh_CN.UTF-8"
+    assert env["LC_ALL"] == "zh_CN.UTF-8"
 
 
 def test_runtime_profile_preserves_explicit_zotero_bridge_bin(monkeypatch, tmp_path):

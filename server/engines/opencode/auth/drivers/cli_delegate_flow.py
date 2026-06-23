@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import Lock, Thread
 
 from server.runtime.auth.cli_pty_runtime import CliPtyRuntime, ProcessHandle, spawn_cli_pty
+from server.services.platform.subprocess_text import run_text
 
 _ANSI_CSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _ANSI_OSC_PATTERN = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
@@ -478,11 +479,8 @@ class OpencodeAuthCliFlow:
         if proc.poll() is None:
             try:
                 if platform.system().lower().startswith("win"):
-                    subprocess.run(
+                    run_text(
                         ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                        capture_output=True,
-                        text=True,
-                        check=False,
                     )
                 else:
                     killpg = getattr(os, "killpg", None)

@@ -113,6 +113,11 @@ class RuntimeProfile:
         env["NPM_CONFIG_PREFIX"] = str(self.npm_prefix)
         env["UV_CACHE_DIR"] = str(self.uv_cache_dir)
         env["UV_PROJECT_ENVIRONMENT"] = str(self.uv_project_environment)
+        env.setdefault("PYTHONUTF8", "1")
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        if self.platform != "windows":
+            env.setdefault("LANG", "C.UTF-8")
+            env.setdefault("LC_ALL", "C.UTF-8")
         xdg_config_home = self.agent_home / ".config"
         xdg_data_home = self.agent_home / ".local" / "share"
         xdg_state_home = self.agent_home / ".local" / "state"

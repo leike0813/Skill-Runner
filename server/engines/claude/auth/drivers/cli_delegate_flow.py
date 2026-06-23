@@ -47,6 +47,8 @@ class ClaudeAuthCliFlow:
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 start_new_session=True,
             )
         now = _utc_now()

@@ -50,6 +50,7 @@ from server.services.engine_management.runtime_profile import (
 from server.services.engine_management.zotero_bridge_cli_bundle import (
     ensure_zotero_bridge_managed_plugin,
 )
+from server.services.platform.subprocess_text import run_text
 
 logger = logging.getLogger(__name__)
 
@@ -427,11 +428,8 @@ class AgentCliManager:
             return None
         env = self.profile.build_subprocess_env()
         try:
-            result = subprocess.run(
+            result = run_text(
                 [str(cmd), "--version"],
-                capture_output=True,
-                text=True,
-                check=False,
                 env=env,
             )
         except (FileNotFoundError, OSError):
@@ -494,11 +492,8 @@ class AgentCliManager:
             self.profile.platform,
         )
         try:
-            result = subprocess.run(
+            result = run_text(
                 [npm_cmd, "install", "-g", package],
-                capture_output=True,
-                text=True,
-                check=False,
                 env=env,
             )
             duration_ms = int((time.perf_counter() - started_at) * 1000)
@@ -550,11 +545,8 @@ class AgentCliManager:
             timeout_sec,
         )
         try:
-            result = subprocess.run(
+            result = run_text(
                 argv,
-                capture_output=True,
-                text=True,
-                check=False,
                 env=env,
                 timeout=timeout_sec,
             )

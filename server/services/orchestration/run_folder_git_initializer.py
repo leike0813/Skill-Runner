@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from server.services.platform.subprocess_text import run_text
 
 
 class RunFolderGitInitializer:
@@ -14,11 +15,8 @@ class RunFolderGitInitializer:
         if git_dir.exists():
             return False
         resolved.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(
+        result = run_text(
             [self.git_executable, "init", "-q", str(resolved)],
-            capture_output=True,
-            text=True,
-            check=False,
         )
         if result.returncode != 0:
             detail = (result.stderr or "").strip() or (result.stdout or "").strip() or f"exit={result.returncode}"

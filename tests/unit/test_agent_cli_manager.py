@@ -545,16 +545,25 @@ def test_read_version_extracts_semver_from_prefixed_output(tmp_path: Path, monke
     manager = AgentCliManager(_build_profile(tmp_path))
     manager.ensure_layout()
     monkeypatch.setattr(manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/fake"))
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *args, **kwargs: SimpleNamespace(  # noqa: ARG005
+
+    captured_kwargs: dict[str, object] = {}
+
+    def _fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured_kwargs.update(kwargs)
+        return SimpleNamespace(
             stdout="codex-cli 0.105.0\n",
             stderr="",
             returncode=0,
-        ),
+        )
+
+    monkeypatch.setattr(
+        "subprocess.run",
+        _fake_run,
     )
 
     assert manager.read_version("codex") == "0.105.0"
+    assert captured_kwargs["encoding"] == "utf-8"
+    assert captured_kwargs["errors"] == "replace"
 
 
 def test_read_version_returns_none_on_oserror(tmp_path: Path, monkeypatch) -> None:

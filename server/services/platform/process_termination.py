@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from server.config import config
+from server.services.platform.subprocess_text import run_text
 
 TerminationOutcome = Literal["already_exited", "terminated", "failed"]
 PopenProcess = subprocess.Popen[str] | subprocess.Popen[bytes]
@@ -60,11 +61,8 @@ def terminate_pid_tree(
 
     if platform.system().lower().startswith("win"):
         try:
-            result = subprocess.run(
+            result = run_text(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True,
-                text=True,
-                check=False,
             )
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
             return TerminationResult(outcome="failed", detail=f"taskkill_error:{type(exc).__name__}")

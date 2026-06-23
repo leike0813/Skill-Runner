@@ -23,14 +23,23 @@ def test_terminate_pid_tree_returns_already_exited_when_pid_not_alive(monkeypatc
 def test_terminate_pid_tree_windows_taskkill_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_termination.platform, "system", lambda: "Windows")
     monkeypatch.setattr(process_termination, "_is_pid_alive", lambda _pid: True)
+
+    captured_kwargs: dict[str, object] = {}
+
+    def _fake_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured_kwargs.update(kwargs)
+        return SimpleNamespace(returncode=0)
+
     monkeypatch.setattr(
         process_termination.subprocess,
         "run",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+        _fake_run,
     )
     result = process_termination.terminate_pid_tree(23456)
     assert result.outcome == "terminated"
     assert result.detail == "taskkill_ok"
+    assert captured_kwargs["encoding"] == "utf-8"
+    assert captured_kwargs["errors"] == "replace"
 
 
 @pytest.mark.asyncio

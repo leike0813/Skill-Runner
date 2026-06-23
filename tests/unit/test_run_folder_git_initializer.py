@@ -13,18 +13,23 @@ def test_ensure_git_repo_initializes_when_missing(tmp_path: Path, monkeypatch: p
     run_dir.mkdir(parents=True)
     commands: list[list[str]] = []
 
-    def _fake_run(command, capture_output, check, text):  # type: ignore[no-untyped-def]
+    captured_kwargs: dict[str, object] = {}
+
+    def _fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
         commands.append(list(command))
+        captured_kwargs.update(kwargs)
         (run_dir / ".git").mkdir(exist_ok=True)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr("server.services.orchestration.run_folder_git_initializer.subprocess.run", _fake_run)
+    monkeypatch.setattr("server.services.platform.subprocess_text.subprocess.run", _fake_run)
     initializer = RunFolderGitInitializer()
 
     created = initializer.ensure_git_repo(run_dir)
 
     assert created is True
     assert commands == [["git", "init", "-q", str(run_dir.resolve())]]
+    assert captured_kwargs["encoding"] == "utf-8"
+    assert captured_kwargs["errors"] == "replace"
     assert (run_dir / ".git").exists()
 
 
@@ -42,10 +47,10 @@ def test_ensure_git_repo_raises_on_git_failure(tmp_path: Path, monkeypatch: pyte
     run_dir = tmp_path / "run-c"
     run_dir.mkdir(parents=True)
 
-    def _fake_run(command, capture_output, check, text):  # type: ignore[no-untyped-def]
+    def _fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
         return subprocess.CompletedProcess(command, 1, "", "git init failed")
 
-    monkeypatch.setattr("server.services.orchestration.run_folder_git_initializer.subprocess.run", _fake_run)
+    monkeypatch.setattr("server.services.platform.subprocess_text.subprocess.run", _fake_run)
     initializer = RunFolderGitInitializer()
 
     with pytest.raises(RuntimeError, match="git init failed"):
