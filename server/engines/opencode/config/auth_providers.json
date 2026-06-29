@@ -50,6 +50,13 @@
       "supports_import": false
     },
     {
+      "provider_id": "opencode-go",
+      "display_name": "OpenCode Go",
+      "auth_mode": "api_key",
+      "menu_label": "OpenCode Go",
+      "supports_import": false
+    },
+    {
       "provider_id": "openrouter",
       "display_name": "OpenRouter",
       "auth_mode": "api_key",

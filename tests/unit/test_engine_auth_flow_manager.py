@@ -1120,7 +1120,8 @@ def test_engine_auth_flow_manager_iflow_rejects_wrong_method(tmp_path: Path):
         manager.start_session("iflow", "auth", transport="cli_delegate", auth_method="callback")
 
 
-def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
+@pytest.mark.parametrize("provider_id", ["deepseek", "opencode-go"])
+def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path, provider_id: str):
     command_path = _write_script(tmp_path / "fake-opencode", "sleep 1")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
@@ -1132,14 +1133,14 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
     started = manager.start_session(
         "opencode",
         "auth",
-        provider_id="deepseek",
+        provider_id=provider_id,
         transport="oauth_proxy",
         auth_method="api_key",
     )
     assert started["engine"] == "opencode"
     assert started["status"] == "waiting_user"
     assert started["input_kind"] == "api_key"
-    assert started["provider_id"] == "deepseek"
+    assert started["provider_id"] == provider_id
 
     submitted = manager.input_session(started["session_id"], "api_key", "sk-test-123")
     assert submitted["status"] == "succeeded"
@@ -1147,7 +1148,7 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path):
     auth_path = profile.agent_home / ".local" / "share" / "opencode" / "auth.json"
     assert auth_path.exists()
     payload = auth_path.read_text(encoding="utf-8")
-    assert "deepseek" in payload
+    assert provider_id in payload
     assert "sk-test-123" in payload
 
 

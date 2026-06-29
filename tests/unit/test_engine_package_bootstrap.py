@@ -21,3 +21,5 @@ def test_opencode_auth_registry_reexport_is_available() -> None:
     assert provider_non_cn.provider_id == "alibaba-coding-plan"
     provider_cn = opencode_auth_provider_registry.get("alibaba-coding-plan-cn")
     assert provider_cn.provider_id == "alibaba-coding-plan-cn"
+    provider_go = opencode_auth_provider_registry.get("opencode-go")
+    assert provider_go.provider_id == "opencode-go"
