@@ -10,6 +10,7 @@ httpx = pytest.importorskip("httpx")
 
 from server.main import app
 from server.config import config
+from server.version import get_backend_version
 from server.models import (
     CancelResponse,
     InteractionPendingResponse,
@@ -164,7 +165,7 @@ async def test_system_handshake_reports_job_protocol_and_backend_version():
     assert res.status_code == 200
     body = res.json()
     assert body["schema"] == "zotero-agents.skillrunner-handshake.response.v1"
-    assert body["backend"] == {"name": "Skill-Runner", "version": "0.7.2"}
+    assert body["backend"] == {"name": "Skill-Runner", "version": get_backend_version()}
     assert body["protocols"]["skillrunner.job.v1"]["supported"] is True
 
 

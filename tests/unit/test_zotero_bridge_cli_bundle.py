@@ -347,7 +347,7 @@ def test_zotero_bridge_submodule_and_docker_wiring_are_declared() -> None:
     gitmodules = Path(".gitmodules").read_text(encoding="utf-8")
     assert '[submodule "plugins/zotero-bridge-cli-bundle"]' in gitmodules
     assert "path = plugins/zotero-bridge-cli-bundle" in gitmodules
-    assert "url = https://github.com/leike0813/Zotero-Skills.git" in gitmodules
+    assert "url = https://github.com/leike0813/zotero-agents.git" in gitmodules
     assert "branch = host-bridge/zotero-bridge-cli-bundle" in gitmodules
 
     bundle = Path("plugins/zotero-bridge-cli-bundle")
