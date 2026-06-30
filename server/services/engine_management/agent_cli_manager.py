@@ -60,7 +60,7 @@ WINDOWS_NPM_BINARY_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
     "opencode": {
         "$schema": "https://opencode.ai/config.json",
-        "plugin": ["opencode-antigravity-auth"],
+        "provider": {},
     },
     "claude": {
         "hasCompletedOnboarding": True,

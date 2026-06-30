@@ -426,7 +426,7 @@ def test_ui_shell_manager_qwen_session_disables_shell_and_reports_non_sandbox(
 
     settings_path = session_dir / ".qwen" / "settings.json"
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert payload["model"]["name"] == "coder-model"
+    assert payload["model"]["name"] == "qwen3-coder-plus"
     assert payload["permissions"]["defaultMode"] == "plan"
     assert "Bash" in payload["permissions"]["deny"]
 

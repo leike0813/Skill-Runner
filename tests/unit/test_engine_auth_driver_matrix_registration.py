@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionGate
 
@@ -86,8 +88,8 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
     assert manager._driver_registry.supports(  # noqa: SLF001
         transport="oauth_proxy",
         engine="qwen",
-        auth_method="auth_code_or_url",
-        provider_id="qwen-oauth",
+        auth_method="api_key",
+        provider_id="openrouter",
     )
     assert manager._driver_registry.supports(  # noqa: SLF001
         transport="oauth_proxy",
@@ -115,8 +117,8 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
     assert manager.resolve_transport_start_method(
         transport="oauth_proxy",
         engine="qwen",
-        auth_method="auth_code_or_url",
-        provider_id="qwen-oauth",
+        auth_method="api_key",
+        provider_id="openrouter",
     ) == "auth"
     assert manager.resolve_transport_start_method(
         transport="oauth_proxy",
@@ -124,9 +126,10 @@ def test_driver_matrix_registration_and_method_resolution(tmp_path: Path, monkey
         auth_method="auth_code_or_url",
         provider_id="kilo",
     ) == "auth"
-    assert manager.resolve_transport_start_method(
-        transport="cli_delegate",
-        engine="qwen",
-        auth_method="api_key",
-        provider_id="coding-plan-global",
-    ) == "auth"
+    with pytest.raises(KeyError):
+        manager.resolve_transport_start_method(
+            transport="cli_delegate",
+            engine="qwen",
+            auth_method="api_key",
+            provider_id="coding-plan-global",
+        )

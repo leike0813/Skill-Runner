@@ -2208,6 +2208,18 @@
                   "fatal": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "completion_state": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [

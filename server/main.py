@@ -28,7 +28,6 @@ def _load_shared_engine_auth_env_files() -> None:
     root = Path(__file__).resolve().parent.parent
     env_paths = (
         root / "server" / "engines" / "gemini" / "auth" / "protocol" / "shared_oauth_credentials.env",
-        root / "server" / "engines" / "opencode" / "auth" / "protocol" / "shared_google_antigravity_oauth_credentials.env",
     )
     for env_path in env_paths:
         _load_env_file(env_path)

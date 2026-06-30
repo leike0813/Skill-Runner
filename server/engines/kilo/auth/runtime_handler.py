@@ -34,7 +34,6 @@ class KiloAuthRuntimeHandler:
             manager,
             auth_store_factory=manager._build_kilo_auth_store,  # noqa: SLF001
             openai_oauth_flow_attr="_kilo_opencode_openai_oauth_proxy_flow",
-            google_antigravity_oauth_flow_attr="_kilo_opencode_google_antigravity_oauth_proxy_flow",
         )
 
     def requires_parent_trust_bootstrap(self) -> bool:

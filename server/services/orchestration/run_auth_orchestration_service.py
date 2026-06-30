@@ -65,11 +65,7 @@ _HIGH_RISK_SHORT_LABEL = "High risk!"
 _HIGH_RISK_NOTICE = (
     "This third-party login path may violate Google policies and could lead to account suspension."
 )
-_AUTH_SIGNAL_PROVIDER_FALLBACKS: dict[str, dict[str, str]] = {
-    "qwen": {
-        "qwen_oauth_waiting_authorization": "qwen-oauth",
-    }
-}
+_AUTH_SIGNAL_PROVIDER_FALLBACKS: dict[str, dict[str, str]] = {}
 
 
 def _utc_now() -> datetime:

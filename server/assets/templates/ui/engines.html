@@ -83,6 +83,41 @@
             border-top: 1px solid #e5e7eb;
             margin: 2px 0;
         }
+        .auth-menu-popover {
+            display: none;
+            position: fixed;
+            z-index: 80;
+            width: min(520px, calc(100vw - 24px));
+            min-width: min(220px, calc(100vw - 24px));
+            max-height: min(480px, calc(100vh - 24px));
+            overflow: auto;
+            overscroll-behavior: contain;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            box-shadow: 0 12px 24px rgba(15,23,42,0.16);
+            border-radius: 10px;
+            padding: 8px;
+        }
+        .auth-menu-title {
+            font-size: 13px;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+        .auth-menu-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 6px;
+        }
+        .auth-menu-items .auth-menu-separator {
+            grid-column: 1 / -1;
+        }
+        .auth-menu-items button {
+            width: 100%;
+            min-height: 36px;
+            text-align: left;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
         .auth-import-modal {
             position: fixed;
             inset: 0;
@@ -347,9 +382,9 @@
             </div>
         </div>
         <div id="auth-error" class="error"></div>
-        <div id="auth-menu-popover" style="display:none; position:fixed; z-index:80; min-width:220px; background:#ffffff; border:1px solid #d1d5db; box-shadow:0 12px 24px rgba(15,23,42,0.16); border-radius:10px; padding:8px;">
-            <div id="auth-menu-title" style="font-size:13px; color:#374151; margin-bottom:6px;">{{ t("ui.engines.choose", default="请选择") }}</div>
-            <div id="auth-menu-items" style="display:grid; gap:6px;"></div>
+        <div id="auth-menu-popover" class="auth-menu-popover">
+            <div id="auth-menu-title" class="auth-menu-title">{{ t("ui.engines.choose", default="请选择") }}</div>
+            <div id="auth-menu-items" class="auth-menu-items"></div>
         </div>
         <div id="auth-import-modal" class="auth-import-modal" aria-hidden="true">
             <div class="auth-import-card">
@@ -1903,9 +1938,24 @@
     function positionAuthMenu(anchor) {
         if (!authMenuPopoverEl || !anchor) return;
         const rect = anchor.getBoundingClientRect();
+        const margin = 12;
         authMenuPopoverEl.style.display = "block";
-        authMenuPopoverEl.style.left = `${Math.max(12, rect.left)}px`;
-        authMenuPopoverEl.style.top = `${Math.min(window.innerHeight - 20, rect.bottom + 6)}px`;
+        authMenuPopoverEl.style.maxHeight = `${Math.max(160, window.innerHeight - margin * 2)}px`;
+        const menuRect = authMenuPopoverEl.getBoundingClientRect();
+        const targetLeft = Math.min(
+            Math.max(margin, rect.left),
+            Math.max(margin, window.innerWidth - menuRect.width - margin)
+        );
+        const spaceBelow = window.innerHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+        let targetTop = rect.bottom + 6;
+        if (menuRect.height > spaceBelow && spaceAbove > spaceBelow) {
+            targetTop = Math.max(margin, rect.top - menuRect.height - 6);
+        } else {
+            targetTop = Math.min(targetTop, Math.max(margin, window.innerHeight - menuRect.height - margin));
+        }
+        authMenuPopoverEl.style.left = `${targetLeft}px`;
+        authMenuPopoverEl.style.top = `${targetTop}px`;
     }
 
     function renderAuthMenuItems(items, title) {
@@ -1922,8 +1972,6 @@
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = item.secondary ? "btn btn-secondary" : "btn btn-primary";
-            btn.style.textAlign = "left";
-            btn.style.width = "100%";
             btn.textContent = item.label;
             btn.addEventListener("click", (evt) => {
                 evt.preventDefault();
@@ -2212,7 +2260,6 @@
         return (
             engine === "codex"
             || (engine === "opencode" && providerId === "openai")
-            || (engine === "qwen" && providerId === "qwen-oauth")
         );
     }
 

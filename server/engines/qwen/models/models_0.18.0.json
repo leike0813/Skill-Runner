@@ -3,15 +3,6 @@
   "version": "0.18.0",
   "models": [
     {
-      "id": "coder-model",
-      "display_name": "Qwen 3.6 Plus",
-      "deprecated": true,
-      "notes": "Qwen OAuth built-in model",
-      "provider": "qwen-oauth",
-      "provider_id": "qwen-oauth",
-      "model": "coder-model"
-    },
-    {
       "id": "qwen3.5-plus",
       "display_name": "Qwen 3.5 Plus",
       "deprecated": false,

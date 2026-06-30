@@ -45,8 +45,8 @@
     "seed_path": "../models/models_seed.json"
   },
   "command_defaults": {
-    "start": ["run", "--format", "json", "--auto"],
-    "resume": ["run", "--format", "json", "--auto", "--session"],
+    "start": ["run", "--format", "json", "--auto", "--thinking"],
+    "resume": ["run", "--format", "json", "--auto", "--thinking", "--session"],
     "ui_shell": []
   },
   "structured_output": {

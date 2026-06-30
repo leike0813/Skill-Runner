@@ -22,17 +22,12 @@ from server.engines.kilo.auth.runtime_handler import KiloAuthRuntimeHandler
 from server.engines.opencode.auth import (
     OpencodeAuthCliFlow,
     OpencodeAuthStore,
-    OpencodeGoogleAntigravityOAuthProxyFlow,
     OpencodeOpenAIOAuthProxyFlow,
-)
-from server.engines.opencode.auth.callbacks.antigravity_local_callback_server import (
-    antigravity_local_callback_server,
 )
 from server.engines.opencode.auth.runtime_handler import OpencodeAuthRuntimeHandler
 from server.engines.qwen.auth import (
     QwenAuthCliFlow,
     CodingPlanAuthFlow,
-    QwenOAuthProxyFlow,
 )
 from server.engines.qwen.auth.runtime_handler import QwenAuthRuntimeHandler
 from server.runtime.auth.callbacks import CallbackListenerRegistry
@@ -43,7 +38,7 @@ from server.services.engine_management.engine_auth_strategy_service import (
 )
 
 logger = logging.getLogger(__name__)
-_WINDOWS_PYWINPTY_ENGINES = frozenset({"opencode", "qwen"})
+_WINDOWS_PYWINPTY_ENGINES = frozenset({"opencode"})
 
 
 @dataclass(frozen=True)
@@ -114,7 +109,6 @@ def _resolve_disabled_cli_delegate_engines() -> set[str]:
 def _build_callback_listener_registry() -> CallbackListenerRegistry:
     registry = CallbackListenerRegistry()
     registry.register(channel="openai", listener=openai_local_callback_server)
-    registry.register(channel="antigravity", listener=antigravity_local_callback_server)
     registry.register(channel="claude", listener=claude_local_callback_server)
     return registry
 
@@ -131,22 +125,10 @@ def build_engine_auth_bootstrap(
     manager._codex_oauth_proxy_flow = CodexOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._claude_oauth_proxy_flow = ClaudeOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._opencode_openai_oauth_proxy_flow = OpencodeOpenAIOAuthProxyFlow(agent_home)  # noqa: SLF001
-    manager._opencode_google_antigravity_oauth_proxy_flow = (
-        OpencodeGoogleAntigravityOAuthProxyFlow(  # noqa: SLF001
-            agent_home
-        )
-    )
     manager._kilo_opencode_openai_oauth_proxy_flow = OpencodeOpenAIOAuthProxyFlow(  # noqa: SLF001
         agent_home,
         store_app_name="kilo",
     )
-    manager._kilo_opencode_google_antigravity_oauth_proxy_flow = (  # noqa: SLF001
-        OpencodeGoogleAntigravityOAuthProxyFlow(
-            agent_home,
-            store_app_name="kilo",
-        )
-    )
-    manager._qwen_oauth_proxy_flow = QwenOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._qwen_coding_plan_flow = CodingPlanAuthFlow(agent_home)  # noqa: SLF001
     manager._qwen_flow = QwenAuthCliFlow(agent_home)  # noqa: SLF001
     manager._kilo_gateway_device_auth_flow = KiloGatewayDeviceAuthFlow(agent_home)  # noqa: SLF001

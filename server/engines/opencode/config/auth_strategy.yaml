@@ -22,137 +22,74 @@ providers:
         - callback
         - device_auth
         - import
-  google:
-    transports:
+  anthropic:
+    transports: &api_key_transports
       oauth_proxy:
         methods:
-          - callback
-          - auth_code_or_url
-        high_risk_methods:
-          - callback
-          - auth_code_or_url
+          - api_key
         driver:
           start_method: auth
           execution_mode: protocol_proxy
-      cli_delegate:
-        methods:
-          - auth_code_or_url
-        high_risk_methods:
-          - auth_code_or_url
-        driver:
-          start_method: auth
-          execution_mode: cli_delegate
-    in_conversation:
+    in_conversation: &api_key_conversation
       methods:
-        - callback
-        - import
+        - api_key
   deepseek:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   iflowcn:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   minimax:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   moonshotai:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   opencode:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   opencode-go:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   openrouter:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  groq:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  mistral:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  xai:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  cerebras:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  perplexity:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  togetherai:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  deepinfra:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  cohere:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  venice:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
+  vercel:
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   zai-coding-plan:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   alibaba-coding-plan:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation
   alibaba-coding-plan-cn:
-    transports:
-      oauth_proxy:
-        methods:
-          - api_key
-        driver:
-          start_method: auth
-          execution_mode: protocol_proxy
-    in_conversation:
-      methods:
-        - api_key
+    transports: *api_key_transports
+    in_conversation: *api_key_conversation

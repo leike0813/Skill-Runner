@@ -683,13 +683,13 @@ async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypat
                 "codex": ["callback"],
                 "gemini": ["callback"],
                 "opencode": {"deepseek": ["api_key"]},
-                "qwen": {"qwen-oauth": ["callback"], "coding-plan-global": ["api_key"]},
+                "qwen": {"openrouter": ["api_key"], "coding-plan-global": ["api_key"]},
             },
             "cli_delegate": {
                 "codex": ["auth_code_or_url"],
                 "gemini": ["auth_code_or_url"],
                 "opencode": {},
-                "qwen": {"qwen-oauth": ["auth_code_or_url"], "coding-plan-global": ["api_key"]},
+                "qwen": {},
             },
         },
     )
@@ -699,14 +699,14 @@ async def test_ui_engines_auth_capabilities_come_from_strategy_service(monkeypat
             "oauth_proxy": {
                 "codex": [],
                 "gemini": [],
-                "opencode": {"google": ["callback", "auth_code_or_url"]},
-                "qwen": {"qwen-oauth": ["callback"]},
+                "opencode": {},
+                "qwen": {},
             },
             "cli_delegate": {
                 "codex": [],
                 "gemini": [],
-                "opencode": {"google": ["auth_code_or_url"]},
-                "qwen": {"qwen-oauth": ["auth_code_or_url"]},
+                "opencode": {},
+                "qwen": {},
             },
         },
     )

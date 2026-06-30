@@ -974,7 +974,7 @@ async def test_codex_usage_limit_high_confidence_enters_waiting_auth_and_preserv
 
 
 @pytest.mark.asyncio
-async def test_qwen_oauth_waiting_banner_enters_waiting_auth_without_protocol_schema_failure(
+async def test_removed_qwen_oauth_waiting_banner_does_not_enter_waiting_auth(
     tmp_path: Path,
 ) -> None:
     old_runs_dir = config.SYSTEM.RUNS_DIR
@@ -1006,21 +1006,7 @@ async def test_qwen_oauth_waiting_banner_enters_waiting_auth_without_protocol_sc
             )
         }
 
-        with patch(
-            "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
-            lambda **_kwargs: {
-                "session_id": "auth-qwen-1",
-                "engine": "qwen",
-                "provider_id": "qwen-oauth",
-                "status": "waiting_user",
-                "input_kind": None,
-                "auth_url": "https://chat.qwen.ai/authorize?user_code=TEST-123",
-                "user_code": "TEST-123",
-                "created_at": "2099-03-03T00:00:00Z",
-                "expires_at": "2099-03-03T00:15:00Z",
-                "error": None,
-            },
-        ), patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
+        with patch("server.services.skill.skill_registry.skill_registry.get_skill", return_value=skill):
             await orchestrator.run_job(
                 run_id,
                 skill.id,
@@ -1031,18 +1017,13 @@ async def test_qwen_oauth_waiting_banner_enters_waiting_auth_without_protocol_sc
         run_dir = Path(config.SYSTEM.RUNS_DIR) / run_id
         state_data = _read_state_data(run_dir)
         meta_data = json.loads((_audit_dir(run_dir) / "meta.1.json").read_text(encoding="utf-8"))
-        pending_auth = state_data["pending"]["payload"]
-        assert state_data["status"] == RunStatus.WAITING_AUTH.value
-        assert state_data["error"] is None
-        assert state_data["pending"]["owner"] == "waiting_auth.challenge_active"
-        assert pending_auth["provider_id"] == "qwen-oauth"
-        assert pending_auth["auth_url"] == "https://chat.qwen.ai/authorize?user_code=TEST-123"
-        assert pending_auth["user_code"] == "TEST-123"
-        assert meta_data["auth_detection"]["classification"] == "auth_required"
-        assert meta_data["auth_detection"]["confidence"] == "high"
-        assert meta_data["auth_detection"]["provider_id"] is None
-        assert meta_data["auth_session"]["status"] == "waiting"
-        assert meta_data["auth_session"]["provider_id"] == "qwen-oauth"
+        assert state_data["status"] == RunStatus.FAILED.value
+        assert state_data["pending"]["owner"] is None
+        assert state_data["state_phase"]["waiting_auth_phase"] is None
+        assert meta_data["auth_detection"]["classification"] == "unknown"
+        assert meta_data["auth_detection"]["confidence"] == "low"
+        assert meta_data["auth_session"]["status"] == "none"
+        assert meta_data["auth_session"]["provider_id"] is None
     finally:
         config.defrost()
         config.SYSTEM.RUNS_DIR = old_runs_dir

@@ -1,13 +1,6 @@
 {
   "providers": [
     {
-      "provider_id": "qwen-oauth",
-      "display_name": "Qwen OAuth (Free)",
-      "auth_mode": "oauth",
-      "menu_label": "Qwen OAuth",
-      "supports_import": true
-    },
-    {
       "provider_id": "coding-plan-china",
       "display_name": "Alibaba Cloud Coding Plan (China)",
       "auth_mode": "api_key",
@@ -19,6 +12,69 @@
       "display_name": "Alibaba Cloud Coding Plan (Global)",
       "auth_mode": "api_key",
       "menu_label": "Coding Plan (Global)",
+      "supports_import": false
+    },
+    {
+      "provider_id": "token-plan",
+      "display_name": "Alibaba ModelStudio Token Plan",
+      "auth_mode": "api_key",
+      "menu_label": "Token Plan",
+      "supports_import": false
+    },
+    {
+      "provider_id": "alibaba-standard",
+      "display_name": "Alibaba ModelStudio Standard API Key",
+      "auth_mode": "api_key",
+      "menu_label": "Alibaba Standard",
+      "supports_import": false
+    },
+    {
+      "provider_id": "deepseek",
+      "display_name": "DeepSeek",
+      "auth_mode": "api_key",
+      "menu_label": "DeepSeek",
+      "supports_import": false
+    },
+    {
+      "provider_id": "minimax",
+      "display_name": "MiniMax",
+      "auth_mode": "api_key",
+      "menu_label": "MiniMax",
+      "supports_import": false
+    },
+    {
+      "provider_id": "zai",
+      "display_name": "Z.AI",
+      "auth_mode": "api_key",
+      "menu_label": "Z.AI",
+      "supports_import": false
+    },
+    {
+      "provider_id": "idealab",
+      "display_name": "Idealab",
+      "auth_mode": "api_key",
+      "menu_label": "Idealab",
+      "supports_import": false
+    },
+    {
+      "provider_id": "modelscope",
+      "display_name": "ModelScope",
+      "auth_mode": "api_key",
+      "menu_label": "ModelScope",
+      "supports_import": false
+    },
+    {
+      "provider_id": "openrouter",
+      "display_name": "OpenRouter",
+      "auth_mode": "api_key",
+      "menu_label": "OpenRouter",
+      "supports_import": false
+    },
+    {
+      "provider_id": "requesty",
+      "display_name": "Requesty",
+      "auth_mode": "api_key",
+      "menu_label": "Requesty",
       "supports_import": false
     }
   ]

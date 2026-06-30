@@ -1,6 +1,6 @@
 {
   "$schema": "../schemas/qwen_config_schema.json",
   "model": {
-    "name": "coder-model"
+    "name": "qwen3-coder-plus"
   }
 }

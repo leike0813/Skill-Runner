@@ -8,11 +8,11 @@
       "supports_import": true
     },
     {
-      "provider_id": "google",
-      "display_name": "Google (AntiGravity)",
-      "auth_mode": "oauth",
-      "menu_label": "Google",
-      "supports_import": true
+      "provider_id": "anthropic",
+      "display_name": "Anthropic",
+      "auth_mode": "api_key",
+      "menu_label": "Anthropic",
+      "supports_import": false
     },
     {
       "provider_id": "deepseek",
@@ -61,6 +61,76 @@
       "display_name": "OpenRouter",
       "auth_mode": "api_key",
       "menu_label": "OpenRouter",
+      "supports_import": false
+    },
+    {
+      "provider_id": "groq",
+      "display_name": "Groq",
+      "auth_mode": "api_key",
+      "menu_label": "Groq",
+      "supports_import": false
+    },
+    {
+      "provider_id": "mistral",
+      "display_name": "Mistral",
+      "auth_mode": "api_key",
+      "menu_label": "Mistral",
+      "supports_import": false
+    },
+    {
+      "provider_id": "xai",
+      "display_name": "xAI",
+      "auth_mode": "api_key",
+      "menu_label": "xAI",
+      "supports_import": false
+    },
+    {
+      "provider_id": "cerebras",
+      "display_name": "Cerebras",
+      "auth_mode": "api_key",
+      "menu_label": "Cerebras",
+      "supports_import": false
+    },
+    {
+      "provider_id": "perplexity",
+      "display_name": "Perplexity",
+      "auth_mode": "api_key",
+      "menu_label": "Perplexity",
+      "supports_import": false
+    },
+    {
+      "provider_id": "togetherai",
+      "display_name": "Together AI",
+      "auth_mode": "api_key",
+      "menu_label": "Together AI",
+      "supports_import": false
+    },
+    {
+      "provider_id": "deepinfra",
+      "display_name": "DeepInfra",
+      "auth_mode": "api_key",
+      "menu_label": "DeepInfra",
+      "supports_import": false
+    },
+    {
+      "provider_id": "cohere",
+      "display_name": "Cohere",
+      "auth_mode": "api_key",
+      "menu_label": "Cohere",
+      "supports_import": false
+    },
+    {
+      "provider_id": "venice",
+      "display_name": "Venice",
+      "auth_mode": "api_key",
+      "menu_label": "Venice",
+      "supports_import": false
+    },
+    {
+      "provider_id": "vercel",
+      "display_name": "Vercel AI Gateway",
+      "auth_mode": "api_key",
+      "menu_label": "Vercel",
       "supports_import": false
     },
     {

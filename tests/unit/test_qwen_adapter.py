@@ -55,7 +55,7 @@ def test_qwen_config_composer_merges_default_skill_runtime_and_enforced(tmp_path
     assert payload["permissions"]["defaultMode"] == "bypassPermissions"
 
 
-def test_qwen_parse_runtime_stream_detects_oauth_waiting_from_stderr_banner() -> None:
+def test_qwen_parse_runtime_stream_ignores_removed_oauth_waiting_banner() -> None:
     adapter = QwenExecutionAdapter()
     stderr_banner = (
         "╭──────────────────────────────╮\n"
@@ -77,14 +77,7 @@ def test_qwen_parse_runtime_stream_detects_oauth_waiting_from_stderr_banner() ->
     assert result["turn_started"] is False
     assert result["turn_completed"] is False
     assert result["turn_markers"] == []
-    assert result["auth_signal"] == {
-        "required": True,
-        "confidence": "high",
-        "subcategory": None,
-        "provider_id": None,
-        "reason_code": "QWEN_OAUTH_WAITING_AUTHORIZATION",
-        "matched_pattern_id": "qwen_oauth_waiting_authorization",
-    }
+    assert "auth_signal" not in result
 
 
 def test_qwen_live_session_remains_stdout_pty_ndjson_only() -> None:

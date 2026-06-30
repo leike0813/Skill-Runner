@@ -45,8 +45,8 @@
     "seed_path": "../models/models_seed.json"
   },
   "command_defaults": {
-    "start": ["--format", "json"],
-    "resume": ["--format", "json"],
+    "start": ["--format", "json", "--thinking"],
+    "resume": ["--format", "json", "--thinking"],
     "ui_shell": []
   },
   "structured_output": {
@@ -81,12 +81,6 @@
         "source": "auth.json",
         "target_relpath": ".local/share/opencode/auth.json",
         "import_validator": "opencode_auth_json"
-      },
-      {
-        "source": "antigravity-accounts.json",
-        "target_relpath": ".config/opencode/antigravity-accounts.json",
-        "import_validator": "opencode_antigravity_accounts_json",
-        "aliases": ["antigravity_accounts.json"]
       }
     ],
     "credential_policy": {
@@ -113,30 +107,6 @@
   },
   "parser_auth_patterns": {
     "rules": [
-      {
-        "id": "opencode_google_api_key_missing",
-        "enabled": true,
-        "priority": 1000,
-        "match": {
-          "all": [
-            {
-              "field": "extracted.error_name",
-              "op": "eq",
-              "value": "ProviderAuthError"
-            },
-            {
-              "field": "extracted.provider_id",
-              "op": "eq",
-              "value": "google"
-            },
-            {
-              "field": "extracted.message",
-              "op": "regex",
-              "value": "API key is missing"
-            }
-          ]
-        }
-      },
       {
         "id": "opencode_missing_auth_header",
         "enabled": true,

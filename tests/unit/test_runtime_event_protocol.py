@@ -285,6 +285,85 @@ def test_process_events_promote_to_final_on_turn_completed(tmp_path: Path) -> No
     assert "assistant.message.final" in fcmp_types
 
 
+def test_kilo_process_events_project_to_rasp_and_fcmp(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-kilo-process"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text(
+        "\n".join(
+            [
+                '{"type":"step_start","sessionID":"session-kilo","part":{"type":"step-start"}}',
+                '{"type":"tool_use","sessionID":"session-kilo","part":{"type":"tool","id":"p1","tool":"bash","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi"}}}',
+                '{"type":"tool_use","sessionID":"session-kilo","part":{"type":"tool","id":"p2","tool":"webfetch","state":{"status":"completed","input":{"url":"https://example.invalid"},"output":"example"}}}',
+                '{"type":"text","sessionID":"session-kilo","part":{"type":"text","text":"done"}}',
+                '{"type":"step_finish","sessionID":"session-kilo","part":{"type":"step-finish","tokens":{"input":1,"output":2,"reasoning":3},"cost":0}}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-kilo-process",
+        engine="kilo",
+        attempt_number=1,
+        status="running",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+    )
+
+    rasp_types = [event.event.type for event in rasp_events]
+    assert "agent.command_execution" in rasp_types
+    assert "agent.tool_call" in rasp_types
+    command = next(event for event in rasp_events if event.event.type == "agent.command_execution")
+    assert command.data["summary"] == "echo hi"
+    complete = next(event for event in rasp_events if event.event.type == "agent.turn_complete")
+    assert complete.data["tokens"]["reasoning"] == 3
+
+    fcmp_events = build_fcmp_events(rasp_events, status="running")
+    fcmp_types = [event.type for event in fcmp_events]
+    assert "assistant.command_execution" in fcmp_types
+    assert "assistant.tool_call" in fcmp_types
+
+
+def test_interrupted_empty_output_emits_fallback_turn_failed(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-kilo-timeout"
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "stdout.txt").write_text("", encoding="utf-8")
+    (logs_dir / "stderr.txt").write_text("", encoding="utf-8")
+
+    rasp_events = build_rasp_events(
+        run_id="run-kilo-timeout",
+        engine="kilo",
+        attempt_number=1,
+        status="canceled",
+        pending_interaction=None,
+        stdout_path=logs_dir / "stdout.txt",
+        stderr_path=logs_dir / "stderr.txt",
+        completion={"state": "interrupted", "reason_code": "TIMEOUT", "diagnostics": []},
+    )
+
+    turn_failed = next(event for event in rasp_events if event.event.type == "agent.turn_failed")
+    assert turn_failed.data["fatal"] is True
+    assert turn_failed.data["status"] == "canceled"
+    assert turn_failed.data["completion_state"] == "interrupted"
+    assert turn_failed.data["reason_code"] == "TIMEOUT"
+
+    fcmp_events = build_fcmp_events(
+        rasp_events,
+        status="canceled",
+        completion={"state": "interrupted", "reason_code": "TIMEOUT", "diagnostics": []},
+    )
+    assert any(
+        event.type == "conversation.state.changed"
+        and event.data.get("terminal", {}).get("status") == "canceled"
+        for event in fcmp_events
+    )
+
+
 def test_turn_markers_are_rasp_only_and_not_mapped_to_fcmp(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-turn-markers"
     logs_dir = run_dir / "logs"

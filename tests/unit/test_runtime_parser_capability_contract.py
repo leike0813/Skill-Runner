@@ -18,6 +18,18 @@ def _stream_parser_source(engine: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _opencode_family_common_source() -> str:
+    path = (
+        PROJECT_ROOT
+        / "server"
+        / "engines"
+        / "common"
+        / "opencode_family"
+        / "stream_parser.py"
+    )
+    return path.read_text(encoding="utf-8")
+
+
 def _adapter_profile(engine: str) -> dict[str, object]:
     path = PROJECT_ROOT / "server" / "engines" / engine / "adapter" / "adapter_profile.json"
     return json.loads(path.read_text(encoding="utf-8"))
@@ -40,16 +52,23 @@ def test_runtime_parser_capability_contract_declares_all_current_engines() -> No
 
 def test_runtime_parser_capability_contract_matches_current_engine_sources() -> None:
     payload = load_runtime_parser_capability_contract()
+    family_common_source = _opencode_family_common_source()
     for engine, capability_obj in payload["engines"].items():
         source = _stream_parser_source(engine)
+        uses_opencode_family = "OpenCodeFamilyStreamParserCore" in source
+        capability_source = f"{source}\n{family_common_source}" if uses_opencode_family else source
         profile = _adapter_profile(engine)
         capability = dict(capability_obj)
-        assert _assert_turn_start_capability(source) is capability["semantic_turn_markers"]["start"]
-        assert ("turn_completed" in source) is capability["semantic_turn_markers"]["complete"]
-        assert ("turn_failed" in source) is capability["semantic_turn_markers"]["failed"]
+        assert _assert_turn_start_capability(capability_source) is capability["semantic_turn_markers"]["start"]
+        assert ("turn_completed" in capability_source) is capability["semantic_turn_markers"]["complete"]
+        if uses_opencode_family:
+            has_failed_markers = "mark_error_rows_failed=True" in source
+        else:
+            has_failed_markers = "turn_failed" in source
+        assert has_failed_markers is capability["semantic_turn_markers"]["failed"]
         assert ("classify_engine_error_payload" in source) is capability["generic_error_governance"]
-        assert ("process_events" in source) is capability["process_event_extraction"]
-        assert ("structured_payloads" in source) is capability["structured_payload_extraction"]
+        assert ("process_events" in capability_source) is capability["process_event_extraction"]
+        assert ("structured_payloads" in capability_source) is capability["structured_payload_extraction"]
         structured_output_profile = cast(
             dict[str, object],
             profile.get("structured_output") if isinstance(profile.get("structured_output"), dict) else {},
@@ -59,8 +78,8 @@ def test_runtime_parser_capability_contract_matches_current_engine_sources() -> 
             == "result_structured_output_field"
         )
         assert has_result_success_structured_output is capability["success_result_structured_output"]
-        assert ("run_handle" in source) is capability["run_handle_extraction"]
-        assert ('"confidence"' in source) is capability["parser_confidence_reporting"]
+        assert ("run_handle" in capability_source) is capability["run_handle_extraction"]
+        assert ('"confidence"' in capability_source) is capability["parser_confidence_reporting"]
         has_auth_patterns = "parser_auth_patterns" in profile and bool(profile["parser_auth_patterns"])
         assert has_auth_patterns is capability["auth_signal_snapshot"]
 

@@ -130,7 +130,7 @@ def test_construct_config_enforced_provider_timeout_disables_runtime_override(tm
             "execution_mode": "auto",
             "opencode_config": {
                 "provider": {
-                    "google": {
+                    "anthropic": {
                         "options": {
                             "timeout": 600000
                         }
@@ -141,7 +141,7 @@ def test_construct_config_enforced_provider_timeout_disables_runtime_override(tm
     )
     payload = _read_json(config_path)
 
-    assert payload["provider"]["google"]["options"]["timeout"] is False
+    assert payload["provider"]["anthropic"]["options"]["timeout"] is False
 
 
 def test_parse_runtime_stream_keeps_latest_step_only():
@@ -189,3 +189,29 @@ def test_parse_runtime_stream_emits_turn_markers_and_process_events() -> None:
     tokens = turn_complete_data.get("tokens")
     assert isinstance(tokens, dict)
     assert tokens.get("total") == 12
+
+
+def test_parse_runtime_stream_extracts_reasoning_process_event() -> None:
+    adapter = OpencodeExecutionAdapter()
+    parsed = adapter.parse_runtime_stream(
+        stdout_raw=(
+            b'{"type":"step_start","id":"s1","sessionID":"ses-op-1"}\n'
+            b'{"type":"reasoning","part":{"type":"reasoning","id":"r1","text":"draft plan"}}\n'
+            b'{"type":"text","part":{"type":"text","text":"final answer"}}\n'
+            b'{"type":"step_finish","id":"s1","part":{"reason":"stop","cost":0,"tokens":{"total":12,"input":7,"output":2,"reasoning":3}}}\n'
+        ),
+        stderr_raw=b"",
+        pty_raw=b"",
+    )
+
+    process_events = parsed.get("process_events", [])
+    assert isinstance(process_events, list)
+    assert [event.get("process_type") for event in process_events] == ["reasoning"]
+    assert process_events[0].get("message_id") == "r1"
+    assert process_events[0].get("text") == "draft plan"
+    assert [msg["text"] for msg in parsed["assistant_messages"]] == ["final answer"]
+    turn_complete_data = parsed.get("turn_complete_data")
+    assert isinstance(turn_complete_data, dict)
+    tokens = turn_complete_data.get("tokens")
+    assert isinstance(tokens, dict)
+    assert tokens.get("reasoning") == 3

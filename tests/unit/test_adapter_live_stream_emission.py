@@ -5,6 +5,7 @@ import pytest
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.stream_parser import CodexStreamParser
+from server.engines.kilo.adapter.execution_adapter import KiloExecutionAdapter
 from server.engines.opencode.adapter.stream_parser import OpencodeStreamParser
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
@@ -519,6 +520,67 @@ def test_opencode_live_session_keeps_raw_ref_stable_for_split_ndjson_line() -> N
     assert raw_ref.get("stream") == "stdout"
     assert raw_ref.get("byte_from") == 0
     assert raw_ref.get("byte_to") == len(payload_bytes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("engine", "parser_factory"),
+    [
+        ("opencode", lambda: OpencodeStreamParser(_StubOpencodeAdapter())),
+        ("kilo", lambda: KiloExecutionAdapter().stream_parser),
+    ],
+)
+async def test_opencode_family_live_runtime_emitter_projects_reasoning(
+    tmp_path: Path,
+    engine: str,
+    parser_factory,
+) -> None:
+    run_id = f"run-live-{engine}-reasoning"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear(run_id)
+    rasp_live_journal.clear(run_id)
+    parser = parser_factory()
+    emitter = LiveRuntimeEmitterImpl(
+        run_id=run_id,
+        run_dir=run_dir,
+        engine=engine,
+        attempt_number=1,
+        stream_parser=parser,
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
+    )
+    payload = (
+        '{"type":"step_start","sessionID":"session-family","part":{"type":"step-start"}}\n'
+        '{"type":"reasoning","sessionID":"session-family","part":{"type":"reasoning","id":"r1","text":"draft plan"}}\n'
+        '{"type":"text","sessionID":"session-family","part":{"type":"text","text":"final answer"}}\n'
+    )
+
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=payload,
+        byte_from=0,
+        byte_to=len(payload.encode("utf-8")),
+    )
+
+    rasp_payload = rasp_live_journal.replay(run_id=run_id, after_seq=0)
+    reasoning_rasp = [
+        row
+        for row in rasp_payload["events"]
+        if row.get("event", {}).get("type") == "agent.reasoning"
+    ]
+    assert reasoning_rasp
+    assert reasoning_rasp[0].get("data", {}).get("text") == "draft plan"
+
+    fcmp_payload = fcmp_live_journal.replay(run_id=run_id, after_seq=0)
+    reasoning_fcmp = [
+        row
+        for row in fcmp_payload["events"]
+        if row.get("type") == "assistant.reasoning"
+    ]
+    assert reasoning_fcmp
+    assert reasoning_fcmp[0].get("data", {}).get("text") == "draft plan"
 
 
 @pytest.mark.asyncio

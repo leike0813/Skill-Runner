@@ -12,11 +12,21 @@
             "selectedType": {
               "type": "string",
               "enum": [
-                "qwen-oauth",
                 "openai",
-                "alibaba-cloud-coding-plan",
+                "anthropic",
+                "gemini",
+                "vertex-ai",
                 "coding-plan-china",
-                "coding-plan-global"
+                "coding-plan-global",
+                "token-plan",
+                "alibaba-standard",
+                "deepseek",
+                "minimax",
+                "zai",
+                "idealab",
+                "modelscope",
+                "openrouter",
+                "requesty"
               ]
             }
           }

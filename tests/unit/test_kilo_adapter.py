@@ -50,6 +50,7 @@ def test_kilo_command_builder_start_and_resume(monkeypatch) -> None:
         "--format",
         "json",
         "--auto",
+        "--thinking",
         "--model",
         "kilo/kilo-auto/free",
         "hello",
@@ -62,6 +63,7 @@ def test_kilo_command_builder_start_and_resume(monkeypatch) -> None:
         "--format",
         "json",
         "--auto",
+        "--thinking",
         "--session",
         "session-123",
         "--model",
@@ -204,6 +206,93 @@ def test_kilo_parse_runtime_stream_extracts_text_session_tokens_and_cost() -> No
     assert parsed["turn_completed"] is True
     assert parsed["turn_complete_data"]["tokens"] == {"input": 1, "output": 2}
     assert parsed["turn_complete_data"]["cost"] == 0
+
+
+def test_kilo_parse_runtime_stream_extracts_opencode_family_process_events() -> None:
+    adapter = KiloExecutionAdapter()
+    stdout = (
+        b'{"type":"step_start","sessionID":"session-kilo","part":{"type":"step-start"}}\n'
+        b'{"type":"tool_use","sessionID":"session-kilo","part":{"type":"tool","id":"p1","tool":"bash","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi"}}}\n'
+        b'{"type":"step_finish","sessionID":"session-kilo","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":3,"output":4,"reasoning":5},"cost":0}}\n'
+        b'{"type":"step_start","sessionID":"session-kilo","part":{"type":"step-start"}}\n'
+        b'{"type":"tool_use","sessionID":"session-kilo","part":{"type":"tool","id":"p2","tool":"webfetch","state":{"status":"completed","input":{"url":"https://example.invalid","format":"text"},"output":"example"}}}\n'
+        b'{"type":"text","sessionID":"session-kilo","part":{"type":"text","text":"done"}}\n'
+        b'{"type":"step_finish","sessionID":"session-kilo","part":{"type":"step-finish","tokens":{"input":1,"output":2,"reasoning":7},"cost":0}}\n'
+    )
+
+    parsed = adapter.parse_runtime_stream(stdout_raw=stdout, stderr_raw=b"")
+
+    process_events = parsed["process_events"]
+    assert [event["process_type"] for event in process_events] == [
+        "command_execution",
+        "tool_call",
+    ]
+    assert process_events[0]["summary"] == "echo hi"
+    assert process_events[0]["text"] == "hi"
+    assert process_events[1]["summary"] == "webfetch"
+    assert parsed["assistant_messages"] == [
+        {
+            "text": "done",
+            "raw_ref": parsed["assistant_messages"][0]["raw_ref"],
+        }
+    ]
+    assert parsed["turn_complete_data"]["tokens"]["reasoning"] == 7
+
+
+def test_kilo_parse_runtime_stream_extracts_reasoning_process_event() -> None:
+    adapter = KiloExecutionAdapter()
+    stdout = (
+        b'{"type":"step_start","sessionID":"session-kilo","part":{"type":"step-start"}}\n'
+        b'{"type":"reasoning","sessionID":"session-kilo","part":{"type":"reasoning","id":"r1","text":"draft plan"}}\n'
+        b'{"type":"text","sessionID":"session-kilo","part":{"type":"text","text":"final answer"}}\n'
+        b'{"type":"step_finish","sessionID":"session-kilo","part":{"type":"step-finish","tokens":{"input":1,"output":2,"reasoning":3},"cost":0}}\n'
+    )
+
+    parsed = adapter.parse_runtime_stream(stdout_raw=stdout, stderr_raw=b"")
+
+    process_events = parsed["process_events"]
+    assert [event["process_type"] for event in process_events] == ["reasoning"]
+    assert process_events[0]["message_id"] == "r1"
+    assert process_events[0]["text"] == "draft plan"
+    assert parsed["assistant_messages"][0]["text"] == "final answer"
+    assert parsed["turn_complete_data"]["tokens"]["reasoning"] == 3
+
+
+def test_kilo_live_session_emits_process_events() -> None:
+    adapter = KiloExecutionAdapter()
+    session = adapter.stream_parser.start_live_session()
+
+    emissions = session.feed(
+        stream="stdout",
+        text=(
+            '{"type":"tool_use","sessionID":"session-kilo","part":{"type":"tool","id":"p1",'
+            '"tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/tmp/run"}}}\n'
+        ),
+        byte_from=0,
+        byte_to=160,
+    )
+
+    process = next(item for item in emissions if item["kind"] == "process_event")
+    assert process["process_type"] == "command_execution"
+    assert process["summary"] == "pwd"
+    assert process["text"] == "/tmp/run"
+
+
+def test_kilo_live_session_emits_reasoning_process_event() -> None:
+    adapter = KiloExecutionAdapter()
+    session = adapter.stream_parser.start_live_session()
+
+    emissions = session.feed(
+        stream="stdout",
+        text='{"type":"reasoning","sessionID":"session-kilo","part":{"type":"reasoning","id":"r1","text":"draft plan"}}\n',
+        byte_from=0,
+        byte_to=108,
+    )
+
+    process = next(item for item in emissions if item["kind"] == "process_event")
+    assert process["process_type"] == "reasoning"
+    assert process["message_id"] == "r1"
+    assert process["text"] == "draft plan"
 
 
 def test_kilo_legacy_parse_success_uses_final_turn_outcome() -> None:

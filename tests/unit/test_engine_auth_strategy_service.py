@@ -20,12 +20,18 @@ def test_strategy_service_exposes_ui_capabilities_from_policy() -> None:
     assert capabilities["oauth_proxy"]["opencode"]["opencode-go"] == ["api_key"]
     assert capabilities["oauth_proxy"]["opencode"]["alibaba-coding-plan"] == ["api_key"]
     assert capabilities["oauth_proxy"]["opencode"]["alibaba-coding-plan-cn"] == ["api_key"]
-    assert capabilities["oauth_proxy"]["qwen"]["qwen-oauth"] == ["auth_code_or_url"]
+    assert capabilities["oauth_proxy"]["opencode"]["anthropic"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["opencode"]["groq"] == ["api_key"]
+    assert "google" not in capabilities["oauth_proxy"]["opencode"]
     assert capabilities["oauth_proxy"]["qwen"]["coding-plan-china"] == ["api_key"]
     assert capabilities["oauth_proxy"]["qwen"]["coding-plan-global"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["qwen"]["openrouter"] == ["api_key"]
+    assert "qwen-oauth" not in capabilities["oauth_proxy"]["qwen"]
     assert capabilities["oauth_proxy"]["kilo"]["kilo"] == ["auth_code_or_url"]
     assert capabilities["oauth_proxy"]["kilo"]["deepseek"] == ["api_key"]
     assert capabilities["oauth_proxy"]["kilo"]["opencode-go"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["kilo"]["anthropic"] == ["api_key"]
+    assert "google" not in capabilities["oauth_proxy"]["kilo"]
     assert capabilities["cli_delegate"]["kilo"] == {}
     assert capabilities["provider_config"]["kilo"] == {}
     assert "deepseek" not in capabilities["cli_delegate"]["opencode"]
@@ -36,22 +42,22 @@ def test_strategy_service_exposes_high_risk_capabilities_from_policy() -> None:
 
     high_risk = service.list_ui_high_risk_capabilities()
 
-    assert high_risk["oauth_proxy"]["opencode"]["google"] == ["callback", "auth_code_or_url"]
-    assert high_risk["cli_delegate"]["opencode"]["google"] == ["auth_code_or_url"]
-    assert high_risk["oauth_proxy"]["kilo"]["google"] == ["callback", "auth_code_or_url"]
-    assert "deepseek" not in high_risk["oauth_proxy"]["opencode"]
+    assert "google" not in high_risk.get("oauth_proxy", {}).get("opencode", {})
+    assert "google" not in high_risk.get("cli_delegate", {}).get("opencode", {})
+    assert "google" not in high_risk.get("oauth_proxy", {}).get("kilo", {})
+    assert "deepseek" not in high_risk.get("oauth_proxy", {}).get("opencode", {})
 
 
 def test_strategy_service_high_risk_helpers_resolve_runtime_and_conversation_methods() -> None:
     service = EngineAuthStrategyService()
 
-    assert service.is_runtime_method_high_risk(
+    assert not service.is_runtime_method_high_risk(
         engine="opencode",
         transport="oauth_proxy",
         provider_id="google",
         auth_method="callback",
     )
-    assert service.is_runtime_method_high_risk(
+    assert not service.is_runtime_method_high_risk(
         engine="opencode",
         transport="cli_delegate",
         provider_id="google",
@@ -63,7 +69,7 @@ def test_strategy_service_high_risk_helpers_resolve_runtime_and_conversation_met
         provider_id="deepseek",
         auth_method="api_key",
     )
-    assert service.is_conversation_method_high_risk(
+    assert not service.is_conversation_method_high_risk(
         engine="opencode",
         provider_id="google",
         conversation_method="callback",
@@ -91,7 +97,19 @@ def test_strategy_service_supports_start_requires_explicit_provider_for_opencode
         auth_method="api_key",
         provider_id=None,
     )
+    assert not service.supports_start(
+        transport="oauth_proxy",
+        engine="opencode",
+        auth_method="auth_code_or_url",
+        provider_id="google",
+    )
     assert service.supports_start(
+        transport="oauth_proxy",
+        engine="qwen",
+        auth_method="api_key",
+        provider_id="openrouter",
+    )
+    assert not service.supports_start(
         transport="oauth_proxy",
         engine="qwen",
         auth_method="auth_code_or_url",
@@ -140,9 +158,10 @@ def test_strategy_service_kilo_auth_is_provider_aware_in_phase2() -> None:
 def test_strategy_service_qwen_conversation_methods_use_provider_scope() -> None:
     service = EngineAuthStrategyService()
 
-    assert service.methods_for_conversation("qwen", "qwen-oauth") == ("auth_code_or_url",)
+    assert service.methods_for_conversation("qwen", "qwen-oauth") == ()
     assert service.methods_for_conversation("qwen", "coding-plan-china") == ("api_key",)
     assert service.methods_for_conversation("qwen", "coding-plan-global") == ("api_key",)
+    assert service.methods_for_conversation("qwen", "openrouter") == ("api_key",)
     assert service.methods_for_conversation("qwen", None) == ()
 
 
@@ -153,11 +172,6 @@ def test_strategy_service_runtime_session_behavior_defaults_and_qwen_override() 
         engine="codex",
         transport="oauth_proxy",
     )
-    qwen_behavior = service.runtime_session_behavior_for_transport(
-        engine="qwen",
-        transport="oauth_proxy",
-        provider_id="qwen-oauth",
-    )
     kilo_behavior = service.runtime_session_behavior_for_transport(
         engine="kilo",
         transport="oauth_proxy",
@@ -166,8 +180,6 @@ def test_strategy_service_runtime_session_behavior_defaults_and_qwen_override() 
 
     assert default_behavior.input_required is True
     assert default_behavior.polling_start == "manual_submit"
-    assert qwen_behavior.input_required is False
-    assert qwen_behavior.polling_start == "immediate"
     assert kilo_behavior.input_required is False
     assert kilo_behavior.polling_start == "immediate"
 

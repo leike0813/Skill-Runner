@@ -440,6 +440,64 @@ def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> No
     ]
 
 
+def test_opencode_profile_commands_include_thinking(monkeypatch, tmp_path: Path) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = OpencodeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="demo-skill", path=tmp_path),
+        run_dir=tmp_path / "run",
+        input_data={},
+        options={"model": "openai/gpt-5"},
+    )
+
+    start = adapter.build_start_command(
+        ctx=ctx,
+        prompt="hello",
+        options=ctx.options,
+        use_profile_defaults=True,
+    )
+    resume = adapter.build_resume_command(
+        ctx=ctx,
+        prompt="again",
+        options=ctx.options,
+        session_handle=EngineSessionHandle(
+            engine="opencode",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="ses-123",
+            created_at_turn=1,
+        ),
+        use_profile_defaults=True,
+    )
+
+    assert start == [
+        _platform_cmd("/usr/bin/opencode"),
+        "run",
+        "--dir",
+        str(ctx.run_dir),
+        "--format",
+        "json",
+        "--thinking",
+        "--model",
+        "openai/gpt-5",
+        "hello",
+    ]
+    assert resume == [
+        _platform_cmd("/usr/bin/opencode"),
+        "run",
+        "--dir",
+        str(ctx.run_dir),
+        "--session=ses-123",
+        "--format",
+        "json",
+        "--thinking",
+        "--model",
+        "openai/gpt-5",
+        "again",
+    ]
+
+
 def test_opencode_start_command_anchors_run_dir_when_context_available(monkeypatch, tmp_path: Path) -> None:
     adapter = OpencodeExecutionAdapter()
     monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))

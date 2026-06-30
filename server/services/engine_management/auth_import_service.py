@@ -99,12 +99,6 @@ class AuthImportService:
             auth_rule = imports.get("auth.json")
             if auth_rule is None:
                 raise AuthImportError("opencode adapter profile missing auth.json import rule")
-            if normalized_provider == "google":
-                google_optional_rules: list[CredentialImportProfile] = []
-                antigravity_rule = imports.get("antigravity-accounts.json")
-                if antigravity_rule is not None:
-                    google_optional_rules.append(antigravity_rule)
-                return _RuleSelection(required=(auth_rule,), optional=tuple(google_optional_rules))
             return _RuleSelection(required=(auth_rule,), optional=tuple())
 
         required_sources = profile.cli_management.credential_policy.sources
@@ -264,10 +258,6 @@ class AuthImportService:
                 provider = get_engine_auth_provider(profile.engine, normalized_provider)
                 supported = provider.supports_import
 
-        ui_hints: dict[str, Any] = {}
-        if profile.engine == "opencode" and normalized_provider == "google":
-            ui_hints["risk_notice_required"] = True
-
         return {
             "engine": profile.engine,
             "provider_id": normalized_provider,
@@ -277,7 +267,7 @@ class AuthImportService:
                 "prompt": "Upload credential files to complete authentication.",
                 "hint": "Select required files and submit to continue.",
                 "files": file_items,
-                "ui_hints": ui_hints,
+                "ui_hints": {},
             },
         }
 
@@ -361,7 +351,7 @@ class AuthImportService:
             "engine": profile.engine,
             "provider_id": normalized_provider,
             "imported_files": imported,
-            "risk_notice_required": profile.engine == "opencode" and normalized_provider == "google",
+            "risk_notice_required": False,
         }
 
 

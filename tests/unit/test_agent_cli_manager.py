@@ -93,9 +93,8 @@ def test_ensure_layout_creates_default_config_files(tmp_path):
     assert qwen_settings.exists()
     opencode_payload = json.loads(opencode_config.read_text(encoding="utf-8"))
     qwen_payload = json.loads(qwen_settings.read_text(encoding="utf-8"))
-    plugins = opencode_payload.get("plugin", [])
-    assert isinstance(plugins, list)
-    assert any(isinstance(item, str) and item.startswith("opencode-antigravity-auth") for item in plugins)
+    assert "opencode-antigravity-auth" not in json.dumps(opencode_payload)
+    assert "google" not in opencode_payload.get("provider", {})
     assert qwen_payload["general"]["enableAutoUpdate"] is False
 
 
@@ -422,29 +421,26 @@ def test_import_credentials_whitelist_only(tmp_path):
     (src / "codex" / "config.toml").write_text("should_not_copy=true", encoding="utf-8")
 
     (src / "opencode" / "auth.json").write_text('{"token":"x"}', encoding="utf-8")
-    (src / "opencode" / "antigravity-accounts.json").write_text('{"accounts":[]}', encoding="utf-8")
     (src / "claude" / ".credentials.json").write_text('{"claudeAiOauth":{"accessToken":"x"}}', encoding="utf-8")
     (src / "qwen" / "oauth_creds.json").write_text("{}", encoding="utf-8")
 
     copied = manager.import_credentials(src)
     assert copied["codex"] == ["auth.json"]
     assert copied["claude"] == [".credentials.json"]
-    assert copied["opencode"] == ["auth.json", "antigravity-accounts.json"]
-    assert copied["qwen"] == ["oauth_creds.json"]
+    assert copied["opencode"] == ["auth.json"]
+    assert copied["qwen"] == []
 
     codex_dst = manager.profile.agent_home / ".codex"
     claude_dst = manager.profile.agent_home / ".claude"
     opencode_data_dst = manager.profile.agent_home / ".local" / "share" / "opencode"
-    opencode_config_dst = manager.profile.agent_home / ".config" / "opencode"
     qwen_dst = manager.profile.agent_home / ".qwen"
 
     assert (codex_dst / "auth.json").exists()
     assert 'cli_auth_credentials_store = "file"' in (codex_dst / "config.toml").read_text(encoding="utf-8")
 
     assert (claude_dst / ".credentials.json").exists()
-    assert (qwen_dst / "oauth_creds.json").exists()
+    assert not (qwen_dst / "oauth_creds.json").exists()
     assert (opencode_data_dst / "auth.json").exists()
-    assert (opencode_config_dst / "antigravity-accounts.json").exists()
 
 def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
     manager = AgentCliManager(_build_profile(tmp_path))
@@ -711,7 +707,6 @@ def test_install_package_returns_failure_on_oserror(tmp_path: Path, monkeypatch)
     [
         ("codex", "auth.json", ".codex/auth.json"),
         ("opencode", "auth.json", ".local/share/opencode/auth.json"),
-        ("qwen", "oauth_creds.json", ".qwen/oauth_creds.json"),
     ],
 )
 def test_import_credentials_uses_profile_rules_for_all_engines(

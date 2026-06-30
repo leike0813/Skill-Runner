@@ -84,16 +84,10 @@
   "cli_management": {
     "package": "@qwen-code/qwen-code",
     "binary_candidates": ["qwen", "qwen.cmd", "qwen.exe"],
-    "credential_imports": [
-      {
-        "source": "oauth_creds.json",
-        "target_relpath": ".qwen/oauth_creds.json",
-        "import_validator": "qwen_oauth_creds_json"
-      }
-    ],
+    "credential_imports": [],
     "credential_policy": {
       "mode": "any_of_sources",
-      "sources": ["oauth_creds.json"],
+      "sources": ["settings.json"],
       "settings_validator": null
     },
     "resume_probe": {
@@ -109,39 +103,6 @@
   },
   "parser_auth_patterns": {
     "rules": [
-      {
-        "id": "qwen_oauth_waiting_authorization",
-        "enabled": true,
-        "priority": 950,
-        "match": {
-          "all": [
-            {
-              "field": "combined_text",
-              "op": "regex",
-              "value": "Qwen OAuth Device Authorization|https://chat\\.qwen\\.ai/authorize\\?user_code="
-            },
-            {
-              "field": "combined_text",
-              "op": "regex",
-              "value": "Waiting for authorization to complete"
-            }
-          ]
-        }
-      },
-      {
-        "id": "qwen_oauth_token_expired",
-        "enabled": true,
-        "priority": 900,
-        "match": {
-          "all": [
-            {
-              "field": "combined_text",
-              "op": "regex",
-              "value": "OAuth.*token.*expired|401.*Unauthorized|invalid.*token"
-            }
-          ]
-        }
-      },
       {
         "id": "qwen_api_key_missing",
         "enabled": true,

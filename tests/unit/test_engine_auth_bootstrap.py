@@ -39,6 +39,12 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
     assert bundle.driver_registry.supports(
         transport="oauth_proxy",
         engine="qwen",
+        auth_method="api_key",
+        provider_id="openrouter",
+    )
+    assert not bundle.driver_registry.supports(
+        transport="oauth_proxy",
+        engine="qwen",
         auth_method="auth_code_or_url",
         provider_id="qwen-oauth",
     )
@@ -76,8 +82,8 @@ def test_engine_auth_bootstrap_disables_windows_cli_delegate_without_pywinpty(
     assert not bundle.driver_registry.supports(
         transport="cli_delegate",
         engine="qwen",
-        auth_method="auth_code_or_url",
-        provider_id="qwen-oauth",
+        auth_method="api_key",
+        provider_id="coding-plan-global",
     )
     assert bundle.driver_registry.supports(
         transport="cli_delegate",
@@ -112,9 +118,9 @@ def test_engine_auth_bootstrap_keeps_windows_cli_delegate_with_pywinpty(
         auth_method="callback",
         provider_id="openai",
     )
-    assert bundle.driver_registry.supports(
+    assert not bundle.driver_registry.supports(
         transport="cli_delegate",
         engine="qwen",
-        auth_method="auth_code_or_url",
-        provider_id="qwen-oauth",
+        auth_method="api_key",
+        provider_id="coding-plan-global",
     )

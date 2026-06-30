@@ -101,7 +101,7 @@ def test_available_methods_for_drops_unknown_strategy_values(monkeypatch) -> Non
     assert methods == [AuthMethod.CALLBACK]
 
 
-def test_challenge_profile_appends_high_risk_notice_for_opencode_google() -> None:
+def test_challenge_profile_does_not_append_high_risk_notice_for_removed_google() -> None:
     service = RunAuthOrchestrationService()
 
     _challenge_kind, _accepts_input, _input_kind, prompt = service._challenge_profile(  # noqa: SLF001
@@ -110,7 +110,7 @@ def test_challenge_profile_appends_high_risk_notice_for_opencode_google() -> Non
         auth_method=AuthMethod.CALLBACK,
     )
 
-    assert "High risk!" in prompt
+    assert "High risk!" not in prompt
 
 
 def test_resolve_effective_provider_id_prefers_canonical_for_provider_aware_engine() -> None:
@@ -119,13 +119,13 @@ def test_resolve_effective_provider_id_prefers_canonical_for_provider_aware_engi
     resolved = service._resolve_effective_provider_id(  # noqa: SLF001
         engine_name="qwen",
         auth_detection=_build_detection(engine="qwen", provider_id="coding-plan-global"),
-        canonical_provider_id="qwen-oauth",
+        canonical_provider_id="openrouter",
     )
 
-    assert resolved == "qwen-oauth"
+    assert resolved == "openrouter"
 
 
-def test_resolve_effective_provider_id_uses_qwen_rule_fallback_when_provider_missing() -> None:
+def test_resolve_effective_provider_id_ignores_removed_qwen_oauth_rule_fallback() -> None:
     service = RunAuthOrchestrationService()
 
     resolved = service._resolve_effective_provider_id(  # noqa: SLF001
@@ -138,7 +138,7 @@ def test_resolve_effective_provider_id_uses_qwen_rule_fallback_when_provider_mis
         canonical_provider_id=None,
     )
 
-    assert resolved == "qwen-oauth"
+    assert resolved is None
 
 
 def test_build_import_pending_auth_embeds_upload_files_ask_user(monkeypatch) -> None:
@@ -443,20 +443,20 @@ async def test_create_pending_auth_single_method_preserves_last_error_message(mo
 
 
 @pytest.mark.asyncio
-async def test_create_pending_auth_qwen_oauth_proxy_auto_poll_hides_chat_input(monkeypatch, tmp_path: Path):
-    run_dir = tmp_path / "run-auth-qwen-auto-poll"
+async def test_create_pending_auth_qwen_api_key_provider_uses_api_key_challenge(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "run-auth-qwen-api-key"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
         "server.services.orchestration.run_auth_orchestration_service.engine_auth_flow_manager.start_session",
         lambda **_kwargs: {
-            "session_id": "auth-qwen-1",
-            "engine": "qwen",
-            "provider_id": "qwen-oauth",
-            "status": "waiting_user",
-            "input_kind": None,
-            "auth_url": "https://chat.qwen.ai/device?user_code=TEST123",
-            "user_code": "TEST123",
+                "session_id": "auth-qwen-1",
+                "engine": "qwen",
+                "provider_id": "openrouter",
+                "status": "waiting_user",
+                "input_kind": "api_key",
+                "auth_url": None,
+                "user_code": None,
             "created_at": "2099-03-03T00:00:00Z",
             "expires_at": "2099-03-03T00:15:00Z",
             "error": None,
@@ -480,22 +480,19 @@ async def test_create_pending_auth_qwen_oauth_proxy_auto_poll_hides_chat_input(m
         engine_name="qwen",
         options={"execution_mode": "interactive"},
         attempt_number=1,
-        auth_detection=_build_detection(engine="qwen", provider_id="qwen-oauth", subcategory="oauth_reauth"),
-        canonical_provider_id="qwen-oauth",
+            auth_detection=_build_detection(engine="qwen", provider_id="openrouter", subcategory="api_key_missing"),
+            canonical_provider_id="openrouter",
         run_store_backend=backend,
         append_orchestrator_event=lambda **_kwargs: None,
         update_status=lambda *_args, **_kwargs: None,
     )
 
     assert pending_auth is not None
-    assert pending_auth.auth_method == AuthMethod.AUTH_CODE_OR_URL
-    assert pending_auth.challenge_kind == AuthChallengeKind.AUTH_CODE_OR_URL
-    assert pending_auth.accepts_chat_input is False
-    assert pending_auth.input_kind is None
-    assert pending_auth.auth_url == "https://chat.qwen.ai/device?user_code=TEST123"
-    assert pending_auth.user_code == "TEST123"
-    assert pending_auth.instructions is not None
-    assert "polling automatically" in pending_auth.instructions
+    assert pending_auth.provider_id == "openrouter"
+    assert pending_auth.auth_method == AuthMethod.API_KEY
+    assert pending_auth.challenge_kind == AuthChallengeKind.API_KEY
+    assert pending_auth.accepts_chat_input is True
+    assert pending_auth.input_kind == "api_key"
 
 
 @pytest.mark.asyncio
@@ -511,10 +508,10 @@ async def test_create_pending_auth_opencode_prefers_canonical_provider_over_dete
         lambda **_kwargs: {
             "session_id": "auth-1",
             "engine": "opencode",
-            "provider_id": "google",
-            "status": "waiting_user",
-            "input_kind": "callback",
-            "auth_url": "https://auth.example.test",
+                "provider_id": "openrouter",
+                "status": "waiting_user",
+                "input_kind": "api_key",
+                "auth_url": None,
             "user_code": None,
             "created_at": "2099-03-03T00:00:00Z",
             "expires_at": "2099-03-03T00:15:00Z",
@@ -542,19 +539,16 @@ async def test_create_pending_auth_opencode_prefers_canonical_provider_over_dete
         options={"execution_mode": "interactive"},
         attempt_number=1,
         auth_detection=_build_detection(provider_id="deepseek", subcategory="oauth_reauth"),
-        canonical_provider_id="google",
+        canonical_provider_id="openrouter",
         run_store_backend=backend,
         append_orchestrator_event=lambda **_kwargs: None,
         update_status=lambda *_args, **_kwargs: None,
     )
 
     assert selection is not None
-    assert selection.phase == AuthSessionPhase.METHOD_SELECTION
-    assert selection.provider_id == "google"
-    assert selection.available_methods == [
-        AuthMethod.CALLBACK,
-        AuthMethod.IMPORT,
-    ]
+    assert selection.phase == AuthSessionPhase.CHALLENGE_ACTIVE
+    assert selection.provider_id == "openrouter"
+    assert selection.auth_method == AuthMethod.API_KEY
 
 
 @pytest.mark.asyncio

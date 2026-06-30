@@ -104,10 +104,10 @@ def test_validate_model_non_codex_ignores_suffix_when_effort_is_unsupported(monk
         lambda _engine: None,
     )
 
-    result = registry.validate_model("qwen", "qwen-oauth/coder-model@high")
+    result = registry.validate_model("qwen", "coding-plan-china/qwen3-coder-plus@high")
     assert result == {
-        "model": "coder-model",
-        "provider_id": "qwen-oauth",
+        "model": "qwen3-coder-plus",
+        "provider_id": "coding-plan-china",
     }
 
 
@@ -445,7 +445,6 @@ def test_get_manifest_view_qwen_uses_snapshot_contract(monkeypatch, tmp_path: Pa
     assert view["engine"] == "qwen"
     assert view["manifest"]["engine"] == "qwen"
     assert view["resolved_snapshot_file"] == "models_0.14.0.json"
-    assert any(item["provider_id"] == "qwen-oauth" for item in view["models"])
     assert any(item["provider_id"] == "coding-plan-china" for item in view["models"])
     assert any(item["provider_id"] == "coding-plan-global" for item in view["models"])
 

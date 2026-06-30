@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -10,12 +11,7 @@ from server.config import config
 from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 from server.engines.codex.auth import CodexOAuthProxySession
 from server.engines.kilo.auth import KiloGatewayDeviceAuthSession
-from server.engines.opencode.auth import (
-    OpencodeAuthCliSession,
-    OpencodeGoogleAntigravityOAuthProxySession,
-)
-from server.engines.qwen.auth.drivers.cli_delegate_flow import QwenAuthCliSession
-from server.engines.qwen.auth.protocol.qwen_oauth_proxy_flow import QwenOAuthSession
+from server.engines.opencode.auth import OpencodeAuthCliSession
 from server.runtime.auth.session_lifecycle import AuthStartPlan
 from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
@@ -660,7 +656,7 @@ def test_engine_auth_flow_manager_opencode_openai_cli_delegate_callback_shows_in
     assert started["input_kind"] == "text"
 
 
-def test_engine_auth_flow_manager_qwen_oauth_proxy_starts_and_completes(
+def test_engine_auth_flow_manager_qwen_openrouter_api_key_writes_settings(
     tmp_path: Path,
 ):
     command_path = _write_script(tmp_path / "fake-qwen", "exit 0")
@@ -670,55 +666,31 @@ def test_engine_auth_flow_manager_qwen_oauth_proxy_starts_and_completes(
         interaction_gate=EngineInteractionGate(),
         trust_manager=_TrustSpy(),
     )
-    now = datetime.now(timezone.utc)
-    runtime = QwenOAuthSession(
-        session_id="auth-qwen-1",
-        device_code="device-1",
-        user_code="TEST123",
-        verification_uri_complete="https://chat.qwen.ai/device?user_code=TEST123",
-        code_verifier="verifier-1",
-        expires_in=300,
-        created_at=now,
-        updated_at=now,
-        expires_at=now + timedelta(minutes=5),
-    )
-    manager._qwen_oauth_proxy_flow.start_session = lambda **_kwargs: runtime  # type: ignore[method-assign]  # noqa: SLF001
-
-    def _start_polling(_runtime, now=None, poll_now=False):  # noqa: ANN001
-        current = now or datetime.now(timezone.utc)
-        _runtime.polling_started = True
-        _runtime.next_poll_at = current if poll_now else (_runtime.next_poll_at or current + timedelta(seconds=2))
-
-    def _poll_once(_runtime, now=None):  # noqa: ANN001
-        current = now or datetime.now(timezone.utc)
-        next_poll_at = _runtime.next_poll_at
-        if next_poll_at is not None and current < next_poll_at:
-            return False
-        return True
-
-    manager._qwen_oauth_proxy_flow.start_polling = _start_polling  # type: ignore[method-assign]  # noqa: SLF001
-    manager._qwen_oauth_proxy_flow.submit_input = lambda _runtime, _value, now=None: setattr(  # type: ignore[method-assign]  # noqa: SLF001
-        _runtime, "polling_started", True
-    )
-    manager._qwen_oauth_proxy_flow.poll_once = _poll_once  # type: ignore[method-assign]  # noqa: SLF001
 
     started = manager.start_session(
         "qwen",
         "auth",
         transport="oauth_proxy",
-        provider_id="qwen-oauth",
-        auth_method="auth_code_or_url",
+        provider_id="openrouter",
+        auth_method="api_key",
     )
     assert started["engine"] == "qwen"
+    assert started["provider_id"] == "openrouter"
     assert started["status"] == "waiting_user"
-    assert started["user_code"] == "TEST123"
-    assert started["auth_url"] == "https://chat.qwen.ai/device?user_code=TEST123"
-    assert started["input_kind"] is None
+    assert started["input_kind"] == "api_key"
 
-    runtime.next_poll_at = datetime.now(timezone.utc)
-    final = manager.get_session(started["session_id"])
+    final = manager.input_session(started["session_id"], "api_key", "sk-or-123")
     assert final["status"] == "succeeded"
     assert final["terminal"] is True
+
+    settings_path = profile.agent_home / ".qwen" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["env"]["OPENROUTER_API_KEY"] == "sk-or-123"
+    assert settings["security"]["auth"]["selectedType"] == "openai"
+    assert settings["model"]["name"] == "z-ai/glm-4.5-air:free"
+    rows = settings["modelProviders"]["openai"]
+    assert rows[0]["baseUrl"] == "https://openrouter.ai/api/v1"
+    assert rows[0]["envKey"] == "OPENROUTER_API_KEY"
 
 
 def test_engine_auth_flow_manager_kilo_gateway_oauth_proxy_starts_and_completes(
@@ -786,9 +758,8 @@ def test_engine_auth_flow_manager_kilo_gateway_oauth_proxy_starts_and_completes(
     assert (profile.agent_home / ".local" / "share" / "kilo" / "auth.json").exists()
 
 
-def test_engine_auth_flow_manager_qwen_cli_delegate_waits_for_api_key_prompt(
+def test_engine_auth_flow_manager_qwen_cli_delegate_is_not_startable(
     tmp_path: Path,
-    monkeypatch,
 ):
     command_path = _write_script(tmp_path / "fake-qwen", "exit 0")
     profile = _FakeProfile(tmp_path)
@@ -798,46 +769,14 @@ def test_engine_auth_flow_manager_qwen_cli_delegate_waits_for_api_key_prompt(
         trust_manager=_TrustSpy(),
     )
 
-    class _FakeProc:
-        pid = 9876
-
-        def poll(self):  # noqa: ANN201
-            return None
-
-    now = datetime.now(timezone.utc)
-    runtime = QwenAuthCliSession(
-        session_id="auth-qwen-2",
-        provider_id="coding-plan-global",
-        process=_FakeProc(),
-        master_fd=0,
-        output_path=tmp_path / "auth.log",
-        created_at=now,
-        updated_at=now,
-        expires_at=now + timedelta(minutes=5),
-        status="waiting_user",
-        api_key_prompt_visible=True,
-    )
-    manager._qwen_flow.start_session = lambda **_kwargs: runtime  # type: ignore[method-assign]  # noqa: SLF001
-    manager._qwen_flow.refresh = lambda _runtime: None  # type: ignore[method-assign]  # noqa: SLF001
-    captured: list[str] = []
-    manager._qwen_flow.submit_api_key = lambda _runtime, value: captured.append(value)  # type: ignore[method-assign]  # noqa: SLF001
-
-    started = manager.start_session(
-        "qwen",
-        "auth",
-        transport="cli_delegate",
-        provider_id="coding-plan-global",
-        auth_method="api_key",
-    )
-    assert started["engine"] == "qwen"
-    assert started["transport"] == "cli_delegate"
-    assert started["input_kind"] == "api_key"
-    assert started["status"] == "waiting_user"
-
-    monkeypatch.setattr(manager._qwen_flow, "refresh", lambda _runtime: setattr(_runtime, "status", "code_submitted_waiting_result"))  # noqa: SLF001
-    input_snapshot = manager.input_session(started["session_id"], "api_key", "sk-sp-123")
-    assert captured == ["sk-sp-123"]
-    assert input_snapshot["status"] == "code_submitted_waiting_result"
+    with pytest.raises(ValueError, match="qwen only supports oauth_proxy"):
+        manager.start_session(
+            "qwen",
+            "auth",
+            transport="cli_delegate",
+            provider_id="coding-plan-global",
+            auth_method="api_key",
+        )
 
 
 def test_engine_auth_flow_manager_cancel_releases_lock_on_terminate_error(tmp_path: Path, monkeypatch):
@@ -1270,7 +1209,7 @@ def test_engine_auth_flow_manager_opencode_api_key_rejects_cli_delegate(tmp_path
         )
 
 
-def test_engine_auth_flow_manager_opencode_google_cleanup_failure(tmp_path: Path, monkeypatch):
+def test_engine_auth_flow_manager_opencode_google_cli_delegate_is_not_startable(tmp_path: Path):
     command_path = _write_script(tmp_path / "fake-opencode", "sleep 1")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
@@ -1279,27 +1218,14 @@ def test_engine_auth_flow_manager_opencode_google_cleanup_failure(tmp_path: Path
         trust_manager=_TrustSpy(),
     )
 
-    class _BrokenStore:
-        def backup_antigravity_accounts(self, _backup_path):
-            return {"source_exists": False, "backup_created": False, "backup_path": None}
-
-        def clear_antigravity_accounts(self):
-            raise RuntimeError("boom")
-
-        def restore_antigravity_accounts(self, *, source_exists, backup_path=None):  # noqa: ARG002
-            return None
-
-    monkeypatch.setattr(manager, "_build_opencode_auth_store", lambda: _BrokenStore())
-    payload = manager.start_session(
-        "opencode",
-        "auth",
-        provider_id="google",
-        transport="cli_delegate",
-        auth_method="auth_code_or_url",
-    )
-    assert payload["status"] == "failed"
-    assert payload["terminal"] is True
-    assert payload["audit"]["google_antigravity_cleanup"]["success"] is False
+    with pytest.raises(ValueError, match="Unsupported opencode provider: google"):
+        manager.start_session(
+            "opencode",
+            "auth",
+            provider_id="google",
+            transport="cli_delegate",
+            auth_method="auth_code_or_url",
+        )
 
 
 def test_engine_auth_flow_manager_opencode_openai_enters_waiting_user(tmp_path: Path, monkeypatch):
@@ -1330,11 +1256,9 @@ def test_engine_auth_flow_manager_opencode_openai_enters_waiting_user(tmp_path: 
     assert "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback" in str(waiting["auth_url"])
 
 
-def test_engine_auth_flow_manager_opencode_google_oauth_proxy_manual_fallback_success(
+def test_engine_auth_flow_manager_opencode_google_oauth_proxy_is_not_startable(
     tmp_path: Path,
-    monkeypatch,
 ):
-    _set_google_oauth_proxy_env(monkeypatch)
     command_path = _write_script(tmp_path / "fake-opencode-google", "exit 0")
     profile = _FakeProfile(tmp_path)
     manager = EngineAuthFlowManager(
@@ -1342,129 +1266,15 @@ def test_engine_auth_flow_manager_opencode_google_oauth_proxy_manual_fallback_su
         interaction_gate=EngineInteractionGate(),
         trust_manager=_TrustSpy(),
     )
-    listener_calls = {"start": 0, "stop": 0}
 
-    monkeypatch.setattr(
-        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.set_callback_handler",
-        lambda _handler: None,
-    )
-    def _fake_antigravity_listener_start() -> bool:
-        listener_calls["start"] = listener_calls["start"] + 1
-        return True
-
-    def _fake_antigravity_listener_stop() -> None:
-        listener_calls["stop"] = listener_calls["stop"] + 1
-
-    monkeypatch.setattr(
-        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.start",
-        _fake_antigravity_listener_start,
-    )
-    monkeypatch.setattr(
-        "server.engines.opencode.auth.callbacks.antigravity_local_callback_server.stop",
-        _fake_antigravity_listener_stop,
-    )
-
-    class _TokenPayload:
-        access_token = "google-access"
-        refresh_token = "google-refresh"
-        expires_in = 3600
-        email = "google@example.com"
-
-    monkeypatch.setattr(
-        manager._opencode_google_antigravity_oauth_proxy_flow,
-        "_exchange_code",
-        lambda **_kwargs: _TokenPayload(),
-    )
-    started = manager.start_session(
-        "opencode",
-        "auth",
-        provider_id="google",
-        transport="oauth_proxy",
-        auth_method="auth_code_or_url",
-    )
-    assert started["engine"] == "opencode"
-    assert started["provider_id"] == "google"
-    assert started["transport"] == "oauth_proxy"
-    assert started["status"] == "waiting_user"
-    assert started["execution_mode"] == "protocol_proxy"
-    assert "accounts.google.com/o/oauth2/v2/auth" in str(started["auth_url"])
-
-    runtime = manager._sessions[started["session_id"]].driver_state  # noqa: SLF001
-    assert isinstance(runtime, OpencodeGoogleAntigravityOAuthProxySession)
-    submitted = manager.input_session(
-        started["session_id"],
-        "text",
-        f"http://localhost:51121/oauth-callback?code=google-code&state={runtime.state}",
-    )
-    assert submitted["status"] == "succeeded"
-    assert submitted["manual_fallback_used"] is True
-    assert submitted["audit"]["callback_mode"] == "manual"
-    assert submitted["audit"]["google_antigravity_single_account_written"] is True
-    assert listener_calls["start"] == 0
-    assert listener_calls["stop"] == 1
-
-    accounts_path = profile.agent_home / ".config" / "opencode" / "antigravity-accounts.json"
-    assert accounts_path.exists()
-
-
-def test_engine_auth_flow_manager_opencode_google_oauth_proxy_rejects_device_auth(tmp_path: Path):
-    command_path = _write_script(tmp_path / "fake-opencode-google", "exit 0")
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-    try:
+    with pytest.raises(ValueError, match="Unsupported opencode provider: google"):
         manager.start_session(
             "opencode",
             "auth",
             provider_id="google",
             transport="oauth_proxy",
-            auth_method="api_key",
+            auth_method="auth_code_or_url",
         )
-        raise AssertionError("expected ValueError")
-    except ValueError as exc:
-        assert "callback or auth_code_or_url" in str(exc)
-
-
-def test_engine_auth_flow_manager_opencode_google_cancel_restores_accounts(tmp_path: Path):
-    _require_pty()
-    command_path = _write_script(tmp_path / "fake-opencode", "sleep 10")
-    profile = _FakeProfile(tmp_path)
-    manager = EngineAuthFlowManager(
-        agent_manager=_FakeCliManager(profile, command_path),
-        interaction_gate=EngineInteractionGate(),
-        trust_manager=_TrustSpy(),
-    )
-
-    accounts_path = profile.agent_home / ".config" / "opencode" / "antigravity-accounts.json"
-    accounts_path.parent.mkdir(parents=True, exist_ok=True)
-    accounts_path.write_text(
-        '{"accounts":[{"id":"legacy"}],"active":"legacy","activeIndex":0}\n',
-        encoding="utf-8",
-    )
-
-    started = manager.start_session(
-        "opencode",
-        "auth",
-        provider_id="google",
-        transport="cli_delegate",
-        auth_method="auth_code_or_url",
-    )
-    assert started["engine"] == "opencode"
-    assert started["provider_id"] == "google"
-    cleared = accounts_path.read_text(encoding="utf-8")
-    assert '"accounts": []' in cleared
-
-    canceled = manager.cancel_session(started["session_id"])
-    assert canceled["status"] == "canceled"
-    rollback = canceled["audit"]["google_antigravity_cleanup"]
-    assert rollback["rollback_attempted"] is True
-    assert rollback["rollback_success"] is True
-
-    restored = accounts_path.read_text(encoding="utf-8")
-    assert '"legacy"' in restored
 
 
 def test_engine_auth_flow_manager_codex_oauth_proxy_device_start_failure_message(tmp_path: Path, monkeypatch):

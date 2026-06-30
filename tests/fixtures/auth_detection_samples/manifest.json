@@ -60,14 +60,6 @@
       "expected_subcategory": "invalid_api_key"
     },
     {
-      "sample_id": "google_api_key_missing",
-      "engine": "opencode",
-      "provider_id": "google",
-      "source_run_id": "20260302T125146-opencode-318a9085",
-      "expected_classification": "auth_required",
-      "expected_subcategory": "api_key_missing"
-    },
-    {
       "sample_id": "openai_missing_bearer_401",
       "engine": "codex",
       "provider_id": "openai",

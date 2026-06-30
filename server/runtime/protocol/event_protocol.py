@@ -304,6 +304,44 @@ def build_rasp_events(
             correlation=correlation,
         )
         marker_types_seen.add("agent.turn_failed")
+    completion_state: str | None = None
+    completion_reason_code: str | None = None
+    if isinstance(completion, dict):
+        state_obj = completion.get("state")
+        if isinstance(state_obj, str) and state_obj:
+            completion_state = state_obj
+        reason_obj = completion.get("reason_code")
+        if isinstance(reason_obj, str) and reason_obj:
+            completion_reason_code = reason_obj
+    terminal_status_failed = status in {"failed", "canceled"}
+    terminal_completion_interrupted = completion_state == "interrupted"
+    if (
+        "agent.turn_failed" not in marker_types_seen
+        and (terminal_status_failed or terminal_completion_interrupted)
+    ):
+        fallback_message = completion_reason_code or (
+            f"terminal status {status}" if isinstance(status, str) and status else "terminal attempt failed"
+        )
+        payload: dict[str, Any] = {
+            "fatal": True,
+            "message": fallback_message,
+            "source_type": "orchestrator_terminal_fallback",
+            "pattern_kind": "orchestrator_terminal_fallback",
+        }
+        if isinstance(status, str) and status:
+            payload["status"] = status
+        if isinstance(completion_state, str) and completion_state:
+            payload["completion_state"] = completion_state
+        if isinstance(completion_reason_code, str) and completion_reason_code:
+            payload["reason_code"] = completion_reason_code
+            payload["code"] = completion_reason_code
+        push(
+            RuntimeEventCategory.AGENT,
+            "agent.turn_failed",
+            data=payload,
+            correlation=correlation,
+        )
+        marker_types_seen.add("agent.turn_failed")
 
     run_handle_obj = parsed.get("run_handle")
     if isinstance(run_handle_obj, dict):

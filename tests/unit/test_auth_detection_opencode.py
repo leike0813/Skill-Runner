@@ -19,7 +19,6 @@ def _load_runtime_parse_result(sample: dict[str, object]) -> dict[str, object]:
 @pytest.mark.parametrize(
     ("sample_id", "confidence"),
     [
-        ("google_api_key_missing", "high"),
         ("openrouter_missing_auth_header", "high"),
         ("minimax_login_fail_401", "high"),
         ("moonshot_invalid_authentication", "high"),
