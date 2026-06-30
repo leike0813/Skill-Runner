@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **OpenCode**, **Claude Code** and **Qwen** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
+Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **OpenCode**, **Claude Code**, **Qwen**, and **Kilo Code** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
 
 ## ✨ Highlights
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 Pluggable Skills</strong><br/>Drop-in skill packages<br/><sub>Schema-validated I/O</sub></td>
-<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen<br/><sub>Unified adapter protocol</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen · Kilo Code<br/><sub>Unified adapter protocol</sub></td>
 <td align="center" width="25%"><strong>🔄 Dual Mode</strong><br/>Auto &amp; Interactive execution<br/><sub>Multi-turn conversations</sub></td>
 <td align="center" width="25%"><strong>📦 Structured Output</strong><br/>JSON + artifacts + bundle<br/><sub>Isolated, contract-driven runs</sub></td>
 </tr>
@@ -63,7 +63,7 @@ my-skill/
 ### Why It Matters
 
 - **Standards-based**: Compatible with the Open Agent Skills ecosystem — skills are portable across platforms.
-- **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, OpenCode, Claude Code, or Qwen.
+- **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, OpenCode, Claude Code, Qwen, or Kilo Code.
 - **Schema-driven I/O**: Input, parameter, and output are all defined by JSON Schema — the runner validates automatically.
 - **Isolated execution**: Each run gets its own workspace with standardized I/O contracts — no cross-run interference.
 - **Zero-integration install**: Drop a skill directory into user dir `skills/` (or upload via API/UI) and it's immediately available. Built-in skills ship in `skills_builtin/`.
@@ -322,6 +322,7 @@ graph TD
         Orchestrator --> OpenCode[OpenCode Adapter]
         Orchestrator --> ClaudeCode[Claude Code Adapter]
         Orchestrator --> Qwen[Qwen Adapter]
+        Orchestrator --> KiloCode[Kilo Code Adapter]
     end
 
     subgraph Storage
@@ -335,6 +336,7 @@ graph TD
     OpenCode --> OpenCodeCLI[OpenCode]
     ClaudeCode --> ClaudeCodeCLI[Claude Code CLI]
     Qwen --> QwenCLI[Qwen CLI]
+    KiloCode --> KiloCodeCLI[Kilo Code]
 ```
 
 **Execution Flow**: `POST /v1/jobs` → input upload → engine execution → output validation → `GET /v1/jobs/{id}/result`
@@ -348,6 +350,7 @@ graph TD
 | **OpenCode** | `opencode-ai` |
 | **Claude Code** | `@anthropic-ai/claude-code` |
 | **Qwen** | `@qwen-code/qwen-cli` |
+| **Kilo Code** | `@kilocode/cli` |
 
 > All engines support both **Auto** and **Interactive** execution modes.
 
@@ -367,7 +370,7 @@ graph TD
 
 ## ⚠️ Disclaimer
 
-Codex, Gemini CLI, OpenCode, Claude Code, and Qwen are fast-evolving tools. Their config formats, CLI behavior, and API details may change in short cycles. If you encounter compatibility issues with newer CLI versions, please [open an issue](https://github.com/leike0813/Skill-Runner/issues).
+Codex, Gemini CLI, OpenCode, Claude Code, Qwen, and Kilo Code are fast-evolving tools. Their config formats, CLI behavior, and API details may change in short cycles. If you encounter compatibility issues with newer CLI versions, please [open an issue](https://github.com/leike0813/Skill-Runner/issues).
 
 ---
 
