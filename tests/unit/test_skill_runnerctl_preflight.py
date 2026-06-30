@@ -98,6 +98,7 @@ def test_preflight_passes_when_environment_ready(monkeypatch, capsys, tmp_path: 
     assert payload["ok"] is True
     assert payload["blocking_issues"] == []
     assert payload["warnings"] == []
+    assert payload["checks"]["zotero_bridge_bundle"]["source"] in {"builtin", "managed"}
     assert payload["suggested_next"]["port"] == 29813
 
 

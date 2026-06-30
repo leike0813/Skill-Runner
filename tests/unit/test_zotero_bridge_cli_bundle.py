@@ -1,18 +1,29 @@
 import hashlib
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
 
 import pytest
 
+from server.config import config
 from server.services.engine_management.runtime_profile import RuntimeProfile
 from server.services.engine_management.zotero_bridge_cli_bundle import (
     GLOBAL_SKILL_DIRS,
     ZoteroBridgeBundleError,
     ensure_zotero_bridge_managed_plugin,
+    find_default_bundle_root,
     resolve_bundle_platform_key,
+    validate_zotero_bridge_bundle_root,
+    write_managed_bundle_current,
+    write_zotero_bridge_bundle_state,
+    zotero_bridge_bundle_status,
     zotero_bridge_bin_path,
+)
+from server.services.engine_management.zotero_bridge_bundle_auto_update import (
+    ZoteroBridgeBundleAutoUpdateConfig,
+    ZoteroBridgeBundleAutoUpdateManager,
 )
 
 
@@ -194,6 +205,142 @@ def test_ensure_zotero_bridge_skips_missing_bundle(tmp_path: Path) -> None:
 
     assert result.cli_installed is False
     assert result.skipped_reason == "bundle_missing"
+
+
+def test_default_bundle_root_prefers_valid_managed_bundle(tmp_path: Path) -> None:
+    bundle, _digest = _write_fake_bundle(tmp_path)
+    profile = _profile(tmp_path)
+    write_zotero_bridge_bundle_state(
+        profile,
+        {
+            "status": "installed",
+            "active_commit": "abc123",
+            "active_bundle_root": str(bundle),
+        },
+    )
+    write_managed_bundle_current(
+        profile,
+        active_commit="abc123",
+        active_bundle_root=bundle,
+    )
+
+    assert find_default_bundle_root(profile) == bundle
+    status = zotero_bridge_bundle_status(profile)
+    assert status["source"] == "managed"
+    assert status["bundle_root"] == str(bundle)
+
+
+def test_default_bundle_root_falls_back_when_managed_bundle_is_invalid(tmp_path: Path) -> None:
+    profile = _profile(tmp_path)
+    missing = tmp_path / "missing-bundle"
+    write_zotero_bridge_bundle_state(
+        profile,
+        {
+            "status": "installed",
+            "active_commit": "abc123",
+            "active_bundle_root": str(missing),
+        },
+    )
+
+    assert find_default_bundle_root(profile) != missing
+    assert zotero_bridge_bundle_status(profile)["source"] == "builtin"
+
+
+def test_validate_zotero_bridge_rejects_unsafe_manifest_path(tmp_path: Path) -> None:
+    bundle, _digest = _write_fake_bundle(tmp_path)
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wrapperSkill"]["path"] = "../outside"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ZoteroBridgeBundleError, match="unsafe"):
+        validate_zotero_bridge_bundle_root(bundle)
+
+
+def test_auto_update_noops_when_remote_commit_is_current(tmp_path: Path, monkeypatch) -> None:
+    profile = _profile(tmp_path)
+    manager = ZoteroBridgeBundleAutoUpdateManager(profile)
+    write_zotero_bridge_bundle_state(
+        profile,
+        {
+            "status": "installed",
+            "active_commit": "abc123",
+            "active_bundle_root": str(tmp_path / "bundle"),
+        },
+    )
+    monkeypatch.setattr(manager, "_remote_head", lambda _cfg: "abc123")
+
+    state = manager._check_once_sync(_auto_update_cfg())
+
+    assert state["status"] == "up_to_date"
+    assert state["active_commit"] == "abc123"
+
+
+def test_auto_update_installs_new_valid_bundle(tmp_path: Path, monkeypatch) -> None:
+    bundle, _digest = _write_fake_bundle(tmp_path)
+    version_dir = tmp_path / "cache" / "plugin-bundles" / "zotero-bridge-cli-bundle" / "versions" / "def456"
+    version_dir.parent.mkdir(parents=True)
+    shutil.copytree(bundle, version_dir)
+    profile = _profile(tmp_path)
+    manager = ZoteroBridgeBundleAutoUpdateManager(profile)
+    monkeypatch.setattr(manager, "_remote_head", lambda _cfg: "def456")
+    monkeypatch.setattr(manager, "_ensure_version_dir", lambda _cfg, _commit: version_dir)
+
+    state = manager._check_once_sync(_auto_update_cfg())
+
+    assert state["status"] == "installed"
+    assert state["active_commit"] == "def456"
+    assert find_default_bundle_root(profile) == version_dir
+    assert (profile.npm_prefix / "bin" / "zotero-bridge").exists()
+
+
+def test_auto_update_failure_keeps_previous_state(tmp_path: Path, monkeypatch) -> None:
+    profile = _profile(tmp_path)
+    manager = ZoteroBridgeBundleAutoUpdateManager(profile)
+    previous = {
+        "status": "installed",
+        "active_commit": "abc123",
+        "active_bundle_root": str(tmp_path / "previous"),
+    }
+    write_zotero_bridge_bundle_state(profile, previous)
+    monkeypatch.setattr(manager, "_remote_head", lambda _cfg: "def456")
+    monkeypatch.setattr(
+        manager,
+        "_ensure_version_dir",
+        lambda _cfg, _commit: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    state = manager._check_once_sync(_auto_update_cfg())
+
+    assert state["status"] == "failed"
+    assert state["active_commit"] == "abc123"
+    assert state["error_message"] == "boom"
+
+
+def test_auto_update_start_respects_disabled_config(tmp_path: Path) -> None:
+    old_enabled = config.SYSTEM.ZOTERO_BRIDGE_BUNDLE_AUTO_UPDATE.ENABLED
+    config.defrost()
+    config.SYSTEM.ZOTERO_BRIDGE_BUNDLE_AUTO_UPDATE.ENABLED = False
+    config.freeze()
+    try:
+        manager = ZoteroBridgeBundleAutoUpdateManager(_profile(tmp_path))
+        manager.start()
+        assert manager._task is None
+    finally:
+        config.defrost()
+        config.SYSTEM.ZOTERO_BRIDGE_BUNDLE_AUTO_UPDATE.ENABLED = old_enabled
+        config.freeze()
+
+
+def _auto_update_cfg() -> ZoteroBridgeBundleAutoUpdateConfig:
+    return ZoteroBridgeBundleAutoUpdateConfig(
+        enabled=True,
+        repository=str(config.SYSTEM.ZOTERO_BRIDGE_BUNDLE_AUTO_UPDATE.SOURCE_REPOSITORY),
+        branch=str(config.SYSTEM.ZOTERO_BRIDGE_BUNDLE_AUTO_UPDATE.SOURCE_BRANCH),
+        interval_sec=86400,
+        startup_delay_sec=0,
+        timeout_sec=5,
+    )
 
 
 def test_zotero_bridge_submodule_and_docker_wiring_are_declared() -> None:

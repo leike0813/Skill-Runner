@@ -82,6 +82,9 @@ async def lifespan(_app: FastAPI):
     from .services.engine_management.engine_model_catalog_lifecycle import (
         engine_model_catalog_lifecycle,
     )
+    from .services.engine_management.zotero_bridge_bundle_auto_update import (
+        zotero_bridge_bundle_auto_update_manager,
+    )
     from .runtime.auth_detection.service import auth_detection_service
     from .services.platform.local_runtime_lease_service import local_runtime_lease_service
 
@@ -162,6 +165,7 @@ async def lifespan(_app: FastAPI):
     await skill_package_identity_service.refresh_all()
     engine_status_cache_service.start()
     run_cleanup_manager.start()
+    zotero_bridge_bundle_auto_update_manager.start()
     runtime_profile_mode = str(getattr(runtime_profile, "mode", "local")).strip().lower() or "local"
 
     async def _shutdown_for_local_lease(reason: str) -> None:
@@ -185,6 +189,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await zotero_bridge_bundle_auto_update_manager.stop()
         await local_runtime_lease_service.stop()
         await process_supervisor.stop()
         engine_status_cache_service.stop()

@@ -26,6 +26,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from server.services.engine_management.runtime_profile import get_runtime_profile
 from server.services.engine_management.agent_cli_manager import AgentCliManager
+from server.services.engine_management.zotero_bridge_cli_bundle import (
+    zotero_bridge_bundle_status,
+)
 
 WINDOWS_NPM_CANDIDATES = ("npm.cmd", "npm.exe", "npm.bat", "npm")
 DEFAULT_SERVICE_PORT = 9813
@@ -291,6 +294,22 @@ def _runtime_dependency_checks() -> dict[str, bool]:
 def _claude_sandbox_status(profile: Any) -> dict[str, Any]:
     manager = AgentCliManager(profile)
     return manager.collect_sandbox_status("claude")
+
+
+def _zotero_bridge_bundle_status(profile: Any) -> dict[str, Any]:
+    try:
+        return zotero_bridge_bundle_status(profile)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {
+            "source": "unknown",
+            "bundle_root": None,
+            "managed_store_root": None,
+            "state": {
+                "status": "unreadable",
+                "error_code": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        }
 
 
 def _forward_stream_to_stderr(stream: Any, sink: Any, collector: list[str]) -> None:
@@ -611,6 +630,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
             )
 
     claude_sandbox = _claude_sandbox_status(profile)
+    zotero_bundle = _zotero_bridge_bundle_status(profile)
     if claude_sandbox.get("warning_code"):
         warnings.append(
             _preflight_issue(
@@ -809,6 +829,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         "checks": {
             "dependencies": dependency_checks,
             "claude_sandbox": claude_sandbox,
+            "zotero_bridge_bundle": zotero_bundle,
             "required_files": required_file_checks,
             "integrity": integrity_check,
             "port": port_check,
@@ -851,6 +872,9 @@ def _collect_local_status(args: argparse.Namespace) -> dict[str, Any]:
         "state_file": str(state_path),
         "engine_checks": {
             "claude_sandbox": _claude_sandbox_status(profile),
+        },
+        "managed_plugins": {
+            "zotero_bridge_bundle": _zotero_bridge_bundle_status(profile),
         },
     }
     payload["message"] = f"Local runtime status: {status}."
@@ -900,6 +924,9 @@ def _cmd_status_docker(args: argparse.Namespace, *, as_json: bool) -> int:
         "detail": detail,
         "engine_checks": {
             "claude_sandbox": _claude_sandbox_status(get_runtime_profile()),
+        },
+        "managed_plugins": {
+            "zotero_bridge_bundle": _zotero_bridge_bundle_status(get_runtime_profile()),
         },
         "message": f"Docker runtime status: {status}.",
     }
@@ -1143,6 +1170,7 @@ def _cmd_down(args: argparse.Namespace) -> int:
 def _cmd_doctor(args: argparse.Namespace) -> int:
     profile, env = _runtime_env()
     claude_sandbox = _claude_sandbox_status(profile)
+    zotero_bundle = _zotero_bridge_bundle_status(profile)
     checks = {
         "uv": _command_exists("uv"),
         "node": _command_exists("node"),
@@ -1157,6 +1185,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "checks": checks,
         "engine_checks": {
             "claude_sandbox": claude_sandbox,
+        },
+        "managed_plugins": {
+            "zotero_bridge_bundle": zotero_bundle,
         },
         "paths": {
             "data_dir": str(profile.data_dir),

@@ -44,7 +44,7 @@ The source package includes repository files plus `skills_builtin/*` submodule c
 The default compose file mounts:
 
 - `./skills:/app/skills` (user skills registry; editable from host)
-- `skillrunner_cache:/opt/cache` (contains isolated agent home + uv cache + npm prefix)
+- `skillrunner_cache:/opt/cache` (contains isolated agent home, uv cache, npm prefix, and managed plugin bundles)
 - *(optional)* `./data:/data` (runs.db, runs/, logs, settings)
 
 Containers run as a fixed non-root user by default. If you enable the optional
@@ -54,6 +54,9 @@ is an operator-side convenience tradeoff rather than the recommended default.
 
 Builtin skills are packaged in-image under `/app/skills_builtin` (read-only source).
 User-installable skills live under `/app/skills` (volume/bind mount target).
+The built-in Zotero Bridge CLI bundle is packaged in-image under `/app/plugins`
+as a fallback. Runtime-validated updates are stored in the cache volume under
+`/opt/cache/skill-runner/plugin-bundles/zotero-bridge-cli-bundle`.
 
 ## Agent CLI installation
 
@@ -362,6 +365,15 @@ If startup prints `Failed to install <engine>: exit=1` or later warns
 `opencode CLI not found`, inspect the two files above first. The report includes
 per-engine `exit_code`, `duration_ms`, summarized stderr output, and the
 requested/skipped engine sets for that bootstrap run.
+
+Zotero Bridge bundle auto-update state is written under:
+
+```text
+${SKILL_RUNNER_AGENT_CACHE_DIR}/plugin-bundles/zotero-bridge-cli-bundle/state.json
+```
+
+`skill-runnerctl doctor --json`, `preflight --json`, and `status --json` expose
+that state without triggering a network update check.
 
 ## Release compose asset (tag-only)
 

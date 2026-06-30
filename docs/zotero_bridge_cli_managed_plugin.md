@@ -1,16 +1,52 @@
 # Zotero Bridge CLI Managed Plugin
 
-Skill Runner includes the Zotero Bridge CLI bundle as a managed plugin submodule:
+Skill Runner manages the Zotero Bridge CLI bundle as a managed plugin. The
+runtime resolves the bundle from the managed cache first, then falls back to the
+built-in bundle shipped with the service:
 
 ```text
+<SKILL_RUNNER_AGENT_CACHE_DIR>/plugin-bundles/zotero-bridge-cli-bundle
 plugins/zotero-bridge-cli-bundle
 ```
 
 The bundle provides `manifest.json`, platform binaries under `bin/`, the global wrapper skill at `skills/zotero-bridge-cli/`, and `assets/profile.template.json`.
 
+## Automatic Bundle Updates
+
+Skill Runner checks the configured Git branch in the background after service
+startup and stores validated bundle versions under:
+
+```text
+<SKILL_RUNNER_AGENT_CACHE_DIR>/plugin-bundles/zotero-bridge-cli-bundle/versions/<commit>
+```
+
+The project-level defaults are defined in `server/config.py`:
+
+```text
+repository=https://github.com/leike0813/zotero-agents
+branch=host-bridge/zotero-bridge-cli-bundle
+interval_sec=86400
+startup_delay_sec=30
+timeout_sec=30
+```
+
+The updater validates the bundle manifest, wrapper skill, profile template, and
+current platform binary SHA256 before activating a version. Update failures do
+not block service startup or agent runs. The runtime keeps using the previous
+active managed bundle, or the built-in fallback when no managed bundle is active.
+
+Update status is recorded at:
+
+```text
+<SKILL_RUNNER_AGENT_CACHE_DIR>/plugin-bundles/zotero-bridge-cli-bundle/state.json
+```
+
+`scripts/skill-runnerctl doctor --json`, `preflight --json`, and `status --json`
+include this state as read-only diagnostics.
+
 ## Bootstrap Behavior
 
-During agent layout bootstrap, Skill Runner reads the bundle manifest and installs the current platform binary into the managed prefix:
+During agent layout bootstrap, Skill Runner reads the resolved bundle manifest and installs the current platform binary into the managed prefix:
 
 ```text
 <SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge
