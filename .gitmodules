@@ -20,5 +20,5 @@
 	branch = skill/literature-translator
 [submodule "plugins/zotero-bridge-cli-bundle"]
 	path = plugins/zotero-bridge-cli-bundle
-	url = https://github.com/leike0813/Zotero-Skills.git
+	url = https://github.com/leike0813/zotero-agents.git
 	branch = host-bridge/zotero-bridge-cli-bundle
