@@ -1,6 +1,6 @@
 [project]
 name = "skill-runner"
-version = "0.7.2"
+version = "0.7.3"
 description = "Agent Skill Runner"
 authors = [
     {name = "Joshua Reed", email = "leike0813@gmail.com"},
