@@ -35,7 +35,7 @@ def test_runtime_parser_capability_contract_is_loadable() -> None:
 
 def test_runtime_parser_capability_contract_declares_all_current_engines() -> None:
     payload = load_runtime_parser_capability_contract()
-    assert set(payload["engines"]) == {"codex", "claude", "opencode", "qwen"}
+    assert set(payload["engines"]) == {"codex", "claude", "opencode", "qwen", "kilo"}
 
 
 def test_runtime_parser_capability_contract_matches_current_engine_sources() -> None:

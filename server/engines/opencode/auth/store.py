@@ -9,16 +9,20 @@ from typing import Any, Dict
 
 
 class OpencodeAuthStore:
-    def __init__(self, agent_home: Path) -> None:
+    def __init__(self, agent_home: Path, *, app_name: str = "opencode") -> None:
         self.agent_home = agent_home
+        normalized_app_name = app_name.strip().lower()
+        if not normalized_app_name:
+            raise ValueError("app_name is required")
+        self.app_name = normalized_app_name
 
     @property
     def auth_path(self) -> Path:
-        return self.agent_home / ".local" / "share" / "opencode" / "auth.json"
+        return self.agent_home / ".local" / "share" / self.app_name / "auth.json"
 
     @property
     def antigravity_accounts_path(self) -> Path:
-        return self.agent_home / ".config" / "opencode" / "antigravity-accounts.json"
+        return self.agent_home / ".config" / self.app_name / "antigravity-accounts.json"
 
     def _read_json(self, path: Path) -> Dict[str, Any]:
         if not path.exists():

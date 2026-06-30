@@ -565,3 +565,34 @@ def test_load_skill_from_run_dir_reads_workspace_manifest(tmp_path: Path) -> Non
     assert manifest is not None
     assert manifest.id == skill_id
     assert manifest.path == skill_dir
+
+
+def test_load_skill_from_run_dir_uses_adapter_profile_workspace(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-resume"
+    skill_id = "temp-resume-skill"
+    skill_dir = run_dir / ".kilo" / "skills" / skill_id
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("demo", encoding="utf-8")
+    (assets_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "id": skill_id,
+                "name": "Temp Resume Skill",
+                "version": "0.1.0",
+                "engines": ["kilo"],
+                "execution_modes": ["interactive"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_skill_from_run_dir(
+        run_dir=run_dir,
+        skill_id=skill_id,
+        engine_name="kilo",
+    )
+
+    assert manifest is not None
+    assert manifest.id == skill_id
+    assert manifest.path == skill_dir

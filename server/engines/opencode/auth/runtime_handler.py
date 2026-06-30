@@ -36,8 +36,18 @@ def _resolve_openai_callback_url(callback_base_url: str | None = None) -> str:
 
 
 class OpencodeAuthRuntimeHandler:
-    def __init__(self, manager: Any) -> None:
+    def __init__(
+        self,
+        manager: Any,
+        *,
+        auth_store_factory: Any | None = None,
+        openai_oauth_flow_attr: str = "_opencode_openai_oauth_proxy_flow",
+        google_antigravity_oauth_flow_attr: str = "_opencode_google_antigravity_oauth_proxy_flow",
+    ) -> None:
         self._manager = manager
+        self._auth_store_factory = auth_store_factory
+        self._openai_oauth_flow_attr = openai_oauth_flow_attr
+        self._google_antigravity_oauth_flow_attr = google_antigravity_oauth_flow_attr
 
     def requires_parent_trust_bootstrap(self) -> bool:
         return False
@@ -135,7 +145,15 @@ class OpencodeAuthRuntimeHandler:
         )
 
     def _auth_store(self) -> OpencodeAuthStore:
+        if self._auth_store_factory is not None:
+            return self._auth_store_factory()
         return self._manager._build_opencode_auth_store()  # noqa: SLF001
+
+    def _openai_oauth_proxy_flow(self) -> Any:
+        return getattr(self._manager, self._openai_oauth_flow_attr)
+
+    def _google_antigravity_oauth_proxy_flow(self) -> Any:
+        return getattr(self._manager, self._google_antigravity_oauth_flow_attr)
 
     def start_session_locked(
         self,
@@ -162,7 +180,7 @@ class OpencodeAuthRuntimeHandler:
                 cleanup_state = context.cleanup_state if context.cleanup_state is not None else {}
                 context.cleanup_state = cleanup_state
                 cleanup_state["openai_listener_started"] = True
-                runtime = self._manager._opencode_openai_oauth_proxy_flow.start_session(  # noqa: SLF001
+                runtime = self._openai_oauth_proxy_flow().start_session(
                     session_id=context.session_id,
                     callback_url=_resolve_openai_callback_url(callback_base_url),
                     now=context.now,
@@ -254,7 +272,7 @@ class OpencodeAuthRuntimeHandler:
                 cleanup_state = context.cleanup_state if context.cleanup_state is not None else {}
                 context.cleanup_state = cleanup_state
                 cleanup_state["antigravity_listener_started"] = True
-            runtime = self._manager._opencode_google_antigravity_oauth_proxy_flow.start_session(  # noqa: SLF001
+            runtime = self._google_antigravity_oauth_proxy_flow().start_session(
                 session_id=context.session_id,
                 auth_method=plan.auth_method,
                 now=context.now,
@@ -442,7 +460,7 @@ class OpencodeAuthRuntimeHandler:
             session.status = "code_submitted_waiting_result"
             session.updated_at = _utc_now()
             try:
-                self._manager._opencode_openai_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
+                self._openai_oauth_proxy_flow().submit_input(runtime, value)
                 session.status = "succeeded"
                 session.error = None
                 self._manager._finalize_active_session(session)  # noqa: SLF001
@@ -456,7 +474,7 @@ class OpencodeAuthRuntimeHandler:
             session.status = "code_submitted_waiting_result"
             session.updated_at = _utc_now()
             try:
-                flow_result = self._manager._opencode_google_antigravity_oauth_proxy_flow.submit_input(runtime, value)  # noqa: SLF001
+                flow_result = self._google_antigravity_oauth_proxy_flow().submit_input(runtime, value)
                 session.status = "succeeded"
                 session.error = None
                 audit = self._manager._ensure_audit_dict(session)  # noqa: SLF001
@@ -567,7 +585,7 @@ class OpencodeAuthRuntimeHandler:
                 tokens = self._manager._openai_device_proxy_flow.poll_once(runtime, now=now)  # noqa: SLF001
                 if tokens is None:
                     return True
-                self._manager._opencode_openai_oauth_proxy_flow.complete_with_tokens(tokens)  # noqa: SLF001
+                self._openai_oauth_proxy_flow().complete_with_tokens(tokens)
                 session.status = "succeeded"
                 session.error = None
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
@@ -604,7 +622,7 @@ class OpencodeAuthRuntimeHandler:
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             try:
-                self._manager._opencode_openai_oauth_proxy_flow.complete_with_code(runtime, normalized_code)  # noqa: SLF001
+                self._openai_oauth_proxy_flow().complete_with_code(runtime, normalized_code)
                 session.status = "succeeded"
                 session.error = None
                 self._manager._mark_auto_callback_success(session)  # noqa: SLF001
@@ -629,7 +647,7 @@ class OpencodeAuthRuntimeHandler:
                 self._manager._finalize_active_session(session)  # noqa: SLF001
                 return True
             try:
-                flow_result = self._manager._opencode_google_antigravity_oauth_proxy_flow.complete_with_code(  # noqa: SLF001
+                flow_result = self._google_antigravity_oauth_proxy_flow().complete_with_code(
                     runtime=runtime,
                     code=normalized_code,
                     state=state,
@@ -682,7 +700,7 @@ class OpencodeAuthRuntimeHandler:
         source_exists = bool(cleanup.get("source_exists"))
         backup_path = cleanup.get("backup_path")
         try:
-            auth_store = self._manager._build_opencode_auth_store()  # noqa: SLF001
+            auth_store = self._auth_store()
             auth_store.restore_antigravity_accounts(
                 source_exists=source_exists,
                 backup_path=backup_path if isinstance(backup_path, str) else None,

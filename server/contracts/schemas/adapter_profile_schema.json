@@ -10,6 +10,7 @@
     "prompt_builder",
     "session_codec",
     "attempt_workspace",
+    "launch",
     "config_assets",
     "model_catalog",
     "command_defaults",
@@ -21,7 +22,7 @@
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "opencode", "claude", "qwen"]
+      "enum": ["codex", "opencode", "claude", "qwen", "kilo"]
     },
     "provider_contract": {
       "type": "object",
@@ -115,6 +116,25 @@
         "skills_subdir": { "type": "string" },
         "use_config_parent_as_workspace": { "type": "boolean" },
         "unknown_fallback": { "type": "boolean" }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd_strategy", "config_env_var", "run_dir_flag"],
+      "properties": {
+        "cwd_strategy": {
+          "type": "string",
+          "enum": ["run_dir"]
+        },
+        "config_env_var": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "run_dir_flag": {
+          "type": ["string", "null"],
+          "pattern": "^--?[A-Za-z0-9][A-Za-z0-9_-]*$"
+        }
       }
     },
     "config_assets": {

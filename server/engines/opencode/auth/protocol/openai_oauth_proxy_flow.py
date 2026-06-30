@@ -29,8 +29,8 @@ class OpencodeOpenAIOAuthProxySession:
 
 
 class OpencodeOpenAIOAuthProxyFlow:
-    def __init__(self, agent_home: Path) -> None:
-        self.auth_store = OpencodeAuthStore(agent_home)
+    def __init__(self, agent_home: Path, *, store_app_name: str = "opencode") -> None:
+        self.auth_store = OpencodeAuthStore(agent_home, app_name=store_app_name)
 
     def start_session(
         self,

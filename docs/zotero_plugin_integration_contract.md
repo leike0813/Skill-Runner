@@ -309,11 +309,56 @@ warning（可继续）：
 3. `skill-runnerctl preflight --json`（`exit_code!=0` 则中止自动启动并展示 blocking）
 4. `skill-runnerctl up --mode local --json`
 5. `POST /v1/local-runtime/lease/acquire`（使用 `up` 返回的实际 `host/port/url`，不要硬编码端口）
-6. 按 `heartbeat_interval_seconds` 定时 `heartbeat`
-7. 插件退出时 `release`
-8. 可选 `skill-runnerctl down --mode local --json`
+6. `POST /v1/system/handshake` 查询协议能力；旧后端没有该接口时，插件可按 legacy 逻辑仅视为支持 `skillrunner.job.v1`
+7. 按 `heartbeat_interval_seconds` 定时 `heartbeat`
+8. 插件退出时 `release`
+9. 可选 `skill-runnerctl down --mode local --json`
 
-## 6) 卸载契约（跨平台）
+## 6) Handshake capability contract
+
+插件在提交任务前可调用：
+
+`POST /v1/system/handshake`
+
+请求：
+```json
+{
+  "schema": "zotero-agents.skillrunner-handshake.request.v1",
+  "client": {
+    "name": "zotero-agents",
+    "version": "0.5.4"
+  },
+  "requested_protocols": [
+    "skillrunner.job.v1",
+    "skillrunner.sequence.v1"
+  ]
+}
+```
+
+响应：
+```json
+{
+  "schema": "zotero-agents.skillrunner-handshake.response.v1",
+  "backend": {
+    "name": "Skill-Runner",
+    "version": "0.7.2"
+  },
+  "protocols": {
+    "skillrunner.job.v1": { "supported": true },
+    "skillrunner.sequence.v1": { "supported": false }
+  }
+}
+```
+
+约束：
+- `POST /v1/system/handshake` 是协议能力查询入口。
+- `GET|HEAD /v1/system/ping` 仅表示后端可达，不表示协议能力。
+- `skillrunner.job.v1` 是第一版支持的任务提交协议。
+- 当前后端不原生支持整段 sequence workflow 执行，因此 `skillrunner.sequence.v1.supported=false`。
+- 未知协议不得导致 500，可返回 `supported=false`。
+- 协议 ID 是稳定契约；后续新增语义必须新增 ID，不能复用旧 ID 改行为。
+
+## 7) 卸载契约（跨平台）
 
 推荐脚本：
 
@@ -353,7 +398,23 @@ JSON 输出字段：
 - 全部成功：`exit_code=0`
 - 部分失败：保留已完成清理结果，同时 `exit_code!=0`
 
-## 7) Error handling
+## 8) Version management
+
+后端版本以 `pyproject.toml` 的 `[project].version` 为单一事实源。发布前使用统一脚本更新版本：
+
+```bash
+uv run --project="$HOME/.ar" --locked -- python scripts/bump_version.py 0.7.3
+```
+
+创建 tag 后，发布流程会校验 tag 与项目版本一致：
+
+```bash
+uv run --project="$HOME/.ar" --locked -- python scripts/bump_version.py --check-tag v0.7.3
+```
+
+脚本只更新或校验 `pyproject.toml`，不创建 tag、不提交代码、不切换分支。
+
+## 9) Error handling
 
 - `local-runtime` 接口返回 `409`：说明当前不是 local 模式，插件应停止 lease 流程。
 - `heartbeat` 返回 `404`：lease 已失效，插件应重新 `acquire`。

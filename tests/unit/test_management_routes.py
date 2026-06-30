@@ -150,6 +150,68 @@ async def test_management_runtime_options_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_system_handshake_reports_job_protocol_and_backend_version():
+    res = await _request(
+        "POST",
+        "/v1/system/handshake",
+        json={
+            "schema": "zotero-agents.skillrunner-handshake.request.v1",
+            "client": {"name": "zotero-agents", "version": "0.5.4"},
+            "requested_protocols": ["skillrunner.job.v1"],
+        },
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["schema"] == "zotero-agents.skillrunner-handshake.response.v1"
+    assert body["backend"] == {"name": "Skill-Runner", "version": "0.7.2"}
+    assert body["protocols"]["skillrunner.job.v1"]["supported"] is True
+
+
+@pytest.mark.asyncio
+async def test_system_handshake_reports_sequence_unsupported_and_unknown_false():
+    res = await _request(
+        "POST",
+        "/v1/system/handshake",
+        json={
+            "schema": "zotero-agents.skillrunner-handshake.request.v1",
+            "client": {"name": "zotero-agents", "version": "0.5.4"},
+            "requested_protocols": [
+                "skillrunner.sequence.v1",
+                "example.unknown.v1",
+            ],
+        },
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["protocols"]["skillrunner.sequence.v1"]["supported"] is False
+    assert body["protocols"]["example.unknown.v1"]["supported"] is False
+
+
+@pytest.mark.asyncio
+async def test_system_handshake_follows_management_system_auth_policy(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "server.services.ui.ui_auth.get_ui_basic_auth_credentials",
+        lambda: ("admin", "secret"),
+    )
+
+    res = await _request(
+        "POST",
+        "/v1/system/handshake",
+        json={
+            "schema": "zotero-agents.skillrunner-handshake.request.v1",
+            "client": {"name": "zotero-agents", "version": "0.5.4"},
+            "requested_protocols": ["skillrunner.job.v1"],
+        },
+    )
+
+    assert res.status_code == 200
+    assert res.json()["protocols"]["skillrunner.job.v1"]["supported"] is True
+
+
+@pytest.mark.asyncio
 async def test_management_engine_custom_provider_crud(monkeypatch):
     providers = [
         {

@@ -140,5 +140,17 @@ from .local_runtime import (LocalLeaseAcquireRequest, LocalLeaseAcquireResponse,
                             LocalLeaseHeartbeatResponse, LocalLeaseReleaseRequest, LocalLeaseReleaseResponse,
                             LocalRuntimeStatusResponse)
 from .skill import ManifestArtifact, RuntimeDefinition, SkillManifest, SkillMcpDeclaration
+from .system import (
+    BACKEND_NAME,
+    HANDSHAKE_REQUEST_SCHEMA,
+    HANDSHAKE_RESPONSE_SCHEMA,
+    PROTOCOL_SKILLRUNNER_JOB_V1,
+    PROTOCOL_SKILLRUNNER_SEQUENCE_V1,
+    SystemHandshakeBackend,
+    SystemHandshakeClient,
+    SystemHandshakeRequest,
+    SystemHandshakeResponse,
+    SystemProtocolCapability,
+)
 
 __all__ = sorted(name for name in globals() if not name.startswith("_"))

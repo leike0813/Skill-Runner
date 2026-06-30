@@ -33,6 +33,10 @@ def test_engine_auth_strategy_yaml_matches_schema() -> None:
     strategy = _load_strategy()
 
     jsonschema.validate(instance=strategy, schema=schema)
+    engines = cast(dict[str, object], strategy["engines"])
+    kilo = engines["kilo"]
+    assert isinstance(kilo, dict)
+    assert "providers" in kilo
 
 
 def test_engine_auth_strategy_schema_rejects_missing_required_fields() -> None:
@@ -65,3 +69,54 @@ def test_engine_auth_strategy_schema_accepts_session_behavior_extension() -> Non
     }
 
     jsonschema.validate(instance=strategy, schema=schema)
+
+
+def test_engine_auth_strategy_schema_accepts_kilo_provider_aware_policy() -> None:
+    schema = _load_schema()
+    strategy = _load_strategy()
+    engines = cast(dict[str, object], strategy["engines"])
+    kilo = engines["kilo"]
+    assert isinstance(kilo, dict)
+    providers = kilo["providers"]
+    assert isinstance(providers, dict)
+    assert "kilo" in providers
+
+    jsonschema.validate(instance=strategy, schema=schema)
+
+
+def test_engine_auth_strategy_schema_rejects_kilo_disabled_policy() -> None:
+    schema = _load_schema()
+    strategy = _load_strategy()
+    engines = cast(dict[str, object], strategy["engines"])
+    engines["kilo"] = {"enabled": False}
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=strategy, schema=schema)
+
+
+def test_engine_auth_strategy_schema_rejects_kilo_engine_scoped_policy() -> None:
+    schema = _load_schema()
+    strategy = _load_strategy()
+    engines = cast(dict[str, object], strategy["engines"])
+    engines["kilo"] = {
+        "in_conversation": {
+            "transport": "oauth_proxy",
+            "methods": ["callback"],
+        },
+        "providers": {
+            "oauth_proxy": {
+                "transports": {
+                    "oauth_proxy": {
+                        "methods": ["callback"],
+                        "driver": {
+                            "start_method": "auth",
+                            "execution_mode": "protocol_proxy",
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=strategy, schema=schema)

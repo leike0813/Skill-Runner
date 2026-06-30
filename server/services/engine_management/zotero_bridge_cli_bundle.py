@@ -25,6 +25,7 @@ GLOBAL_SKILL_DIRS: Mapping[str, Path] = {
     "claude": Path(".claude") / "skills" / WRAPPER_SKILL_ID,
     "qwen": Path(".qwen") / "skills" / WRAPPER_SKILL_ID,
     "opencode": Path(".opencode") / "skills" / WRAPPER_SKILL_ID,
+    "kilo": Path(".kilo") / "skills" / WRAPPER_SKILL_ID,
 }
 
 

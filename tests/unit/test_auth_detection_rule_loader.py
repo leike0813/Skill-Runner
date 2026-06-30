@@ -51,6 +51,11 @@ def _write_profile(
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False,
                 },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None,
+                },
                 "command_defaults": {
                     "start": ["--json"],
                     "resume": ["resume", "--json"],

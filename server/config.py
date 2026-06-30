@@ -257,7 +257,8 @@ _C.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = (
     "opencode",
     "codex",
     "claude",
-    "qwen"
+    "qwen",
+    "kilo"
 )
 
 

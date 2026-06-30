@@ -440,6 +440,87 @@ def test_opencode_start_command_includes_run_format_and_model(monkeypatch) -> No
     ]
 
 
+def test_opencode_start_command_anchors_run_dir_when_context_available(monkeypatch, tmp_path: Path) -> None:
+    adapter = OpencodeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--format", "json"]
+        if use_profile_defaults and action == "start"
+        else [],
+    )
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="demo-skill", path=tmp_path),
+        run_dir=tmp_path / "run",
+        input_data={},
+        options={"model": "openai/gpt-5"},
+    )
+
+    command = adapter.build_start_command(
+        ctx=ctx,
+        prompt="hello",
+        options=ctx.options,
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/opencode"),
+        "run",
+        "--dir",
+        str(ctx.run_dir),
+        "--format",
+        "json",
+        "--model",
+        "openai/gpt-5",
+        "hello",
+    ]
+
+
+def test_opencode_resume_command_anchors_run_dir_when_context_available(monkeypatch, tmp_path: Path) -> None:
+    from server.models import EngineSessionHandle, EngineSessionHandleType
+
+    adapter = OpencodeExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/usr/bin/opencode"))
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_profile_flags",
+        lambda *, action, use_profile_defaults: ["--format", "json"]
+        if use_profile_defaults and action == "resume"
+        else [],
+    )
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="demo-skill", path=tmp_path),
+        run_dir=tmp_path / "run",
+        input_data={},
+        options={},
+    )
+
+    command = adapter.build_resume_command(
+        ctx=ctx,
+        prompt="next turn",
+        options=ctx.options,
+        session_handle=EngineSessionHandle(
+            engine="opencode",
+            handle_type=EngineSessionHandleType.SESSION_ID,
+            handle_value="ses-123",
+            created_at_turn=1,
+        ),
+        use_profile_defaults=True,
+    )
+
+    assert command == [
+        _platform_cmd("/usr/bin/opencode"),
+        "run",
+        "--dir",
+        str(ctx.run_dir),
+        "--session=ses-123",
+        "--format",
+        "json",
+        "next turn",
+    ]
+
+
 def test_opencode_harness_resume_command_uses_session_and_passthrough_flags(monkeypatch) -> None:
     from server.models import EngineSessionHandle, EngineSessionHandleType
 

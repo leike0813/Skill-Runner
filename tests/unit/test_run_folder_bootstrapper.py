@@ -38,6 +38,16 @@ def _build_skill_dir(tmp_path: Path, skill_id: str = "demo-skill") -> Path:
     return skill_dir
 
 
+def test_run_folder_bootstrapper_snapshot_dir_uses_adapter_profile(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+
+    assert run_folder_bootstrapper.snapshot_dir(
+        run_dir=run_dir,
+        engine_name="kilo",
+        skill_id="demo-skill",
+    ) == run_dir / ".kilo" / "skills" / "demo-skill"
+
+
 def test_run_folder_bootstrapper_materializes_installed_skill_once(tmp_path: Path) -> None:
     skill_dir = _build_skill_dir(tmp_path)
     run_dir = tmp_path / "run"

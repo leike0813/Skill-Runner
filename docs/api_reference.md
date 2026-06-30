@@ -18,6 +18,7 @@
 
 - `GET /v1/system/ping`：极轻量可达性探测（无响应体）
 - `HEAD /v1/system/ping`：极轻量可达性探测（无响应体）
+- `POST /v1/system/handshake`：协议能力握手，用于客户端在提交任务前确认后端支持的执行协议
 
 `GET /v1/system/ping`
 
@@ -25,6 +26,53 @@
 - `204 No Content`
 - 响应体为空
 - 不依赖数据库、技能扫描或引擎状态探测，适合作为 liveness/readiness 的快速探测入口
+- 仅表示后端 HTTP 可达，不表示任何执行协议能力
+
+---
+
+## Zotero Agents Handshake
+
+`POST /v1/system/handshake`
+
+用于 Zotero Agents 插件在发送任务前查询当前 Skill-Runner 后端支持的稳定执行协议。
+协议 ID 是稳定契约；后续若协议语义发生不兼容变化，必须新增协议 ID，不能复用旧 ID 改行为。
+
+**Request Body**:
+```json
+{
+  "schema": "zotero-agents.skillrunner-handshake.request.v1",
+  "client": {
+    "name": "zotero-agents",
+    "version": "0.5.4"
+  },
+  "requested_protocols": [
+    "skillrunner.job.v1",
+    "skillrunner.sequence.v1"
+  ]
+}
+```
+
+**Response**:
+```json
+{
+  "schema": "zotero-agents.skillrunner-handshake.response.v1",
+  "backend": {
+    "name": "Skill-Runner",
+    "version": "0.7.2"
+  },
+  "protocols": {
+    "skillrunner.job.v1": { "supported": true },
+    "skillrunner.sequence.v1": { "supported": false }
+  }
+}
+```
+
+说明：
+- `backend.version` 来自后端项目版本单一事实源。
+- 第一版声明支持 `skillrunner.job.v1`。
+- 当前后端尚未原生支持整段 sequence workflow 执行，因此 `skillrunner.sequence.v1.supported=false`。
+- `requested_protocols` 中出现未知协议不会导致 500；未知协议返回 `supported=false`。
+- 认证策略与现有 management/system 接口一致。
 
 ---
 

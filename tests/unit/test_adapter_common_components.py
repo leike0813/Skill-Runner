@@ -12,6 +12,7 @@ from server.engines.claude.adapter.sandbox_probe import (
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.gemini.adapter.execution_adapter import GeminiExecutionAdapter
 from server.models import SkillManifest
+from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.contracts import AdapterExecutionContext
 from server.runtime.adapter.common.prompt_builder_common import (
     _normalize_prompt_file_path,
@@ -34,6 +35,25 @@ from server.runtime.adapter.common.session_codec_common import (
 from server.runtime.adapter.common.run_folder_validator_common import (
     validate_run_folder_contract,
 )
+
+
+class _EnvHookAdapter(EngineExecutionAdapter):
+    def build_subprocess_env(self, base_env: dict[str, str]) -> dict[str, str]:
+        return {**base_env, "LEGACY_ENV_HOOK": "1"}
+
+
+def test_base_execution_env_hook_defaults_to_subprocess_env(tmp_path: Path) -> None:
+    adapter = _EnvHookAdapter()
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="demo"),
+        run_dir=tmp_path,
+        input_data={},
+        options={},
+    )
+
+    env = adapter.build_execution_env({"BASE": "1"}, ctx, tmp_path / ".engine" / "config.json")
+
+    assert env == {"BASE": "1", "LEGACY_ENV_HOOK": "1"}
 
 
 def test_prompt_builder_common_resolves_template_and_context(tmp_path: Path) -> None:

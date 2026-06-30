@@ -68,11 +68,20 @@ class OpencodeCommandBuilder:
         prompt: str,
         defaults: list[str],
         explicit_flags: list[str],
+        ctx: AdapterExecutionContext | None = None,
         session_id: str | None = None,
         options: dict[str, object],
     ) -> list[str]:
         merged_flags = merge_cli_args(defaults, explicit_flags)
         command: list[str] = [str(self._adapter._resolve_opencode_command()), "run"]  # noqa: SLF001
+        run_dir_flag = self._adapter.profile.launch.run_dir_flag
+        has_run_dir_flag = (
+            isinstance(run_dir_flag, str)
+            and bool(run_dir_flag)
+            and any(flag == run_dir_flag or flag.startswith(f"{run_dir_flag}=") for flag in merged_flags)
+        )
+        if ctx is not None and isinstance(run_dir_flag, str) and run_dir_flag and not has_run_dir_flag:
+            command.extend([run_dir_flag, str(ctx.run_dir)])
         if session_id is not None:
             command.append(f"--session={session_id}")
         command.extend(merged_flags)
@@ -85,6 +94,7 @@ class OpencodeCommandBuilder:
         *,
         prompt: str,
         options: dict[str, object],
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -99,6 +109,7 @@ class OpencodeCommandBuilder:
             prompt=prompt,
             defaults=defaults,
             explicit_flags=[],
+            ctx=ctx,
             options=options,
         )
 
@@ -107,6 +118,7 @@ class OpencodeCommandBuilder:
         return self.build_start_with_options(
             prompt=prompt,
             options=ctx.options,
+            ctx=ctx,
             use_profile_defaults=use_profile_defaults,
         )
 
@@ -116,6 +128,7 @@ class OpencodeCommandBuilder:
         prompt: str,
         options: dict[str, object],
         session_handle: EngineSessionHandle,
+        ctx: AdapterExecutionContext | None = None,
         passthrough_args: list[str] | None = None,
         use_profile_defaults: bool = True,
     ) -> list[str]:
@@ -131,6 +144,7 @@ class OpencodeCommandBuilder:
                 prompt=prompt,
                 defaults=[],
                 explicit_flags=flags,
+                ctx=ctx,
                 session_id=session_id,
                 options=options,
             )
@@ -142,6 +156,7 @@ class OpencodeCommandBuilder:
             prompt=prompt,
             defaults=defaults,
             explicit_flags=[],
+            ctx=ctx,
             session_id=session_id,
             options=options,
         )
@@ -157,5 +172,6 @@ class OpencodeCommandBuilder:
             prompt=prompt,
             options=ctx.options,
             session_handle=session_handle,
+            ctx=ctx,
             use_profile_defaults=use_profile_defaults,
         )

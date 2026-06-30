@@ -17,7 +17,7 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def test_active_engine_keys_exclude_gemini_and_keep_legacy_readonly() -> None:
-    assert set(keys.ENGINE_KEYS) == {"codex", "opencode", "claude", "qwen"}
+    assert set(keys.ENGINE_KEYS) == {"codex", "opencode", "claude", "qwen", "kilo"}
     assert "gemini" in keys.LEGACY_READONLY_ENGINE_KEYS
 
 
@@ -26,6 +26,7 @@ def test_active_engine_config_layers_validate_against_schemas() -> None:
         "claude": PROJECT_ROOT / "server/engines/claude/schemas/claude_settings_schema.json",
         "opencode": PROJECT_ROOT / "server/engines/opencode/schemas/opencode_config_schema.json",
         "qwen": PROJECT_ROOT / "server/engines/qwen/schemas/qwen_config_schema.json",
+        "kilo": PROJECT_ROOT / "server/engines/kilo/schemas/kilo_config_schema.json",
     }
     for engine, schema_path in schema_paths.items():
         schema = _load_json(schema_path)

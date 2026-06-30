@@ -19,7 +19,10 @@ from server.services.platform.runtime_env_options import runtime_env_secret_serv
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
 from server.services.skill.skill_registry import skill_registry
-from server.runtime.adapter.common.profile_loader import load_adapter_profile
+from server.runtime.adapter.common.profile_loader import (
+    adapter_profile_path_for_engine,
+    load_adapter_profile,
+)
 from server.config import config
 from pydantic import ValidationError
 
@@ -99,19 +102,14 @@ def load_skill_from_run_dir(
     engine_name: str,
 ) -> SkillManifest | None:
     workspace_subdir = ".codex"
-    profile_path = (
-        Path(__file__).resolve().parents[2]
-        / "engines"
-        / engine_name
-        / "adapter"
-        / "adapter_profile.json"
-    )
+    skills_subdir = "skills"
     try:
-        profile = load_adapter_profile(engine_name, profile_path)
+        profile = load_adapter_profile(engine_name, adapter_profile_path_for_engine(engine_name))
         workspace_subdir = profile.attempt_workspace.workspace_subdir
+        skills_subdir = profile.attempt_workspace.skills_subdir
     except RuntimeError:
         pass
-    skill_dir = run_dir / workspace_subdir / "skills" / skill_id
+    skill_dir = run_dir / workspace_subdir / skills_subdir / skill_id
     runner_path = skill_dir / "assets" / "runner.json"
     if not runner_path.exists() or not runner_path.is_file():
         return None

@@ -156,7 +156,7 @@ def test_ensure_layout_syncs_existing_claude_agent_home_mcp(tmp_path):
 
 def test_default_bootstrap_engines_come_from_global_config(tmp_path: Path) -> None:
     manager = AgentCliManager(_build_profile(tmp_path))
-    assert manager.default_bootstrap_engines() == ("opencode", "codex", "claude", "qwen")
+    assert manager.default_bootstrap_engines() == ("opencode", "codex", "claude", "qwen", "kilo")
 
 
 def test_default_bootstrap_engines_respect_config_override(tmp_path: Path) -> None:
@@ -168,7 +168,7 @@ def test_default_bootstrap_engines_respect_config_override(tmp_path: Path) -> No
         assert manager.default_bootstrap_engines() == ("claude",)
     finally:
         config.defrost()
-        config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("opencode", "codex", "claude", "qwen")
+        config.SYSTEM.DEFAULT_BOOTSTRAP_ENGINES = ("opencode", "codex", "claude", "qwen", "kilo")
         config.freeze()
 
 
@@ -468,8 +468,8 @@ def test_ensure_installed_uses_managed_presence_only(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "install_package", _fake_install)
 
     results = manager.ensure_installed()
-    assert set(results.keys()) == {"codex", "opencode", "claude", "qwen"}
-    assert len(calls) == 4
+    assert set(results.keys()) == {"codex", "opencode", "claude", "qwen", "kilo"}
+    assert len(calls) == 5
 
 
 def test_collect_auth_status_reports_global_fallback(tmp_path, monkeypatch):

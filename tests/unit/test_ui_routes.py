@@ -12,6 +12,7 @@ httpx = pytest.importorskip("httpx")
 from fastapi import Request  # noqa: E402
 
 from server.main import app  # noqa: E402
+from server.config_registry import keys  # noqa: E402
 from server.routers.ui import _build_engine_ui_metadata  # noqa: E402
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError  # noqa: E402
 from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT  # noqa: E402
@@ -175,8 +176,9 @@ async def test_ui_index_renders_engine_status_indicator_from_cache(monkeypatch):
     assert "状态来自 bootstrap/ensure 的引擎缓存快照" not in response.text
     assert 'id="engine-status-indicator"' in response.text
     assert 'data-engine-status-refresh="static"' in response.text
-    assert 'data-engine-count="4"' in response.text
-    assert "style=\"--engine-count: 4;\"" in response.text
+    expected_engine_count = len(keys.ENGINE_KEYS)
+    assert f'data-engine-count="{expected_engine_count}"' in response.text
+    assert f"style=\"--engine-count: {expected_engine_count};\"" in response.text
     assert 'data-engine="codex" data-status-level="healthy"' in response.text
     assert 'data-engine="qwen" data-status-level="error"' in response.text
 

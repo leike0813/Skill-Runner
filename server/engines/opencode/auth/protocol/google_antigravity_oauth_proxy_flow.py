@@ -123,8 +123,8 @@ def _parse_input_value(value: str) -> tuple[str, str | None]:
 
 
 class OpencodeGoogleAntigravityOAuthProxyFlow:
-    def __init__(self, agent_home: Path) -> None:
-        self.auth_store = OpencodeAuthStore(agent_home)
+    def __init__(self, agent_home: Path, *, store_app_name: str = "opencode") -> None:
+        self.auth_store = OpencodeAuthStore(agent_home, app_name=store_app_name)
 
     def start_session(
         self,

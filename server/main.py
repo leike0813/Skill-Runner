@@ -40,6 +40,14 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request  # type: ignore[i
 from fastapi.responses import JSONResponse, Response  # type: ignore[import-not-found]
 from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
+from .models import (
+    PROTOCOL_SKILLRUNNER_JOB_V1,
+    PROTOCOL_SKILLRUNNER_SEQUENCE_V1,
+    SystemHandshakeBackend,
+    SystemHandshakeRequest,
+    SystemHandshakeResponse,
+    SystemProtocolCapability,
+)
 from .routers import (
     engines,
     jobs,
@@ -53,6 +61,7 @@ from .routers import (
 )
 from .services.engine_management.runtime_profile import get_runtime_profile
 from .i18n import SUPPORTED_LANGUAGES, get_language, get_translator
+from .version import get_backend_version
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +200,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Agent Skill Runner",
     description="A lightweight REST service to run CLI agent skills.",
-    version="0.2.0",
+    version=get_backend_version(),
     lifespan=lifespan
 )
 
@@ -272,6 +281,27 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "assets" 
 @app.api_route("/v1/system/ping", methods=["GET", "HEAD"], include_in_schema=False)
 async def system_ping() -> Response:
     return Response(status_code=204)
+
+
+@app.post("/v1/system/handshake", response_model=SystemHandshakeResponse)
+async def system_handshake(request: SystemHandshakeRequest) -> SystemHandshakeResponse:
+    supported_protocols = {
+        PROTOCOL_SKILLRUNNER_JOB_V1: True,
+        PROTOCOL_SKILLRUNNER_SEQUENCE_V1: False,
+    }
+    requested_protocols = list(dict.fromkeys(request.requested_protocols))
+    if not requested_protocols:
+        requested_protocols = list(supported_protocols)
+    protocols = {
+        protocol_id: SystemProtocolCapability(
+            supported=bool(supported_protocols.get(protocol_id, False))
+        )
+        for protocol_id in requested_protocols
+    }
+    return SystemHandshakeResponse(
+        backend=SystemHandshakeBackend(version=get_backend_version()),
+        protocols=protocols,
+    )
 
 
 @app.get("/")

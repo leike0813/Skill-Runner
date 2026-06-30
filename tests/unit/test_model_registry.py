@@ -147,6 +147,74 @@ def test_validate_model_opencode_requires_provider_model(monkeypatch):
         registry.validate_model("opencode", "gpt-5")
 
 
+def test_validate_model_kilo_preserves_gateway_runtime_model(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_model_catalog_lifecycle.get_snapshot",
+        lambda _engine: {
+            "status": "ready",
+            "updated_at": "2026-06-30T00:00:00Z",
+            "last_error": None,
+            "models": [
+                {
+                    "id": "kilo/openai/gpt-5.2",
+                    "display_name": "Kilo Gateway GPT-5.2",
+                    "deprecated": False,
+                    "notes": "runtime_probe_cache",
+                    "provider": "kilo/openai",
+                    "provider_id": "kilo/openai",
+                    "model": "gpt-5.2",
+                }
+            ],
+        },
+    )
+
+    result = registry.validate_model("kilo", "kilo/openai/gpt-5.2")
+    assert result == {
+        "model": "gpt-5.2",
+        "provider_id": "kilo/openai",
+        "runtime_model": "kilo/openai/gpt-5.2",
+    }
+
+
+def test_validate_model_kilo_preserves_third_party_runtime_model(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_model_catalog_lifecycle.get_snapshot",
+        lambda _engine: {
+            "status": "ready",
+            "updated_at": "2026-06-30T00:00:00Z",
+            "last_error": None,
+            "models": [
+                {
+                    "id": "openai-compatible/my-model",
+                    "display_name": "My Model",
+                    "deprecated": False,
+                    "notes": "runtime_probe_cache",
+                    "provider": "openai-compatible",
+                    "provider_id": "openai-compatible",
+                    "model": "my-model",
+                }
+            ],
+        },
+    )
+
+    result = registry.validate_model("kilo", "openai-compatible/my-model")
+    assert result == {
+        "model": "my-model",
+        "provider_id": "openai-compatible",
+        "runtime_model": "openai-compatible/my-model",
+    }
+
+
 def test_validate_model_unknown_engine():
     registry = ModelRegistry()
     with pytest.raises(ValueError, match="Unknown engine"):

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-runner.local/schemas/kilo_config_schema.json",
+  "title": "Kilo Code Config",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "model": { "type": "string", "minLength": 1 },
+    "small_model": { "type": "string", "minLength": 1 },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

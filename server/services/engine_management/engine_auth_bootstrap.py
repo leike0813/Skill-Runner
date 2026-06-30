@@ -17,8 +17,11 @@ from server.engines.common.callbacks.openai_local_callback_server import (
     openai_local_callback_server,
 )
 from server.engines.common.openai_auth import OpenAIDeviceProxyFlow
+from server.engines.kilo.auth import KiloGatewayDeviceAuthFlow
+from server.engines.kilo.auth.runtime_handler import KiloAuthRuntimeHandler
 from server.engines.opencode.auth import (
     OpencodeAuthCliFlow,
+    OpencodeAuthStore,
     OpencodeGoogleAntigravityOAuthProxyFlow,
     OpencodeOpenAIOAuthProxyFlow,
 )
@@ -133,15 +136,32 @@ def build_engine_auth_bootstrap(
             agent_home
         )
     )
+    manager._kilo_opencode_openai_oauth_proxy_flow = OpencodeOpenAIOAuthProxyFlow(  # noqa: SLF001
+        agent_home,
+        store_app_name="kilo",
+    )
+    manager._kilo_opencode_google_antigravity_oauth_proxy_flow = (  # noqa: SLF001
+        OpencodeGoogleAntigravityOAuthProxyFlow(
+            agent_home,
+            store_app_name="kilo",
+        )
+    )
     manager._qwen_oauth_proxy_flow = QwenOAuthProxyFlow(agent_home)  # noqa: SLF001
     manager._qwen_coding_plan_flow = CodingPlanAuthFlow(agent_home)  # noqa: SLF001
     manager._qwen_flow = QwenAuthCliFlow(agent_home)  # noqa: SLF001
+    manager._kilo_gateway_device_auth_flow = KiloGatewayDeviceAuthFlow(agent_home)  # noqa: SLF001
+    if not hasattr(manager, "_build_kilo_auth_store"):
+        manager._build_kilo_auth_store = lambda: OpencodeAuthStore(  # noqa: SLF001
+            agent_home,
+            app_name="kilo",
+        )
 
     handlers = {
         "codex": CodexAuthRuntimeHandler(manager),
         "opencode": OpencodeAuthRuntimeHandler(manager),
         "claude": ClaudeAuthRuntimeHandler(manager),
         "qwen": QwenAuthRuntimeHandler(manager),
+        "kilo": KiloAuthRuntimeHandler(manager),
     }
     return AuthBootstrapBundle(
         driver_registry=_build_driver_registry(

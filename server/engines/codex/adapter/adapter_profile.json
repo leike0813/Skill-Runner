@@ -26,6 +26,11 @@
     "use_config_parent_as_workspace": false,
     "unknown_fallback": false
   },
+  "launch": {
+    "cwd_strategy": "run_dir",
+    "config_env_var": null,
+    "run_dir_flag": null
+  },
   "config_assets": {
     "bootstrap_path": "../config/bootstrap.toml",
     "default_path": "../config/default.toml",

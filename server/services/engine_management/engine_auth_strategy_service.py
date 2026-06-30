@@ -174,6 +174,10 @@ class EngineAuthStrategyService:
         block = engines.get(normalized_engine)
         return block if isinstance(block, dict) else {}
 
+    def _is_engine_auth_disabled(self, engine: str) -> bool:
+        block = self._engine_block(engine)
+        return block.get("enabled") is False
+
     def _provider_block(self, engine: str, provider_id: str | None) -> dict[str, Any]:
         if not provider_id:
             return {}
@@ -191,6 +195,8 @@ class EngineAuthStrategyService:
         transport: str,
     ) -> dict[str, Any]:
         normalized_engine = engine.strip().lower()
+        if self._is_engine_auth_disabled(normalized_engine):
+            return {}
         normalized_transport = transport.strip().lower()
         if normalized_engine in _PROVIDER_AWARE_ENGINES:
             provider_block = self._provider_block(normalized_engine, provider_id)
@@ -206,6 +212,8 @@ class EngineAuthStrategyService:
         self, engine: str, provider_id: str | None = None
     ) -> str:
         normalized_engine = engine.strip().lower()
+        if self._is_engine_auth_disabled(normalized_engine):
+            return ""
         block = self._engine_block(normalized_engine)
         in_conversation_obj = block.get("in_conversation")
         in_conversation = (
@@ -224,6 +232,8 @@ class EngineAuthStrategyService:
         self, engine: str, provider_id: str | None = None
     ) -> tuple[str, ...]:
         normalized_engine = engine.strip().lower()
+        if self._is_engine_auth_disabled(normalized_engine):
+            return ()
         if normalized_engine in _PROVIDER_AWARE_ENGINES:
             provider_block = self._provider_block(normalized_engine, provider_id)
             in_conversation_obj = provider_block.get("in_conversation")
@@ -371,6 +381,8 @@ class EngineAuthStrategyService:
             for engine in _ENGINE_SCOPED_ENGINES:
                 payload[transport][engine] = []
         for engine in _ENGINE_SCOPED_ENGINES:
+            if self._is_engine_auth_disabled(engine):
+                continue
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(
                     self.runtime_methods_for_transport(
@@ -413,6 +425,8 @@ class EngineAuthStrategyService:
             for engine in _ENGINE_SCOPED_ENGINES:
                 payload[transport][engine] = []
         for engine in _ENGINE_SCOPED_ENGINES:
+            if self._is_engine_auth_disabled(engine):
+                continue
             for transport in _VALID_TRANSPORTS:
                 payload[transport][engine] = list(
                     self.runtime_high_risk_methods_for_transport(
@@ -446,6 +460,8 @@ class EngineAuthStrategyService:
         entries: list[DriverStrategyEntry] = []
 
         for engine in _ENGINE_SCOPED_ENGINES:
+            if self._is_engine_auth_disabled(engine):
+                continue
             for transport in _VALID_TRANSPORTS:
                 transport_block = self._transport_block(
                     engine=engine, transport=transport

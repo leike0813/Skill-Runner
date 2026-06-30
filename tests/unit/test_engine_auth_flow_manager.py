@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from server.config import config
+from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 from server.engines.codex.auth import CodexOAuthProxySession
+from server.engines.kilo.auth import KiloGatewayDeviceAuthSession
 from server.engines.opencode.auth import (
     OpencodeAuthCliSession,
     OpencodeGoogleAntigravityOAuthProxySession,
@@ -18,7 +20,6 @@ from server.runtime.auth.session_lifecycle import AuthStartPlan
 from server.services.engine_management.engine_auth_flow_manager import EngineAuthFlowManager
 from server.services.engine_management.engine_interaction_gate import EngineInteractionBusyError, EngineInteractionGate
 from server.services.orchestration.auth_session_durable_store import DurableAuthSessionSyncStore
-from server.engines.common.openai_auth import OpenAIDeviceProxySession, OpenAIOAuthError
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt",
@@ -720,6 +721,71 @@ def test_engine_auth_flow_manager_qwen_oauth_proxy_starts_and_completes(
     assert final["terminal"] is True
 
 
+def test_engine_auth_flow_manager_kilo_gateway_oauth_proxy_starts_and_completes(
+    tmp_path: Path,
+):
+    command_path = _write_script(tmp_path / "fake-kilo", "exit 0")
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+    )
+    now = datetime.now(timezone.utc)
+    runtime = KiloGatewayDeviceAuthSession(
+        session_id="auth-kilo-1",
+        code="device-code-1",
+        user_code="USER-CODE-1",
+        verification_url="https://app.kilo.ai/device?code=USER-CODE-1",
+        expires_in=300,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    manager._kilo_gateway_device_auth_flow.start_session = lambda **_kwargs: runtime  # type: ignore[method-assign]  # noqa: SLF001
+
+    def _start_polling(_runtime, now=None, poll_now=False):  # noqa: ANN001
+        current = now or datetime.now(timezone.utc)
+        _runtime.polling_started = True
+        _runtime.next_poll_at = current if poll_now else (_runtime.next_poll_at or current + timedelta(seconds=2))
+
+    def _poll_once(_runtime, now=None):  # noqa: ANN001
+        current = now or datetime.now(timezone.utc)
+        next_poll_at = _runtime.next_poll_at
+        if next_poll_at is not None and current < next_poll_at:
+            return False
+        auth_path = profile.agent_home / ".local" / "share" / "kilo" / "auth.json"
+        auth_path.parent.mkdir(parents=True, exist_ok=True)
+        auth_path.write_text(
+            '{"kilo":{"type":"oauth","access":"token-1","refresh":"token-1","expires":9999999999999}}\n',
+            encoding="utf-8",
+        )
+        return True
+
+    manager._kilo_gateway_device_auth_flow.start_polling = _start_polling  # type: ignore[method-assign]  # noqa: SLF001
+    manager._kilo_gateway_device_auth_flow.poll_once = _poll_once  # type: ignore[method-assign]  # noqa: SLF001
+
+    started = manager.start_session(
+        "kilo",
+        "auth",
+        transport="oauth_proxy",
+        provider_id="kilo",
+        auth_method="auth_code_or_url",
+    )
+    assert started["engine"] == "kilo"
+    assert started["provider_id"] == "kilo"
+    assert started["status"] == "waiting_user"
+    assert started["input_kind"] is None
+    assert started["user_code"] == "USER-CODE-1"
+
+    runtime.next_poll_at = datetime.now(timezone.utc)
+    final = manager.get_session(started["session_id"])
+    assert final["engine"] == "kilo"
+    assert final["status"] == "succeeded"
+    assert final["terminal"] is True
+    assert (profile.agent_home / ".local" / "share" / "kilo" / "auth.json").exists()
+
+
 def test_engine_auth_flow_manager_qwen_cli_delegate_waits_for_api_key_prompt(
     tmp_path: Path,
     monkeypatch,
@@ -1150,6 +1216,39 @@ def test_engine_auth_flow_manager_opencode_api_key_success(tmp_path: Path, provi
     payload = auth_path.read_text(encoding="utf-8")
     assert provider_id in payload
     assert "sk-test-123" in payload
+
+
+def test_engine_auth_flow_manager_kilo_api_key_writes_kilo_auth_store(tmp_path: Path):
+    command_path = _write_script(tmp_path / "fake-kilo", "sleep 1")
+    profile = _FakeProfile(tmp_path)
+    manager = EngineAuthFlowManager(
+        agent_manager=_FakeCliManager(profile, command_path),
+        interaction_gate=EngineInteractionGate(),
+        trust_manager=_TrustSpy(),
+    )
+
+    started = manager.start_session(
+        "kilo",
+        "auth",
+        provider_id="opencode-go",
+        transport="oauth_proxy",
+        auth_method="api_key",
+    )
+    assert started["engine"] == "kilo"
+    assert started["status"] == "waiting_user"
+    assert started["input_kind"] == "api_key"
+    assert started["provider_id"] == "opencode-go"
+
+    submitted = manager.input_session(started["session_id"], "api_key", "sk-kilo-third-party")
+    assert submitted["engine"] == "kilo"
+    assert submitted["status"] == "succeeded"
+
+    auth_path = profile.agent_home / ".local" / "share" / "kilo" / "auth.json"
+    assert auth_path.exists()
+    payload = auth_path.read_text(encoding="utf-8")
+    assert "opencode-go" in payload
+    assert "sk-kilo-third-party" in payload
+    assert not (profile.agent_home / ".local" / "share" / "opencode" / "auth.json").exists()
 
 
 def test_engine_auth_flow_manager_opencode_api_key_rejects_cli_delegate(tmp_path: Path):

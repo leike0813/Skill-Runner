@@ -68,6 +68,9 @@ _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
     "qwen": {
         "general": {"enableAutoUpdate": False, "checkpointing": {"enabled": False}}
     },
+    "kilo": {
+        "$schema": "https://app.kilo.ai/config.json",
+    },
 }
 _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS: dict[str, str] = {
     "codex": 'cli_auth_credentials_store = "file"\n',

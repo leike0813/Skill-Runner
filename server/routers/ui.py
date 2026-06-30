@@ -194,10 +194,10 @@ def _request_opencode_catalog_refresh_if_needed(
         return
     engine = str(snapshot.get("engine") or "").strip().lower()
     status = str(snapshot.get("status") or "").strip().lower()
-    if engine != "opencode" or status != "succeeded":
+    if status != "succeeded" or not engine_model_catalog_lifecycle.supports_engine(engine):
         return
     engine_model_catalog_lifecycle.request_refresh_async(
-        "opencode",
+        engine,
         reason=reason,
     )
 
@@ -484,6 +484,7 @@ def _build_engine_ui_metadata(request: Request) -> dict[str, dict[str, str]]:
         "opencode": "OpenCode",
         "claude": "Claude Code",
         "qwen": "Qwen",
+        "kilo": "Kilo Code",
     }
     input_defaults: dict[str, dict[str, str]] = {
         "gemini": {

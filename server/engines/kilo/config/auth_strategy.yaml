@@ -1,0 +1,157 @@
+in_conversation:
+  transport: oauth_proxy
+providers:
+  kilo:
+    transports:
+      oauth_proxy:
+        methods:
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+        session_behavior:
+          input_required: false
+          polling_start: immediate
+    in_conversation:
+      methods:
+        - auth_code_or_url
+  openai:
+    transports:
+      oauth_proxy:
+        methods:
+          - callback
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - callback
+        - device_auth
+        - import
+  google:
+    transports:
+      oauth_proxy:
+        methods:
+          - callback
+          - auth_code_or_url
+        high_risk_methods:
+          - callback
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - callback
+        - import
+  deepseek:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  iflowcn:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  minimax:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  moonshotai:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  opencode:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  opencode-go:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  openrouter:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  zai-coding-plan:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  alibaba-coding-plan:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key
+  alibaba-coding-plan-cn:
+    transports:
+      oauth_proxy:
+        methods:
+          - api_key
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+    in_conversation:
+      methods:
+        - api_key

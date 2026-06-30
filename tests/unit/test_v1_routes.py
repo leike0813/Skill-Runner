@@ -114,6 +114,7 @@ async def test_v1_system_ping_route_available():
 
     head_response = await _request("HEAD", "/v1/system/ping")
     assert head_response.status_code == 204
+    assert head_response.text == ""
 
 
 @pytest.mark.asyncio

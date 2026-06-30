@@ -1,0 +1,20 @@
+{
+  "engine": "kilo",
+  "source": "runtime_probe_seed",
+  "status": "seed_fallback",
+  "updated_at": null,
+  "last_error": null,
+  "providers": ["kilo/kilo-auto"],
+  "models": [
+    {
+      "id": "kilo/kilo-auto/free",
+      "provider": "kilo/kilo-auto",
+      "provider_id": "kilo/kilo-auto",
+      "model": "free",
+      "display_name": "Kilo Auto Free",
+      "deprecated": false,
+      "notes": "phase_1_fallback",
+      "supported_effort": ["default"]
+    }
+  ]
+}

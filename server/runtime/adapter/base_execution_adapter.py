@@ -69,7 +69,7 @@ AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 1.5
 AUTH_DETECTION_STDOUT_WINDOW_BYTES = 64 * 1024
 AUTH_DETECTION_STDERR_WINDOW_BYTES = 16 * 1024
 RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS = 0.2
-NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode", "qwen"}
+NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode", "qwen", "kilo"}
 
 
 @dataclass
@@ -166,6 +166,7 @@ class EngineExecutionAdapter:
             run_dir,
             skill,
             options,
+            config_path=config_path,
             live_runtime_emitter=live_runtime_emitter,
         )
         exit_code = process_result.exit_code
@@ -520,6 +521,15 @@ class EngineExecutionAdapter:
     def build_subprocess_env(self, base_env: dict[str, str]) -> dict[str, str]:
         return base_env
 
+    def build_execution_env(
+        self,
+        base_env: dict[str, str],
+        ctx: AdapterExecutionContext,
+        config_path: Path,
+    ) -> dict[str, str]:
+        _ = ctx, config_path
+        return self.build_subprocess_env(base_env)
+
     def cleanup_terminal_run_resources(
         self,
         *,
@@ -549,9 +559,11 @@ class EngineExecutionAdapter:
         run_dir: Path,
         skill: SkillManifest,
         options: dict[str, Any],
+        config_path: Path | None = None,
         live_runtime_emitter: LiveRuntimeEmitter | None = None,
     ) -> ProcessExecutionResult:
         runtime_warnings: list[dict[str, str]] = []
+        effective_config_path = config_path if config_path is not None else run_dir
         execution_ctx = AdapterExecutionContext(
             skill=skill,
             run_dir=run_dir,
@@ -574,7 +586,7 @@ class EngineExecutionAdapter:
             )
 
         env = self._apply_runtime_env_overlay(
-            self.build_subprocess_env(os.environ.copy()),
+            self.build_execution_env(os.environ.copy(), execution_ctx, effective_config_path),
             options,
         )
         original_command = [str(token) for token in command]

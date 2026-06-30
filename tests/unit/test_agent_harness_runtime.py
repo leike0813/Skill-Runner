@@ -9,6 +9,7 @@ import pytest
 from agent_harness.config import HarnessConfig
 from agent_harness.errors import HarnessError
 from agent_harness.runtime import HarnessLaunchRequest, HarnessResumeRequest, HarnessRuntime
+from agent_harness.skill_injection import inject_all_skill_packages
 from agent_harness.storage import resolve_next_attempt_paths
 from server.services.engine_management.runtime_profile import RuntimeProfile
 
@@ -426,6 +427,25 @@ def test_harness_injects_project_and_fixture_skills(tmp_path: Path) -> None:
     assert isinstance(config_injection, dict)
     assert config_injection.get("engine") == "codex"
     assert config_injection.get("profile_name") == "skill-runner-harness"
+
+
+def test_harness_skill_injection_uses_adapter_profile_target_root(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    run_dir = tmp_path / "run"
+    skill_dir = project_root / "skills" / "project-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# project skill\n", encoding="utf-8")
+
+    result = inject_all_skill_packages(
+        project_root=project_root,
+        run_directory=run_dir,
+        engine="kilo",
+        execution_mode="interactive",
+    )
+
+    assert result["supported"] is True
+    assert result["target_root"] == str((run_dir / ".kilo" / "skills").resolve())
+    assert (run_dir / ".kilo" / "skills" / "project-skill" / "SKILL.md").exists()
 
 
 def test_resume_inherits_auto_mode_from_handle_metadata(tmp_path: Path) -> None:

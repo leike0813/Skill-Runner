@@ -5,6 +5,7 @@ from typing import Dict
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
+from server.engines.kilo.adapter.execution_adapter import KiloExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
@@ -35,6 +36,11 @@ class EngineAdapterRegistry:
                 / "qwen"
                 / "adapter"
                 / "adapter_profile.json",
+                "kilo": Path(__file__).resolve().parents[2]
+                / "engines"
+                / "kilo"
+                / "adapter"
+                / "adapter_profile.json",
             }
         )
         self._adapters: Dict[str, EngineExecutionAdapter] = {
@@ -42,6 +48,7 @@ class EngineAdapterRegistry:
             "opencode": OpencodeExecutionAdapter(),
             "claude": ClaudeExecutionAdapter(),
             "qwen": QwenExecutionAdapter(),
+            "kilo": KiloExecutionAdapter(),
         }
 
     def get(self, engine: str) -> EngineExecutionAdapter | None:

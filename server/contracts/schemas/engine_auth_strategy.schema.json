@@ -20,7 +20,8 @@
         "codex",
         "opencode",
         "claude",
-        "qwen"
+        "qwen",
+        "kilo"
       ],
       "properties": {
         "codex": {
@@ -33,6 +34,9 @@
           "$ref": "#/$defs/engine_scoped_engine"
         },
         "qwen": {
+          "$ref": "#/$defs/provider_aware_engine"
+        },
+        "kilo": {
           "$ref": "#/$defs/provider_aware_engine"
         }
       }

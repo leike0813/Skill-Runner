@@ -107,10 +107,11 @@ def test_resolve_bundle_platform_key(system: str, machine: str, expected: str | 
 def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(tmp_path: Path) -> None:
     bundle, _digest = _write_fake_bundle(tmp_path)
     profile = _profile(tmp_path)
+    engines = ("codex", "claude", "qwen", "opencode")
 
     result = ensure_zotero_bridge_managed_plugin(
         profile,
-        engines=("codex", "claude", "qwen", "opencode"),
+        engines=engines,
         bundle_root=bundle,
         system="Linux",
         machine="x86_64",
@@ -134,7 +135,9 @@ def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(tmp_p
     assert profile_payload["auth"]["tokenEnv"] == "ZOTERO_BRIDGE_TOKEN"
     assert "127.0.0.1:26570" not in json.dumps(profile_payload)
 
-    for relpath in GLOBAL_SKILL_DIRS.values():
+    assert result.skill_destinations == tuple(profile.agent_home / GLOBAL_SKILL_DIRS[engine] for engine in engines)
+    for engine in engines:
+        relpath = GLOBAL_SKILL_DIRS[engine]
         assert (profile.agent_home / relpath / "SKILL.md").read_text(
             encoding="utf-8"
         ) == "# Zotero Bridge CLI\n"

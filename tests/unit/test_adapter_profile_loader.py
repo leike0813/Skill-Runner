@@ -29,6 +29,9 @@ def test_load_adapter_profile_success() -> None:
     assert profile.structured_output.cli_schema_strategy == "path_schema_artifact"
     assert profile.structured_output.prompt_contract_strategy == "compat_summary"
     assert profile.structured_output.payload_canonicalizer == "payload_union_object_canonicalizer"
+    assert profile.launch.cwd_strategy == "run_dir"
+    assert profile.launch.config_env_var is None
+    assert profile.launch.run_dir_flag is None
 
 
 def test_load_adapter_profile_defaults_missing_command_features_to_disabled(tmp_path: Path) -> None:
@@ -78,6 +81,11 @@ def test_load_adapter_profile_defaults_missing_command_features_to_disabled(tmp_
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False,
+                },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None,
                 },
                 "config_assets": {
                     "bootstrap_path": str(bootstrap_path),
@@ -209,6 +217,11 @@ def test_load_adapter_profile_engine_mismatch(tmp_path: Path) -> None:
                     "use_config_parent_as_workspace": True,
                     "unknown_fallback": False
                 },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None
+                },
                 "config_assets": {
                     "bootstrap_path": str(bootstrap_path),
                     "default_path": str(default_path),
@@ -313,6 +326,11 @@ def test_validate_adapter_profiles_fail_fast(tmp_path: Path) -> None:
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False
                 },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None
+                },
                 "config_assets": {
                     "bootstrap_path": "",
                     "default_path": "",
@@ -361,6 +379,18 @@ def test_validate_adapter_profiles_fail_fast(tmp_path: Path) -> None:
         validate_adapter_profiles({"codex": bad})
 
 
+def test_load_adapter_profile_rejects_invalid_launch_env_var(tmp_path: Path) -> None:
+    payload = json.loads(
+        Path("server/engines/codex/adapter/adapter_profile.json").read_text(encoding="utf-8")
+    )
+    payload["launch"]["config_env_var"] = "not-valid"
+    profile_path = tmp_path / "adapter_profile.json"
+    profile_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Adapter profile validation failed"):
+        load_adapter_profile("codex", profile_path)
+
+
 def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> None:
     profile_path = tmp_path / "adapter_profile.json"
     profile_path.write_text(
@@ -392,6 +422,11 @@ def test_load_adapter_profile_fails_when_config_path_missing(tmp_path: Path) -> 
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False
+                },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None
                 },
                 "config_assets": {
                     "bootstrap_path": str(tmp_path / "missing.toml"),
@@ -514,6 +549,11 @@ def test_load_adapter_profile_fails_when_credential_target_is_absolute(tmp_path:
                     "skills_subdir": "skills",
                     "use_config_parent_as_workspace": False,
                     "unknown_fallback": False
+                },
+                "launch": {
+                    "cwd_strategy": "run_dir",
+                    "config_env_var": None,
+                    "run_dir_flag": None
                 },
                 "config_assets": {
                     "bootstrap_path": str(bootstrap_path),

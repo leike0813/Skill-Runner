@@ -30,8 +30,15 @@ class RunFolderBootstrapper:
     def __init__(self) -> None:
         self._validator = SkillPackageValidator()
 
+    def _profiled_skills_root(self, *, run_dir: Path, engine_name: str) -> Path:
+        profile = load_adapter_profile(
+            engine_name,
+            adapter_profile_path_for_engine(engine_name),
+        )
+        return run_dir / profile.attempt_workspace.workspace_subdir / profile.attempt_workspace.skills_subdir
+
     def snapshot_dir(self, *, run_dir: Path, engine_name: str, skill_id: str) -> Path:
-        return run_dir / f".{engine_name}" / "skills" / skill_id
+        return self._profiled_skills_root(run_dir=run_dir, engine_name=engine_name) / skill_id
 
     def materialize_skill(
         self,

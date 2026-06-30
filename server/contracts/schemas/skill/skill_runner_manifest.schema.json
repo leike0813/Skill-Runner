@@ -92,6 +92,9 @@
         },
         "qwen": {
           "type": "string"
+        },
+        "kilo": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -144,7 +147,8 @@
         "codex",
         "claude",
         "opencode",
-        "qwen"
+        "qwen",
+        "kilo"
       ]
     }
   }

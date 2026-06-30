@@ -26,6 +26,11 @@
     "use_config_parent_as_workspace": true,
     "unknown_fallback": true
   },
+  "launch": {
+    "cwd_strategy": "run_dir",
+    "config_env_var": null,
+    "run_dir_flag": null
+  },
   "config_assets": {
     "bootstrap_path": "../config/bootstrap.json",
     "default_path": "../config/default.json",

@@ -8,20 +8,14 @@ from pathlib import Path
 from typing import Any, List, Literal
 
 from server.models import ManifestArtifact
+from server.runtime.adapter.common.profile_loader import (
+    adapter_profile_path_for_engine,
+    load_adapter_profile,
+)
 from server.services.orchestration.manifest_artifact_inference import (
     infer_manifest_artifacts,
 )
 from server.services.skill.skill_patcher import skill_patcher
-
-
-AGENT_SKILL_ROOTS: dict[str, Path] = {
-    "codex": Path(".codex/skills"),
-    "gemini": Path(".gemini/skills"),
-    "iflow": Path(".iflow/skills"),
-    "opencode": Path(".opencode/skills"),
-    "claude": Path(".claude/skills"),
-    "qwen": Path(".qwen/skills"),
-}
 
 
 @dataclass(frozen=True)
@@ -74,6 +68,14 @@ def _load_manifest_artifacts(skill_dir: Path) -> List[ManifestArtifact]:
     return artifacts
 
 
+def _resolve_engine_skill_root(engine: str) -> Path | None:
+    try:
+        profile = load_adapter_profile(engine, adapter_profile_path_for_engine(engine))
+    except RuntimeError:
+        return None
+    return Path(profile.attempt_workspace.workspace_subdir) / profile.attempt_workspace.skills_subdir
+
+
 def inject_all_skill_packages(
     *,
     project_root: Path,
@@ -81,7 +83,7 @@ def inject_all_skill_packages(
     engine: str,
     execution_mode: Literal["auto", "interactive"],
 ) -> dict[str, Any]:
-    mapped = AGENT_SKILL_ROOTS.get(engine)
+    mapped = _resolve_engine_skill_root(engine)
     if mapped is None:
         return {
             "mode": "all",

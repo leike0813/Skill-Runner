@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from server.engines.kilo.models.catalog_service import kilo_model_catalog
 from server.engines.opencode.models.catalog_service import opencode_model_catalog
 from server.services.engine_management.engine_catalog import normalize_engine_name
 
@@ -50,10 +51,32 @@ class _OpencodeCatalogHandler:
         return opencode_model_catalog.cache_path()
 
 
+@dataclass(frozen=True)
+class _KiloCatalogHandler:
+    def start(self) -> None:
+        kilo_model_catalog.start()
+
+    def stop(self) -> None:
+        kilo_model_catalog.stop()
+
+    async def refresh(self, *, reason: str) -> None:
+        await kilo_model_catalog.refresh(reason=reason)
+
+    def request_refresh_async(self, *, reason: str) -> asyncio.Task[None] | None:
+        return kilo_model_catalog.request_refresh_async(reason=reason)
+
+    def get_snapshot(self) -> dict[str, object]:
+        return kilo_model_catalog.get_snapshot()
+
+    def cache_path(self) -> Path:
+        return kilo_model_catalog.cache_path()
+
+
 class EngineModelCatalogLifecycle:
     def __init__(self) -> None:
         self._handlers: dict[str, RuntimeProbeCatalogHandler] = {
             "opencode": _OpencodeCatalogHandler(),
+            "kilo": _KiloCatalogHandler(),
         }
 
     def runtime_probe_engines(self) -> tuple[str, ...]:

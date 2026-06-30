@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 from server.config import config
+from server.engines.common.model_verbose_parser import extract_labeled_json_rows, extract_model_rows
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.runtime_profile import RuntimeProfile, get_runtime_profile
@@ -234,53 +235,10 @@ class OpencodeModelCatalog:
         return self._parse_verbose_models(stdout_text)
 
     def _extract_verbose_rows(self, payload: Any) -> List[Dict[str, Any]]:
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        if isinstance(payload, dict):
-            models_obj = payload.get("models")
-            if isinstance(models_obj, list):
-                return [item for item in models_obj if isinstance(item, dict)]
-        return []
+        return extract_model_rows(payload)
 
     def _extract_verbose_labeled_rows(self, stdout_text: str) -> List[tuple[str | None, Dict[str, Any]]]:
-        try:
-            payload = json.loads(stdout_text)
-        except json.JSONDecodeError:
-            return self._extract_verbose_block_rows(stdout_text)
-        return [(None, row) for row in self._extract_verbose_rows(payload)]
-
-    def _extract_verbose_block_rows(self, stdout_text: str) -> List[tuple[str | None, Dict[str, Any]]]:
-        decoder = json.JSONDecoder()
-        rows: List[tuple[str | None, Dict[str, Any]]] = []
-        position = 0
-        text = stdout_text
-        text_len = len(text)
-        while position < text_len:
-            while position < text_len and text[position].isspace():
-                position += 1
-            if position >= text_len:
-                break
-            label: str | None = None
-            if text[position] != "{":
-                line_end = text.find("\n", position)
-                if line_end == -1:
-                    break
-                candidate = text[position:line_end].strip()
-                position = line_end + 1
-                if candidate:
-                    label = candidate
-                while position < text_len and text[position].isspace():
-                    position += 1
-            if position >= text_len or text[position] != "{":
-                continue
-            try:
-                payload, next_position = decoder.raw_decode(text, position)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError("opencode models --verbose returned malformed object blocks") from exc
-            if isinstance(payload, dict):
-                rows.append((label, payload))
-            position = next_position
-        return rows
+        return extract_labeled_json_rows(stdout_text, error_label="opencode models --verbose")
 
     def _supported_effort_from_variants(self, variants_obj: Any) -> List[str]:
         if not isinstance(variants_obj, dict):

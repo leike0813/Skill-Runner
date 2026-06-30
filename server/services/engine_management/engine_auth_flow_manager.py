@@ -266,6 +266,9 @@ class EngineAuthFlowManager:
     def _build_opencode_auth_store(self) -> OpencodeAuthStore:
         return OpencodeAuthStore(self.agent_manager.profile.agent_home)
 
+    def _build_kilo_auth_store(self) -> OpencodeAuthStore:
+        return OpencodeAuthStore(self.agent_manager.profile.agent_home, app_name="kilo")
+
     def register_callback_state(self, *, channel: str, session_id: str, state: str) -> None:
         self._callback_state_store.register(
             channel=channel,

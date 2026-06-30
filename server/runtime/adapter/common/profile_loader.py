@@ -22,6 +22,7 @@ CredentialPolicyMode = Literal["all_of_sources", "any_of_sources"]
 SettingsValidator = Literal["qwen_settings_coding_plan"]
 BootstrapFormat = Literal["json", "text"]
 NormalizeStrategy = Literal["noop"]
+LaunchCwdStrategy = Literal["run_dir"]
 ProcessEventType = Literal["reasoning", "tool_call", "command_execution"]
 UiShellSandboxProbeStrategy = Literal[
     "static_supported",
@@ -72,6 +73,13 @@ class AttemptWorkspaceProfile:
     skills_subdir: str
     use_config_parent_as_workspace: bool
     unknown_fallback: bool
+
+
+@dataclass(frozen=True)
+class LaunchProfile:
+    cwd_strategy: LaunchCwdStrategy
+    config_env_var: str | None
+    run_dir_flag: str | None
 
 
 @dataclass(frozen=True)
@@ -217,6 +225,7 @@ class AdapterProfile:
     prompt_builder: PromptBuilderProfile
     session_codec: SessionCodecProfile
     attempt_workspace: AttemptWorkspaceProfile
+    launch: LaunchProfile
     config_assets: ConfigAssetsProfile
     model_catalog: ModelCatalogProfile
     command_defaults: CommandDefaultsProfile
@@ -380,6 +389,14 @@ def _parse_adapter_profile(
     provider_contract_raw = payload["provider_contract"]
     session_raw = payload["session_codec"]
     workspace_raw = payload["attempt_workspace"]
+    launch_raw = payload.get(
+        "launch",
+        {
+            "cwd_strategy": "run_dir",
+            "config_env_var": None,
+            "run_dir_flag": None,
+        },
+    )
     config_assets_raw = payload["config_assets"]
     model_catalog_raw = payload["model_catalog"]
     command_defaults_raw = payload["command_defaults"]
@@ -547,6 +564,19 @@ def _parse_adapter_profile(
             skills_subdir=str(workspace_raw["skills_subdir"]),
             use_config_parent_as_workspace=bool(workspace_raw["use_config_parent_as_workspace"]),
             unknown_fallback=bool(workspace_raw["unknown_fallback"]),
+        ),
+        launch=LaunchProfile(
+            cwd_strategy=cast(LaunchCwdStrategy, str(launch_raw.get("cwd_strategy", "run_dir"))),
+            config_env_var=(
+                str(launch_raw["config_env_var"])
+                if launch_raw.get("config_env_var") is not None
+                else None
+            ),
+            run_dir_flag=(
+                str(launch_raw["run_dir_flag"])
+                if launch_raw.get("run_dir_flag") is not None
+                else None
+            ),
         ),
         config_assets=ConfigAssetsProfile(
             bootstrap_path=str(config_assets_raw["bootstrap_path"]),

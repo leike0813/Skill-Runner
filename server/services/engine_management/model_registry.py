@@ -223,9 +223,9 @@ class ModelRegistry:
         provider_id: str | None = None,
         effort: str | None = None,
     ) -> NormalizedModelSelection:
-        catalog = self.get_models(engine)
         normalized_engine = engine.strip().lower()
-        parsed = self._parse_model_selector(model)
+        catalog = self.get_models(normalized_engine)
+        parsed = self._parse_model_selector(normalized_engine, model)
         requested_effort = self._normalize_effort(effort or parsed["effort"])
         profile = self._adapter_profile(normalized_engine)
         multi_provider = profile.provider_contract.multi_provider
@@ -250,6 +250,8 @@ class ModelRegistry:
             raise ValueError(f"provider_id is required for multi-provider engine '{normalized_engine}'")
 
         selected_model = cast(str, parsed["model"])
+        if not multi_provider and parsed["provider"]:
+            selected_model = f"{parsed['provider']}/{selected_model}"
         entry = self._resolve_model_entry(
             engine=normalized_engine,
             models=catalog.models,
@@ -274,7 +276,7 @@ class ModelRegistry:
             requested_effort=requested_effort,
             supported_effort=supported_effort,
         )
-        model_value = self._model_value_for_entry(entry)
+        model_value = self._model_value_for_entry(normalized_engine, entry)
         runtime_model = self._runtime_model_for_entry(
             engine=normalized_engine,
             entry=entry,
@@ -390,9 +392,16 @@ class ModelRegistry:
         canonical_provider = profile.provider_contract.canonical_provider_id
         normalized: List[ModelEntry] = []
         for item in models:
-            parsed_provider, parsed_model = self._split_provider_model(item.id)
-            provider = self._normalize_provider_id(item.provider_id or item.provider or parsed_provider)
-            model_name = item.model.strip() if isinstance(item.model, str) and item.model.strip() else parsed_model or item.id
+            parsed_provider, parsed_model = self._split_provider_model_for_engine(normalized_engine, item.id)
+            if normalized_engine == "kilo":
+                provider = self._normalize_provider_id(parsed_provider or item.provider_id or item.provider)
+            else:
+                provider = self._normalize_provider_id(item.provider_id or item.provider or parsed_provider)
+            raw_model_name = item.model.strip() if isinstance(item.model, str) and item.model.strip() else None
+            if normalized_engine == "kilo" and parsed_model:
+                model_name = parsed_model
+            else:
+                model_name = raw_model_name or parsed_model or item.id
             if not multi_provider:
                 provider = canonical_provider
             elif provider is None and normalized_engine == "claude":
@@ -640,7 +649,7 @@ class ModelRegistry:
         profile = self._adapter_profile(engine.strip().lower())
         return profile.provider_contract.canonical_provider_id
 
-    def _parse_model_selector(self, model_spec: str | None) -> Dict[str, Optional[str]]:
+    def _parse_model_selector(self, engine: str, model_spec: str | None) -> Dict[str, Optional[str]]:
         raw = model_spec.strip() if isinstance(model_spec, str) else ""
         if not raw:
             return {"provider": None, "model": None, "effort": None}
@@ -652,7 +661,7 @@ class ModelRegistry:
                 raise ValueError("Invalid model specification format")
             model_part = model_part.strip()
             effort = effort_part.strip().lower()
-        provider, model_name = self._split_provider_model(model_part)
+        provider, model_name = self._split_provider_model_for_engine(engine, model_part)
         if provider and model_name:
             return {"provider": provider, "model": model_name, "effort": effort}
         return {"provider": None, "model": model_part.strip(), "effort": effort}
@@ -674,7 +683,7 @@ class ModelRegistry:
         profile = self._adapter_profile(engine)
         if not profile.provider_contract.multi_provider:
             for entry in models:
-                candidates = {entry.id, self._model_value_for_entry(entry)}
+                candidates = {entry.id, self._model_value_for_entry(engine, entry)}
                 if model in candidates:
                     return entry
             return None
@@ -684,7 +693,7 @@ class ModelRegistry:
             entry_provider = self._normalize_provider_id(entry.provider_id or entry.provider)
             if entry_provider != provider_id:
                 continue
-            if model in {entry.id, self._model_value_for_entry(entry)}:
+            if model in {entry.id, self._model_value_for_entry(engine, entry)}:
                 return entry
         return None
 
@@ -725,16 +734,36 @@ class ModelRegistry:
             )
         return requested_effort
 
-    def _model_value_for_entry(self, entry: ModelEntry) -> str:
+    def _model_value_for_entry(self, engine: str, entry: ModelEntry) -> str:
         if isinstance(entry.model, str) and entry.model.strip():
+            if engine == "kilo":
+                _provider, parsed_model = self._split_provider_model_for_engine(engine, entry.id)
+                if parsed_model:
+                    return parsed_model
             return entry.model.strip()
-        _provider, parsed_model = self._split_provider_model(entry.id)
+        _provider, parsed_model = self._split_provider_model_for_engine(engine, entry.id)
         return parsed_model or entry.id
 
     def _split_provider_model(self, value: str | None) -> Tuple[str | None, str | None]:
         if not isinstance(value, str) or "/" not in value:
             return None, None
         provider, model = value.split("/", 1)
+        provider = provider.strip().lower()
+        model = model.strip()
+        if not provider or not model:
+            return None, None
+        return provider, model
+
+    def _split_provider_model_for_engine(
+        self,
+        engine: str,
+        value: str | None,
+    ) -> Tuple[str | None, str | None]:
+        if engine.strip().lower() != "kilo":
+            return self._split_provider_model(value)
+        if not isinstance(value, str) or "/" not in value:
+            return None, None
+        provider, model = value.rsplit("/", 1)
         provider = provider.strip().lower()
         model = model.strip()
         if not provider or not model:
@@ -761,7 +790,7 @@ class ModelRegistry:
         provider_id: str | None,
         model: str,
     ) -> str | None:
-        if engine == "opencode":
+        if engine in {"opencode", "kilo"}:
             return entry.id
         if engine == "claude" and entry.source == "custom_provider" and provider_id:
             return f"{provider_id}/{model}"
