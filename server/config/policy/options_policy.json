@@ -7,6 +7,7 @@
     "hard_timeout_seconds",
     "workspace",
     "env",
-    "collect_skill_run_feedback"
+    "collect_skill_run_feedback",
+    "preamble_prompt"
   ]
 }

@@ -10,6 +10,12 @@
 
 客户端可以通过 `runtime_options.env` 为单次 run 注入局部环境变量。API 创建请求时会先校验 env，再将 raw value 写入 `data/run_secrets/<request_id>.env.json`，普通 request record 与 input manifest 只保存 redacted 投影。执行 attempt 准备阶段从 vault 重新加载 raw env，作为内部 `__runtime_env` 传给 adapter；adapter 只把它叠加到当前 subprocess env，不修改全局 `os.environ`。
 
+## Run-scoped Preamble Prompt
+
+客户端可以通过 `runtime_options.preamble_prompt` 为单次 run 注入受治理的前置上下文。API 创建请求时会校验并规范化该文本，将 raw value 写入 `data/run_secrets/<request_id>.preamble.json`，普通 request record 与 input manifest 只保存包含 `sha256` 和 `length` 的 redacted descriptor。
+
+执行 attempt 准备阶段只会在首次初始 attempt 恢复 raw preamble，并作为内部 `__preamble_prompt` 交给 common prompt builder。该内容被包裹在固定边界中，插入到 skill invoke line 之后、skill body prompt 之前；retry、interactive reply、auth resume 与 output repair 不会重复注入。
+
 ## 阶段一：初始化与上传 (Setup & Upload)
 
 1. **Client -> API**: 发送 `POST /v1/jobs` 创建请求。
@@ -22,10 +28,11 @@
    - Payload: Zip 文件。
 4. **WorkspaceManager**:
    - 解压 Zip 到 `data/requests/<request_id>/uploads/`。
-   - 生成 `input_manifest.json` 并计算 cache key v2。
+   - 生成 `input_manifest.json` 并计算 cache key。
    - 缓存仅在 `execution_mode=auto` 且 `no_cache!=true` 时启用；`interactive` 不读不写缓存。
-   - cache key v2 统一包含 skill id、engine、规范化 `skill_package_hash`、参数、engine options、上传文件清单哈希和 inline input 哈希。
+   - cache key 统一包含 skill id、engine、规范化 `skill_package_hash`、参数、engine options、上传文件清单哈希、inline input 哈希和 preamble hash。
    - `runtime_options.env` 不进入 cache key；若 env 会影响输出，调用方需设置 `no_cache=true`。
+   - `runtime_options.preamble_prompt` 的规范化内容 hash 进入 cache key；相同输入但不同 preamble 会 cache miss。
    - 已安装 skill 与临时上传 skill 使用同一套 `skill_package_hash` 口径；临时上传包会缓存未 patch 的规范化 snapshot，默认 30 天滑动 TTL。
    - 命中缓存则将缓存的 run 绑定到 `request_id`；未命中则创建 `data/runs/<run_id>/`。
 

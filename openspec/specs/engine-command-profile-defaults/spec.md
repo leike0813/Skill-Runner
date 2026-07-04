@@ -2,13 +2,14 @@
 
 ### Requirement: Kilo command defaults MUST be profile declared
 
-Kilo command defaults SHALL be declared in the adapter profile and consumed through the shared command-default contract.
+Kilo command, workspace, config, and UI shell defaults SHALL be declared in the adapter profile and consumed through shared profile contracts.
 
-#### Scenario: Kilo profile defaults
+#### Scenario: Kilo profile config assets
 
-- **WHEN** the runtime builds a Kilo API command with profile defaults enabled
-- **THEN** the defaults MUST include `run --format json --auto --thinking`
-- **AND** Kilo-specific defaults MUST NOT be hardcoded in shared command-default modules
+- **WHEN** runtime and UI shell managers resolve Kilo config assets
+- **THEN** runtime config assets MUST point to Kilo config files
+- **AND** UI shell config assets MUST point to Kilo config files
+- **AND** profile targets MUST preserve `.kilo/kilo.jsonc`
 
 ## ADDED Requirements
 

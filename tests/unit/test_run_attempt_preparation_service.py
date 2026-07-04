@@ -13,6 +13,10 @@ from server.services.orchestration.run_attempt_preparation_service import (
 )
 from server.services.orchestration.run_job_lifecycle_service import RunJobRequest
 from server.services.platform.runtime_env_options import RuntimeEnvSecretService
+from server.services.platform.runtime_preamble_options import (
+    RuntimePreambleSecretService,
+    redact_runtime_preamble_prompt,
+)
 
 
 def _layout_fields(run_dir: Path, *, run_id: str, namespace: str = "prep-skill.1") -> dict[str, str]:
@@ -353,6 +357,144 @@ async def test_prepare_uses_namespaced_output_schema_when_layout_exists(
     assert context.run_options["__target_output_schema_relpath"] == expected_relpath
     assert (run_dir / expected_relpath).exists()
     assert not (run_dir / ".audit" / "contracts" / "target_output_schema.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_prepare_injects_runtime_preamble_only_for_first_initial_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill = _build_skill(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.run_folder_git_initializer.ensure_git_repo",
+        lambda _run_dir: None,
+    )
+    preamble_service = RuntimePreambleSecretService(tmp_path / "run_secrets")
+    preamble_service.save(request_id="req-preamble", preamble_prompt="client context")
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.runtime_preamble_secret_service",
+        preamble_service,
+    )
+    descriptor = redact_runtime_preamble_prompt("client context")
+    request_record = {
+        "request_id": "req-preamble",
+        **_layout_fields(run_dir, run_id="run-preamble"),
+        "input": {"paper_path": "uploads/paper.pdf"},
+        "parameter": {},
+        "runtime_options": {"execution_mode": "auto", "preamble_prompt": descriptor},
+        "effective_runtime_options": {"execution_mode": "auto", "preamble_prompt": descriptor},
+    }
+    orchestrator = _FakeOrchestrator(
+        run_store=_FakeRunStore(request_record=request_record),
+        workspace=_FakeWorkspace(run_dir),
+    )
+    request = RunJobRequest(
+        run_id="run-preamble",
+        skill_id=skill.id,
+        engine_name="claude",
+        options={},
+        skill_override=skill,
+    )
+
+    context = await RunAttemptPreparationService().prepare(
+        orchestrator=orchestrator,
+        request=request,
+        run_dir=run_dir,
+        request_record=request_record,
+        request_id="req-preamble",
+        execution_mode="auto",
+        conversation_mode="session",
+        session_capable=True,
+        is_interactive=False,
+        interactive_auto_reply=False,
+        can_wait_for_user=False,
+        can_persist_waiting_user=False,
+        interactive_profile=None,
+        attempt_number=1,
+        resolve_custom_provider_model=lambda **_kwargs: None,
+        run_store_backend=orchestrator._run_store_backend(),
+        interaction_service=orchestrator,
+        audit_service=type(
+            "_Audit",
+            (),
+            {"append_internal_schema_warning": staticmethod(lambda **_kwargs: None)},
+        )(),
+        resolve_attempt_number=orchestrator._resolve_attempt_number,
+        build_reply_prompt=lambda response: str(response),
+    )
+
+    assert context.run_options["__preamble_prompt"] == "client context"
+
+
+@pytest.mark.asyncio
+async def test_prepare_skips_runtime_preamble_for_resume_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill = _build_skill(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.run_folder_git_initializer.ensure_git_repo",
+        lambda _run_dir: None,
+    )
+    preamble_service = RuntimePreambleSecretService(tmp_path / "run_secrets")
+    preamble_service.save(request_id="req-resume", preamble_prompt="client context")
+    monkeypatch.setattr(
+        "server.services.orchestration.run_attempt_preparation_service.runtime_preamble_secret_service",
+        preamble_service,
+    )
+    descriptor = redact_runtime_preamble_prompt("client context")
+    request_record = {
+        "request_id": "req-resume",
+        **_layout_fields(run_dir, run_id="run-resume"),
+        "input": {"paper_path": "uploads/paper.pdf"},
+        "parameter": {},
+        "runtime_options": {"execution_mode": "interactive", "preamble_prompt": descriptor},
+        "effective_runtime_options": {"execution_mode": "interactive", "preamble_prompt": descriptor},
+    }
+    orchestrator = _FakeOrchestrator(
+        run_store=_FakeRunStore(request_record=request_record),
+        workspace=_FakeWorkspace(run_dir),
+    )
+    request = RunJobRequest(
+        run_id="run-resume",
+        skill_id=skill.id,
+        engine_name="claude",
+        options={"__resume_ticket_id": "ticket-1"},
+        skill_override=skill,
+    )
+
+    context = await RunAttemptPreparationService().prepare(
+        orchestrator=orchestrator,
+        request=request,
+        run_dir=run_dir,
+        request_record=request_record,
+        request_id="req-resume",
+        execution_mode="interactive",
+        conversation_mode="session",
+        session_capable=True,
+        is_interactive=True,
+        interactive_auto_reply=False,
+        can_wait_for_user=True,
+        can_persist_waiting_user=True,
+        interactive_profile=orchestrator.interactive_profile,
+        attempt_number=1,
+        resolve_custom_provider_model=lambda **_kwargs: None,
+        run_store_backend=orchestrator._run_store_backend(),
+        interaction_service=orchestrator,
+        audit_service=type(
+            "_Audit",
+            (),
+            {"append_internal_schema_warning": staticmethod(lambda **_kwargs: None)},
+        )(),
+        resolve_attempt_number=orchestrator._resolve_attempt_number,
+        build_reply_prompt=lambda response: str(response),
+    )
+
+    assert "__preamble_prompt" not in context.run_options
 
 
 @pytest.mark.asyncio

@@ -346,7 +346,6 @@ class RunOutputConvergenceService:
         for round_index in range(1, MAX_REPAIR_ROUNDS + 1):
             repair_prompt = self._build_repair_prompt(
                 execution_mode=execution_mode,
-                candidate=last_candidate,
                 schema_errors=last_errors,
                 prompt_summary=prompt_contract_markdown,
             )
@@ -900,7 +899,6 @@ class RunOutputConvergenceService:
         self,
         *,
         execution_mode: str,
-        candidate: _CandidateResolution,
         schema_errors: list[str],
         prompt_summary: str,
     ) -> str:
@@ -910,13 +908,9 @@ class RunOutputConvergenceService:
             if (execution_mode or "").strip().lower() == ExecutionMode.INTERACTIVE.value
             else "Return exactly one final JSON object with `__SKILL_DONE__ = true`."
         )
-        candidate_block = candidate.raw_candidate_preview or "No valid JSON object was extracted from the previous output."
         errors_block = "\n".join(f"- {item}" for item in schema_errors) if schema_errors else "- Unknown validation error"
         lines = [
             "Your previous output did not satisfy the Skill Runner output contract.",
-            "",
-            "Previous candidate:",
-            candidate_block,
             "",
             "Validation errors:",
             errors_block,

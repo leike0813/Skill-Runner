@@ -142,6 +142,39 @@ def test_runtime_env_redacted_projection_allowed_for_persisted_options():
     assert runtime_opts["env"] == {"FOO": {"redacted": True}}
 
 
+def test_runtime_preamble_prompt_allowed_and_normalized():
+    policy = OptionsPolicy()
+    runtime_opts = policy.validate_runtime_options(
+        {"preamble_prompt": "  line one\r\nline two  "}
+    )
+    assert runtime_opts["preamble_prompt"] == "line one\nline two"
+
+
+def test_runtime_preamble_prompt_redacted_descriptor_allowed():
+    policy = OptionsPolicy()
+    descriptor = {"redacted": True, "sha256": "a" * 64, "length": 12}
+    runtime_opts = policy.validate_runtime_options({"preamble_prompt": descriptor})
+    assert runtime_opts["preamble_prompt"] == descriptor
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "   ",
+        123,
+        None,
+        "x" * 8001,
+        "hello\x00world",
+        {"redacted": True, "sha256": "bad", "length": 1},
+    ],
+)
+def test_runtime_preamble_prompt_invalid_values_rejected(value):
+    policy = OptionsPolicy()
+    with pytest.raises(ValueError):
+        policy.validate_runtime_options({"preamble_prompt": value})
+
+
 def test_workspace_file_bindings_shape_allowed():
     policy = OptionsPolicy()
     runtime_opts = policy.validate_runtime_options(

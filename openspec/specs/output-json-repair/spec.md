@@ -77,6 +77,8 @@ The target success rule MUST remain schema-first, and repair exhaustion MUST onl
 - **WHEN** orchestrator 为某个 attempt 构建 schema repair prompt
 - **THEN** repair prompt 中的 contract details MUST 来自统一动态 builder
 - **AND** 该文本 MUST 与当前引擎有效的 prompt contract 保持一致
+- **AND** repair prompt MUST include validation errors and execution-mode branch instructions
+- **AND** repair prompt MUST NOT include a `Previous candidate` section or copied previous candidate text
 
 #### Scenario: prompt contract artifact removed
 - **WHEN** run 目录中不存在 prompt-facing schema Markdown artifact

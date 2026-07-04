@@ -700,10 +700,13 @@
   - 引擎执行启用硬超时，默认 `1200s`（环境变量 `SKILL_RUNNER_ENGINE_HARD_TIMEOUT_SECONDS` 可覆盖）。
   - 超时后会终止子进程并将 run 置为 `failed`（错误码 `TIMEOUT`）。
   - `runtime_options.env` 可为单次 run 注入局部环境变量，例如 `{"FOO":"value"}`；变量名必须匹配 `^[A-Z_][A-Z0-9_]{0,127}$`，最多 64 个，单值最多 8192 字符，且不能覆盖 `PATH/HOME/PYTHONPATH/LD_LIBRARY_PATH` 等基础变量。原始值只写入本地 secret vault，DB、状态、审计与 bundle 只保留 redacted 投影。
+  - `runtime_options.preamble_prompt` 可为单次 run 注入受治理的前置上下文。该值必须是非空字符串，trim 后最多 8000 字符，不允许 NUL/C0 控制字符（换行与 tab 除外）。服务端会把它放在首次初始 attempt 的 invoke line 之后、skill body 之前，并用边界文本声明其优先级低于服务端、engine、skill、安全与 output schema 指令。后续 retry、interactive reply、auth resume 与 output repair 不会重复注入。
+  - `runtime_options.preamble_prompt` 原文只写入本地 request-scoped secret vault；DB、状态、审计、bundle 与 request input snapshot 只保留 `{"redacted": true, "sha256": "...", "length": N}` descriptor。
 - **缓存策略**:
   - 设置 `runtime_options.no_cache=true` 将跳过缓存命中检查。
   - `runtime_options.execution_mode=interactive` 时，系统会跳过缓存命中，且不会写入 `cache_entries`。
   - `runtime_options.env` 不参与 cache key；如果 env 会影响输出，调用方应同时设置 `runtime_options.no_cache=true`。
+  - `runtime_options.preamble_prompt` 的规范化内容 hash 会参与 cache key；相同输入但不同 preamble 不会命中同一缓存。
 - **Debug Bundle**: 普通 bundle 与 Debug Bundle 是两个独立下载产物；是否下载 debug 版本不再由 `runtime_options` 控制。
 - **临时 Skill 调试保留**: `runtime_options.debug_keep_temp=true` 仅用于 `/v1/jobs` 的 `skill_source=temp_upload` 请求，表示终态后不立即删除临时 skill 包与解压目录。
 - **模型校验**: `model` 必须在 `GET /v1/engines/{engine}/models` 的 allowlist 中。
@@ -1573,6 +1576,7 @@ Query 参数：
 - `runtime_options.execution_mode=interactive`：不读 cache，也不回写 cache。
 - `runtime_options.no_cache=true`：无论模式，均禁用 cache lookup 与 write-back。
 - `runtime_options.env` 不进入 cache key，且 raw value 不通过 API、bundle 或 audit 暴露。
+- `runtime_options.preamble_prompt` 进入 cache key，但 raw value 不通过 API、bundle 或 audit 暴露。
 - 临时 skill 的 auto 缓存键额外包含“上传 skill 压缩包整体哈希”，避免不同包误命中。
 
 ### 已移除的旧临时 Skill API

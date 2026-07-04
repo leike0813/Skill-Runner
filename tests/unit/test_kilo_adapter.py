@@ -128,6 +128,9 @@ def test_kilo_config_composer_writes_project_level_jsonc_and_applies_layers(tmp_
     assert payload["$schema"] == "https://app.kilo.ai/config.json"
     assert payload["model"] == "kilo/kilo-auto/free"
     assert payload["nested"] == {"source": "runtime", "keep": True}
+    assert payload["provider"]["kilo"]["options"]["timeout"] is False
+    assert payload["permission"]["bash"] == "allow"
+    assert payload["permission"]["external_directory"] == "deny"
     assert payload["skills"]["paths"] == [
         "/external/kilo/skills",
         str((run_dir / ".kilo" / "skills").resolve()),

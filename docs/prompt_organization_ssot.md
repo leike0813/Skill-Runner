@@ -45,15 +45,26 @@ That makes the run-root instruction file discoverable to the engine without poll
 
 ## Skill Prompt Assembly
 
-The skill prompt is assembled in two parts:
+The skill prompt is assembled from the stable invoke/body contract, with one optional run-scoped preamble layer:
 
 1. `skill invoke line`
-2. `skill body prompt`
+2. optional `runtime_options.preamble_prompt`
+3. `skill body prompt`
 
-The final assembled prompt is always:
+Without a preamble, the final assembled prompt is:
 
 ```text
 <invoke line>
+<body prompt>
+```
+
+With a preamble, the final assembled prompt is:
+
+```text
+<invoke line>
+
+<bounded client preamble>
+
 <body prompt>
 ```
 
@@ -76,6 +87,15 @@ Current engine mappings:
 The invoke line is always rendered as the first line of the final prompt.
 This table is a documentation projection of each engine profile. If there is any conflict,
 `adapter_profile.json -> prompt_builder.skill_invoke_line_template` is the authoritative source.
+
+### Runtime Preamble
+
+`runtime_options.preamble_prompt` is client-provided run context, not a system prompt override.
+It is injected only into the first initial attempt and is skipped for retry, interactive reply, auth resume, recovery resume, and output repair prompts.
+
+The common prompt builder wraps the raw text in a fixed bounded section after the invoke line and before the body prompt. The section states that the client preamble cannot override service, engine, skill, safety, tool, or output-schema instructions.
+
+Raw preamble text is loaded from request-scoped secret storage during attempt preparation. Persistent request records, audit snapshots, and bundles contain only a redacted descriptor.
 
 ### Body Prompt
 
@@ -111,7 +131,7 @@ The prompt organization pipeline is:
 2. render run-root instruction file
 3. materialize run-local skill snapshot
 4. patch runtime `SKILL.md`
-5. assemble invoke line + body prompt
+5. assemble invoke line + optional run preamble + body prompt
 6. pass the final assembled prompt to the engine
 
 The same run-root instruction file remains in effect for:
@@ -139,7 +159,7 @@ Prompt assembly and `SKILL.md` patching are related but not the same thing:
 
 - run-root instruction file = global execution constraints
 - patched `SKILL.md` = runtime skill-local instructions
-- final prompt = invoke line + body prompt
+- final prompt = invoke line + optional bounded run preamble + body prompt
 
 ## Audit Semantics
 

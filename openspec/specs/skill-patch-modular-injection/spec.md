@@ -87,7 +87,8 @@ Patch composition MUST remain modular and idempotent after switching output sche
 - **WHEN** runtime 组织引擎可见提示信息
 - **THEN** run-root instruction file MUST 承载 engine-agnostic 全局执行约束
 - **AND** runtime `SKILL.md` MUST 继续承载 skill-local runtime patch 模块
-- **AND** 最终 CLI prompt MUST 仅由 invoke line 与 body prompt 组成
+- **AND** 最终 CLI prompt MUST 由 invoke line、可选 run-scoped preamble、body prompt 组成
+- **AND** run-scoped preamble MUST NOT be treated as a replacement for run-root instructions or runtime `SKILL.md` patching
 
 ### Requirement: Prompt organization SSOT MUST separate patched SKILL instructions from assembled body prompt defaults
 系统 MUST 明确区分 runtime-patched `SKILL.md` 与 adapter prompt builder 的默认 body 模板，禁止将旧 prompt-builder 兼容变量继续视为 runtime instruction source。

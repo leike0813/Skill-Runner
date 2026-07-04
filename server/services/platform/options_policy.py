@@ -10,6 +10,10 @@ from server.runtime.session.timeout import (
     resolve_interactive_reply_timeout,
 )
 from server.services.platform.runtime_env_options import validate_runtime_env
+from server.services.platform.runtime_preamble_options import (
+    PREAMBLE_PROMPT_KEY,
+    normalize_runtime_preamble_option,
+)
 
 HARD_TIMEOUT_SECONDS_KEY = "hard_timeout_seconds"
 COLLECT_SKILL_RUN_FEEDBACK_KEY = "collect_skill_run_feedback"
@@ -39,6 +43,7 @@ class OptionsPolicy:
         self._validate_workspace(normalized)
         self._validate_env(normalized)
         self._validate_collect_skill_run_feedback(normalized)
+        self._validate_preamble_prompt(normalized)
         timeout_resolution = resolve_interactive_reply_timeout(
             normalized,
             default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
@@ -160,6 +165,13 @@ class OptionsPolicy:
             return
         raise ValueError(
             f"runtime_options.{COLLECT_SKILL_RUN_FEEDBACK_KEY} must be a boolean"
+        )
+
+    def _validate_preamble_prompt(self, runtime_options: Dict[str, Any]) -> None:
+        if PREAMBLE_PROMPT_KEY not in runtime_options:
+            return
+        runtime_options[PREAMBLE_PROMPT_KEY] = normalize_runtime_preamble_option(
+            runtime_options.get(PREAMBLE_PROMPT_KEY)
         )
 
 

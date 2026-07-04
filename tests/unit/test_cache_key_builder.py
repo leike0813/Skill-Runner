@@ -150,6 +150,36 @@ def test_cache_key_changes_with_workspace_input_token(tmp_path):
     assert key1 != key2
 
 
+def test_cache_key_changes_with_preamble_prompt_hash(tmp_path):
+    skill_dir = tmp_path / "skill"
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("v1")
+    (assets_dir / "runner.json").write_text(json.dumps({"id": "demo"}))
+    skill = SkillManifest(id="demo", path=skill_dir, schemas={})
+
+    skill_fp = compute_skill_fingerprint(skill, "qwen")
+    key1 = compute_cache_key(
+        skill_id="demo",
+        engine="qwen",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        preamble_prompt_hash="a" * 64,
+    )
+    key2 = compute_cache_key(
+        skill_id="demo",
+        engine="qwen",
+        skill_fingerprint=skill_fp,
+        parameter={"a": 1},
+        engine_options={"model": "x"},
+        input_manifest_hash="h",
+        preamble_prompt_hash="b" * 64,
+    )
+    assert key1 != key2
+
+
 def test_cache_key_changes_only_when_skill_run_feedback_enabled():
     base_key = compute_cache_key(
         skill_id="demo",

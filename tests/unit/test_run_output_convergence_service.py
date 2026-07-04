@@ -38,6 +38,7 @@ class _FakeRepairAdapter:
     def __init__(self, rerun_outputs: list[str]) -> None:
         self._rerun_outputs = list(rerun_outputs)
         self.repair_run_count = 0
+        self.repair_prompts: list[str] = []
 
     async def run(self, skill, input_data, run_dir, options, live_runtime_emitter=None):
         _ = skill
@@ -46,6 +47,7 @@ class _FakeRepairAdapter:
         _ = live_runtime_emitter
         assert options.get("__repair_round_index", 0) >= 1
         self.repair_run_count += 1
+        self.repair_prompts.append(str(options.get("__prompt_override") or ""))
         raw_stdout = self._rerun_outputs.pop(0)
         return EngineRunResult(
             exit_code=0,
@@ -192,7 +194,12 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     )
     audit_service = RunAuditService()
     interaction_service = RunInteractionLifecycleService()
-    initial_result = EngineRunResult(exit_code=0, raw_stdout="not-json", raw_stderr="", artifacts_created=[])
+    initial_result = EngineRunResult(
+        exit_code=0,
+        raw_stdout="INVALID_PREVIOUS_OUTPUT_MARKER",
+        raw_stderr="",
+        artifacts_created=[],
+    )
 
     result = await run_output_convergence_service.converge(
         adapter=adapter,
@@ -214,7 +221,10 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
         attempt_number=1,
         options=_convergence_options(layout),
         initial_result=initial_result,
-        initial_runtime_parse_result=adapter.parse_runtime_stream(stdout_raw=b"not-json", stderr_raw=b""),
+        initial_runtime_parse_result=adapter.parse_runtime_stream(
+            stdout_raw=b"INVALID_PREVIOUS_OUTPUT_MARKER",
+            stderr_raw=b"",
+        ),
         auth_detection_result=_auth_result(),
         auth_detection_high=False,
         resolve_structured_output_candidate=resolve_structured_output_candidate,
@@ -230,6 +240,16 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     assert result.success_source == "done_signal_payload"
     assert result.branch_resolved == "final"
     assert adapter.repair_run_count == 1
+    assert len(adapter.repair_prompts) == 1
+    repair_prompt = adapter.repair_prompts[0]
+    assert "Previous candidate" not in repair_prompt
+    assert "INVALID_PREVIOUS_OUTPUT_MARKER" not in repair_prompt
+    assert "Validation errors:" in repair_prompt
+    assert "Output JSON missing or unreadable" in repair_prompt
+    assert "Return exactly one final JSON object with `__SKILL_DONE__ = true`." in repair_prompt
+    assert "Do not output explanations." in repair_prompt
+    assert "Do not output Markdown fences." in repair_prompt
+    assert "Target output contract details:" in repair_prompt
     repair_rows = [
         json.loads(line)
         for line in (layout.audit_dir / "output_repair.1.jsonl").read_text(encoding="utf-8").splitlines()
@@ -243,6 +263,8 @@ async def test_convergence_repairs_auto_attempt_with_fenced_json(tmp_path: Path)
     assert repair_rows[0]["deterministic_repair_applied"] is True
     assert repair_rows[0]["deterministic_repair_succeeded"] is True
     assert repair_rows[0]["schema_valid"] is True
+    assert "Previous candidate" not in repair_rows[0]["repair_prompt_or_summary"]
+    assert "INVALID_PREVIOUS_OUTPUT_MARKER" not in repair_rows[0]["repair_prompt_or_summary"]
     superseded = next(row for row in orchestrator_rows if row["type"] == "assistant.message.superseded")
     assert superseded["data"]["message_id"].startswith("m_1_")
     assert superseded["data"]["message_family_id"] == superseded["data"]["message_id"]
@@ -348,6 +370,13 @@ async def test_convergence_repairs_interactive_attempt_to_pending_branch(tmp_pat
     assert result.pending_interaction_candidate is not None
     assert result.pending_interaction_candidate["prompt"] == "Need your choice"
     assert result.pending_interaction_candidate["interaction_id"] == 1
+    assert len(adapter.repair_prompts) == 1
+    repair_prompt = adapter.repair_prompts[0]
+    assert "Previous candidate" not in repair_prompt
+    assert "<ASK_USER_YAML>legacy</ASK_USER_YAML>" not in repair_prompt
+    assert "For interactive mode, return exactly one JSON object" in repair_prompt
+    assert "Validation errors:" in repair_prompt
+    assert "Target output contract details:" in repair_prompt
 
 
 @pytest.mark.asyncio

@@ -240,7 +240,9 @@ parser/materialization diagnostics。
 
 首个 attempt（`attempt=1`）会在该 JSON 对象内追加：
 
-- `rendered_prompt_first_attempt`: 首次实际调用引擎时的最终 assembled skill prompt 文本（含 `__prompt_override` 覆盖结果），不再包含旧的全局 first-attempt prefix。
+- `rendered_prompt_first_attempt`: 首次实际调用引擎时的最终 assembled skill prompt 文本（含内部 `__prompt_override` 覆盖结果；若本 run 声明了 `runtime_options.preamble_prompt`，则包含已包裹的首次 preamble 区块），不再包含旧的全局 first-attempt prefix。
+
+`runtime_options.preamble_prompt` 的 raw value 不写入 request record、input manifest、audit snapshot 或 bundle；这些持久化投影只保留 redacted descriptor。若需要执行首个 attempt，runtime 从 request-scoped secret vault 恢复 raw preamble。
 
 若该文件缺失、内容不是 JSON 对象，或回写失败，则降级写入：
 

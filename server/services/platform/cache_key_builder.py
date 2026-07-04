@@ -136,11 +136,12 @@ def compute_cache_key(
     skill_package_hash: str = "",
     temp_skill_package_hash: str = "",
     workspace_input_token: str = "",
+    preamble_prompt_hash: str = "",
     collect_skill_run_feedback: bool = False,
 ) -> str:
     package_hash = skill_package_hash or skill_fingerprint
     payload = {
-        "cache_key_version": 2,
+        "cache_key_version": 3,
         "skill_id": skill_id,
         "engine": engine,
         "skill_package_hash": package_hash,
@@ -149,6 +150,7 @@ def compute_cache_key(
         "input_manifest_hash": input_manifest_hash,
         "inline_input_hash": inline_input_hash,
         "workspace_input_token": workspace_input_token or "",
+        "preamble_prompt_hash": preamble_prompt_hash or "",
     }
     if collect_skill_run_feedback:
         payload["skill_run_feedback"] = "collect_v1"

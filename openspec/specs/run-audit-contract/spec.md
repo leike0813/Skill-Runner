@@ -244,6 +244,15 @@ New request-bound runs MUST emit canonical runtime files under their run-owned n
 - **THEN** attempt audit files are written under `.audit/<namespace>/`
 - **AND** `.audit/stdout.<attempt>.log`, `.audit/stderr.<attempt>.log`, `.audit/io_chunks.<attempt>.jsonl`, `.audit/meta.<attempt>.json`, `.audit/service.<attempt>.log`, `.audit/events.<attempt>.jsonl`, and `.audit/fcmp_events.<attempt>.jsonl` at the root are not written as current truth for that run.
 
+### Requirement: Runtime preamble MUST be redacted from persisted audit input
+
+Run audit inputs SHALL not persist raw `preamble_prompt` text.
+
+#### Scenario: Request snapshot written
+- WHEN request payload is written to request store, staging request JSON, or run input snapshot
+- THEN `runtime_options.preamble_prompt` and `effective_runtime_options.preamble_prompt` MUST be redacted descriptors
+- AND raw preamble text MUST NOT appear in those artifacts
+
 ### Requirement: Live protocol mirrors MUST use the request-owned audit directory
 
 Live FCMP, RASP, and chat replay mirror writers MUST write to the request-owned audit directory when one is supplied.

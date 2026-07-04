@@ -4,15 +4,255 @@
   "title": "Kilo Code Config",
   "type": "object",
   "additionalProperties": true,
+  "$defs": {
+    "permissionAction": {
+      "type": ["string", "null"],
+      "enum": ["ask", "allow", "deny", null]
+    },
+    "permissionRule": {
+      "anyOf": [
+        { "$ref": "#/$defs/permissionAction" },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/permissionAction" }
+        }
+      ]
+    },
+    "permission": {
+      "anyOf": [
+        { "$ref": "#/$defs/permissionAction" },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/permissionRule" }
+        }
+      ]
+    },
+    "providerModel": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "family": { "type": "string" },
+        "prompt": { "type": "string" },
+        "isFree": { "type": "boolean" },
+        "release_date": { "type": "string" },
+        "attachment": { "type": "boolean" },
+        "reasoning": { "type": ["boolean", "null"] },
+        "temperature": { "type": "boolean" },
+        "tool_call": { "type": "boolean" },
+        "interleaved": {
+          "anyOf": [
+            { "const": true },
+            {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": ["reasoning_content", "reasoning_details"]
+                }
+              },
+              "required": ["field"],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "provider": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "api": { "type": "string" },
+        "name": { "type": "string" },
+        "env": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "id": { "type": "string" },
+        "npm": { "type": "string" },
+        "whitelist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "blacklist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "apiKey": { "type": "string" },
+            "baseURL": { "type": "string" },
+            "enterpriseUrl": { "type": "string" },
+            "setCacheKey": { "type": "boolean" },
+            "timeout": {
+              "anyOf": [
+                { "type": "integer", "minimum": 1 },
+                { "const": false }
+              ]
+            },
+            "headerTimeout": {
+              "anyOf": [
+                { "type": "integer", "minimum": 1 },
+                { "const": false }
+              ]
+            },
+            "chunkTimeout": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "models": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/providerModel" }
+        }
+      }
+    },
+    "mcpServer": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": { "type": "string", "enum": ["local", "remote"] },
+            "command": { "type": "string" },
+            "url": { "type": "string" },
+            "environment": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "oauth": { "type": "boolean" },
+            "enabled": { "type": "boolean" },
+            "timeout": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    }
+  },
   "properties": {
     "$schema": { "type": "string" },
-    "model": { "type": "string", "minLength": 1 },
-    "small_model": { "type": "string", "minLength": 1 },
+    "shell": { "type": "string" },
+    "logLevel": { "type": "string", "enum": ["DEBUG", "INFO", "WARN", "ERROR"] },
+    "model": { "type": ["string", "null"], "minLength": 1 },
+    "small_model": { "type": ["string", "null"], "minLength": 1 },
+    "subagent_model": { "type": ["string", "null"], "minLength": 1 },
+    "subagent_variant": { "type": ["string", "null"] },
+    "subagent_variant_overrides": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "default_agent": { "type": ["string", "null"] },
+    "provider": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/provider" }
+    },
     "mcp": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/mcpServer" }
+    },
+    "permission": { "$ref": "#/$defs/permission" },
+    "skills": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "instructions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "disabled_providers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "enabled_providers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "remote_control": { "type": "boolean" },
+    "auto_collapse_reasoning": { "type": "boolean" },
+    "indexing": {
       "type": "object",
       "additionalProperties": true
     },
-    "provider": {
+    "console": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "terminal_command_display": {
+      "type": "string",
+      "enum": ["expanded", "collapsed"]
+    },
+    "code_edit_display": {
+      "type": "string",
+      "enum": ["expanded", "collapsed"]
+    },
+    "hide_prompt_training_models": { "type": "boolean" },
+    "formatter": {
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "object", "additionalProperties": true }
+      ]
+    },
+    "lsp": {
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "object", "additionalProperties": true }
+      ]
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "enterprise": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "commit_message": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "tool_output": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "compaction": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "experimental": {
       "type": "object",
       "additionalProperties": true
     }

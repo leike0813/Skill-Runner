@@ -449,6 +449,24 @@ def test_ui_shell_manager_opencode_session_reports_non_sandbox(
     assert payload["permission"] == "deny"
 
 
+def test_ui_shell_manager_kilo_session_writes_kilo_project_config(
+    tmp_path: Path,
+    patch_fake_popen,
+):
+    manager = _new_manager(tmp_path)
+    started = manager.start_session("kilo")
+    session_dir = Path(started["session_dir"])
+    popen_args, _ = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    assert Path(command[0]).as_posix() == "/usr/bin/ttyd"
+    assert command[command.index("--") + 1] == sys.executable
+    assert started["sandbox_status"] == "unsupported"
+    assert "without sandbox" in started["sandbox_message"]
+    project_config_path = session_dir / ".kilo" / "kilo.jsonc"
+    payload = json.loads(project_config_path.read_text(encoding="utf-8"))
+    assert payload["permission"] == "deny"
+
+
 def test_ui_shell_manager_respects_auth_gate_conflict(tmp_path: Path, patch_fake_popen):
     gate = EngineInteractionGate()
     gate.acquire("auth_flow", session_id="auth-1", engine="codex")

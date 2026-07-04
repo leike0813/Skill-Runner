@@ -65,6 +65,11 @@ from ..services.platform.runtime_env_options import (
     runtime_env_secret_service,
     sanitize_runtime_options_env,
 )
+from ..services.platform.runtime_preamble_options import (
+    preamble_prompt_hash_from_options,
+    runtime_preamble_secret_service,
+    sanitize_runtime_options_preamble,
+)
 from ..services.orchestration.run_store import run_store
 from ..services.orchestration.run_cleanup_manager import run_cleanup_manager
 from ..services.orchestration.run_audit_contract_service import run_audit_contract_service
@@ -119,15 +124,27 @@ async def _cleanup_unpersisted_runtime_env_secret(request_id: str | None) -> Non
             runtime_env_secret_service.delete(request_id=request_id)
 
 
-def _sanitize_and_collect_runtime_env(
+async def _cleanup_unpersisted_runtime_preamble_secret(request_id: str | None) -> None:
+    if not request_id:
+        return
+    with contextlib.suppress(OSError, RuntimeError, ValueError, TypeError, LookupError):
+        existing = await maybe_await(run_store.get_request(request_id))
+        if existing is None:
+            runtime_preamble_secret_service.delete(request_id=request_id)
+
+
+def _sanitize_and_collect_runtime_secrets(
     *,
     runtime_options: dict[str, Any],
     effective_runtime_options: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, str] | None]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str] | None, str | None]:
     sanitized_runtime, raw_runtime_env = sanitize_runtime_options_env(runtime_options)
     sanitized_effective, raw_effective_env = sanitize_runtime_options_env(effective_runtime_options)
+    sanitized_runtime, raw_runtime_preamble = sanitize_runtime_options_preamble(sanitized_runtime)
+    sanitized_effective, raw_effective_preamble = sanitize_runtime_options_preamble(sanitized_effective)
     raw_env = raw_effective_env or raw_runtime_env
-    return sanitized_runtime, sanitized_effective, raw_env
+    raw_preamble = raw_effective_preamble or raw_runtime_preamble
+    return sanitized_runtime, sanitized_effective, raw_env, raw_preamble
 
 
 async def _resolve_workspace_reuse(runtime_options: dict[str, Any]) -> dict[str, Any] | None:
@@ -381,12 +398,17 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
             )
 
         request_id = str(uuid.uuid4())
-        runtime_opts, effective_runtime_opts, raw_runtime_env = _sanitize_and_collect_runtime_env(
+        runtime_opts, effective_runtime_opts, raw_runtime_env, raw_runtime_preamble = _sanitize_and_collect_runtime_secrets(
             runtime_options=runtime_opts,
             effective_runtime_options=effective_runtime_opts,
         )
         if raw_runtime_env:
             runtime_env_secret_service.save(request_id=request_id, env=raw_runtime_env)
+        if raw_runtime_preamble:
+            runtime_preamble_secret_service.save(
+                request_id=request_id,
+                preamble_prompt=raw_runtime_preamble,
+            )
         inline_input = request.input if isinstance(request.input, dict) else {}
         inline_input_hash = compute_inline_input_hash(inline_input)
         if skill is not None:
@@ -498,6 +520,7 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
                 if workspace_reuse is not None
                 else ""
             ),
+            preamble_prompt_hash=preamble_prompt_hash_from_options(effective_runtime_opts),
             collect_skill_run_feedback=bool(
                 effective_runtime_opts.get("collect_skill_run_feedback") is True
             ),
@@ -710,21 +733,25 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
+        await _cleanup_unpersisted_runtime_preamble_secret(request_id)
         raise HTTPException(status_code=e.status_code, detail=str(e))
     except ValueError as e:
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
+        await _cleanup_unpersisted_runtime_preamble_secret(request_id)
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
+        await _cleanup_unpersisted_runtime_preamble_secret(request_id)
         raise
     except Exception as e:
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
         await _cleanup_unpersisted_runtime_env_secret(request_id)
+        await _cleanup_unpersisted_runtime_preamble_secret(request_id)
         # Router boundary mapping: preserve HTTP 500 contract for unclassified errors.
         logger.exception(
             "jobs.create_run failed; returning HTTP 500",
@@ -1292,9 +1319,15 @@ async def upload_file(
                     runtime_options=request_runtime_options,
                 )
             )
-            effective_runtime_options, _raw_env_unused = sanitize_runtime_options_env(
+            effective_runtime_options, _raw_env_unused = sanitize_runtime_options_env(effective_runtime_options)
+            effective_runtime_options, raw_preamble_from_defaults = sanitize_runtime_options_preamble(
                 effective_runtime_options
             )
+            if raw_preamble_from_defaults:
+                runtime_preamble_secret_service.save(
+                    request_id=request_id,
+                    preamble_prompt=raw_preamble_from_defaults,
+                )
             workspace_reuse = await _resolve_workspace_reuse(effective_runtime_options)
             file_bindings = get_workspace_file_bindings(effective_runtime_options)
             if file_bindings and workspace_reuse is None:
@@ -1400,6 +1433,7 @@ async def upload_file(
                         if workspace_reuse is not None
                         else ""
                     ),
+                    preamble_prompt_hash=preamble_prompt_hash_from_options(effective_runtime_options),
                     collect_skill_run_feedback=bool(
                         effective_runtime_options.get("collect_skill_run_feedback") is True
                     ),

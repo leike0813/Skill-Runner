@@ -67,8 +67,8 @@
     "auth_hint_strategy": "none",
     "runtime_override_strategy": "none",
     "config_assets": {
-      "default_path": null,
-      "enforced_path": null,
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
       "settings_schema_path": "../schemas/kilo_config_schema.json",
       "target_relpath": ".kilo/kilo.jsonc"
     }

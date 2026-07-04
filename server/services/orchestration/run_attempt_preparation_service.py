@@ -16,6 +16,10 @@ from server.services.orchestration.run_workspace_layout import (
 )
 from server.services.orchestration.run_skill_materialization_service import run_folder_bootstrapper
 from server.services.platform.runtime_env_options import runtime_env_secret_service
+from server.services.platform.runtime_preamble_options import (
+    INTERNAL_PREAMBLE_PROMPT_KEY,
+    runtime_preamble_secret_service,
+)
 from server.services.platform.schema_validator import schema_validator
 from server.services.skill.skill_asset_resolver import resolve_schema_asset
 from server.services.skill.skill_registry import skill_registry
@@ -27,6 +31,16 @@ from server.config import config
 from pydantic import ValidationError
 
 WORKSPACE_LAYOUT_UNAVAILABLE = "Run workspace layout is unavailable"
+_PREAMBLE_SKIP_OPTION_KEYS = {
+    "__resume_ticket_id",
+    "__resume_session_handle",
+    "__resume_cause",
+    "__prompt_override",
+    "__repair_round_index",
+    "__interactive_reply_payload",
+    "__interactive_reply_interaction_id",
+    "__attempt_number_override",
+}
 
 if TYPE_CHECKING:
     from server.services.orchestration.run_job_lifecycle_service import RunJobRequest
@@ -81,6 +95,12 @@ def resolve_session_timeout_seconds(options: dict[str, Any]) -> int:
         options,
         default=int(config.SYSTEM.SESSION_TIMEOUT_SEC),
     ).value
+
+
+def should_inject_runtime_preamble(*, attempt_number: int, options: dict[str, Any]) -> bool:
+    if attempt_number != 1:
+        return False
+    return not any(key in options for key in _PREAMBLE_SKIP_OPTION_KEYS)
 
 
 async def resolve_attempt_number(
@@ -238,6 +258,16 @@ class RunAttemptPreparationService:
             )
             if runtime_env:
                 run_options["__runtime_env"] = runtime_env
+            if should_inject_runtime_preamble(
+                attempt_number=attempt_number,
+                options=run_options,
+            ):
+                runtime_preamble = runtime_preamble_secret_service.load_for_runtime_options(
+                    request_id=request_id,
+                    runtime_options=runtime_options,
+                )
+                if runtime_preamble:
+                    run_options[INTERNAL_PREAMBLE_PROMPT_KEY] = runtime_preamble
         layout = require_layout_from_record(request_record or {})
         run_options["__audit_dir"] = str(layout.audit_dir)
         run_options["__input_manifest_path"] = str(layout.input_manifest_path)
