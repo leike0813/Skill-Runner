@@ -134,6 +134,7 @@
     "todoread": "allow",
     "webfetch": "allow",
     "websearch": "allow",
-    "external_directory": "deny"
+    "external_directory": "deny",
+    "question": "deny"
   }
 }
