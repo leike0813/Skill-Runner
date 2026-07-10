@@ -18,10 +18,12 @@ def test_load_adapter_profile_success() -> None:
     assert profile.prompt_builder.skill_invoke_line_template == "${{ skill.id }}"
     assert profile.prompt_builder.body_prefix_extra_block == ""
     assert profile.prompt_builder.body_suffix_extra_block == ""
+    assert profile.provider_contract.selection_required is False
     assert profile.session_codec.strategy == "first_json_line"
     assert profile.command_defaults.start[:2] == ("--skip-git-repo-check", "--json")
     assert profile.ui_shell.command_id == "codex-tui"
     assert profile.ui_shell.label == "Codex TUI"
+    assert profile.ui_shell.enabled is True
     assert profile.cli_management.package == "@openai/codex"
     assert "codex" in profile.cli_management.binary_candidates
     assert profile.command_features.inject_output_schema_cli is True

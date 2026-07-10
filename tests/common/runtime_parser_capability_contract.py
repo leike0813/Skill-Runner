@@ -26,6 +26,7 @@ def load_runtime_parser_capability_contract() -> Dict[str, Any]:
         raise RuntimeError("Parser capability contract root must be a mapping")
     _as_mapping(payload_obj.get("common"), field="common")
     _as_mapping(payload_obj.get("engines"), field="engines")
+    _as_mapping(payload_obj.get("planned_engines"), field="planned_engines")
     return payload_obj
 
 

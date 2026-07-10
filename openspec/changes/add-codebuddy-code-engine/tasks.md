@@ -1,7 +1,7 @@
 ## 1. 规格、合同与计划工件
 
 - [x] CB-1.1 创建 umbrella change、delta specs 与详细代码级计划；验收：工件职责、规范优先级、路由/数据流/接口/失败/测试矩阵完整。详见 [CB-1.1](../../../artifacts/codebuddy_engine_integration_plan_2026-07-10.md#cb-11-umbrella-change-与详细计划)。
-- [ ] CB-1.2 更新 profile、skill、MCP、parser capability 机器合同与根 AGENTS.md 导航；验收：schema/profile 合同测试和 strict OpenSpec 验证通过。详见 [CB-1.2](../../../artifacts/codebuddy_engine_integration_plan_2026-07-10.md#cb-12-机器合同与导航)。
+- [x] CB-1.2 更新 profile、skill、MCP、parser capability 机器合同与根 AGENTS.md 导航；验收：schema/profile 合同测试和 strict OpenSpec 验证通过。详见 [CB-1.2](../../../artifacts/codebuddy_engine_integration_plan_2026-07-10.md#cb-12-机器合同与导航)。
 
 ## 2. 双 Provider 鉴权、Secret Vault 与模型目录
 

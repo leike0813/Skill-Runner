@@ -414,7 +414,7 @@ settings.json 固定值：
 
 - profile schema 增 codebuddy、selection_required、ui_shell.enabled。
 - skill/MCP schema 墳 codebuddy。
-- parser capability invariants 增 CodeBuddy row。
+- parser capability invariants 增 CodeBuddy 预声明 row；parser/profile 落地并激活后再转入活动 engine row。
 - profile loader 对旧 profile 提供 selection_required=false、ui_shell.enabled=true 默认。
 - 根 AGENTS.md 的 schema/invariants 导航指向 server/contracts 当前路径。
 

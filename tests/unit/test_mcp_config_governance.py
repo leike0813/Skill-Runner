@@ -99,6 +99,28 @@ def test_mcp_registry_schema_accepts_stdio_server() -> None:
     jsonschema.validate(instance=payload, schema=_registry_schema())
 
 
+def test_engine_schemas_accept_codebuddy() -> None:
+    jsonschema.validate(
+        instance={
+            "version": 1,
+            "servers": {
+                "demo": {
+                    "activation": "declared",
+                    "engines": ["codebuddy"],
+                    "scope": "run-local",
+                    "transport": "stdio",
+                    "command": "python",
+                }
+            },
+        },
+        schema=_registry_schema(),
+    )
+    jsonschema.validate(
+        instance=_minimal_runner(engines=["codebuddy"], unsupported_engines=["codebuddy"]),
+        schema=_manifest_schema(),
+    )
+
+
 def test_mcp_registry_schema_accepts_structured_auth_refs() -> None:
     payload = {
         "version": 1,

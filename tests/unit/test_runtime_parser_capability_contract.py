@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+from server.config_registry import keys
 from tests.common.runtime_parser_capability_contract import (
     load_runtime_parser_capability_contract,
     parser_capability_contract_path,
@@ -47,7 +48,27 @@ def test_runtime_parser_capability_contract_is_loadable() -> None:
 
 def test_runtime_parser_capability_contract_declares_all_current_engines() -> None:
     payload = load_runtime_parser_capability_contract()
-    assert set(payload["engines"]) == {"codex", "claude", "opencode", "qwen", "kilo"}
+    assert set(payload["engines"]) == set(keys.ENGINE_KEYS)
+
+
+def test_runtime_parser_capability_contract_declares_codebuddy_before_activation() -> None:
+    payload = load_runtime_parser_capability_contract()
+
+    assert "codebuddy" not in keys.ENGINE_KEYS
+    assert payload["planned_engines"]["codebuddy"] == {
+        "semantic_turn_markers": {
+            "start": True,
+            "complete": True,
+            "failed": True,
+        },
+        "generic_error_governance": False,
+        "auth_signal_snapshot": True,
+        "structured_payload_extraction": False,
+        "success_result_structured_output": True,
+        "process_event_extraction": True,
+        "run_handle_extraction": True,
+        "parser_confidence_reporting": True,
+    }
 
 
 def test_runtime_parser_capability_contract_matches_current_engine_sources() -> None:

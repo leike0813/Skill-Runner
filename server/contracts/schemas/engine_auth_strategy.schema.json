@@ -21,7 +21,8 @@
         "opencode",
         "claude",
         "qwen",
-        "kilo"
+        "kilo",
+        "codebuddy"
       ],
       "properties": {
         "codex": {
@@ -37,6 +38,9 @@
           "$ref": "#/$defs/provider_aware_engine"
         },
         "kilo": {
+          "$ref": "#/$defs/provider_aware_engine"
+        },
+        "codebuddy": {
           "$ref": "#/$defs/provider_aware_engine"
         }
       }

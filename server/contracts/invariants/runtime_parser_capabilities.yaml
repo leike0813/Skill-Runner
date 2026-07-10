@@ -80,6 +80,7 @@ engines:
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
+planned_engines:
   codebuddy:
     semantic_turn_markers:
       start: true

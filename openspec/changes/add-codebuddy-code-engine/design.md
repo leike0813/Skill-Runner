@@ -65,7 +65,7 @@ The first valid system.init supplies the session handle; repeated init on resume
 
 ### D9. Central activation occurs last
 
-Machine schemas may recognize CodeBuddy early. Active engine keys, adapter, install/upgrade, auth bootstrap, model lifecycle, API and UI are enabled together only after auth/catalog/adapter work is usable.
+Machine schemas may recognize CodeBuddy early. Its parser capability remains in the contract's pre-activation declaration until the profile and parser exist; only then may it move into the active parser set. Active engine keys, adapter, install/upgrade, auth bootstrap, model lifecycle, API and UI are enabled together only after auth/catalog/adapter work is usable.
 
 ### D10. Cache remains caller controlled
 

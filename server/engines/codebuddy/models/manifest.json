@@ -1,0 +1,9 @@
+{
+  "engine": "codebuddy",
+  "snapshots": [
+    {
+      "version": "0.0.0",
+      "file": "models_0.0.0.json"
+    }
+  ]
+}
