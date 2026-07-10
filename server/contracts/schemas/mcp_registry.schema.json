@@ -24,7 +24,7 @@
   "$defs": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "claude", "opencode", "qwen", "kilo"]
+      "enum": ["codex", "claude", "opencode", "qwen", "kilo", "codebuddy"]
     },
     "server": {
       "type": "object",

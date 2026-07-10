@@ -22,7 +22,7 @@
   "properties": {
     "engine": {
       "type": "string",
-      "enum": ["codex", "opencode", "claude", "qwen", "kilo"]
+      "enum": ["codex", "opencode", "claude", "qwen", "kilo", "codebuddy"]
     },
     "provider_contract": {
       "type": "object",
@@ -30,7 +30,8 @@
       "required": ["multi_provider", "canonical_provider_id"],
       "properties": {
         "multi_provider": { "type": "boolean" },
-        "canonical_provider_id": { "type": ["string", "null"] }
+        "canonical_provider_id": { "type": ["string", "null"] },
+        "selection_required": { "type": "boolean", "default": false }
       },
       "allOf": [
         {
@@ -245,6 +246,7 @@
         "config_assets"
       ],
       "properties": {
+        "enabled": { "type": "boolean", "default": true },
         "command_id": { "type": "string", "minLength": 1 },
         "label": { "type": "string", "minLength": 1 },
         "trust_bootstrap_parent": { "type": "boolean" },

@@ -95,6 +95,9 @@
         },
         "kilo": {
           "type": "string"
+        },
+        "codebuddy": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -148,7 +151,8 @@
         "claude",
         "opencode",
         "qwen",
-        "kilo"
+        "kilo",
+        "codebuddy"
       ]
     }
   }

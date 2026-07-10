@@ -1,0 +1,31 @@
+in_conversation:
+  transport: oauth_proxy
+providers:
+  codebuddy-cn:
+    transports:
+      oauth_proxy:
+        methods:
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+        session_behavior:
+          input_required: false
+          polling_start: immediate
+    in_conversation:
+      methods:
+        - auth_code_or_url
+  codebuddy-global:
+    transports:
+      oauth_proxy:
+        methods:
+          - auth_code_or_url
+        driver:
+          start_method: auth
+          execution_mode: protocol_proxy
+        session_behavior:
+          input_required: false
+          polling_start: immediate
+    in_conversation:
+      methods:
+        - auth_code_or_url

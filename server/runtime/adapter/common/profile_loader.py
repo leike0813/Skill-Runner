@@ -103,6 +103,7 @@ class ModelCatalogProfile:
 class ProviderContractProfile:
     multi_provider: bool
     canonical_provider_id: str | None
+    selection_required: bool
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,7 @@ class UiShellConfigAssetsProfile:
 
 @dataclass(frozen=True)
 class UiShellProfile:
+    enabled: bool
     command_id: str
     label: str
     trust_bootstrap_parent: bool
@@ -542,6 +544,7 @@ def _parse_adapter_profile(
                 if provider_contract_raw.get("canonical_provider_id") is not None
                 else None
             ),
+            selection_required=bool(provider_contract_raw.get("selection_required", False)),
         ),
         prompt_builder=PromptBuilderProfile(
             skill_invoke_line_template=str(prompt_raw["skill_invoke_line_template"]),
@@ -646,6 +649,7 @@ def _parse_adapter_profile(
             ),
         ),
         ui_shell=UiShellProfile(
+            enabled=bool(ui_shell_raw.get("enabled", True)),
             command_id=str(ui_shell_raw["command_id"]),
             label=str(ui_shell_raw["label"]),
             trust_bootstrap_parent=bool(ui_shell_raw["trust_bootstrap_parent"]),
