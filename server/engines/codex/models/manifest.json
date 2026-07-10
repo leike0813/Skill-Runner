@@ -28,6 +28,10 @@
     {
       "version": "0.139.0",
       "file": "models_0.139.0.json"
+    },
+    {
+      "version": "0.144.1",
+      "file": "models_0.144.1.json"
     }
   ]
 }
