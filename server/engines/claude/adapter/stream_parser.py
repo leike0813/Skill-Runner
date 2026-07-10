@@ -4,6 +4,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, cast
 
+from server.engines.common.content_block_mapper import map_content_block
 from server.runtime.adapter.common.live_stream_parser_common import (
     NdjsonLiveStreamParserSession,
     parse_repaired_ndjson_dict,
@@ -171,7 +172,10 @@ class ClaudeStreamParser:
         payload_type: str,
         block: dict[str, Any],
     ) -> RuntimeProcessEvent | None:
-        text = block.get("thinking")
+        shared = map_content_block(block, raw_ref=row_raw_ref, tool_use_by_id={})
+        text = shared.get("text") if isinstance(shared, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            text = block.get("thinking")
         if not isinstance(text, str) or not text.strip():
             text = block.get("text")
         if not isinstance(text, str) or not text.strip():
@@ -198,6 +202,8 @@ class ClaudeStreamParser:
         block: dict[str, Any],
         tool_use_by_id: dict[str, dict[str, Any]],
     ) -> RuntimeProcessEvent | None:
+        # The shared mapper owns neutral block classification; Claude retains its richer metadata.
+        map_content_block(block, raw_ref=row_raw_ref, tool_use_by_id=tool_use_by_id)
         name = str(block.get("name") or "tool_use")
         tool_input = block.get("input")
         process_type = cls._normalize_process_type(tool_name=name)
@@ -241,6 +247,7 @@ class ClaudeStreamParser:
         tool_result: Any | None,
         tool_use_by_id: dict[str, dict[str, Any]],
     ) -> RuntimeProcessEvent:
+        map_content_block(block, raw_ref=row_raw_ref, tool_use_by_id=tool_use_by_id)
         tool_use_id = str(block.get("tool_use_id") or "").strip()
         tool_meta = tool_use_by_id.get(tool_use_id, {})
         tool_result_command_name: str | None = None

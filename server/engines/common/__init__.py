@@ -1,3 +1,1 @@
-from __future__ import annotations
-
-__all__ = ["openai_auth"]
+"""Shared engine-neutral adapter helpers."""

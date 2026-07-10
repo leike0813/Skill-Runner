@@ -69,7 +69,7 @@ AUTH_DETECTION_PROBE_THROTTLE_SECONDS = 1.5
 AUTH_DETECTION_STDOUT_WINDOW_BYTES = 64 * 1024
 AUTH_DETECTION_STDERR_WINDOW_BYTES = 16 * 1024
 RUNTIME_AUDIT_DRAIN_TIMEOUT_SECONDS = 0.2
-NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode", "qwen", "kilo"}
+NDJSON_INGRESS_SANITIZED_ENGINES = {"claude", "codex", "opencode", "qwen", "kilo", "codebuddy"}
 
 
 @dataclass
@@ -538,6 +538,17 @@ class EngineExecutionAdapter:
         options: dict[str, Any],
     ) -> None:
         _ = skill, run_dir, options
+
+    def resolve_process_failure_reason(
+        self,
+        *,
+        exit_code: int,
+        raw_stdout: str,
+        raw_stderr: str,
+    ) -> str | None:
+        """Optional engine-specific terminal contract consulted before live completion."""
+        _ = exit_code, raw_stdout, raw_stderr
+        return None
 
     def _apply_runtime_env_overlay(
         self,
@@ -1087,6 +1098,12 @@ class EngineExecutionAdapter:
             failure_reason = "AUTH_REQUIRED"
         elif timed_out:
             failure_reason = "TIMEOUT"
+        if failure_reason is None:
+            failure_reason = self.resolve_process_failure_reason(
+                exit_code=returncode,
+                raw_stdout=raw_stdout,
+                raw_stderr=raw_stderr,
+            )
         if live_runtime_emitter is not None:
             await live_runtime_emitter.on_process_exit(
                 exit_code=returncode,

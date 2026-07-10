@@ -7,6 +7,7 @@ from typing import Protocol
 
 from server.engines.kilo.models.catalog_service import kilo_model_catalog
 from server.engines.opencode.models.catalog_service import opencode_model_catalog
+from server.engines.codebuddy.models.catalog_service import codebuddy_model_catalog
 from server.services.engine_management.engine_catalog import normalize_engine_name
 
 
@@ -72,11 +73,37 @@ class _KiloCatalogHandler:
         return kilo_model_catalog.cache_path()
 
 
+@dataclass(frozen=True)
+class _CodeBuddyCatalogHandler:
+    def start(self) -> None:
+        # CodeBuddy refresh is credential-gated and intentionally has no eager probe.
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    async def refresh(self, *, reason: str) -> None:
+        await codebuddy_model_catalog.refresh(reason=reason)
+
+    def request_refresh_async(self, *, reason: str) -> asyncio.Task[None] | None:
+        try:
+            return asyncio.create_task(codebuddy_model_catalog.refresh(reason=reason))
+        except RuntimeError:
+            return None
+
+    def get_snapshot(self) -> dict[str, object]:
+        return codebuddy_model_catalog.get_snapshot()
+
+    def cache_path(self) -> Path:
+        return codebuddy_model_catalog.cache_path()
+
+
 class EngineModelCatalogLifecycle:
     def __init__(self) -> None:
         self._handlers: dict[str, RuntimeProbeCatalogHandler] = {
             "opencode": _OpencodeCatalogHandler(),
             "kilo": _KiloCatalogHandler(),
+            "codebuddy": _CodeBuddyCatalogHandler(),
         }
 
     def runtime_probe_engines(self) -> tuple[str, ...]:

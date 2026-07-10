@@ -45,6 +45,25 @@ def validate_runtime_and_model_options(
     runtime_options: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     runtime_opts = options_policy.validate_runtime_options(runtime_options)
+    normalized_engine = engine.strip().lower()
+    if normalized_engine == "codebuddy":
+        raw_env = runtime_opts.get("env")
+        if isinstance(raw_env, dict):
+            reserved = {
+                "CODEBUDDY_AUTH_TOKEN",
+                "CODEBUDDY_API_KEY",
+                "CODEBUDDY_INTERNET_ENVIRONMENT",
+                "CODEBUDDY_BASE_URL",
+                "CODEBUDDY_CONFIG_DIR",
+            }
+            forbidden = sorted(reserved.intersection(raw_env))
+            if forbidden:
+                raise ValueError(
+                    "CodeBuddy runtime_options.env may not override managed variable(s): "
+                    + ", ".join(forbidden)
+                )
+        if not provider_id:
+            raise ValueError("CodeBuddy engine_options.provider_id is required")
     engine_opts: dict[str, Any] = {}
     if model or provider_id or effort:
         normalized = model_registry.normalize_model_selection(

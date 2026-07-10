@@ -80,7 +80,6 @@ engines:
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
-planned_engines:
   codebuddy:
     semantic_turn_markers:
       start: true
@@ -88,8 +87,10 @@ planned_engines:
       failed: true
     generic_error_governance: false
     auth_signal_snapshot: true
-    structured_payload_extraction: false
+    structured_payload_extraction: true
     success_result_structured_output: true
     process_event_extraction: true
     run_handle_extraction: true
     parser_confidence_reporting: true
+planned_engines:
+  {}

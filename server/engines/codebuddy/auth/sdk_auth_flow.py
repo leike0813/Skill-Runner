@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 import os
 import queue
 import re
@@ -74,8 +75,19 @@ class CodeBuddySdkAuthFlow:
         popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
     ) -> None:
         self.credential_store = credential_store or codebuddy_credential_store
-        self.on_success = on_success
+        self.on_success = on_success or self._schedule_catalog_refresh
         self._popen_factory = popen_factory
+
+    @staticmethod
+    def _schedule_catalog_refresh(provider_id: str) -> None:
+        """Refresh only the provider that has just received a credential."""
+        from server.engines.codebuddy.models.catalog_service import codebuddy_model_catalog
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(codebuddy_model_catalog.refresh(provider_id=provider_id, reason="auth_success"))
 
     def start(
         self,

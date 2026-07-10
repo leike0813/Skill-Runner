@@ -361,9 +361,9 @@ def render_mcp_config(
     *,
     secret_resolver: SecretResolver | None = None,
 ) -> dict[str, Any]:
-    if not servers:
-        return {}
     root = _engine_mcp_root(engine)
+    if not servers:
+        return {root: {}} if engine == "codebuddy" else {}
     return {
         root: {
             server.definition.id: _render_server_payload(
@@ -379,7 +379,7 @@ def render_mcp_config(
 def _engine_mcp_root(engine: str) -> str:
     if engine == "codex":
         return "mcp_servers"
-    if engine in {"gemini", "qwen", "claude"}:
+    if engine in {"gemini", "qwen", "claude", "codebuddy"}:
         return "mcpServers"
     if engine == "opencode":
         return "mcp"
@@ -394,6 +394,8 @@ def _render_server_payload(
 ) -> dict[str, Any]:
     if definition.transport == "stdio":
         payload: dict[str, Any] = {"command": definition.command}
+        if engine == "codebuddy":
+            payload["type"] = "stdio"
         if definition.args:
             payload["args"] = list(definition.args)
         env_payload = _resolve_env_payload(definition, secret_resolver)
@@ -401,6 +403,8 @@ def _render_server_payload(
             payload["env"] = env_payload
         return payload
     payload = {"url": definition.url}
+    if engine == "codebuddy":
+        payload["type"] = definition.transport
     header_payload = _resolve_header_payload(definition, secret_resolver)
     if header_payload:
         payload["http_headers" if engine == "codex" else "headers"] = header_payload

@@ -40,8 +40,8 @@
     "skill_defaults_path": null
   },
   "model_catalog": {
-    "mode": "manifest",
-    "manifest_path": "../models/manifest.json",
+    "mode": "runtime_probe",
+    "manifest_path": null,
     "models_root": "../models",
     "seed_path": null
   },
@@ -50,7 +50,9 @@
     "resume": ["-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions"],
     "ui_shell": ["-p", "--output-format", "stream-json"]
   },
-  "command_features": {},
+  "command_features": {
+    "inject_output_schema_cli": true
+  },
   "structured_output": {
     "mode": "compat_translate",
     "cli_schema_strategy": "inline_schema_object",
@@ -98,6 +100,21 @@
     }
   },
   "parser_auth_patterns": {
-    "rules": []
+    "rules": [
+      {
+        "id": "codebuddy_reauth_required",
+        "enabled": true,
+        "priority": 900,
+        "match": {
+          "any": [
+            {
+              "field": "combined_text",
+              "op": "regex",
+              "value": "(?i)(401\\s+unauthorized|login required|not logged in|authentication.*(?:expired|failed)|token.*expired)"
+            }
+          ]
+        }
+      }
+    ]
   }
 }

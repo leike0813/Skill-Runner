@@ -51,11 +51,11 @@ def test_runtime_parser_capability_contract_declares_all_current_engines() -> No
     assert set(payload["engines"]) == set(keys.ENGINE_KEYS)
 
 
-def test_runtime_parser_capability_contract_declares_codebuddy_before_activation() -> None:
+def test_runtime_parser_capability_contract_declares_codebuddy_parser_after_implementation() -> None:
     payload = load_runtime_parser_capability_contract()
 
-    assert "codebuddy" not in keys.ENGINE_KEYS
-    assert payload["planned_engines"]["codebuddy"] == {
+    assert "codebuddy" in keys.ENGINE_KEYS
+    assert payload["engines"]["codebuddy"] == {
         "semantic_turn_markers": {
             "start": True,
             "complete": True,
@@ -63,7 +63,7 @@ def test_runtime_parser_capability_contract_declares_codebuddy_before_activation
         },
         "generic_error_governance": False,
         "auth_signal_snapshot": True,
-        "structured_payload_extraction": False,
+        "structured_payload_extraction": True,
         "success_result_structured_output": True,
         "process_event_extraction": True,
         "run_handle_extraction": True,
