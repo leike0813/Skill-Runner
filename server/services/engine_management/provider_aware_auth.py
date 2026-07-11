@@ -7,6 +7,7 @@ from server.engines.opencode.auth.provider_registry import (
     opencode_auth_provider_registry,
 )
 from server.engines.kilo.auth.provider_registry import kilo_auth_provider_registry
+from server.engines.codebuddy.auth.provider_registry import codebuddy_provider_registry
 from server.engines.qwen.auth.provider_registry_impl import qwen_auth_provider_registry
 
 
@@ -40,6 +41,7 @@ _PROVIDER_REGISTRIES: dict[str, _ProviderRegistry] = {
     "kilo": cast(_ProviderRegistry, kilo_auth_provider_registry),
     "opencode": cast(_ProviderRegistry, opencode_auth_provider_registry),
     "qwen": cast(_ProviderRegistry, qwen_auth_provider_registry),
+    "codebuddy": cast(_ProviderRegistry, codebuddy_provider_registry),
 }
 
 

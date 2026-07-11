@@ -122,3 +122,43 @@ async def test_engine_status_cache_service_start_stop_scheduler(tmp_path: Path):
 
     service.stop()
     assert service._scheduler is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_engine_status_cache_requires_error_free_probe_for_confirmed_present(tmp_path: Path):
+    manager = _FakeManager(tmp_path)
+    service = EngineStatusCacheService(manager, db_path=tmp_path / "runs.db")
+    await service.refresh_all()
+    assert service.is_confirmed_present("codex") is True
+
+    def _failed_probe(_engine: str):
+        raise RuntimeError("probe unavailable")
+
+    manager.collect_engine_status = _failed_probe
+    status = await service.refresh_engine("codex")
+
+    assert status.present is True
+    assert status.version == "0.105.0"
+    assert status.last_error == "probe unavailable"
+    assert service.is_confirmed_present("codex") is False
+
+
+@pytest.mark.asyncio
+async def test_engine_status_cache_adds_last_error_to_existing_table(tmp_path: Path):
+    db_path = tmp_path / "runs.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "CREATE TABLE engine_status_cache (engine TEXT PRIMARY KEY, present INTEGER NOT NULL, version TEXT, updated_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO engine_status_cache VALUES (?, ?, ?, ?)",
+            ("codex", 1, "0.105.0", "2026-01-01T00:00:00Z"),
+        )
+    service = EngineStatusCacheService(_FakeManager(tmp_path), db_path=db_path)
+
+    snapshot = await service.load_persisted()
+
+    assert snapshot["codex"].version == "0.105.0"
+    with sqlite3.connect(str(db_path)) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(engine_status_cache)")}
+    assert "last_error" in columns

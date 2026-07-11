@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +20,8 @@ from ..models import (
     ManagementEngineCustomProviderListResponse,
     ManagementEngineCustomProviderUpsertRequest,
     ManagementEngineDetail,
+    ManagementEngineCredentialDeleteResponse,
+    ManagementEngineCredentialStatus,
     ManagementEngineAuthImportSpecResponse,
     ManagementEngineAuthImportSubmitResponse,
     ManagementEngineListResponse,
@@ -47,6 +48,9 @@ from ..models import (
     SkillManifest,
 )
 from ..services.engine_management.model_registry import model_registry
+from ..services.engine_management.engine_status_cache_service import engine_status_cache_service
+from ..engines.codebuddy.auth.credential_store import codebuddy_credential_store
+from ..engines.codebuddy.auth.provider_registry import require_provider
 from ..services.engine_management.engine_custom_provider_service import engine_custom_provider_service
 from ..services.engine_management.auth_import_service import auth_import_service, AuthImportError
 from ..services.engine_management.auth_import_validator_registry import AuthImportValidationError
@@ -72,7 +76,6 @@ from ..services.platform.system_settings_service import (
 from ..services.platform.system_log_explorer_service import system_log_explorer_service
 from ..services.skill.skill_registry import is_builtin_skill_path, skill_registry
 from ..services.orchestration.run_workspace_layout import require_layout_from_record
-from ..services.orchestration.workspace_manager import workspace_manager
 from . import jobs as jobs_router
 
 
@@ -351,13 +354,46 @@ async def get_management_engine(engine: str):
         )
         for entry in catalog.models
     ]
+    credential_statuses: list[ManagementEngineCredentialStatus] = []
+    if engine.strip().lower() == "codebuddy":
+        credential_statuses = [
+            ManagementEngineCredentialStatus(
+                provider_id=status.provider_id,
+                credential_state=status.credential_state,
+                updated_at=status.updated_at,
+                expires_at_advisory=status.expires_at_advisory,
+            )
+            for status in codebuddy_credential_store.project_all_statuses()
+        ]
+    status = engine_status_cache_service.get_engine_status(engine.strip().lower())
     return ManagementEngineDetail(
         engine=engine,
-        cli_version=catalog.cli_version_detected,
+        cli_version=catalog.cli_version_detected or status.version,
         models_count=len(models),
         models=models,
         upgrade_status={"state": "idle"},
-        last_error=None,
+        last_error=status.last_error,
+        credential_statuses=credential_statuses,
+    )
+
+
+@router.delete(
+    "/engines/{engine}/auth/credentials/{provider_id}",
+    response_model=ManagementEngineCredentialDeleteResponse,
+)
+async def delete_management_engine_credential(engine: str, provider_id: str):
+    if engine.strip().lower() != "codebuddy":
+        raise HTTPException(status_code=404, detail="Credential deletion is unsupported for this engine")
+    try:
+        provider = require_provider(provider_id)
+        deleted = codebuddy_credential_store.delete(provider.provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return ManagementEngineCredentialDeleteResponse(
+        engine="codebuddy",
+        provider_id=provider.provider_id,
+        deleted=deleted,
+        credential_state="missing",
     )
 
 

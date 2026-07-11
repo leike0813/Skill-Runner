@@ -614,9 +614,7 @@ class RunAuthStateStore:
                 "phase": "challenge_active",
                 "timed_out": timed_out,
                 "pending_owner": "waiting_auth.challenge_active",
-                "available_methods": pending_selection.get("available_methods", []) if isinstance(pending_selection, dict) else (
-                    [pending_auth.get("auth_method")] if pending_auth.get("auth_method") else []
-                ),
+                "available_methods": [],
                 "selected_method": pending_auth.get("auth_method"),
                 "auth_session_id": auth_session_id,
                 "challenge_kind": pending_auth.get("challenge_kind"),

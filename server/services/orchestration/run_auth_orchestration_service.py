@@ -314,6 +314,7 @@ class RunAuthOrchestrationService:
         append_orchestrator_event: Callable[..., None],
         update_status: Callable[..., None],
         resume_run_job: Callable[..., Any],
+        auth_session_id: str | None = None,
     ) -> InteractionReplyResponse:
         self._capture_runtime_loop()
         _ = background_tasks
@@ -332,7 +333,30 @@ class RunAuthOrchestrationService:
         if not has_pending_challenge and not has_pending_selection:
             raise HTTPException(status_code=409, detail="No pending auth flow")
         if has_pending_challenge and not has_pending_selection:
-            raise HTTPException(status_code=409, detail="Auth challenge already active")
+            active_session_id = self._normalize_string(existing_pending.get("auth_session_id"))
+            active_method = self._resolve_auth_method(existing_pending)
+            if auth_session_id != active_session_id:
+                raise HTTPException(status_code=409, detail="Auth session does not match active challenge")
+            if selection.value != active_method:
+                raise HTTPException(status_code=409, detail="Auth method does not match active challenge")
+            log_event(
+                logger,
+                event="auth.method_selection.replayed",
+                phase="auth_orchestration",
+                outcome="ok",
+                request_id=request_id,
+                run_id=resolved_run_id,
+                auth_session_id=active_session_id,
+                selected_method=selection.value,
+            )
+            return InteractionReplyResponse(
+                request_id=request_id,
+                status=RunStatus.WAITING_AUTH,
+                accepted=True,
+                mode="auth",
+            )
+        if auth_session_id is not None:
+            raise HTTPException(status_code=409, detail="Auth method selection has no active session")
         source_attempt = self._resolve_source_attempt(existing_pending, existing_selection)
         provider_id = self._resolve_provider_id(existing_pending, existing_selection)
         available_methods = self._available_methods_for(
@@ -892,6 +916,8 @@ class RunAuthOrchestrationService:
             )
             if method is not None
         ]
+        if phase == AuthSessionPhase.CHALLENGE_ACTIVE:
+            available_methods = []
         return AuthSessionStatusResponse(
             request_id=request_id,
             waiting_auth=waiting_auth,

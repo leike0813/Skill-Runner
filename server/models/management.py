@@ -198,6 +198,23 @@ class ManagementEngineDetail(ManagementEngineSummary):
     models: List[EngineModelInfo] = []
     upgrade_status: Dict[str, Any] = {}
     last_error: Optional[str] = None
+    credential_statuses: List["ManagementEngineCredentialStatus"] = Field(default_factory=list)
+
+
+class ManagementEngineCredentialStatus(BaseModel):
+    """Redacted engine credential status visible to management clients."""
+
+    provider_id: str
+    credential_state: Literal["missing", "present", "expired"]
+    updated_at: Optional[str] = None
+    expires_at_advisory: Optional[str] = None
+
+
+class ManagementEngineCredentialDeleteResponse(BaseModel):
+    engine: str
+    provider_id: str
+    deleted: bool
+    credential_state: Literal["missing"]
 
 
 class ManagementEngineCustomProvider(BaseModel):

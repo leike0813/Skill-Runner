@@ -70,6 +70,8 @@ from .management import (
     ManagementDataResetRequest,
     ManagementDataResetResponse,
     ManagementEngineDetail,
+    ManagementEngineCredentialDeleteResponse,
+    ManagementEngineCredentialStatus,
     ManagementEngineCustomProvider,
     ManagementEngineCustomProviderListResponse,
     ManagementEngineCustomProviderUpsertRequest,

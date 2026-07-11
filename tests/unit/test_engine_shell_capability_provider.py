@@ -8,7 +8,7 @@ from server.services.ui.engine_shell_capability_provider import EngineShellCapab
 
 def test_engine_shell_capability_provider_uses_adapter_profile_ui_shell_metadata() -> None:
     provider = EngineShellCapabilityProvider()
-    for engine in ("codex", "opencode", "claude", "qwen", "kilo"):
+    for engine in ("codex", "opencode", "claude", "qwen", "kilo", "codebuddy"):
         capability = provider.get(engine)
         assert capability is not None
         profile = load_adapter_profile(
@@ -25,3 +25,12 @@ def test_engine_shell_capability_provider_uses_adapter_profile_ui_shell_metadata
             capability.retry_without_sandbox_on_early_exit
             == profile.ui_shell.retry_without_sandbox_on_early_exit
         )
+
+
+def test_engine_shell_capability_provider_exposes_interactive_codebuddy_tui() -> None:
+    capability = EngineShellCapabilityProvider().get("codebuddy")
+    assert capability is not None
+    assert capability.launch_args == ("--setting-sources", "project")
+    assert "-p" not in capability.launch_args
+    assert "--output-format" not in capability.launch_args
+    assert "--permission-mode" not in capability.launch_args

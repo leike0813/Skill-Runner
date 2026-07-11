@@ -12,12 +12,17 @@
 - **AND** 终端显示至少一条握手输出（非空白）
 
 ### Requirement: 系统 MUST 采用每引擎单命令模型
-系统 MUST 仅允许每个引擎一个 TUI 命令入口，不暴露 login/auth/version/interactive 多模式。
 
+系统 MUST 仅允许每个引擎一个 TUI 命令入口，不暴露 login/auth/version/interactive 多模式。CodeBuddy 使用同一入口，但必须通过独立 provider 选择门禁。
 #### Scenario: 命令入口约束
 - **WHEN** 用户从 UI 启动会话
 - **THEN** 可选项仅为 `codex`、`gemini`、`iflow`、`opencode` 对应 TUI 命令
 - **AND** 系统拒绝任何非白名单命令 ID
+
+#### Scenario: 非 CodeBuddy 引擎携带 provider
+- **WHEN** UI-shell start 为非 CodeBuddy 引擎提交 provider_id
+- **THEN** 系统拒绝请求而不是静默忽略 provider
+
 
 ### Requirement: 系统 MUST 对内嵌终端启用 fail-closed 沙箱策略
 系统 MUST 在启动引擎 TUI 前完成 sandbox 可用性探测并暴露结果；探测结果默认用于可观测，不作为阻断启动的硬门槛。
@@ -114,4 +119,16 @@
 - **WHEN** Qwen inline terminal session 配置被生成
 - **THEN** 它 MUST 使用受限的 approval / permissions 默认值
 - **AND** 它 MUST 禁止危险工具和未显式允许的高风险操作
+
+
+#### Scenario: CodeBuddy inline terminal writes session-local enforced settings
+- **WHEN** 用户选择一个已登录 provider 并启动 CodeBuddy inline terminal
+- **THEN** 系统 MUST 生成 session-local `.codebuddy/settings.json`
+- **AND** 设置 MUST 来自 adapter profile 声明的共享 config layering assets
+- **AND** 会话 snapshot 仅记录 provider_id，不得记录 token、user_id 或环境变量
+
+#### Scenario: CodeBuddy inline terminal uses strict empty MCP
+- **WHEN** CodeBuddy UI-shell launch plan 被生成
+- **THEN** 系统 MUST 写入空 `mcpServers` 配置并传入 strict MCP 参数
+- **AND** CLI MUST 使用 provider-scoped managed environment
 

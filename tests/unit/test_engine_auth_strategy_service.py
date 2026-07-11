@@ -31,10 +31,23 @@ def test_strategy_service_exposes_ui_capabilities_from_policy() -> None:
     assert capabilities["oauth_proxy"]["kilo"]["deepseek"] == ["api_key"]
     assert capabilities["oauth_proxy"]["kilo"]["opencode-go"] == ["api_key"]
     assert capabilities["oauth_proxy"]["kilo"]["anthropic"] == ["api_key"]
+    assert capabilities["oauth_proxy"]["codebuddy"]["codebuddy-cn"] == ["auth_code_or_url"]
+    assert capabilities["oauth_proxy"]["codebuddy"]["codebuddy-global"] == ["auth_code_or_url"]
     assert "google" not in capabilities["oauth_proxy"]["kilo"]
     assert capabilities["cli_delegate"]["kilo"] == {}
     assert capabilities["provider_config"]["kilo"] == {}
     assert "deepseek" not in capabilities["cli_delegate"]["opencode"]
+
+
+@pytest.mark.parametrize("provider_id", ["codebuddy-cn", "codebuddy-global"])
+def test_codebuddy_browser_auth_polls_without_manual_input(provider_id: str) -> None:
+    behavior = EngineAuthStrategyService().runtime_session_behavior_for_transport(
+        engine="codebuddy",
+        transport="oauth_proxy",
+        provider_id=provider_id,
+    )
+    assert behavior.input_required is False
+    assert behavior.polling_start == "immediate"
 
 
 def test_strategy_service_exposes_high_risk_capabilities_from_policy() -> None:

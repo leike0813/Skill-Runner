@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skill-runner.local/schemas/engines/codebuddy/release_gate.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "engine", "providers"],
+  "properties": {
+    "version": {"const": 2},
+    "engine": {"const": "codebuddy"},
+    "providers": {
+      "type": "object",
+      "required": ["codebuddy-cn", "codebuddy-global"],
+      "additionalProperties": false,
+      "properties": {
+        "codebuddy-cn": {"$ref": "#/$defs/gate"},
+        "codebuddy-global": {"$ref": "#/$defs/gate"}
+      }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checked_at", "cli_version", "checks", "evidence"],
+      "properties": {
+        "status": {"enum": ["not_run", "blocked_external", "failed", "passed"]},
+        "checked_at": {"type": ["string", "null"]},
+        "cli_version": {"type": ["string", "null"]},
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "login",
+            "model_visibility",
+            "first_run",
+            "exact_resume",
+            "automatic_auth_recovery",
+            "clear_credential",
+            "provider_isolation",
+            "inline_tui",
+            "secret_scan"
+          ],
+          "properties": {
+            "login": {"$ref": "#/$defs/check_status"},
+            "model_visibility": {"$ref": "#/$defs/check_status"},
+            "first_run": {"$ref": "#/$defs/check_status"},
+            "exact_resume": {"$ref": "#/$defs/check_status"},
+            "automatic_auth_recovery": {"$ref": "#/$defs/check_status"},
+            "clear_credential": {"$ref": "#/$defs/check_status"},
+            "provider_isolation": {"$ref": "#/$defs/check_status"},
+            "inline_tui": {"$ref": "#/$defs/check_status"},
+            "secret_scan": {"$ref": "#/$defs/check_status"}
+          }
+        },
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "check_status": {
+      "enum": ["not_run", "blocked_external", "failed", "passed"]
+    }
+  }
+}

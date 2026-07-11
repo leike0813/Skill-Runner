@@ -94,6 +94,7 @@ from ..services.engine_management.engine_policy import resolve_skill_engine_poli
 from ..services.skill.skill_package_identity_service import skill_package_identity_service
 from ..services.skill.temp_skill_package_cache_service import temp_skill_package_cache_service
 from ..services.orchestration.run_execution_core import (
+    EngineOptionValidationError,
     build_effective_runtime_options,
     declared_execution_modes,
     ensure_skill_engine_supported,
@@ -735,6 +736,12 @@ async def create_run(request: RunCreateRequest, background_tasks: BackgroundTask
         await _cleanup_unpersisted_runtime_env_secret(request_id)
         await _cleanup_unpersisted_runtime_preamble_secret(request_id)
         raise HTTPException(status_code=e.status_code, detail=str(e))
+    except EngineOptionValidationError as e:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        await _cleanup_unpersisted_runtime_env_secret(request_id)
+        await _cleanup_unpersisted_runtime_preamble_secret(request_id)
+        raise HTTPException(status_code=422, detail=e.detail)
     except ValueError as e:
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
@@ -883,6 +890,7 @@ async def get_run_status(request_id: str):
                 RunServiceLogMirrorSession.open_run_scope(
                     run_dir=run_dir,
                     run_id=str(run_id),
+                    audit_dir=layout.audit_dir,
                 )
             )
             logger.info(
@@ -1724,6 +1732,21 @@ async def upload_file(
             skill_source=source,
         )
         raise HTTPException(status_code=e.status_code, detail=str(e))
+    except EngineOptionValidationError as e:
+        log_event(
+            logger,
+            event="upload.failed",
+            phase="upload",
+            outcome="error",
+            level=logging.ERROR,
+            request_id=request_id,
+            run_id=run_id_for_log,
+            error_code=str(e.detail.get("code") or "ENGINE_OPTION_INVALID"),
+            error_type=type(e).__name__,
+            detail=str(e.detail.get("code") or "ENGINE_OPTION_INVALID"),
+            skill_source=source,
+        )
+        raise HTTPException(status_code=422, detail=e.detail)
     except ValueError as e:
         log_event(
             logger,

@@ -24,6 +24,10 @@ The injected values are local to the adapter subprocess for that run. They are a
 - A request may define at most 64 variables.
 - The following base variables cannot be overridden: `PATH`, `HOME`, `SHELL`, `PWD`, `OLDPWD`, `USER`, `USERNAME`, `LOGNAME`, `TMPDIR`, `TEMP`, `TMP`, `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, `LD_LIBRARY_PATH`.
 
+### CodeBuddy Reserved Variables
+
+For `engine=codebuddy`, callers may add ordinary run-local variables but must not override `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_API_KEY`, `CODEBUDDY_INTERNET_ENVIRONMENT`, `CODEBUDDY_BASE_URL`, or `CODEBUDDY_CONFIG_DIR`. The adapter clears inherited CodeBuddy credential and routing variables, then injects only the selected canonical provider's vault token, provider environment, and persistent provider config directory. This keeps domestic (`codebuddy-cn`) and international (`codebuddy-global`) routing isolated.
+
 ## Persistence And Redaction
 
 Raw env values are stored only in the local secret vault:
@@ -51,6 +55,8 @@ If a queued, retried, or resumed run declares env but the vault file is missing,
 ## Cache Behavior
 
 `runtime_options.env` does not participate in cache key construction. Callers that expect env values to affect output must set `runtime_options.no_cache=true`.
+
+The same rule applies to CodeBuddy account identity: cache reuse is caller-controlled and a matching cached result is not automatically invalidated when a provider credential changes. Set `no_cache=true` when the selected account is material to the result.
 
 ## Cleanup
 

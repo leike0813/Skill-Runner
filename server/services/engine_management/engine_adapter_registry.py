@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
+from server.engines.codebuddy.adapter.execution_adapter import CodeBuddyExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.kilo.adapter.execution_adapter import KiloExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
@@ -41,6 +42,11 @@ class EngineAdapterRegistry:
                 / "kilo"
                 / "adapter"
                 / "adapter_profile.json",
+                "codebuddy": Path(__file__).resolve().parents[2]
+                / "engines"
+                / "codebuddy"
+                / "adapter"
+                / "adapter_profile.json",
             }
         )
         self._adapters: Dict[str, EngineExecutionAdapter] = {
@@ -49,6 +55,7 @@ class EngineAdapterRegistry:
             "claude": ClaudeExecutionAdapter(),
             "qwen": QwenExecutionAdapter(),
             "kilo": KiloExecutionAdapter(),
+            "codebuddy": CodeBuddyExecutionAdapter(),
         }
 
     def get(self, engine: str) -> EngineExecutionAdapter | None:

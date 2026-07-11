@@ -51,6 +51,7 @@ from .contracts import (
     StreamParser,
 )
 from .types import (
+    AdapterAuthenticationRequired,
     EngineRunResult,
     LiveParserEmission,
     ProcessExecutionResult,
@@ -596,10 +597,19 @@ class EngineExecutionAdapter:
                 options=options,
             )
 
-        env = self._apply_runtime_env_overlay(
-            self.build_execution_env(os.environ.copy(), execution_ctx, effective_config_path),
-            options,
-        )
+        try:
+            env = self._apply_runtime_env_overlay(
+                self.build_execution_env(os.environ.copy(), execution_ctx, effective_config_path),
+                options,
+            )
+        except AdapterAuthenticationRequired as exc:
+            return ProcessExecutionResult(
+                exit_code=1,
+                raw_stdout="",
+                raw_stderr="",
+                failure_reason="AUTH_REQUIRED",
+                auth_signal_snapshot=exc.signal,
+            )
         original_command = [str(token) for token in command]
         normalized_command, normalization_applied, normalization_reason = self._normalize_windows_npm_cmd_shim(
             original_command,
@@ -868,6 +878,12 @@ class EngineExecutionAdapter:
                 return
             offset = 0
             text_decoder = IncrementalUtf8TextDecoder()
+            output_redactor_factory = getattr(self, "create_output_redactor", None)
+            output_redactor = (
+                output_redactor_factory(options=options, stream_name=stream_name)
+                if callable(output_redactor_factory)
+                else None
+            )
             ingress_sanitizer = (
                 NdjsonIngressSanitizer(
                     accepted_streams={"stdout"},
@@ -936,7 +952,12 @@ class EngineExecutionAdapter:
                 if not chunk:
                     break
                 decoded_chunk = text_decoder.feed(chunk)
+                if output_redactor is not None:
+                    decoded_chunk = output_redactor.feed(decoded_chunk)
+                    chunk = decoded_chunk.encode("utf-8")
                 last_output_monotonic = time.monotonic()
+                if not decoded_chunk:
+                    continue
                 if ingress_sanitizer is None:
                     await _publish_text(
                         published_text=decoded_chunk,
@@ -960,6 +981,9 @@ class EngineExecutionAdapter:
                     offset = sanitized_chunk.byte_to
                     await _probe_auth_detection()
             tail_text, pending_len = text_decoder.finish()
+            if output_redactor is not None:
+                tail_text = output_redactor.feed(tail_text) + output_redactor.flush()
+                pending_len = len(tail_text.encode("utf-8"))
             if ingress_sanitizer is None:
                 if tail_text:
                     await _publish_text(
@@ -1021,12 +1045,30 @@ class EngineExecutionAdapter:
 
         timeout_sec = self._resolve_hard_timeout(options)
         timed_out = False
+        output_capture_failed = False
         try:
             if live_runtime_emitter is not None:
                 await live_runtime_emitter.on_process_started()
             started_monotonic = time.monotonic()
             while True:
                 if proc.returncode is not None:
+                    break
+                reader_failure = next(
+                    (
+                        task.exception()
+                        for task in (stdout_task, stderr_task)
+                        if task.done() and not task.cancelled() and task.exception() is not None
+                    ),
+                    None,
+                )
+                if reader_failure is not None:
+                    output_capture_failed = True
+                    logger.error(
+                        "[%s] output capture failed; terminating process error_type=%s",
+                        prefix,
+                        type(reader_failure).__name__,
+                    )
+                    await self._terminate_process_tree(proc, prefix)
                     break
                 await _probe_auth_detection()
                 now = time.monotonic()
@@ -1094,6 +1136,8 @@ class EngineExecutionAdapter:
         failure_reason: str | None = None
         if auth_early_exit:
             failure_reason = "AUTH_REQUIRED"
+        elif output_capture_failed:
+            failure_reason = "OUTPUT_REDACTION_FAILED"
         elif is_high_confidence_auth_signal(auth_signal) and returncode != 0:
             failure_reason = "AUTH_REQUIRED"
         elif timed_out:

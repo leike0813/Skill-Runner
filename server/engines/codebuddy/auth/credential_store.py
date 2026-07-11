@@ -4,7 +4,6 @@ import base64
 import json
 import os
 import shutil
-import tempfile
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -13,6 +12,14 @@ from typing import Any, Mapping
 
 from server.config import config
 from server.engines.codebuddy.auth.provider_registry import require_provider
+from server.engines.codebuddy.storage_layout import (
+    assert_no_symlink,
+    atomic_write_json,
+    credential_vault_path,
+    ensure_private_dir,
+    provider_runtime_dir,
+    runtime_root,
+)
 
 
 VAULT_VERSION = 1
@@ -45,7 +52,7 @@ class CodeBuddyCredentialStore:
         path: Path | None = None,
         agent_home: Path | None = None,
     ) -> None:
-        self.path = path or Path(config.SYSTEM.DATA_DIR) / "engine_credentials" / "codebuddy.json"
+        self.path = path or credential_vault_path()
         self.agent_home = agent_home or Path(config.SYSTEM.AGENT_HOME)
         self._lock = threading.RLock()
 
@@ -84,9 +91,20 @@ class CodeBuddyCredentialStore:
         with self._lock:
             providers = self._read_providers()
             previous = self._parse_credential(providers.get(provider.provider_id))
+            if (
+                previous is not None
+                and previous.token == credential.token
+                and previous.user_id == credential.user_id
+                and previous.expires_at_advisory == credential.expires_at_advisory
+                and previous.sdk_version == credential.sdk_version
+                and previous.cli_version == credential.cli_version
+            ):
+                return self.project_status(provider.provider_id)
             providers[provider.provider_id] = asdict(credential)
             self._write_providers(providers)
-            if previous is not None and previous.user_id != credential.user_id:
+            if previous is not None and (
+                previous.user_id != credential.user_id or previous.token != credential.token
+            ):
                 self._rotate_provider_state(provider.provider_id)
         return self.project_status(provider.provider_id)
 
@@ -145,46 +163,26 @@ class CodeBuddyCredentialStore:
 
     def _write_providers(self, providers: Mapping[str, Mapping[str, Any]]) -> None:
         path = self.path
-        parent = path.parent
-        parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._assert_safe_path(parent)
-        os.chmod(parent, 0o700)
+        parent = ensure_private_dir(path.parent)
         payload = {
             "version": VAULT_VERSION,
             "providers": dict(providers),
         }
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-        fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=parent)
-        tmp_path = Path(raw_tmp)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(serialized)
-                handle.flush()
-                os.fsync(handle.fileno())
-            if path.exists() and path.is_symlink():
-                raise ValueError("CodeBuddy credential vault must not be a symlink")
-            os.replace(tmp_path, path)
-            os.chmod(path, 0o600)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
+        atomic_write_json(path, payload)
 
     def _rotate_provider_state(self, provider_id: str) -> None:
         provider = require_provider(provider_id)
-        root = self.agent_home / ".codebuddy-runtime"
-        target = provider.config_dir(self.agent_home)
-        if root.is_symlink() or target.is_symlink():
-            raise ValueError("CodeBuddy provider state path must not be a symlink")
+        root = runtime_root(self.agent_home)
+        target = provider_runtime_dir(provider.provider_id, self.agent_home)
+        assert_no_symlink(root)
+        assert_no_symlink(target)
         if target.exists():
             shutil.rmtree(target)
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(root, 0o700)
+        ensure_private_dir(root)
 
     @staticmethod
     def _assert_safe_path(path: Path) -> None:
-        if path.is_symlink():
-            raise ValueError("CodeBuddy credential path must not be a symlink")
+        assert_no_symlink(path)
 
     @staticmethod
     def _parse_credential(raw: Mapping[str, Any] | None) -> CodeBuddyCredential | None:

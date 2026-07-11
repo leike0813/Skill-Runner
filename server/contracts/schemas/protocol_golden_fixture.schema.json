@@ -148,6 +148,13 @@
         "synthetic_minimal"
       ]
     },
+    "provenance": {
+      "type": "string",
+      "enum": [
+        "verified",
+        "provenance-unverified"
+      ]
+    },
     "source_run_id": {
       "type": [
         "string",

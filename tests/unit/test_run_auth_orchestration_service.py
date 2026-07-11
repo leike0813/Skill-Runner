@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, HTTPException
 from server.models import (
     AuthChallengeKind,
     AuthMethod,
+    AuthMethodSelection,
     AuthSessionPhase,
     AuthSubmission,
     AuthSubmissionKind,
@@ -652,7 +653,9 @@ async def test_cancel_request_auth_sessions_clears_pending_and_durable(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_select_auth_method_rejects_when_challenge_already_active(monkeypatch, tmp_path: Path):
+async def test_select_auth_method_is_idempotent_when_same_challenge_is_already_active(
+    monkeypatch, tmp_path: Path
+):
     run_dir = tmp_path / "run-auth-active"
     run_dir.mkdir(parents=True, exist_ok=True)
     backend = SimpleNamespace(
@@ -671,20 +674,68 @@ async def test_select_auth_method_rejects_when_challenge_already_active(monkeypa
     )
     service = RunAuthOrchestrationService()
 
+    response = await service.select_auth_method(
+        request_id="req-1",
+        run_id="run-1",
+        selection=AuthMethodSelection(value=AuthMethod.CALLBACK),
+        background_tasks=BackgroundTasks(),
+        run_store_backend=backend,
+        append_orchestrator_event=lambda **_kwargs: None,
+        update_status=lambda *_args, **_kwargs: None,
+        resume_run_job=AsyncMock(),
+        auth_session_id="auth-1",
+    )
+
+    assert response.accepted is True
+    assert response.status == RunStatus.WAITING_AUTH
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("auth_session_id", "auth_method", "detail_fragment"),
+    [
+        ("auth-other", AuthMethod.CALLBACK, "session does not match"),
+        ("auth-1", AuthMethod.AUTH_CODE_OR_URL, "method does not match"),
+    ],
+)
+async def test_select_auth_method_rejects_active_challenge_mismatch(
+    tmp_path: Path,
+    auth_session_id: str,
+    auth_method: AuthMethod,
+    detail_fragment: str,
+):
+    run_dir = tmp_path / "run-auth-active-mismatch"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    backend = SimpleNamespace(
+        get_request=AsyncMock(return_value=_request_record(run_dir, engine="opencode")),
+        get_pending_auth=AsyncMock(
+            return_value={
+                "auth_session_id": "auth-1",
+                "engine": "opencode",
+                "provider_id": "google",
+                "auth_method": "callback",
+                "phase": "challenge_active",
+                "source_attempt": 1,
+            }
+        ),
+        get_pending_auth_method_selection=AsyncMock(return_value=None),
+    )
+
     with pytest.raises(HTTPException) as excinfo:
-        await service.select_auth_method(
+        await RunAuthOrchestrationService().select_auth_method(
             request_id="req-1",
             run_id="run-1",
-            selection=AuthMethod.CALLBACK,
+            selection=AuthMethodSelection(value=auth_method),
             background_tasks=BackgroundTasks(),
             run_store_backend=backend,
             append_orchestrator_event=lambda **_kwargs: None,
             update_status=lambda *_args, **_kwargs: None,
             resume_run_job=AsyncMock(),
+            auth_session_id=auth_session_id,
         )
 
     assert excinfo.value.status_code == 409
-    assert "challenge already active" in str(excinfo.value.detail).lower()
+    assert detail_fragment in str(excinfo.value.detail).lower()
 
 
 @pytest.mark.asyncio
@@ -1103,7 +1154,7 @@ async def test_get_auth_session_status_returns_backend_truth(monkeypatch):
     assert status.waiting_auth is True
     assert status.phase == AuthSessionPhase.CHALLENGE_ACTIVE
     assert status.selected_method == AuthMethod.AUTH_CODE_OR_URL
-    assert status.available_methods == [AuthMethod.CALLBACK, AuthMethod.AUTH_CODE_OR_URL]
+    assert status.available_methods == []
 
 
 @pytest.mark.asyncio

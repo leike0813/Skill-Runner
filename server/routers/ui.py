@@ -25,6 +25,7 @@ from fastapi.templating import Jinja2Templates  # type: ignore[import-not-found]
 
 from ..config import config
 from ..config_registry import keys
+from ..engines.codebuddy.auth.credential_store import codebuddy_credential_store
 from ..i18n import get_language, get_translator
 from ..logging_config import get_logging_settings_payload
 from ..models import (
@@ -75,7 +76,6 @@ from ..services.engine_management.provider_aware_auth import (
 )
 from ..services.skill.skill_browser import (
     build_preview_payload,
-    list_skill_entries,
     resolve_skill_file_path,
 )
 from ..runtime.observability.run_observability import run_observability_service
@@ -458,8 +458,13 @@ async def _management_engine_rows(request: Request) -> list[dict[str, object]]:
     engines_payload = await _resolve_async(management_router.list_management_engines())
     rows = _with_engine_status_rows(_serialize_payload_list(engines_payload, "engines"))
     engine_ui_metadata = _build_engine_ui_metadata(request)
+    ui_shell_engines = {
+        str(item.get("engine") or "").strip().lower()
+        for item in ui_shell_manager.list_commands()
+    }
     for row in rows:
         engine = str(row.get("engine") or "").strip().lower()
+        row["ui_shell_enabled"] = engine in ui_shell_engines
         metadata = engine_ui_metadata.get(engine, {})
         row["auth_entry_label"] = metadata.get(
             "auth_entry_label",
@@ -848,6 +853,7 @@ async def ui_engines(request: Request):
     engine_auth_providers = {
         engine: [
             {
+                "engine": engine,
                 "provider_id": item.provider_id,
                 "display_name": item.display_name,
                 "auth_mode": item.auth_mode,
@@ -857,6 +863,14 @@ async def ui_engines(request: Request):
         ]
         for engine in provider_aware_engines()
     }
+    codebuddy_credential_states = {
+        status.provider_id: status.credential_state
+        for status in codebuddy_credential_store.project_all_statuses()
+    }
+    for provider in engine_auth_providers.get("codebuddy", []):
+        provider["credential_state"] = codebuddy_credential_states.get(
+            provider["provider_id"], "missing"
+        )
     return templates.TemplateResponse(
         request=request,
         name="ui/engines.html",
@@ -1152,13 +1166,18 @@ async def ui_engine_auth_input(session_id: str, body: EngineAuthSessionInputRequ
 async def ui_engine_tui_start(
     engine: str = Form(...),
     custom_model: str | None = Form(default=None),
+    provider_id: str | None = Form(default=None),
 ):
     if not _is_ttyd_available():
         raise HTTPException(
             status_code=503, detail="ttyd not found. Inline TUI is unavailable."
         )
     try:
-        data = ui_shell_manager.start_session(engine, custom_model=custom_model)
+        data = ui_shell_manager.start_session(
+            engine,
+            custom_model=custom_model,
+            provider_id=provider_id,
+        )
         return JSONResponse(data)
     except UiShellBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

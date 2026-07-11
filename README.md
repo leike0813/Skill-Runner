@@ -23,14 +23,14 @@
 
 ---
 
-Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **OpenCode**, **Claude Code**, **Qwen**, and **Kilo Code** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
+Skill Runner wraps mature AI agent CLIs — **Codex**, **Gemini CLI**, **OpenCode**, **Claude Code**, **Qwen**, **Kilo Code**, and **CodeBuddy** — behind a unified Skill protocol, providing deterministic execution, structured artifact management, and a built-in web admin UI.
 
 ## ✨ Highlights
 
 <table>
 <tr>
 <td align="center" width="25%"><strong>🧩 Pluggable Skills</strong><br/>Drop-in skill packages<br/><sub>Schema-validated I/O</sub></td>
-<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen · Kilo Code<br/><sub>Unified adapter protocol</sub></td>
+<td align="center" width="25%"><strong>🤖 Multi-Engine</strong><br/>Codex · Gemini · OpenCode · Claude Code · Qwen · Kilo Code · CodeBuddy<br/><sub>Unified adapter protocol</sub></td>
 <td align="center" width="25%"><strong>🔄 Dual Mode</strong><br/>Auto &amp; Interactive execution<br/><sub>Multi-turn conversations</sub></td>
 <td align="center" width="25%"><strong>📦 Structured Output</strong><br/>JSON + artifacts + bundle<br/><sub>Isolated, contract-driven runs</sub></td>
 </tr>
@@ -63,7 +63,7 @@ my-skill/
 ### Why It Matters
 
 - **Standards-based**: Compatible with the Open Agent Skills ecosystem — skills are portable across platforms.
-- **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, OpenCode, Claude Code, Qwen, or Kilo Code.
+- **Engine-agnostic**: Write once, run on any supported engine. The same skill works with Codex, Gemini, OpenCode, Claude Code, Qwen, Kilo Code, or CodeBuddy.
 - **Schema-driven I/O**: Input, parameter, and output are all defined by JSON Schema — the runner validates automatically.
 - **Isolated execution**: Each run gets its own workspace with standardized I/O contracts — no cross-run interference.
 - **Zero-integration install**: Drop a skill directory into user dir `skills/` (or upload via API/UI) and it's immediately available. Built-in skills ship in `skills_builtin/`.
@@ -232,6 +232,8 @@ The preferred approach — authenticate engines through the built-in OAuth Proxy
 5. Credentials are automatically stored and managed.
 
 This also works during active runs: if an engine requires authentication mid-execution, the frontend can present an **in-session auth challenge** — the run pauses, the user completes OAuth, and execution resumes automatically.
+
+> **CodeBuddy providers:** choose `CodeBuddy 国内版` (`codebuddy-cn`) or `CodeBuddy 国际版` (`codebuddy-global`) before logging in. Their credentials and persistent CLI state are isolated; models come from the engine-local provider-qualified static manifest. Missing, expired, or runtime-rejected credentials enter the existing browser authentication flow and automatically resume after success. The management UI shows only a redacted credential status, supports clearing one provider at a time, and can start the built-in TUI only after the operator explicitly selects a signed-in provider. CodeBuddy runs and TUI sessions use strict run-local MCP configuration; callers should use `runtime_options.no_cache=true` when account identity must not reuse a cached result.
 
 > ⚠️ **High-risk notice (OpenCode + Google/Antigravity):**  
 > For `opencode` with `provider_id=google` (Antigravity path, using third-party plugin `opencode-antigravity-auth`), both `oauth_proxy` and `cli_delegate` are considered a high-risk third-party login route. This path may violate Google policy and could lead to account suspension.

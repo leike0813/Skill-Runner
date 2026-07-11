@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Protocol
+from typing import Dict, Protocol
 
 from server.config import config
 from server.runtime.adapter.common.profile_loader import AdapterProfile, load_adapter_profile
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.engine_catalog import supported_engines
 from server.services.ui.ui_shell_session_config import ProfiledJsonSessionSecurity
+from server.services.ui.ui_shell_launch_handler import (
+    UiShellLaunchHandler,
+    resolve_ui_shell_launch_handler,
+)
 
 
 class SandboxProbeStrategy(Protocol):
@@ -53,6 +57,7 @@ class EngineShellCapability:
     sandbox_probe_strategy: SandboxProbeStrategy
     session_security_strategy: SessionSecurityStrategy
     auth_hint_strategy: AuthHintStrategy
+    launch_handler: UiShellLaunchHandler
 
 
 @dataclass(frozen=True)
@@ -140,8 +145,10 @@ class EngineShellCapabilityProvider:
             return _NoopSecurity()
         return ProfiledJsonSessionSecurity(profile)
 
-    def _build_capability(self, engine: str) -> EngineShellCapability:
+    def _build_capability(self, engine: str) -> EngineShellCapability | None:
         profile = self._load_profile(engine)
+        if not profile.ui_shell.enabled:
+            return None
         return EngineShellCapability(
             command_id=profile.ui_shell.command_id,
             label=profile.ui_shell.label,
@@ -153,10 +160,16 @@ class EngineShellCapabilityProvider:
             sandbox_probe_strategy=self._resolve_sandbox_probe_strategy(profile),
             session_security_strategy=self._resolve_session_security_strategy(profile),
             auth_hint_strategy=self._resolve_auth_hint_strategy(profile),
+            launch_handler=resolve_ui_shell_launch_handler(engine, profile),
         )
 
     def _build_capabilities(self) -> dict[str, EngineShellCapability]:
-        return {engine: self._build_capability(engine) for engine in supported_engines()}
+        capabilities: dict[str, EngineShellCapability] = {}
+        for engine in supported_engines():
+            capability = self._build_capability(engine)
+            if capability is not None:
+                capabilities[engine] = capability
+        return capabilities
 
     def get(self, engine: str) -> EngineShellCapability | None:
         return self._capabilities.get(engine.strip().lower())

@@ -17,7 +17,7 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def test_active_engine_keys_exclude_gemini_and_keep_legacy_readonly() -> None:
-    assert set(keys.ENGINE_KEYS) == {"codex", "opencode", "claude", "qwen", "kilo"}
+    assert set(keys.ENGINE_KEYS) == {"codex", "opencode", "claude", "qwen", "kilo", "codebuddy"}
     assert "gemini" in keys.LEGACY_READONLY_ENGINE_KEYS
 
 

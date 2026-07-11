@@ -5,6 +5,7 @@ from typing import Any
 
 from server.engines.codebuddy.auth.credential_store import codebuddy_credential_store
 from server.engines.codebuddy.auth.provider_registry import require_provider
+from server.engines.codebuddy.managed_environment import build_codebuddy_managed_env
 from server.runtime.adapter.base_execution_adapter import EngineExecutionAdapter
 from server.runtime.adapter.common.profile_loader import load_adapter_profile
 from server.runtime.adapter.common.prompt_builder_common import ProfiledPromptBuilder
@@ -16,15 +17,15 @@ from server.services.engine_management.agent_cli_manager import AgentCliManager
 from .command_builder import CodeBuddyCommandBuilder
 from .config_composer import CodeBuddyConfigComposer
 from .stream_parser import CodeBuddyStreamParser
+from server.engines.codebuddy.secret_redaction import CodeBuddySecretRedactor
 
 
 class CodeBuddyExecutionAdapter(EngineExecutionAdapter):
-    _RESERVED_ENV = {"CODEBUDDY_AUTH_TOKEN", "CODEBUDDY_API_KEY", "CODEBUDDY_INTERNET_ENVIRONMENT", "CODEBUDDY_BASE_URL", "CODEBUDDY_CONFIG_DIR"}
-
     def __init__(self, **kwargs: Any) -> None:
         _ = kwargs
         super().__init__(process_prefix="CodeBuddy")
         self.profile = load_adapter_profile("codebuddy", Path(__file__).with_name("adapter_profile.json"))
+        self._reserved_env = frozenset(self.profile.launch.managed_env_keys)
         self.agent_manager = AgentCliManager()
         self.config_composer = CodeBuddyConfigComposer(self)
         self.run_folder_validator = ProfiledAttemptRunFolderValidator(adapter=self, profile=self.profile)
@@ -35,22 +36,30 @@ class CodeBuddyExecutionAdapter(EngineExecutionAdapter):
 
     def build_execution_env(self, base_env: dict[str, str], ctx: AdapterExecutionContext, config_path: Path) -> dict[str, str]:
         _ = config_path
-        provider = require_provider(ctx.options.get("provider_id"))
-        status = codebuddy_credential_store.project_status(provider.provider_id)
-        credential = codebuddy_credential_store.get(provider.provider_id)
-        if credential is None or status.credential_state != "present":
-            raise RuntimeError(f"AUTH_REQUIRED:{provider.provider_id}")
-        env = self.agent_manager.profile.build_subprocess_env(base_env)
-        for key in self._RESERVED_ENV:
-            env.pop(key, None)
-        env.update({"CODEBUDDY_AUTH_TOKEN": credential.token, "CODEBUDDY_INTERNET_ENVIRONMENT": provider.runtime_environment, "CODEBUDDY_CONFIG_DIR": str(provider.config_dir(self.agent_manager.profile.agent_home))})
-        return env
+        return build_codebuddy_managed_env(
+            base_env=base_env,
+            provider_id=ctx.options.get("provider_id"),
+            managed_env_keys=self._reserved_env,
+            agent_manager=self.agent_manager,
+        )
 
     def _apply_runtime_env_overlay(self, env: dict[str, str], options: dict[str, Any]) -> dict[str, str]:
         runtime_env = options.get("__runtime_env")
-        if isinstance(runtime_env, dict) and self._RESERVED_ENV.intersection(runtime_env):
+        if isinstance(runtime_env, dict) and self._reserved_env.intersection(runtime_env):
             raise ValueError("CodeBuddy runtime environment may not override managed credential or routing variables")
         return super()._apply_runtime_env_overlay(env, options)
+
+    def create_output_redactor(
+        self,
+        *,
+        options: dict[str, Any],
+        stream_name: str,
+    ) -> CodeBuddySecretRedactor:
+        _ = stream_name
+        provider = require_provider(options.get("provider_id"))
+        credential = codebuddy_credential_store.get(provider.provider_id)
+        secrets = () if credential is None else (credential.token, credential.user_id)
+        return CodeBuddySecretRedactor(secrets=secrets)
 
     def resolve_process_failure_reason(
         self,

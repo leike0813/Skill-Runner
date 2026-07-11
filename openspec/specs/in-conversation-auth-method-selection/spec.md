@@ -18,6 +18,15 @@ TBD - created by archiving change refine-in-conversation-auth-method-selection-a
 - **WHEN** run 进入 `waiting_auth`
 - **THEN** 系统 MAY 直接创建 auth session
 - **AND** phase MUST 为 `challenge_active`
+- **AND** `available_methods` MUST 为空
+- **AND** 已采用的方式 MUST 仅通过 `selected_method` 表示
+
+#### Scenario: 客户端重复确认已激活的鉴权方式
+- **GIVEN** auth session 已处于 `challenge_active`
+- **WHEN** 客户端携带相同 `auth_session_id` 和相同 method 重复提交方式选择
+- **THEN** 后端 MUST 幂等返回 accepted
+- **AND** MUST NOT 创建第二个 auth session
+- **AND** session 或 method 不一致时 MUST 拒绝请求
 
 ### Requirement: callback 鉴权 MUST 同时支持自动 callback 与手工 callback URL
 系统 MUST 同时支持自动 callback 完成与手工粘贴 callback URL 完成。
@@ -140,4 +149,3 @@ The system MUST represent provider-config waiting_auth challenges with `custom_p
 - **THEN** `auth_method` MUST be `custom_provider`
 - **AND** `challenge_kind` MUST be `custom_provider`
 - **AND** `input_kind` MUST be `custom_provider`
-

@@ -334,3 +334,5 @@ ordering_rules:
     rule: waiting_auth_may_coexist_with_turn_failed_evidence
   - id: OR-74
     rule: waiting_auth_reason_should_preserve_semantic_failure_message
+  - id: OR-75
+    rule: managed_engine_secrets_must_be_redacted_before_any_runtime_sink

@@ -1,0 +1,23 @@
+{
+  "fixture_id": "codebuddy_success_protocol_synthetic",
+  "layer": "protocol_core",
+  "engine": "codebuddy",
+  "capability_requirements": [
+    "semantic_turn_markers.complete",
+    "success_result_structured_output"
+  ],
+  "inputs": {
+    "stdout_file": "stdout.log",
+    "stderr": "",
+    "status_hint": "succeeded"
+  },
+  "expected": {
+    "rasp_events": [],
+    "fcmp_events": []
+  },
+  "normalization": {
+    "ignore_fields": ["correlation.session_id"]
+  },
+  "source": "synthetic_minimal",
+  "source_run_id": null
+}

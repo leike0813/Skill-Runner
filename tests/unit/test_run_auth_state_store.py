@@ -173,3 +173,5 @@ async def test_get_auth_session_status_prefers_durable_auth_session_truth(tmp_pa
     assert status["last_error"] == "Auth session expired"
     assert status["transport"] == "oauth_proxy"
     assert status["session_status"] == "expired"
+    assert status["available_methods"] == []
+    assert status["selected_method"] == "api_key"

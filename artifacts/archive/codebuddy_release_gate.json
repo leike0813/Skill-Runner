@@ -1,0 +1,46 @@
+{
+  "version": 2,
+  "engine": "codebuddy",
+  "providers": {
+    "codebuddy-cn": {
+      "status": "passed",
+      "checked_at": "2026-07-11T16:56:22+08:00",
+      "cli_version": null,
+      "checks": {
+        "login": "passed",
+        "model_visibility": "passed",
+        "first_run": "passed",
+        "exact_resume": "passed",
+        "automatic_auth_recovery": "passed",
+        "clear_credential": "passed",
+        "provider_isolation": "passed",
+        "inline_tui": "passed",
+        "secret_scan": "passed"
+      },
+      "evidence": [
+        "operator_attestation:2026-07-11:codebuddy-cn manual release checks passed",
+        "automated_gate:2026-07-11:contracts golden corpus unit e2e and secret scan passed"
+      ]
+    },
+    "codebuddy-global": {
+      "status": "passed",
+      "checked_at": "2026-07-11T16:56:22+08:00",
+      "cli_version": null,
+      "checks": {
+        "login": "passed",
+        "model_visibility": "passed",
+        "first_run": "passed",
+        "exact_resume": "passed",
+        "automatic_auth_recovery": "passed",
+        "clear_credential": "passed",
+        "provider_isolation": "passed",
+        "inline_tui": "passed",
+        "secret_scan": "passed"
+      },
+      "evidence": [
+        "operator_attestation:2026-07-11:codebuddy-global manual release checks passed",
+        "automated_gate:2026-07-11:contracts golden corpus unit e2e and secret scan passed"
+      ]
+    }
+  }
+}

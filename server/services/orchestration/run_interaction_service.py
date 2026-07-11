@@ -217,6 +217,7 @@ class RunInteractionService:
                         append_orchestrator_event=append_orchestrator_event,
                         update_status=update_status,
                         resume_run_job=job_orchestrator.run_job,
+                        auth_session_id=request.auth_session_id,
                     )
                 if request.submission is None or request.auth_session_id is None:
                     raise HTTPException(status_code=422, detail="Auth submission is incomplete")

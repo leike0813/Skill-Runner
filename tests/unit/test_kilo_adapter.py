@@ -191,6 +191,29 @@ def test_kilo_config_composer_rejects_user_mcp_root(tmp_path: Path) -> None:
         adapter.config_composer.compose(ctx)
 
 
+def test_kilo_config_composer_writes_governed_mcp_like_opencode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    adapter = KiloExecutionAdapter()
+    ctx = AdapterExecutionContext(
+        skill=SkillManifest(id="test-skill"),
+        run_dir=run_dir,
+        input_data={},
+        options={},
+    )
+    monkeypatch.setattr(
+        "server.engines.kilo.adapter.config_composer.build_mcp_config_layer",
+        lambda *, skill, engine: (None, {"mcp": {"demo": {"command": "python"}}}),
+    )
+
+    payload = _read_json(adapter.config_composer.compose(ctx))
+
+    assert payload["mcp"] == {"demo": {"command": "python"}}
+
+
 def test_kilo_parse_runtime_stream_extracts_text_session_tokens_and_cost() -> None:
     adapter = KiloExecutionAdapter()
     stdout = (

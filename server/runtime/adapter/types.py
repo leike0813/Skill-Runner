@@ -58,6 +58,19 @@ class RuntimeAuthSignal(TypedDict, total=False):
     matched_pattern_id: str | None
 
 
+class AdapterAuthenticationRequired(RuntimeError):
+    """Engine-neutral preflight failure that requests canonical auth orchestration."""
+
+    def __init__(self, signal: RuntimeAuthSignal) -> None:
+        normalized: RuntimeAuthSignal = {
+            **signal,
+            "required": True,
+            "confidence": "high",
+        }
+        self.signal = normalized
+        super().__init__(str(normalized.get("reason_code") or "AUTH_REQUIRED"))
+
+
 class RuntimeStructuredPayload(TypedDict, total=False):
     type: str
     stream: str

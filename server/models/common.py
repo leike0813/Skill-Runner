@@ -87,6 +87,7 @@ class EngineSessionHandle(BaseModel):
     handle_type: EngineSessionHandleType
     handle_value: str
     created_at_turn: int = 1
+    provider_id: str | None = None
 
 
 class EngineResumeCapability(BaseModel):

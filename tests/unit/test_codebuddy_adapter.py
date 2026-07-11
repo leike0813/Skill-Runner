@@ -1,13 +1,15 @@
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from server.engines.codebuddy.adapter.execution_adapter import CodeBuddyExecutionAdapter
+from server.engines.codebuddy.adapter.stream_framer import CodeBuddyStreamFramer
 from server.engines.codebuddy.adapter.stream_parser import CodeBuddyStreamParser
-from server.engines.codebuddy.models.catalog_service import CodeBuddyModelCatalog
 from server.models import EngineSessionHandle, EngineSessionHandleType, SkillManifest
 from server.runtime.adapter.contracts import AdapterExecutionContext
+from server.runtime.adapter.types import AdapterAuthenticationRequired
 from server.services.mcp.registry import McpServerDefinition, ResolvedMcpServer, render_mcp_config
 from server.services.orchestration.run_execution_core import validate_runtime_and_model_options
 
@@ -35,14 +37,29 @@ def test_codebuddy_command_contract_is_symmetric(tmp_path: Path, monkeypatch) ->
     assert "--model" in start and "--continue" not in resume
 
 
-def test_codebuddy_config_materializes_owned_workspace(tmp_path: Path) -> None:
+def test_codebuddy_config_preserves_canonical_skill_snapshot(tmp_path: Path) -> None:
     adapter = CodeBuddyExecutionAdapter()
     ctx = _ctx(tmp_path)
+    assert ctx.skill.path is not None
+    snapshot = ctx.run_dir / ".codebuddy" / "skills" / ctx.skill.id
+    snapshot.parent.mkdir(parents=True)
+    shutil.copytree(ctx.skill.path, snapshot)
+    ctx = AdapterExecutionContext(
+        skill=ctx.skill.model_copy(update={"path": snapshot}),
+        run_dir=ctx.run_dir,
+        input_data=ctx.input_data,
+        options=ctx.options,
+    )
+    skill_markdown = (snapshot / "SKILL.md").read_text(encoding="utf-8")
+    runner_manifest = (snapshot / "assets" / "runner.json").read_text(encoding="utf-8")
+
     settings = adapter.config_composer.compose(ctx)
+
     assert settings.exists()
     assert (ctx.run_dir / "CODEBUDDY.md").exists()
     assert (ctx.run_dir / ".codebuddy" / "mcp.json").read_text(encoding="utf-8") == '{\n  "mcpServers": {}\n}\n'
-    assert (ctx.run_dir / ".codebuddy" / "skills" / "demo" / "SKILL.md").exists()
+    assert (snapshot / "SKILL.md").read_text(encoding="utf-8") == skill_markdown
+    assert (snapshot / "assets" / "runner.json").read_text(encoding="utf-8") == runner_manifest
 
 
 def test_codebuddy_parser_requires_non_error_terminal_result() -> None:
@@ -64,19 +81,156 @@ def test_codebuddy_parser_emits_high_confidence_auth_signal() -> None:
     assert runtime["auth_signal"]["confidence"] == "high"
 
 
+def test_codebuddy_parser_detects_auth_signal_from_stderr() -> None:
+    parser = CodeBuddyStreamParser(CodeBuddyExecutionAdapter())
+    runtime = parser.parse_runtime_stream(
+        stdout_raw=b"",
+        stderr_raw=b"401 Unauthorized: login required",
+    )
+    assert runtime["auth_signal"]["required"] is True
+    assert runtime["auth_signal"]["confidence"] == "high"
+
+
+@pytest.mark.parametrize(
+    ("state", "reason_code"),
+    [
+        ("missing", "CODEBUDDY_CREDENTIAL_MISSING"),
+        ("expired", "CODEBUDDY_CREDENTIAL_EXPIRED"),
+    ],
+)
+def test_codebuddy_managed_env_requires_present_credential(
+    tmp_path: Path,
+    monkeypatch,
+    state: str,
+    reason_code: str,
+) -> None:
+    adapter = CodeBuddyExecutionAdapter()
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.project_status",
+        lambda _provider_id: SimpleNamespace(credential_state=state),
+    )
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.get",
+        lambda _provider_id: None if state == "missing" else SimpleNamespace(token="expired", user_id="user"),
+    )
+
+    with pytest.raises(AdapterAuthenticationRequired) as exc_info:
+        adapter.build_execution_env(
+            {"CODEBUDDY_AUTH_TOKEN": "inherited"},
+            _ctx(tmp_path),
+            tmp_path / "settings.json",
+        )
+
+    assert exc_info.value.signal["reason_code"] == reason_code
+    assert exc_info.value.signal["provider_id"] == "codebuddy-cn"
+
+
+@pytest.mark.asyncio
+async def test_codebuddy_missing_credential_returns_auth_required_without_process_launch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    adapter = CodeBuddyExecutionAdapter()
+    ctx = _ctx(tmp_path)
+    monkeypatch.setattr(
+        adapter.agent_manager,
+        "resolve_engine_command",
+        lambda _engine: Path("/managed/codebuddy"),
+    )
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.project_status",
+        lambda _provider_id: SimpleNamespace(credential_state="missing"),
+    )
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.get",
+        lambda _provider_id: None,
+    )
+    spawn_calls: list[object] = []
+
+    async def _unexpected_spawn(*args, **kwargs):  # noqa: ANN002, ANN003
+        spawn_calls.append((args, kwargs))
+        raise AssertionError("CodeBuddy CLI must not start before authentication")
+
+    monkeypatch.setattr(adapter, "_create_subprocess", _unexpected_spawn)
+
+    result = await adapter._execute_process(
+        "prompt",
+        ctx.run_dir,
+        ctx.skill,
+        dict(ctx.options),
+        config_path=ctx.run_dir / ".codebuddy" / "settings.json",
+    )
+
+    assert result.failure_reason == "AUTH_REQUIRED"
+    assert result.raw_stdout == result.raw_stderr == ""
+    assert result.auth_signal_snapshot == {
+        "required": True,
+        "confidence": "high",
+        "subcategory": "oauth_reauth",
+        "provider_id": "codebuddy-cn",
+        "reason_code": "CODEBUDDY_CREDENTIAL_MISSING",
+        "matched_pattern_id": "codebuddy_credential_missing",
+    }
+    assert spawn_calls == []
+
+
 def test_codebuddy_live_and_batch_share_terminal_framer() -> None:
     parser = CodeBuddyStreamParser(SimpleNamespace())
     live = parser.start_live_session()
-    assert live.feed(stream="stdout", text='{"type":"system.init","session_id":"one"}\n', byte_from=0, byte_to=40) == []
-    assert live.feed(stream="stdout", text='{"type":"result","subtype":"success","result":"ok"}\n', byte_from=40, byte_to=96) == []
-    emissions = live.finish(exit_code=0, failure_reason=None)
-    assert any(item.get("kind") == "turn_completed" for item in emissions)
+    init_emissions = live.feed(
+        stream="stdout",
+        text='{"type":"system.init","session_id":"one"}\n',
+        byte_from=0,
+        byte_to=40,
+    )
+    result_emissions = live.feed(
+        stream="stdout",
+        text='{"type":"result","subtype":"success","result":"ok"}\n',
+        byte_from=40,
+        byte_to=96,
+    )
+    finish_emissions = live.finish(exit_code=0, failure_reason=None)
+
+    assert any(item.get("kind") == "run_handle" for item in init_emissions)
+    assert any(item.get("kind") == "turn_marker" and item.get("marker") == "start" for item in init_emissions)
+    assert any(item.get("kind") == "assistant_message" for item in result_emissions)
+    assert any(item.get("kind") == "turn_completed" for item in result_emissions)
+    assert finish_emissions == []
 
 
-def test_codebuddy_catalog_qualifies_models_and_has_no_static_fallback(tmp_path: Path) -> None:
-    catalog = CodeBuddyModelCatalog(cache_path=tmp_path / "catalog.json")
-    assert catalog.parse_models("--model Currently supported:\n  glm-5.2  default\n", "codebuddy-global") == [{"id": "codebuddy-global/glm-5.2", "provider": "codebuddy-global", "provider_id": "codebuddy-global", "model": "glm-5.2", "display_name": "glm-5.2", "deprecated": False, "notes": "runtime_probe_cache", "supported_effort": ["default"]}]
-    assert catalog.get_snapshot()["models"] == []
+def test_codebuddy_live_parser_does_not_mask_output_capture_failure() -> None:
+    live = CodeBuddyStreamParser(SimpleNamespace()).start_live_session()
+
+    emissions = live.finish(exit_code=-15, failure_reason="OUTPUT_REDACTION_FAILED")
+
+    assert not any(
+        item.get("kind") == "turn_marker"
+        and item.get("marker") == "failed"
+        and item.get("details", {}).get("code") == "CODEBUDDY_MISSING_TERMINAL_RESULT"
+        for item in emissions
+    )
+
+
+def test_codebuddy_framer_repairs_physical_newline_inside_json_string() -> None:
+    frames = CodeBuddyStreamFramer().feed(
+        '{"type":"assistant.text","text":"first line\nsecond line"}\n'
+    )
+    assert len(frames) == 1
+    assert frames[0].payload == {
+        "type": "assistant.text",
+        "text": "first line\nsecond line",
+    }
+
+
+def test_codebuddy_framer_resynchronizes_after_unterminated_row() -> None:
+    framer = CodeBuddyStreamFramer()
+    frames = framer.feed(
+        '{"type":"assistant.text","text":"unterminated\n'
+        '{"type":"result","subtype":"success","result":"ok"}\n'
+    ) + framer.finish()
+
+    assert frames[0].diagnostic == "CODEBUDDY_FRAME_UNTERMINATED"
+    assert frames[1].payload == {"type": "result", "subtype": "success", "result": "ok"}
 
 
 @pytest.mark.parametrize("transport", ["stdio", "http", "sse"])
@@ -87,5 +241,37 @@ def test_codebuddy_mcp_config_is_strict_and_transport_typed(transport: str) -> N
 
 
 def test_codebuddy_reserved_runtime_env_is_rejected_before_model_lookup() -> None:
-    with pytest.raises(ValueError, match="CODEBUDDY_AUTH_TOKEN"):
+    with pytest.raises(ValueError) as exc_info:
         validate_runtime_and_model_options(engine="codebuddy", model=None, provider_id="codebuddy-cn", runtime_options={"env": {"CODEBUDDY_AUTH_TOKEN": "token"}})
+    assert getattr(exc_info.value, "detail")["code"] == "ENGINE_RUNTIME_ENV_RESERVED"
+    assert getattr(exc_info.value, "detail")["field"].endswith("CODEBUDDY_AUTH_TOKEN")
+
+
+def test_codebuddy_profile_declares_managed_environment_keys() -> None:
+    adapter = CodeBuddyExecutionAdapter()
+    assert set(adapter.profile.launch.managed_env_keys) == {
+        "CODEBUDDY_AUTH_TOKEN",
+        "CODEBUDDY_API_KEY",
+        "CODEBUDDY_INTERNET_ENVIRONMENT",
+        "CODEBUDDY_BASE_URL",
+        "CODEBUDDY_CONFIG_DIR",
+    }
+    assert adapter.profile.model_catalog.mode == "manifest"
+    assert adapter.profile.resolve_manifest_path() == (
+        Path("server/engines/codebuddy/models/manifest.json").resolve()
+    )
+
+
+def test_codebuddy_resume_rejects_provider_mismatch(tmp_path: Path, monkeypatch) -> None:
+    adapter = CodeBuddyExecutionAdapter()
+    monkeypatch.setattr(adapter.agent_manager, "resolve_engine_command", lambda _engine: Path("/managed/codebuddy"))
+    ctx = _ctx(tmp_path, {"provider_id": "codebuddy-global"})
+    handle = EngineSessionHandle(
+        engine="codebuddy",
+        handle_type=EngineSessionHandleType.SESSION_ID,
+        handle_value="session-1",
+        provider_id="codebuddy-cn",
+    )
+
+    with pytest.raises(RuntimeError, match="provider mismatch"):
+        adapter.command_builder.build_resume(ctx, "reply", handle)

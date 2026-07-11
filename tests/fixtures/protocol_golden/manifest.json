@@ -2,6 +2,41 @@
   "version": 1,
   "fixtures": [
     {
+      "fixture_id": "codebuddy_success_protocol_synthetic",
+      "path": "codebuddy/codebuddy_success_protocol_synthetic/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codebuddy",
+      "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "codebuddy_exit_zero_auth_error_protocol_synthetic",
+      "path": "codebuddy/codebuddy_exit_zero_auth_error_protocol_synthetic/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codebuddy",
+      "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "codebuddy_canceled_protocol_synthetic",
+      "path": "codebuddy/codebuddy_canceled_protocol_synthetic/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codebuddy",
+      "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "codebuddy_runtime_error_protocol_synthetic",
+      "path": "codebuddy/codebuddy_runtime_error_protocol_synthetic/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codebuddy",
+      "source": "synthetic_minimal"
+    },
+    {
+      "fixture_id": "codebuddy_malformed_resync_protocol_synthetic",
+      "path": "codebuddy/codebuddy_malformed_resync_protocol_synthetic/fixture.json",
+      "layer": "protocol_core",
+      "engine": "codebuddy",
+      "source": "synthetic_minimal"
+    },
+    {
       "fixture_id": "common_outcome_waiting_auth_smoke",
       "path": "common/common_outcome_waiting_auth_smoke/fixture.json",
       "layer": "outcome_core",

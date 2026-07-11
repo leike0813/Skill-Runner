@@ -141,4 +141,5 @@ def test_ordering_rules_are_complete_for_model_tests() -> None:
         "repair_must_not_promote_ask_user_turn",
         "waiting_auth_may_coexist_with_turn_failed_evidence",
         "waiting_auth_reason_should_preserve_semantic_failure_message",
+        "managed_engine_secrets_must_be_redacted_before_any_runtime_sink",
     }

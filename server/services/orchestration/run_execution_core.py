@@ -16,6 +16,12 @@ RUNTIME_DEFAULT_OPTION_IGNORED_WARNING_CODE = "SKILL_RUNTIME_DEFAULT_OPTION_IGNO
 logger = logging.getLogger(__name__)
 
 
+class EngineOptionValidationError(ValueError):
+    def __init__(self, detail: dict[str, Any]) -> None:
+        self.detail = detail
+        super().__init__(str(detail.get("code") or "ENGINE_OPTION_INVALID"))
+
+
 @dataclass(frozen=True)
 class EffectiveRuntimePolicy:
     requested_execution_mode: str
@@ -58,12 +64,36 @@ def validate_runtime_and_model_options(
             }
             forbidden = sorted(reserved.intersection(raw_env))
             if forbidden:
-                raise ValueError(
-                    "CodeBuddy runtime_options.env may not override managed variable(s): "
-                    + ", ".join(forbidden)
+                raise EngineOptionValidationError(
+                    {
+                        "code": "ENGINE_RUNTIME_ENV_RESERVED",
+                        "engine": "codebuddy",
+                        "field": f"runtime_options.env.{forbidden[0]}",
+                        "allowed_values": [],
+                    }
                 )
         if not provider_id:
-            raise ValueError("CodeBuddy engine_options.provider_id is required")
+            raise EngineOptionValidationError(
+                {
+                    "code": "ENGINE_PROVIDER_REQUIRED",
+                    "engine": "codebuddy",
+                    "field": "provider_id",
+                    "allowed_values": ["codebuddy-cn", "codebuddy-global"],
+                }
+            )
+        from server.engines.codebuddy.auth.provider_registry import require_provider
+
+        try:
+            require_provider(provider_id)
+        except ValueError as exc:
+            raise EngineOptionValidationError(
+                {
+                    "code": "ENGINE_PROVIDER_INVALID",
+                    "engine": "codebuddy",
+                    "field": "provider_id",
+                    "allowed_values": ["codebuddy-cn", "codebuddy-global"],
+                }
+            ) from exc
     engine_opts: dict[str, Any] = {}
     if model or provider_id or effort:
         normalized = model_registry.normalize_model_selection(

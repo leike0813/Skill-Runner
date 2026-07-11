@@ -228,6 +228,7 @@ async def _persist_run_handle_immediate(
     engine_name: str,
     attempt_number: int,
     handle_id: str,
+    provider_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_handle = handle_id.strip()
     if not normalized_handle:
@@ -249,6 +250,7 @@ async def _persist_run_handle_immediate(
         handle_type=EngineSessionHandleType.SESSION_ID,
         handle_value=normalized_handle,
         created_at_turn=max(1, int(attempt_number)),
+        provider_id=(provider_id.strip().lower() if isinstance(provider_id, str) and provider_id.strip() else None),
     )
     await maybe_await(
         run_store_backend.set_engine_session_handle(
@@ -899,6 +901,11 @@ class _RunJobLifecyclePipeline:
                         engine_name=engine_name,
                         attempt_number=attempt_number,
                         handle_id=handle_id,
+                        provider_id=(
+                            str(options.get("provider_id"))
+                            if isinstance(options.get("provider_id"), str)
+                            else None
+                        ),
                     )
                 execution = await orchestrator.run_attempt_execution_service.execute(
                     context=preparation,

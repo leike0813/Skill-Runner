@@ -21,6 +21,7 @@ from server.models import (
 from server.routers import jobs as jobs_router
 import server.services.orchestration.run_interaction_service as interaction_service_module
 from server.services.orchestration.run_store import RunStore
+from server.services.orchestration.run_workspace_layout import require_layout_from_record
 
 
 def _create_skill(
@@ -188,6 +189,32 @@ async def test_get_run_status_exposes_waiting_user_pending_fields(monkeypatch, t
     assert response.recovery_state.value == "none"
     assert response.recovered_at is None
     assert response.recovery_reason is None
+
+
+@pytest.mark.asyncio
+async def test_get_run_status_waiting_auth_uses_persisted_audit_directory(
+    monkeypatch,
+    temp_config_dirs,
+):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = str(request_record["run_id"])
+    layout = require_layout_from_record(request_record)
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_AUTH)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(
+        "server.services.orchestration.run_auth_orchestration_service."
+        "run_auth_orchestration_service.reconcile_waiting_auth",
+        reconcile,
+    )
+
+    response = await jobs_router.get_run_status(request_id)
+
+    assert response.status == RunStatus.WAITING_AUTH
+    reconcile.assert_awaited_once_with(request_id=request_id)
+    assert (layout.audit_dir / "service.run.log").is_file()
+    assert not (layout.workspace_dir / ".audit" / "service.run.log").exists()
 
 
 @pytest.mark.asyncio
@@ -489,6 +516,7 @@ async def test_auth_interaction_callbacks_write_namespaced_audit_without_state_f
             interaction_id=1,
             mode="auth",
             response={},
+            auth_session_id="auth-active",
             selection=AuthMethodSelection(value=AuthMethod.API_KEY),
         ),
         BackgroundTasks(),

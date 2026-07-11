@@ -100,6 +100,7 @@ stateDiagram-v2
   - 多方式：`method_selection -> challenge_active`
   - 单方式：直接 `challenge_active`
 - 单方式鉴权若命中 `auth session already active`，系统必须恢复或重投影现有 `challenge_active`，不得降级成 `method_selection`
+- `available_methods` 只表示尚待用户选择的方式，因此仅在 `method_selection` 阶段非空；`challenge_active` 通过 `selected_method` 表示已选方式。客户端对同一 `auth_session_id` 和同一方式的重复选择属于幂等重试，后端不得创建第二个鉴权会话。
 - `auth_ready` 为 retired semantics，不得再用来驱动 resume 或 state transition
 
 ## 6. Layer E: Current Projection Subchart

@@ -67,6 +67,8 @@ Skill Runner 对外运行时事件流收敛为 FCMP 单流：
 - `agent.turn_complete.data` 可直接承载结构化统计信息（例如 usage/tokens/cost/stats）
 - `agent.turn_failed.data` 承载语义失败摘要；terminal failure summary 应优先消费它，而不是先退化到 `Exit code N`
 - `agent.turn_failed` 可以与最终 `waiting_auth` 共存；在这种情况下它只作为 engine failure evidence 保留，不得单独驱动 terminal failed projection
+- `OUTPUT_REDACTION_FAILED` 表示输出采集在安全脱敏阶段 fail closed；该基础设施失败优先于 parser 根据空流或截断流推导的 missing-terminal，且不得为诊断而持久化未脱敏输出
+- CodeBuddy `stream-json` 在每个完整记录通过脱敏与 framing 后增量发布 run handle、reasoning、tool activity 和 assistant text；仅 terminal result 判定保留到 result 记录，禁止将整个 stdout 缓冲到进程退出后再一次性发布
 - Run 句柄事件仅在 RASP：`lifecycle.run_handle`（`data.handle_id`）
 - FCMP 明确不包含 `assistant.turn_*`
 - 同一 `message_id` 的收敛顺序：`*.message.promoted` 必须先于 `*.message.final`

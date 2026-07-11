@@ -161,11 +161,23 @@ lifecycle_normalization_rules:
   waiting_auth_precedence:
     semantic_turn_failed_is_evidence_only: true
     terminal_failed_projection_forbidden: true
+  failure_precedence:
+    process_output_capture_failure:
+      reason_code: OUTPUT_REDACTION_FAILED
+      outranks: parser_inferred_missing_terminal
+      raw_output_persistence: forbidden
   auth_routes:
     multi_method:
       requires_method_selection: true
+      available_methods_visible_in_phase: method_selection
     single_method:
       requires_method_selection: false
+    challenge_active:
+      available_methods: []
+      selected_method_required: true
+      duplicate_selection:
+        same_session_same_method: idempotent_accept
+        mismatch: reject
   busy_recovery:
     single_method:
       preserve_phase: challenge_active

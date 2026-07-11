@@ -367,6 +367,35 @@ async def test_resolve_failure_when_non_session_interactive_cannot_wait(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_output_capture_failure_outranks_parser_inferred_missing_terminal(tmp_path: Path) -> None:
+    context = _build_context(tmp_path)
+    execution = _build_execution(
+        exit_code=-15,
+        failure_reason="OUTPUT_REDACTION_FAILED",
+    )
+    convergence = OutputConvergenceResult(
+        runtime_parse_result={
+            "turn_failure_data": {
+                "message": "CodeBuddy stream ended without a terminal result",
+                "code": "CODEBUDDY_MISSING_TERMINAL_RESULT",
+            }
+        }
+    )
+    inputs, _events = _build_inputs(
+        context=context,
+        execution=execution,
+        convergence=convergence,
+    )
+
+    outcome = await RunAttemptOutcomeService().resolve(inputs=inputs)
+
+    assert outcome.final_status == RunStatus.FAILED
+    assert outcome.final_error_code == "OUTPUT_REDACTION_FAILED"
+    assert outcome.normalized_error is not None
+    assert "without a terminal result" not in outcome.normalized_error["message"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_soft_completion_adds_warning(tmp_path: Path) -> None:
     profile = EngineInteractiveProfile(reason="probe_ok", session_timeout_sec=900)
     context = _build_context(

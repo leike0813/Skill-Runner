@@ -251,8 +251,6 @@ class InteractionReplyRequest(BaseModel):
         if self.selection is None and self.submission is None:
             raise ValueError("selection or submission is required when mode=auth")
         if self.selection is not None:
-            if self.auth_session_id is not None:
-                raise ValueError("auth_session_id must be empty when selecting auth method")
             return self
         if not self.auth_session_id:
             raise ValueError("auth_session_id is required when submitting auth input")

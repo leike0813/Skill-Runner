@@ -30,7 +30,14 @@
   "launch": {
     "cwd_strategy": "run_dir",
     "config_env_var": "CODEBUDDY_CONFIG_DIR",
-    "run_dir_flag": null
+    "run_dir_flag": null,
+    "managed_env_keys": [
+      "CODEBUDDY_AUTH_TOKEN",
+      "CODEBUDDY_API_KEY",
+      "CODEBUDDY_INTERNET_ENVIRONMENT",
+      "CODEBUDDY_BASE_URL",
+      "CODEBUDDY_CONFIG_DIR"
+    ]
   },
   "config_assets": {
     "bootstrap_path": "../config/bootstrap.json",
@@ -40,15 +47,15 @@
     "skill_defaults_path": null
   },
   "model_catalog": {
-    "mode": "runtime_probe",
-    "manifest_path": null,
+    "mode": "manifest",
+    "manifest_path": "../models/manifest.json",
     "models_root": "../models",
     "seed_path": null
   },
   "command_defaults": {
     "start": ["-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions"],
     "resume": ["-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions"],
-    "ui_shell": ["-p", "--output-format", "stream-json"]
+    "ui_shell": ["--setting-sources", "project"]
   },
   "command_features": {
     "inject_output_schema_cli": true
@@ -62,21 +69,21 @@
     "result_success_strategy": "result_structured_output_field"
   },
   "ui_shell": {
-    "enabled": false,
+    "enabled": true,
     "command_id": "codebuddy-tui",
     "label": "CodeBuddy",
     "trust_bootstrap_parent": false,
     "sandbox_arg": null,
     "retry_without_sandbox_on_early_exit": false,
     "sandbox_probe_strategy": "static_unsupported",
-    "sandbox_probe_message": null,
+    "sandbox_probe_message": "CodeBuddy inline TUI runs with session-local permissions and strict MCP isolation without an OS sandbox.",
     "auth_hint_strategy": "none",
     "runtime_override_strategy": "none",
     "config_assets": {
-      "default_path": null,
-      "enforced_path": null,
+      "default_path": "../config/ui_shell_default.json",
+      "enforced_path": "../config/ui_shell_enforced.json",
       "settings_schema_path": null,
-      "target_relpath": null
+      "target_relpath": ".codebuddy/settings.json"
     }
   },
   "cli_management": {
@@ -95,7 +102,7 @@
     "layout": {
       "extra_dirs": [],
       "bootstrap_target_relpath": ".codebuddy/bootstrap.json",
-      "bootstrap_format": "text",
+      "bootstrap_format": "json",
       "normalize_strategy": null
     }
   },

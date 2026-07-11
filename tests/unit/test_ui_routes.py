@@ -573,6 +573,13 @@ async def test_ui_engines_page(monkeypatch):
         "server.routers.ui.engine_auth_flow_manager.get_active_session_snapshot",
         lambda: {"active": False},
     )
+    monkeypatch.setattr(
+        "server.routers.ui.codebuddy_credential_store.project_all_statuses",
+        lambda: (
+            SimpleNamespace(provider_id="codebuddy-cn", credential_state="present"),
+            SimpleNamespace(provider_id="codebuddy-global", credential_state="missing"),
+        ),
+    )
 
     response = await _request("GET", "/ui/engines")
     assert response.status_code == 200
@@ -604,9 +611,18 @@ async def test_ui_engines_page(monkeypatch):
     assert 'id="custom-provider-engine"' in response.text
     assert 'id="custom-provider-table-body"' in response.text
     assert 'id="custom-provider-tui-modal"' in response.text
+    assert 'id="codebuddy-tui-provider-modal"' in response.text
+    assert "data-codebuddy-provider-picker" in response.text
+    assert "data-codebuddy-provider-choice" in response.text
+    assert "data-codebuddy-provider-login" in response.text
     assert "customProvidersStartTui" in response.text
     assert "fetchCustomProviders" in response.text
     assert "Codex OAuth代理（Callback）" not in response.text
+    assert '"engine": "codebuddy"' in response.text
+    assert '"provider_id": "codebuddy-cn"' in response.text
+    assert '"credential_state": "present"' in response.text
+    assert "/v1/management/engines/codebuddy/auth/credentials/" in response.text
+    assert "clearCodeBuddyCredential" in response.text
     assert "ttyd" in response.text
 
 
@@ -737,12 +753,13 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
     )
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
-        lambda engine, custom_model=None: {
+        lambda engine, custom_model=None, provider_id=None: {
             "active": True,
             "status": "running",
             "session_id": "s-1",
             "engine": engine,
             "custom_model": custom_model,
+            "provider_id": provider_id,
         },
     )
     monkeypatch.setattr(
@@ -767,6 +784,14 @@ async def test_ui_engine_tui_session_endpoints(monkeypatch):
     assert custom_start_res.status_code == 200
     assert custom_start_res.json()["custom_model"] == "bailian/qwen3.5-plus"
 
+    codebuddy_start_res = await _request(
+        "POST",
+        "/ui/engines/tui/session/start",
+        data={"engine": "codebuddy", "provider_id": "codebuddy-global"},
+    )
+    assert codebuddy_start_res.status_code == 200
+    assert codebuddy_start_res.json()["provider_id"] == "codebuddy-global"
+
     input_res = await _request("POST", "/ui/engines/tui/session/input", data={"text": "hello"})
     assert input_res.status_code == 410
 
@@ -786,8 +811,8 @@ async def test_ui_engine_tui_start_busy_returns_409(monkeypatch):
 
     from server.services.ui.ui_shell_manager import UiShellBusyError
 
-    def _raise_busy(_engine: str, custom_model=None):
-        _ = custom_model
+    def _raise_busy(_engine: str, custom_model=None, provider_id=None):
+        _ = custom_model, provider_id
         raise UiShellBusyError("busy")
 
     monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _raise_busy)
@@ -804,12 +829,13 @@ async def test_ui_engine_tui_start_sandbox_probe_is_not_blocking(monkeypatch):
     monkeypatch.setattr("server.routers.ui._is_ttyd_available", lambda: True)
     monkeypatch.setattr(
         "server.routers.ui.ui_shell_manager.start_session",
-        lambda engine, custom_model=None: {
+        lambda engine, custom_model=None, provider_id=None: {
             "active": True,
             "status": "running",
             "session_id": "s-2",
             "engine": engine,
             "custom_model": custom_model,
+            "provider_id": provider_id,
             "sandbox_status": "unknown",
             "sandbox_message": "probe only",
         },
@@ -829,7 +855,8 @@ async def test_ui_engine_tui_start_invalid_custom_model_returns_400(monkeypatch)
 
     from server.services.ui.ui_shell_manager import UiShellValidationError
 
-    def _raise_invalid(_engine: str, custom_model=None):
+    def _raise_invalid(_engine: str, custom_model=None, provider_id=None):
+        _ = provider_id
         raise UiShellValidationError(f"invalid: {custom_model}")
 
     monkeypatch.setattr("server.routers.ui.ui_shell_manager.start_session", _raise_invalid)
@@ -851,8 +878,8 @@ async def test_ui_engine_tui_start_returns_503_when_ttyd_unavailable(monkeypatch
 
     called = {"start": False}
 
-    def _start(_engine: str, custom_model=None):
-        _ = custom_model
+    def _start(_engine: str, custom_model=None, provider_id=None):
+        _ = custom_model, provider_id
         called["start"] = True
         return {"active": True}
 

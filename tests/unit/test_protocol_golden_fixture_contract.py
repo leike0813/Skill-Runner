@@ -23,7 +23,7 @@ def test_protocol_golden_fixture_manifest_is_loadable_and_ids_are_unique() -> No
     assert manifest["version"] == 1
     fixture_ids = [item["fixture_id"] for item in list_protocol_golden_fixtures()]
     assert len(fixture_ids) == len(set(fixture_ids))
-    assert len(fixture_ids) == 38
+    assert len(fixture_ids) == 43
 
 
 def test_protocol_golden_fixtures_validate_and_align_with_manifest() -> None:

@@ -870,6 +870,26 @@ async def _load_engine_models(
             for item in raw_models:
                 if isinstance(item, dict) and isinstance(item.get("id"), str):
                     models.append(item)
+        credential_statuses = detail.get("credential_statuses", [])
+        if isinstance(credential_statuses, list):
+            for item in credential_statuses:
+                provider_id = item.get("provider_id") if isinstance(item, dict) else None
+                if not isinstance(provider_id, str) or not provider_id.strip():
+                    continue
+                normalized_provider = provider_id.strip()
+                if any(_provider_from_model_row(row) == normalized_provider for row in models):
+                    continue
+                models.append(
+                    {
+                        "provider_id": normalized_provider,
+                        "provider": normalized_provider,
+                        "_provider_only": True,
+                        "_provider_required": engine == "codebuddy",
+                    }
+                )
+        if engine == "codebuddy":
+            for row in models:
+                row["_provider_required"] = True
         engine_models_by_engine[engine] = models
     return engine_models_by_engine
 
@@ -916,6 +936,25 @@ async def _collect_run_submission(
         selected_provider=submitted_provider,
         rows=engine_models_by_engine.get(engine, []),
     )
+    known_providers = sorted(
+        {
+            provider
+            for provider in (_provider_from_model_row(row) for row in engine_models_by_engine.get(engine, []))
+            if provider
+        }
+    )
+    provider_required = any(
+        row.get("_provider_required") is True
+        for row in engine_models_by_engine.get(engine, [])
+        if isinstance(row, dict)
+    )
+    provider_error: str | None = None
+    if provider_required and not submitted_provider:
+        provider_error = "provider is required for selected engine"
+        selected_provider_id = ""
+    elif submitted_provider and known_providers and submitted_provider not in known_providers:
+        provider_error = f"provider '{submitted_provider}' is not available for selected engine"
+        selected_provider_id = ""
     selected_effort, effort_for_form, effort_error = _resolve_effort_selection(
         selected_effort=submitted_effort,
         selected_model=selected_model,
@@ -931,7 +970,7 @@ async def _collect_run_submission(
             rows=engine_models_by_engine.get(engine, []),
         )
     )
-    if not provider_for_form:
+    if not provider_for_form and not provider_required:
         provider_for_form = ENGINE_DEFAULT_PROVIDER.get(engine, "")
     runtime_options, runtime_errors = _build_runtime_options(
         execution_mode=execution_mode,
@@ -966,6 +1005,8 @@ async def _collect_run_submission(
         errors.append(mode_error)
     if model_error:
         errors.append(model_error)
+    if provider_error:
+        errors.append(provider_error)
     if effort_error:
         errors.append(effort_error)
     return {
@@ -1261,7 +1302,12 @@ def _build_run_form_context(
         engine=selected_engine,
         rows=engine_models_by_engine.get(selected_engine, []),
     )
-    if not selected_provider:
+    provider_required = any(
+        row.get("_provider_required") is True
+        for row in engine_models_by_engine.get(selected_engine, [])
+        if isinstance(row, dict)
+    )
+    if not selected_provider and not provider_required:
         selected_provider = ENGINE_DEFAULT_PROVIDER.get(selected_engine, "")
     submitted_runtime_options = submitted.get("runtime_options", {})
     if not isinstance(submitted_runtime_options, dict):
@@ -1286,6 +1332,7 @@ def _build_run_form_context(
         "execution_modes": execution_modes,
         "selected_engine": selected_engine,
         "selected_provider": selected_provider,
+        "provider_required": provider_required,
         "selected_execution_mode": selected_execution_mode,
         "selected_model": selected_model,
         "selected_effort": selected_effort,
@@ -1612,6 +1659,8 @@ def _resolve_model_selection(
         if provider_matches:
             provider_id, model_value, _row_id = provider_matches[0]
             return model_value, provider_id or selected_provider_text, None
+        if matches:
+            return selected_text, selected_provider_text, f"model '{selected_text}' is not available for selected provider"
 
     if len(matches) == 1:
         provider_id, model_value, _row_id = matches[0]

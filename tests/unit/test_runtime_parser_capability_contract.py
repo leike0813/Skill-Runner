@@ -56,6 +56,7 @@ def test_runtime_parser_capability_contract_declares_codebuddy_parser_after_impl
 
     assert "codebuddy" in keys.ENGINE_KEYS
     assert payload["engines"]["codebuddy"] == {
+        "incremental_live_emission": True,
         "semantic_turn_markers": {
             "start": True,
             "complete": True,
@@ -63,12 +64,13 @@ def test_runtime_parser_capability_contract_declares_codebuddy_parser_after_impl
         },
         "generic_error_governance": False,
         "auth_signal_snapshot": True,
-        "structured_payload_extraction": True,
+        "structured_payload_extraction": False,
         "success_result_structured_output": True,
         "process_event_extraction": True,
         "run_handle_extraction": True,
         "parser_confidence_reporting": True,
     }
+    assert "live_semantic_on_finish_only = True" not in _stream_parser_source("codebuddy")
 
 
 def test_runtime_parser_capability_contract_matches_current_engine_sources() -> None:

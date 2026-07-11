@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
+from server.engines.codebuddy.adapter.stream_parser import CodeBuddyStreamParser
 from server.engines.codex.adapter.stream_parser import CodexStreamParser
 from server.engines.kilo.adapter.execution_adapter import KiloExecutionAdapter
 from server.engines.opencode.adapter.stream_parser import OpencodeStreamParser
@@ -745,6 +747,74 @@ async def test_live_runtime_emitter_delays_raw_until_finish_for_terminal_semanti
     assert any(
         row.get("event", {}).get("type") == "lifecycle.run_handle"
         for row in final_rasp["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_codebuddy_live_runtime_emitter_publishes_before_process_exit(tmp_path: Path) -> None:
+    run_id = "run-live-codebuddy"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fcmp_live_journal.clear(run_id)
+    rasp_live_journal.clear(run_id)
+    chat_replay_live_journal.clear(run_id)
+    emitter = LiveRuntimeEmitterImpl(
+        run_id=run_id,
+        run_dir=run_dir,
+        engine="codebuddy",
+        attempt_number=1,
+        stream_parser=CodeBuddyStreamParser(SimpleNamespace()),
+        fcmp_publisher=FcmpEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        rasp_publisher=RaspEventPublisher(mirror_writer=_NoopMirrorWriter()),
+        audit_dir=_audit_dir(run_dir),
+    )
+
+    first_payload = (
+        '{"type":"system","subtype":"init","session_id":"codebuddy-live"}\n'
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"live plan"}]}}\n'
+    )
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=first_payload,
+        byte_from=0,
+        byte_to=len(first_payload.encode("utf-8")),
+    )
+
+    running_rasp = rasp_live_journal.replay(run_id=run_id, after_seq=0)
+    running_types = [row.get("event", {}).get("type") for row in running_rasp["events"]]
+    assert "lifecycle.run_handle" in running_types
+    assert "agent.turn_start" in running_types
+    assert "agent.reasoning" in running_types
+    running_chat = chat_replay_live_journal.replay(run_id=run_id, after_seq=0)
+    assert any(
+        row.get("kind") == "assistant_process"
+        and row.get("correlation", {}).get("process_type") == "reasoning"
+        for row in running_chat["events"]
+    )
+
+    second_payload = (
+        '{"type":"result","subtype":"success","session_id":"codebuddy-live",'
+        '"result":"done","structured_output":{"__SKILL_DONE__":true,"ok":true}}\n'
+    )
+    second_from = len(first_payload.encode("utf-8"))
+    await emitter.on_stream_chunk(
+        stream="stdout",
+        text=second_payload,
+        byte_from=second_from,
+        byte_to=second_from + len(second_payload.encode("utf-8")),
+    )
+
+    running_fcmp = fcmp_live_journal.replay(run_id=run_id, after_seq=0)
+    assert any(row.get("type") == "assistant.message.final" for row in running_fcmp["events"])
+    final_count_before_exit = sum(
+        row.get("type") == "assistant.message.final" for row in running_fcmp["events"]
+    )
+
+    await emitter.on_process_exit(exit_code=0, failure_reason=None)
+
+    final_fcmp = fcmp_live_journal.replay(run_id=run_id, after_seq=0)
+    assert sum(row.get("type") == "assistant.message.final" for row in final_fcmp["events"]) == (
+        final_count_before_exit
     )
 
 

@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         return asyncio.run(_authenticate(args))
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, TypeError, asyncio.TimeoutError) as exc:
         _emit({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
         return 1
 

@@ -128,3 +128,7 @@ The auth driver registry reads this file automatically via `EngineAuthStrategySe
    - run `tests/unit/test_runtime_auth_no_engine_coupling.py`.
 5. Auth strategy not found:
    - verify `server/engines/<engine>/config/auth_strategy.yaml` exists and passes schema validation.
+
+## 7. CodeBuddy Provider Boundary
+
+CodeBuddy is provider-aware: only `codebuddy-cn` and `codebuddy-global` are accepted. Its runtime handler delegates login to an isolated SDK worker and stores credentials in the provider-keyed CodeBuddy vault. Missing/expired preflight and redacted stdout/stderr 401 evidence reuse canonical `waiting_auth`; SDK browser completion automatically requeues exactly once without requiring a chat reply. Management and UI surfaces may expose the provider ID plus redacted state (`missing`, `present`, or `expired`) and advisory timestamps, never the token, worker diagnostics, or SDK evidence. Deleting one provider credential must rotate only that provider's runtime state and cannot affect the other provider.

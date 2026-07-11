@@ -1,1 +1,10 @@
-{}
+{
+  "autoCompactEnabled": true,
+  "autoUpdates": false,
+  "promptSuggestionEnabled": false,
+  "memory": false,
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "subagentPermissionMode": "bypassPermissions"
+  }
+}

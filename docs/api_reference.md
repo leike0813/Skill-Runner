@@ -114,7 +114,8 @@
 
 ### Engine 管理
 - `GET /v1/management/engines`：引擎摘要列表（`engine/cli_version/models_count`，版本来自后台缓存）
-- `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`；模型项在适用时可带 `provider/provider_id/model/source`）
+- `GET /v1/management/engines/{engine}`：引擎详情（额外包含 `models/upgrade_status/last_error`；模型项在适用时可带 `provider/provider_id/model/source`）。CodeBuddy 额外返回两个 canonical provider 的脱敏 `credential_statuses`（仅状态和时间，绝不含 token）。
+- `DELETE /v1/management/engines/codebuddy/auth/credentials/{provider_id}`：删除一个 canonical CodeBuddy provider 的凭证并轮换该 provider 的本地状态；`provider_id` 仅可为 `codebuddy-cn` 或 `codebuddy-global`。
 - `GET /v1/management/engines/{engine}/auth/import/spec`：返回该引擎（及 provider-aware provider）导入鉴权文件要求
 - `POST /v1/management/engines/{engine}/auth/import`：提交并导入鉴权文件（multipart）
 
@@ -1355,7 +1356,7 @@
 
 终端相关接口（JSON）：
 - `GET /ui/engines/tui/session`
-- `POST /ui/engines/tui/session/start`（`engine`，返回会话与 sandbox 探测状态）
+- `POST /ui/engines/tui/session/start`（内部表单字段 `engine`、可选 `custom_model`、可选 `provider_id`，返回会话与 sandbox 探测状态）。CodeBuddy 必须显式提交已登录的 canonical provider；其他引擎拒绝 `provider_id`。
 - `POST /ui/engines/tui/session/stop`
 - `POST /ui/engines/tui/session/input`（已废弃，返回 `410`）
 - `POST /ui/engines/tui/session/resize`（已废弃，返回 `410`）

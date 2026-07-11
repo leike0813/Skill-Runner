@@ -359,6 +359,7 @@ def test_declared_mcp_is_forced_run_local() -> None:
         ("qwen", "mcpServers"),
         ("claude", "mcpServers"),
         ("opencode", "mcp"),
+        ("kilo", "mcp"),
     ],
 )
 def test_renderer_maps_engine_roots(engine: str, root: str) -> None:

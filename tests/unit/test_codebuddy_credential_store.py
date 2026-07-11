@@ -87,6 +87,21 @@ def test_account_replacement_rotates_only_selected_provider_state(tmp_path: Path
     assert (global_dir / "session.json").read_text(encoding="utf-8") == "keep"
 
 
+def test_token_replacement_rotates_selected_provider_and_identical_write_is_noop(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = store.put("codebuddy-cn", token="old", user_id="same-user")
+    runtime_dir = require_provider("codebuddy-cn").config_dir(store.agent_home)
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "session.json").write_text("session", encoding="utf-8")
+
+    repeated = store.put("codebuddy-cn", token="old", user_id="same-user")
+    assert repeated.updated_at == first.updated_at
+    assert (runtime_dir / "session.json").exists()
+
+    store.put("codebuddy-cn", token="new", user_id="same-user")
+    assert not runtime_dir.exists()
+
+
 def test_vault_rejects_symlink_file(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.path.parent.mkdir(parents=True)

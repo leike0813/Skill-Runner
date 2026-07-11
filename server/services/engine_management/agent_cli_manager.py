@@ -71,6 +71,7 @@ _DEFAULT_BOOTSTRAP_JSON_FALLBACKS: dict[str, Mapping[str, object]] = {
     "kilo": {
         "$schema": "https://app.kilo.ai/config.json",
     },
+    "codebuddy": {},
 }
 _DEFAULT_BOOTSTRAP_TEXT_FALLBACKS: dict[str, str] = {
     "codex": 'cli_auth_credentials_store = "file"\n',

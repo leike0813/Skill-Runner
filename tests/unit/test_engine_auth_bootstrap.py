@@ -25,6 +25,7 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
     assert "gemini" not in bundle.engine_auth_handlers
     assert "opencode" in bundle.engine_auth_handlers
     assert "qwen" in bundle.engine_auth_handlers
+    assert "codebuddy" in bundle.engine_auth_handlers
     assert bundle.driver_registry.supports(
         transport="oauth_proxy",
         engine="codex",
@@ -51,6 +52,13 @@ def test_engine_auth_bootstrap_builds_bundle(tmp_path: Path, monkeypatch) -> Non
     assert hasattr(manager, "_codex_oauth_proxy_flow")
     assert not hasattr(manager, "_gemini_oauth_proxy_flow")
     assert hasattr(manager, "_openai_device_proxy_flow")
+    assert hasattr(manager, "_codebuddy_sdk_auth_flow")
+    assert bundle.driver_registry.supports(
+        transport="oauth_proxy",
+        engine="codebuddy",
+        auth_method="auth_code_or_url",
+        provider_id="codebuddy-cn",
+    )
 
 
 def test_engine_auth_bootstrap_disables_windows_cli_delegate_without_pywinpty(

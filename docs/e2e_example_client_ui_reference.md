@@ -31,6 +31,7 @@ Primary routes:
 ### 4.1 Skill List
 - Table columns: skill name/id, version, engines, health, action.
 - Action button opens run form.
+- CodeBuddy run forms require an explicit provider before enabling provider-filtered model selection. The management UI remains administration-only and does not expose a job launcher.
 
 ### 4.2 Run Form
 - Engine selector at top.

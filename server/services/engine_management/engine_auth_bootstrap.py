@@ -11,6 +11,8 @@ from server.engines.claude.auth.callbacks.local_callback_server import (
     claude_local_callback_server,
 )
 from server.engines.claude.auth.runtime_handler import ClaudeAuthRuntimeHandler
+from server.engines.codebuddy.auth.runtime_handler import CodeBuddyAuthRuntimeHandler
+from server.engines.codebuddy.auth.sdk_auth_flow import CodeBuddySdkAuthFlow
 from server.engines.codex.auth import CodexOAuthProxyFlow
 from server.engines.codex.auth.runtime_handler import CodexAuthRuntimeHandler
 from server.engines.common.callbacks.openai_local_callback_server import (
@@ -132,6 +134,7 @@ def build_engine_auth_bootstrap(
     manager._qwen_coding_plan_flow = CodingPlanAuthFlow(agent_home)  # noqa: SLF001
     manager._qwen_flow = QwenAuthCliFlow(agent_home)  # noqa: SLF001
     manager._kilo_gateway_device_auth_flow = KiloGatewayDeviceAuthFlow(agent_home)  # noqa: SLF001
+    manager._codebuddy_sdk_auth_flow = CodeBuddySdkAuthFlow()  # noqa: SLF001
     if not hasattr(manager, "_build_kilo_auth_store"):
         manager._build_kilo_auth_store = lambda: OpencodeAuthStore(  # noqa: SLF001
             agent_home,
@@ -144,6 +147,7 @@ def build_engine_auth_bootstrap(
         "claude": ClaudeAuthRuntimeHandler(manager),
         "qwen": QwenAuthRuntimeHandler(manager),
         "kilo": KiloAuthRuntimeHandler(manager),
+        "codebuddy": CodeBuddyAuthRuntimeHandler(manager),
     }
     return AuthBootstrapBundle(
         driver_registry=_build_driver_registry(

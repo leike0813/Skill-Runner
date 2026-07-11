@@ -37,4 +37,7 @@ class CodeBuddyCommandBuilder:
         session_id = session_handle.handle_value.strip()
         if not session_id:
             raise RuntimeError("SESSION_RESUME_FAILED: empty codebuddy session_id")
+        provider_id = str(ctx.options.get("provider_id") or "").strip().lower()
+        if session_handle.provider_id is not None and session_handle.provider_id != provider_id:
+            raise RuntimeError("SESSION_RESUME_FAILED: codebuddy provider mismatch")
         return [self._command(), *self._adapter.profile.resolve_command_defaults(action="resume"), "-r", session_id, *self._managed_flags(ctx), prompt]

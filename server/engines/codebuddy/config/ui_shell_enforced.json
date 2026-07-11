@@ -1,0 +1,17 @@
+{
+  "allowUntrustedFrontmatterHooks": false,
+  "autoUpdates": false,
+  "disableAllHooks": true,
+  "enableAllProjectMcpServers": false,
+  "memory": false,
+  "permissions": {
+    "defaultMode": "plan",
+    "deny": [
+      "*"
+    ],
+    "disableAutoMode": "disable",
+    "disableBypassPermissionsMode": "disable",
+    "subagentPermissionMode": "plan"
+  },
+  "promptSuggestionEnabled": false
+}

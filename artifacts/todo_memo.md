@@ -39,7 +39,7 @@
 - [x] **重构输出逻辑，转向结构输出最优先（所有的输出都要求结构化信封，包括中间步骤），对支持的 engine 启用结构输出约束选项**
 - [x] 基于全局结构化输出的升级，优化输出消息信封的消费（chat不直接显示json对象，提示卡也不再显示message）
 - [x] 修复 Claude Code 的双重终态消息问题
-- [ ] 更新一下 OpenCode 和 Kilo Code 的鉴权选项
+- [x] 更新一下 OpenCode 和 Kilo Code 的鉴权选项
 - [ ] 构建测试金例与 mock engine，重构集成测试及 E2E 测试框架
 - [x] 进一步拆分 god object，重构 run store
 - [x] Zotero host cli支持
@@ -51,3 +51,4 @@
 - [ ] **skillrunner.sequence.v1 直接支持**
 - [ ] joint-execution
 - [ ] CI/CD流水线
+

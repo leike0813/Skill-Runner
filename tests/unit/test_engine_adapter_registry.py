@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from server.engines.claude.adapter.execution_adapter import ClaudeExecutionAdapter
+from server.engines.codebuddy.adapter.execution_adapter import CodeBuddyExecutionAdapter
 from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.kilo.adapter.execution_adapter import KiloExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
@@ -16,12 +17,13 @@ def test_registry_exposes_all_supported_adapters() -> None:
     registry = EngineAdapterRegistry()
     adapters = registry.adapter_map()
 
-    assert set(adapters.keys()) == {"codex", "opencode", "claude", "qwen", "kilo"}
+    assert set(adapters.keys()) == {"codex", "opencode", "claude", "qwen", "kilo", "codebuddy"}
     assert isinstance(adapters["claude"], ClaudeExecutionAdapter)
     assert isinstance(adapters["codex"], CodexExecutionAdapter)
     assert isinstance(adapters["opencode"], OpencodeExecutionAdapter)
     assert isinstance(adapters["qwen"], QwenExecutionAdapter)
     assert isinstance(adapters["kilo"], KiloExecutionAdapter)
+    assert isinstance(adapters["codebuddy"], CodeBuddyExecutionAdapter)
 
 
 def test_registry_require_raises_for_unknown_engine() -> None:

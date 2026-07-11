@@ -58,6 +58,7 @@ pytest tests/unit/
 **说明**:
 - engine integration 的主真源现在是 `tests/fixtures/protocol_golden/manifest.json` 与 `source_runs.json`。
 - `tests/engine_integration/suites/*.yaml` 仍保留给 E2E 兼容使用，不再作为 engine integration 的主回归语料。
+- CodeBuddy synthetic golden 覆盖成功、resume/repeated init、thinking/text/tool、structured output、exit-0 auth error、取消、runtime error 及 malformed/resync；历史 malformed fixture 必须标记 `provenance-unverified`。运行 `pytest tests/engine_integration/test_codebuddy_golden_integration.py -q` 可回放 CodeBuddy 协议契约，不需要真实账户。
 
 ### 2.3 Skill 包安装接口集成测试
 

@@ -215,6 +215,45 @@ def test_validate_model_kilo_preserves_third_party_runtime_model(monkeypatch):
     }
 
 
+def test_codebuddy_uses_provider_qualified_static_manifest(monkeypatch):
+    registry = ModelRegistry()
+    monkeypatch.setattr(
+        "server.services.engine_management.model_registry.engine_status_cache_service.get_engine_version",
+        lambda _engine: None,
+    )
+
+    catalog = registry.get_models("codebuddy", refresh=True)
+    domestic = registry.normalize_model_selection(
+        "codebuddy",
+        provider_id="codebuddy-cn",
+        model="glm-5.2",
+    )
+    omitted = registry.normalize_model_selection(
+        "codebuddy",
+        provider_id="codebuddy-global",
+    )
+
+    assert catalog.source == "pinned_snapshot"
+    manifest = registry._load_manifest("codebuddy")
+    expected = max(
+        (snap["version"] for snap in manifest["snapshots"]),
+        key=registry._semver_key,
+    )
+    assert catalog.snapshot_version_used == expected
+    assert any(row.provider_id == "codebuddy-cn" for row in catalog.models)
+    assert any(row.provider_id == "codebuddy-global" for row in catalog.models)
+    assert domestic.model_id == "codebuddy-cn/glm-5.2"
+    assert domestic.runtime_model == "glm-5.2"
+    assert omitted.model is None
+
+    with pytest.raises(ValueError, match="not allowed"):
+        registry.normalize_model_selection(
+            "codebuddy",
+            provider_id="codebuddy-global",
+            model="glm-5.2",
+        )
+
+
 def test_validate_model_unknown_engine():
     registry = ModelRegistry()
     with pytest.raises(ValueError, match="Unknown engine"):

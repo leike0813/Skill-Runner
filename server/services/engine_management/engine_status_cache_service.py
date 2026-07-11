@@ -17,6 +17,9 @@ from server.services.engine_management.agent_cli_manager import (
     EngineStatus,
     format_status_payload,
 )
+from server.services.engine_management.engine_status_cache_schema import (
+    ensure_engine_status_cache_schema,
+)
 from server.services.platform import aiosqlite_compat as aiosqlite
 from server.services.platform.sqlite_db_handle import sqlite_db_handle_registry
 
@@ -46,6 +49,8 @@ def _utc_now_iso() -> str:
 class EngineVersionStatus:
     present: bool
     version: str | None
+    last_error: str | None = None
+    updated_at: str | None = None
 
 
 class EngineStatusCacheService:
@@ -81,6 +86,12 @@ class EngineStatusCacheService:
             snapshot[engine] = EngineVersionStatus(
                 present=present,
                 version=version if isinstance(version, str) and version.strip() else None,
+                last_error=(
+                    str(raw["last_error"])
+                    if isinstance(raw.get("last_error"), str) and str(raw["last_error"]).strip()
+                    else None
+                ),
+                updated_at=(str(raw["updated_at"]) if isinstance(raw.get("updated_at"), str) else None),
             )
         return snapshot
 
@@ -90,20 +101,45 @@ class EngineStatusCacheService:
     def get_engine_version(self, engine: str) -> str | None:
         return self.get_engine_status(engine).version
 
+    def is_confirmed_present(self, engine: str) -> bool:
+        status = self.get_engine_status(engine)
+        return status.present and status.last_error is None
+
     async def refresh_all(self) -> Dict[str, EngineVersionStatus]:
-        status = self._manager.collect_status()
-        await self._write_status(status)
-        return {
-            engine: EngineVersionStatus(present=item.present, version=item.version or None)
-            for engine, item in status.items()
-        }
+        current = self._read_snapshot_payload()
+        for engine in _supported_engines():
+            current[engine] = self._collect_status_payload(engine, previous=current.get(engine))
+        await self.write_payload(current)
+        return self.get_snapshot()
 
     async def refresh_engine(self, engine: str) -> EngineVersionStatus:
         current = self._read_snapshot_payload()
-        status = self._manager.collect_engine_status(engine)
-        current[engine] = {"present": status.present, "version": status.version}
+        current[engine] = self._collect_status_payload(engine, previous=current.get(engine))
         await self.write_payload(current)
-        return EngineVersionStatus(present=status.present, version=status.version or None)
+        return self.get_engine_status(engine)
+
+    def _collect_status_payload(
+        self,
+        engine: str,
+        *,
+        previous: Dict[str, object] | None,
+    ) -> Dict[str, object]:
+        try:
+            status = self._manager.collect_engine_status(engine)
+        except (OSError, RuntimeError, ValueError, TypeError, LookupError) as exc:
+            prior = previous if isinstance(previous, dict) else {}
+            return {
+                "present": bool(prior.get("present", False)),
+                "version": str(prior.get("version") or ""),
+                "last_error": str(exc)[:1000],
+                "updated_at": _utc_now_iso(),
+            }
+        return {
+            "present": status.present,
+            "version": status.version,
+            "last_error": "",
+            "updated_at": _utc_now_iso(),
+        }
 
     async def write_payload(self, payload: Dict[str, Dict[str, object]]) -> None:
         normalized = self._normalize_payload(payload)
@@ -157,17 +193,7 @@ class EngineStatusCacheService:
         async with asyncio.Lock():
             if self._table_ready:
                 return
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS engine_status_cache (
-                    engine TEXT PRIMARY KEY,
-                    present INTEGER NOT NULL,
-                    version TEXT,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
-            await conn.commit()
+            await ensure_engine_status_cache_schema(conn)
             self._table_ready = True
 
     def _normalize_payload(self, payload: Dict[str, Dict[str, object]]) -> Dict[str, Dict[str, object]]:
@@ -179,6 +205,8 @@ class EngineStatusCacheService:
             normalized[engine] = {
                 "present": bool(item.get("present", False)),
                 "version": str(item.get("version") or ""),
+                "last_error": str(item.get("last_error") or "")[:1000],
+                "updated_at": str(item.get("updated_at") or _utc_now_iso()),
             }
         return normalized
 
@@ -236,11 +264,12 @@ class EngineStatusCacheService:
             updated_at = _utc_now_iso()
             await conn.executemany(
                 """
-                INSERT INTO engine_status_cache (engine, present, version, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO engine_status_cache (engine, present, version, last_error, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(engine) DO UPDATE SET
                     present=excluded.present,
                     version=excluded.version,
+                    last_error=excluded.last_error,
                     updated_at=excluded.updated_at
                 """,
                 [
@@ -248,7 +277,8 @@ class EngineStatusCacheService:
                         engine,
                         1 if bool(item.get("present")) else 0,
                         str(item.get("version") or ""),
-                        updated_at,
+                        str(item.get("last_error") or ""),
+                        str(item.get("updated_at") or updated_at),
                     )
                     for engine, item in normalized.items()
                 ],
@@ -260,7 +290,9 @@ class EngineStatusCacheService:
             async with sqlite_db_handle_registry.operation(self._db_path) as conn:
                 await self._ensure_table_async(conn)
                 await self._migrate_legacy_cache_if_needed(conn)
-                cur = await conn.execute("SELECT engine, present, version FROM engine_status_cache")
+                cur = await conn.execute(
+                    "SELECT engine, present, version, last_error, updated_at FROM engine_status_cache"
+                )
                 rows = await cur.fetchall()
         except _SQLITE_EXCEPTIONS as exc:
             logger.warning(
@@ -276,7 +308,7 @@ class EngineStatusCacheService:
             return {}
 
         payload: Dict[str, Dict[str, object]] = {}
-        for engine, present, version in rows:
+        for engine, present, version, last_error, updated_at in rows:
             if not isinstance(engine, str):
                 continue
             if engine not in set(_supported_engines()):
@@ -284,6 +316,8 @@ class EngineStatusCacheService:
             payload[engine] = {
                 "present": bool(present),
                 "version": str(version or ""),
+                "last_error": str(last_error or ""),
+                "updated_at": str(updated_at or ""),
             }
         return payload
 
@@ -321,11 +355,12 @@ class EngineStatusCacheService:
         updated_at = _utc_now_iso()
         await conn.executemany(
             """
-            INSERT INTO engine_status_cache (engine, present, version, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO engine_status_cache (engine, present, version, last_error, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(engine) DO UPDATE SET
                 present=excluded.present,
                 version=excluded.version,
+                last_error=excluded.last_error,
                 updated_at=excluded.updated_at
             """,
             [
@@ -333,6 +368,7 @@ class EngineStatusCacheService:
                     engine,
                     1 if bool(item.get("present")) else 0,
                     str(item.get("version") or ""),
+                    str(item.get("last_error") or ""),
                     updated_at,
                 )
                 for engine, item in legacy.items()

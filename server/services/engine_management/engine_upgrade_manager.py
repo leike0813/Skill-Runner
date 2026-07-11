@@ -30,7 +30,7 @@ class EngineUpgradeValidationError(ValueError):
 class EngineUpgradeManager:
     """Background manager for engine upgrade tasks."""
 
-    SUPPORTED_ENGINES = ("codex", "opencode", "claude", "qwen", "kilo")
+    SUPPORTED_ENGINES = ("codex", "opencode", "claude", "qwen", "kilo", "codebuddy")
 
     def __init__(self) -> None:
         self._store = engine_upgrade_store
@@ -176,8 +176,6 @@ class EngineUpgradeManager:
 
     def _refresh_engine_model_registry(self, engine: str) -> None:
         try:
-            if model_registry.supports_runtime_catalog_refresh(engine):
-                return
             model_registry.refresh(engine)
         except (OSError, RuntimeError, ValueError, TypeError) as exc:
             logger.warning(

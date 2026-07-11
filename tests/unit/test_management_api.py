@@ -9,6 +9,7 @@ httpx = pytest.importorskip("httpx")
 
 from server.config import config  # noqa: E402
 from server.engines.claude.adapter.state_paths import active_claude_state_path  # noqa: E402
+from server.engines.codebuddy.auth.credential_store import CodeBuddyCredentialStore  # noqa: E402
 from server.main import app  # noqa: E402
 from server.services.mcp import clear_mcp_registry_cache  # noqa: E402
 
@@ -83,6 +84,32 @@ async def test_management_mcp_crud_never_echoes_raw_keys() -> None:
     assert delete_res.json()["deleted"] is True
     secrets_payload = json.loads(Path(config.SYSTEM.MCP_SECRETS_FILE).read_text(encoding="utf-8"))
     assert "raw-token" not in secrets_payload["secrets"].values()
+
+
+@pytest.mark.asyncio
+async def test_management_codebuddy_credentials_are_redacted_and_provider_scoped(monkeypatch, tmp_path: Path) -> None:
+    store = CodeBuddyCredentialStore(
+        path=tmp_path / "credentials" / "codebuddy.json",
+        agent_home=tmp_path / "agent-home",
+    )
+    store.put("codebuddy-cn", token="raw-codebuddy-token", user_id="cn-user")
+    store.put("codebuddy-global", token="raw-global-token", user_id="global-user")
+    monkeypatch.setattr("server.routers.management.codebuddy_credential_store", store)
+    monkeypatch.setattr(
+        "server.routers.management.model_registry.get_models",
+        lambda _engine: type("Catalog", (), {"cli_version_detected": None, "models": []})(),
+    )
+
+    detail = await _request("GET", "/v1/management/engines/codebuddy")
+    assert detail.status_code == 200
+    assert "raw-codebuddy-token" not in detail.text
+    assert {item["provider_id"] for item in detail.json()["credential_statuses"]} == {"codebuddy-cn", "codebuddy-global"}
+
+    deleted = await _request("DELETE", "/v1/management/engines/codebuddy/auth/credentials/codebuddy-cn")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"engine": "codebuddy", "provider_id": "codebuddy-cn", "deleted": True, "credential_state": "missing"}
+    assert store.get("codebuddy-cn") is None
+    assert store.get("codebuddy-global") is not None
 
 
 @pytest.mark.asyncio

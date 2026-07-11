@@ -1,0 +1,23 @@
+{
+  "fixture_id": "codebuddy_malformed_resync_protocol_synthetic",
+  "layer": "protocol_core",
+  "engine": "codebuddy",
+  "capability_requirements": [
+    "semantic_turn_markers.complete"
+  ],
+  "inputs": {
+    "stdout_file": "stdout.log",
+    "stderr": "",
+    "status_hint": "succeeded"
+  },
+  "expected": {
+    "rasp_events": [],
+    "fcmp_events": []
+  },
+  "normalization": {
+    "ignore_fields": ["correlation.session_id"]
+  },
+  "provenance": "provenance-unverified",
+  "source": "synthetic_minimal",
+  "source_run_id": null
+}

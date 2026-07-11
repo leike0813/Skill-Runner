@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from inspect import Parameter, signature
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from typing import cast
@@ -62,6 +62,8 @@ _STRICT_FENCED_JSON_RE = re.compile(
     r"^```(?:json)?\s*(\{[\s\S]*\})\s*```$",
     re.IGNORECASE,
 )
+
+_PROCESS_INFRASTRUCTURE_FAILURE_REASONS = frozenset({"OUTPUT_REDACTION_FAILED"})
 
 
 def parse_runtime_stream_for_auth_detection(
@@ -585,7 +587,7 @@ class RunAttemptOutcomeService:
             "AUTH_REQUIRED",
             "TIMEOUT",
             InteractiveErrorCode.SESSION_RESUME_FAILED.value,
-        }:
+        } or process_failure_reason in _PROCESS_INFRASTRUCTURE_FAILURE_REASONS:
             forced_failure_reason = process_failure_reason
         else:
             forced_failure_reason = None
@@ -745,6 +747,9 @@ class RunAttemptOutcomeService:
                     "Client conversation_mode=non_session cannot enter waiting_user; "
                     "interactive flow must auto-resolve without waiting."
                 )
+            elif forced_failure_reason in _PROCESS_INFRASTRUCTURE_FAILURE_REASONS:
+                error_code = forced_failure_reason
+                error_message = "Process output capture failed safely before completion."
             elif isinstance(semantic_turn_failed_message, str) and semantic_turn_failed_message:
                 error_message = semantic_turn_failed_message
             elif has_output_error:

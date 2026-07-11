@@ -381,7 +381,7 @@ def _engine_mcp_root(engine: str) -> str:
         return "mcp_servers"
     if engine in {"gemini", "qwen", "claude", "codebuddy"}:
         return "mcpServers"
-    if engine == "opencode":
+    if engine in {"opencode", "kilo"}:
         return "mcp"
     raise McpConfigError(f"Unsupported MCP render engine: {engine}")
 

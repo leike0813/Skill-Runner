@@ -80,6 +80,7 @@ class LaunchProfile:
     cwd_strategy: LaunchCwdStrategy
     config_env_var: str | None
     run_dir_flag: str | None
+    managed_env_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -579,6 +580,11 @@ def _parse_adapter_profile(
                 str(launch_raw["run_dir_flag"])
                 if launch_raw.get("run_dir_flag") is not None
                 else None
+            ),
+            managed_env_keys=tuple(
+                str(item)
+                for item in launch_raw.get("managed_env_keys", [])
+                if isinstance(item, str) and item
             ),
         ),
         config_assets=ConfigAssetsProfile(

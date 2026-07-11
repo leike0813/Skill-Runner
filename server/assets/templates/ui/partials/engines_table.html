@@ -52,7 +52,7 @@
                         {% endif %}
                     </button>
                 </form>
-                {% if ttyd_available %}
+                {% if ttyd_available and row.ui_shell_enabled %}
                 <button class="btn btn-primary" type="button" data-engine-start="{{ row.engine }}">{{ t("ui.engines.table.start_tui", default="启动TUI") }}</button>
                 {% endif %}
                 {% if row.auth_entry_label %}

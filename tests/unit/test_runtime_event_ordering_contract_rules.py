@@ -37,7 +37,23 @@ def test_runtime_event_ordering_contract_declares_single_method_busy_recovery() 
         "semantic_turn_failed_is_evidence_only": True,
         "terminal_failed_projection_forbidden": True,
     }
+    assert normalization["failure_precedence"]["process_output_capture_failure"] == {
+        "reason_code": "OUTPUT_REDACTION_FAILED",
+        "outranks": "parser_inferred_missing_terminal",
+        "raw_output_persistence": "forbidden",
+    }
     assert normalization["auth_routes"]["single_method"]["requires_method_selection"] is False
+    assert normalization["auth_routes"]["multi_method"]["available_methods_visible_in_phase"] == (
+        "method_selection"
+    )
+    assert normalization["auth_routes"]["challenge_active"] == {
+        "available_methods": [],
+        "selected_method_required": True,
+        "duplicate_selection": {
+            "same_session_same_method": "idempotent_accept",
+            "mismatch": "reject",
+        },
+    }
     assert normalization["busy_recovery"]["single_method"] == {
         "preserve_phase": "challenge_active",
         "reproject_existing_challenge": True,

@@ -135,6 +135,15 @@
         "run_dir_flag": {
           "type": ["string", "null"],
           "pattern": "^--?[A-Za-z0-9][A-Za-z0-9_-]*$"
+        },
+        "managed_env_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "default": []
         }
       }
     },

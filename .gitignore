@@ -17,6 +17,7 @@ uv_cache/
 .claude/
 .kilo/
 .kilocode/
+.codebuddy/
 .qwen/
 .agent/
 .codegraph/

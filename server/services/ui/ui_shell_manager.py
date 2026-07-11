@@ -27,6 +27,7 @@ from server.services.ui.engine_shell_capability_provider import (
     EngineShellCapability,
     EngineShellCapabilityProvider,
 )
+from server.services.ui.ui_shell_launch_handler import UiShellLaunchValidationError
 
 
 class UiShellBusyError(RuntimeError):
@@ -82,6 +83,7 @@ class UiShellSession:
         sandbox_status: str = "unknown",
         sandbox_message: str = "",
         process_lease_id: str | None = None,
+        provider_id: str | None = None,
     ) -> None:
         self.id = session_id
         self.command = command
@@ -104,6 +106,7 @@ class UiShellSession:
         self._start_monotonic = time.monotonic()
         self._process = process
         self.process_lease_id = process_lease_id
+        self.provider_id = provider_id
 
     def _mark_terminal(
         self,
@@ -152,7 +155,7 @@ class UiShellSession:
             self._start_wall_epoch + self.hard_ttl_sec, tz=timezone.utc
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._lock:
-            return {
+            snapshot = {
                 "session_id": self.id,
                 "command_id": self.command.id,
                 "command_label": self.command.label,
@@ -172,6 +175,9 @@ class UiShellSession:
                 "hard_ttl_sec": self.hard_ttl_sec,
                 "terminal": self.status in TERMINAL_STATES,
             }
+            if self.provider_id is not None:
+                snapshot["provider_id"] = self.provider_id
+            return snapshot
 
 
 class UiShellManager:
@@ -363,15 +369,26 @@ class UiShellManager:
                     self._active_session = None
         return data
 
-    def start_session(self, engine: str, *, custom_model: str | None = None) -> Dict[str, Any]:
+    def start_session(
+        self,
+        engine: str,
+        *,
+        custom_model: str | None = None,
+        provider_id: str | None = None,
+    ) -> Dict[str, Any]:
         normalized_engine = engine.strip().lower()
         normalized_custom_model = (custom_model or "").strip() or None
+        normalized_provider_id = (provider_id or "").strip() or None
         spec = self._command_specs.get(normalized_engine)
         capability = self._capabilities.get(normalized_engine)
         if spec is None:
             raise UiShellValidationError(f"Unsupported engine: {engine}")
         if capability is None:
             raise UiShellValidationError(f"Unsupported engine: {engine}")
+        try:
+            normalized_provider_id = capability.launch_handler.validate(normalized_provider_id)
+        except UiShellLaunchValidationError as exc:
+            raise UiShellValidationError(str(exc)) from exc
         if normalized_custom_model is not None:
             provider, separator, model = normalized_custom_model.partition("/")
             if not separator or not provider.strip() or not model.strip():
@@ -442,7 +459,19 @@ class UiShellManager:
                     sandbox_enabled=sandbox_enabled,
                     custom_model=normalized_custom_model,
                 )
-                launch_args = list(spec.args)
+                try:
+                    launch_plan = capability.launch_handler.prepare(
+                        session_dir=session_dir,
+                        base_env=env,
+                        launch_args=spec.args,
+                        provider_id=normalized_provider_id,
+                        agent_manager=self.agent_manager,
+                    )
+                except UiShellLaunchValidationError as exc:
+                    raise UiShellValidationError(str(exc)) from exc
+                env = launch_plan.env
+                launch_args = list(launch_plan.args)
+                normalized_provider_id = launch_plan.provider_id
                 if capability.sandbox_arg and not sandbox_enabled:
                     launch_args = [item for item in launch_args if item != capability.sandbox_arg]
 
@@ -536,6 +565,7 @@ class UiShellManager:
                 sandbox_status=sandbox_status,
                 sandbox_message=sandbox_message,
                 process_lease_id=lease_id,
+                provider_id=normalized_provider_id,
             )
             self._active_session = session
 

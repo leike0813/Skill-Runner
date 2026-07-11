@@ -160,6 +160,22 @@ def _parse_output(self, raw_stdout: str) -> AdapterTurnResult:
     """
 ```
 
+### CodeBuddy Execution Contract
+
+CodeBuddy uses two canonical providers, `codebuddy-cn` and `codebuddy-global`, each with an isolated credential vault, persistent CLI directory, and resume lineage. Its provider-qualified models are read through the generic model registry from `server/engines/codebuddy/models/manifest.json`; listing models never runs the CLI or reads credentials. Every start or resume runs in the request workspace and writes `CODEBUDDY.md`, managed `.codebuddy/settings.json`, `.codebuddy/mcp.json`, and installed skills. Resume adds only `-r <session-id>`; the prompt/reply remains the final argv element.
+
+The adapter always passes `--mcp-config` and `--strict-mcp-config`. Its run-local MCP file has an explicit `mcpServers` root and transport type for STDIO, HTTP, and SSE; resolved MCP secrets never enter logs, errors, audit payloads, or tests. Structured output is passed as the inline JSON schema and follows the shared result-validation pipeline.
+
+CodeBuddy framing and parsing are stateful: malformed frames may resynchronize, but only a non-error `result.success` terminal result completes a turn. A zero process exit with an error result or no terminal result is failed, and high-confidence provider auth signals retain priority.
+
+Missing and expired credentials are represented as engine-neutral preflight auth signals before any CodeBuddy task subprocess starts. Runtime auth evidence is evaluated from redacted stdout and stderr. Both paths enter the canonical `waiting_auth` lifecycle; successful browser authentication automatically requeues once, using exact session resume when a handle exists and a fresh start otherwise.
+
+The inline CodeBuddy TUI uses the same engine-local managed-environment builder as headless execution. It requires an explicit signed-in provider, starts the real interactive CLI with project-only settings, writes enforced Plan/deny-all settings inside the isolated UI-shell directory, and passes a session-local empty MCP configuration in strict mode.
+
+### Kilo MCP and model-catalog lifecycle
+
+Kilo uses the same governed native MCP shape as OpenCode: the shared registry renderer writes servers under the top-level `mcp` key, while skill and runtime configuration cannot provide MCP roots directly. Kilo model probing is installation-gated; startup, interval, manual, and post-install refreshes run only after the cached engine-status probe confirms the managed CLI is present without an error.
+
 ## 3. Implementation Status
 
 > [!NOTE]

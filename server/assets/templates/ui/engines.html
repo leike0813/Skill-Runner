@@ -399,6 +399,22 @@
                 </div>
             </div>
         </div>
+        <div id="codebuddy-tui-provider-modal" class="auth-import-modal" aria-hidden="true">
+            <div class="auth-import-card">
+                <div style="font-size:18px; font-weight:700; color:#111827;">
+                    {{ t("ui.engines.codebuddy_tui_provider_title", default="选择 CodeBuddy Provider") }}
+                </div>
+                <div style="margin-top:4px; color:#6b7280; font-size:13px;">
+                    {{ t("ui.engines.codebuddy_tui_provider_hint", default="请选择一个已登录的 Provider。登录完成后需要再次确认启动。") }}
+                </div>
+                <div id="codebuddy-tui-provider-list" class="auth-import-file-list" data-codebuddy-provider-picker></div>
+                <div id="codebuddy-tui-provider-error" class="error" style="display:none;"></div>
+                <div class="auth-import-actions">
+                    <button id="codebuddy-tui-provider-cancel-btn" class="btn btn-secondary" type="button">{{ t("ui.common.cancel", default="取消") }}</button>
+                    <button id="codebuddy-tui-provider-start-btn" class="btn btn-primary" type="button" disabled>{{ t("ui.engines.custom_providers_start_tui_action", default="启动TUI") }}</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="card" id="mcp-config-card">
@@ -476,6 +492,8 @@
                         <label><input type="checkbox" data-mcp-engine="gemini"> Gemini</label>
                         <label><input type="checkbox" data-mcp-engine="opencode"> OpenCode</label>
                         <label><input type="checkbox" data-mcp-engine="qwen"> Qwen</label>
+                        <label><input type="checkbox" data-mcp-engine="kilo"> Kilo Code</label>
+                        <label><input type="checkbox" data-mcp-engine="codebuddy"> CodeBuddy</label>
                     </div>
                     <div class="provider-meta">{{ t("ui.engines.mcp_engines_hint", default="Leave all unchecked to support all engines.") }}</div>
                 </div>
@@ -700,6 +718,13 @@
         errorNoMethodForEngine: {{ t("ui.engines.error_no_method_for_engine", default="当前鉴权后台下，该引擎暂无可用鉴权方式。") | tojson }},
         errorNoProvider: {{ t("ui.engines.error_no_provider", default="当前鉴权后台下，OpenCode 没有可用 Provider。") | tojson }},
         errorProviderNoMethod: {{ t("ui.engines.error_provider_no_method", default="该 Provider 在当前鉴权后台下没有可用鉴权方式。") | tojson }},
+        credentialMissing: {{ t("ui.engines.credential_missing", default="未登录") | tojson }},
+        credentialPresent: {{ t("ui.engines.credential_present", default="已登录") | tojson }},
+        credentialExpired: {{ t("ui.engines.credential_expired", default="凭证已过期") | tojson }},
+        login: {{ t("ui.engines.login", default="登录") | tojson }},
+        relogin: {{ t("ui.engines.relogin", default="重新登录") | tojson }},
+        clearCredential: {{ t("ui.engines.clear_credential", default="清除凭证") | tojson }},
+        clearCredentialFailed: {{ t("ui.engines.clear_credential_failed", default="清除凭证失败") | tojson }},
         backProviderList: {{ t("ui.engines.back_provider_list", default="← 返回 Provider 列表") | tojson }},
         authEnginePrefix: {{ t("ui.engines.auth_engine_prefix", default="引擎：") | tojson }},
         authTransportPrefix: {{ t("ui.engines.auth_transport_prefix", default="链路：") | tojson }},
@@ -724,6 +749,7 @@
         errorTtydUnavailable: {{ t("ui.engines.error_ttyd_unavailable", default="ttyd 不可用，无法启动内嵌终端。") | tojson }},
         errorStartTuiFailed: {{ t("ui.engines.error_start_tui_failed", default="启动失败（HTTP {status}）") | tojson }},
         errorStopTuiFailed: {{ t("ui.engines.error_stop_tui_failed", default="停止失败（HTTP {status}）") | tojson }},
+        codeBuddyTuiProviderRequired: {{ t("ui.engines.codebuddy_tui_provider_required", default="请选择一个已登录的 CodeBuddy Provider") | tojson }},
         customProvidersStartTui: {{ t("ui.engines.custom_providers_start_tui_action", default="启动TUI") | tojson }},
         customProvidersStartTuiTitle: {{ t("ui.engines.custom_providers_start_tui_title", default="Launch Provider TUI") | tojson }},
         customProvidersTuiModel: {{ t("ui.engines.custom_providers_tui_model", default="Model") | tojson }},
@@ -823,6 +849,11 @@
     const authImportFileListEl = document.getElementById("auth-import-file-list");
     const authImportCancelBtn = document.getElementById("auth-import-cancel-btn");
     const authImportSubmitBtn = document.getElementById("auth-import-submit-btn");
+    const codeBuddyTuiProviderModalEl = document.getElementById("codebuddy-tui-provider-modal");
+    const codeBuddyTuiProviderListEl = document.getElementById("codebuddy-tui-provider-list");
+    const codeBuddyTuiProviderErrorEl = document.getElementById("codebuddy-tui-provider-error");
+    const codeBuddyTuiProviderCancelBtn = document.getElementById("codebuddy-tui-provider-cancel-btn");
+    const codeBuddyTuiProviderStartBtn = document.getElementById("codebuddy-tui-provider-start-btn");
     const mcpServerIdEl = document.getElementById("mcp-server-id");
     const mcpActivationEl = document.getElementById("mcp-activation");
     const mcpScopeEl = document.getElementById("mcp-scope");
@@ -882,6 +913,7 @@
     let mcpRows = [];
     let customProviderRows = [];
     let customProviderTuiState = null;
+    let selectedCodeBuddyTuiProvider = "";
 
     function showError(text) {
         errorEl.style.display = "block";
@@ -2180,7 +2212,7 @@
             }
             renderAuthMenuItems(
                 providers.map((provider) => ({
-                    label: provider.display_name,
+                    label: renderProviderLabel(provider),
                     onClick: () => openProviderMethodMenu(anchor, normalizedEngine, transport, provider),
                 })),
                 `${resolveEngineLabel(normalizedEngine)} · ${I18N.chooseProvider}`
@@ -2213,6 +2245,122 @@
         positionAuthMenu(anchor);
     }
 
+    function codeBuddyCredentialState(provider) {
+        if (!provider || typeof provider !== "object") return "missing";
+        const state = String(provider.credential_state || "missing").trim().toLowerCase();
+        return ["missing", "present", "expired"].includes(state) ? state : "missing";
+    }
+
+    function codeBuddyCredentialStateLabel(provider) {
+        const state = codeBuddyCredentialState(provider);
+        if (state === "present") return I18N.credentialPresent;
+        if (state === "expired") return I18N.credentialExpired;
+        return I18N.credentialMissing;
+    }
+
+    function renderProviderLabel(provider) {
+        const name = String(provider && provider.display_name ? provider.display_name : "").trim();
+        if (String(provider && provider.engine || "").trim().toLowerCase() !== "codebuddy") return name;
+        return `${name} · ${codeBuddyCredentialStateLabel(provider)}`;
+    }
+
+    function updateCodeBuddyCredentialState(providerId, state) {
+        const providers = engineAuthProviders.codebuddy || [];
+        const normalizedProviderId = String(providerId || "").trim().toLowerCase();
+        for (const provider of providers) {
+            if (String(provider.provider_id || "").trim().toLowerCase() === normalizedProviderId) {
+                provider.credential_state = state;
+            }
+        }
+    }
+
+    function closeCodeBuddyTuiProviderPicker() {
+        selectedCodeBuddyTuiProvider = "";
+        if (codeBuddyTuiProviderStartBtn) codeBuddyTuiProviderStartBtn.disabled = true;
+        if (codeBuddyTuiProviderErrorEl) {
+            codeBuddyTuiProviderErrorEl.style.display = "none";
+            codeBuddyTuiProviderErrorEl.textContent = "";
+        }
+        if (codeBuddyTuiProviderModalEl) {
+            codeBuddyTuiProviderModalEl.classList.remove("show");
+            codeBuddyTuiProviderModalEl.setAttribute("aria-hidden", "true");
+        }
+    }
+
+    function openCodeBuddyTuiProviderPicker() {
+        if (!codeBuddyTuiProviderModalEl || !codeBuddyTuiProviderListEl) return;
+        selectedCodeBuddyTuiProvider = "";
+        if (codeBuddyTuiProviderStartBtn) codeBuddyTuiProviderStartBtn.disabled = true;
+        codeBuddyTuiProviderListEl.replaceChildren();
+        const providers = Array.isArray(engineAuthProviders.codebuddy)
+            ? engineAuthProviders.codebuddy
+            : [];
+        for (const provider of providers) {
+            const providerId = String(provider && provider.provider_id || "").trim().toLowerCase();
+            if (!providerId) continue;
+            const row = document.createElement("div");
+            row.className = "auth-import-file-item";
+            row.setAttribute("data-codebuddy-provider-row", providerId);
+            const state = codeBuddyCredentialState(provider);
+            if (state === "present") {
+                const label = document.createElement("label");
+                const radio = document.createElement("input");
+                radio.type = "radio";
+                radio.name = "codebuddy-tui-provider";
+                radio.value = providerId;
+                radio.setAttribute("data-codebuddy-provider-choice", providerId);
+                radio.addEventListener("change", () => {
+                    selectedCodeBuddyTuiProvider = providerId;
+                    if (codeBuddyTuiProviderStartBtn) codeBuddyTuiProviderStartBtn.disabled = false;
+                });
+                label.appendChild(radio);
+                label.append(` ${renderProviderLabel(provider)}`);
+                row.appendChild(label);
+            } else {
+                const label = document.createElement("span");
+                label.textContent = renderProviderLabel(provider);
+                row.appendChild(label);
+                const loginButton = document.createElement("button");
+                loginButton.type = "button";
+                loginButton.className = "btn btn-secondary";
+                loginButton.setAttribute("data-codebuddy-provider-login", providerId);
+                loginButton.textContent = state === "expired" ? I18N.relogin : I18N.login;
+                loginButton.addEventListener("click", () => {
+                    openProviderMethodMenu(
+                        loginButton,
+                        "codebuddy",
+                        selectedTransport(),
+                        provider
+                    );
+                    closeCodeBuddyTuiProviderPicker();
+                });
+                row.appendChild(loginButton);
+            }
+            codeBuddyTuiProviderListEl.appendChild(row);
+        }
+        codeBuddyTuiProviderModalEl.classList.add("show");
+        codeBuddyTuiProviderModalEl.setAttribute("aria-hidden", "false");
+    }
+
+    async function clearCodeBuddyCredential(anchor, provider) {
+        const providerId = String(provider && provider.provider_id || "").trim().toLowerCase();
+        if (!providerId) return;
+        try {
+            const response = await fetch(
+                `/v1/management/engines/codebuddy/auth/credentials/${encodeURIComponent(providerId)}`,
+                { method: "DELETE" }
+            );
+            if (!response.ok) {
+                showAuthError(I18N.clearCredentialFailed);
+                return;
+            }
+            updateCodeBuddyCredentialState(providerId, "missing");
+            openEngineAuthMenu(anchor, "codebuddy");
+        } catch (_err) {
+            showAuthError(I18N.clearCredentialFailed);
+        }
+    }
+
     function openProviderMethodMenu(anchor, engine, transport, provider) {
         const normalizedEngine = String(engine || "").trim().toLowerCase();
         const providerId = String(provider.provider_id || "").trim().toLowerCase();
@@ -2222,6 +2370,8 @@
             return;
         }
         const supportsImport = provider && provider.supports_import === true;
+        const isCodeBuddy = normalizedEngine === "codebuddy";
+        const hasCodeBuddyCredential = isCodeBuddy && codeBuddyCredentialState(provider) !== "missing";
         const items = [
             {
                 label: I18N.backProviderList,
@@ -2229,13 +2379,23 @@
                 onClick: () => openEngineAuthMenu(anchor, normalizedEngine),
             },
             ...methods.map((method) => ({
-                label: renderAuthMethodLabel(method, transport, normalizedEngine, providerId),
+                label: isCodeBuddy
+                    ? `${hasCodeBuddyCredential ? I18N.relogin : I18N.login} · ${renderAuthMethodLabel(method, transport, normalizedEngine, providerId)}`
+                    : renderAuthMethodLabel(method, transport, normalizedEngine, providerId),
                 onClick: () => {
                     hideAuthMenu();
                     startAuth(normalizedEngine, transport, method, providerId);
                 },
             })),
         ];
+        if (hasCodeBuddyCredential) {
+            items.push({ separator: true });
+            items.push({
+                label: I18N.clearCredential,
+                secondary: true,
+                onClick: () => clearCodeBuddyCredential(anchor, provider),
+            });
+        }
         if (supportsImport) {
             items.push({ separator: true });
             items.push({
@@ -2245,7 +2405,7 @@
         }
         renderAuthMenuItems(
             items,
-            `${resolveEngineLabel(normalizedEngine)} / ${provider.display_name} · ${I18N.chooseMethodSuffix}`
+            `${resolveEngineLabel(normalizedEngine)} / ${renderProviderLabel(provider)} · ${I18N.chooseMethodSuffix}`
         );
         authMenuState = { level: "method", engine: normalizedEngine, providerId, anchor };
         positionAuthMenu(anchor);
@@ -2321,6 +2481,12 @@
             if (authCodeCopyResultEl) authCodeCopyResultEl.textContent = "";
         }
         const status = currentAuthSession.status || (active ? "running" : "idle");
+        if (
+            status === "succeeded"
+            && String(currentAuthSession.engine || "").trim().toLowerCase() === "codebuddy"
+        ) {
+            updateCodeBuddyCredentialState(currentAuthSession.provider_id, "present");
+        }
         const statusLabel = mapStatusLabel(status);
         const terminalSuffix = currentAuthSession.error ? `: ${currentAuthSession.error}` : "";
         const engine = currentAuthSession.engine || "-";
@@ -2578,7 +2744,7 @@
         applyAuthState(payload.session || {});
     }
 
-    async function startTui(engine, customModel = "") {
+    async function startTui(engine, customModel = "", providerId = "") {
         if (!ttydAvailable) {
             showError(I18N.errorTtydUnavailable);
             return false;
@@ -2592,6 +2758,9 @@
         form.set("engine", engine);
         if (String(customModel || "").trim()) {
             form.set("custom_model", String(customModel || "").trim());
+        }
+        if (String(providerId || "").trim()) {
+            form.set("provider_id", String(providerId || "").trim());
         }
         tuiStartPending = true;
         updateInteractiveActionLocks();
@@ -2799,12 +2968,22 @@
             }
         });
     }
+    if (codeBuddyTuiProviderModalEl) {
+        codeBuddyTuiProviderModalEl.addEventListener("click", (evt) => {
+            if (evt.target === codeBuddyTuiProviderModalEl) {
+                closeCodeBuddyTuiProviderPicker();
+            }
+        });
+    }
     document.addEventListener("keydown", (evt) => {
         if (evt.key === "Escape" && authImportModalEl && authImportModalEl.classList.contains("show")) {
             closeAuthImportDialog();
         }
         if (evt.key === "Escape" && customProviderTuiModalEl && customProviderTuiModalEl.classList.contains("show")) {
             closeCustomProviderTuiDialog();
+        }
+        if (evt.key === "Escape" && codeBuddyTuiProviderModalEl && codeBuddyTuiProviderModalEl.classList.contains("show")) {
+            closeCodeBuddyTuiProviderPicker();
         }
     });
 
@@ -2816,8 +2995,29 @@
         if (startEl instanceof HTMLButtonElement && startEl.disabled) return;
         const engine = startEl.getAttribute("data-engine-start");
         if (!engine) return;
+        if (String(engine).trim().toLowerCase() === "codebuddy") {
+            openCodeBuddyTuiProviderPicker();
+            return;
+        }
         startTui(engine);
     });
+    if (codeBuddyTuiProviderCancelBtn) {
+        codeBuddyTuiProviderCancelBtn.addEventListener("click", closeCodeBuddyTuiProviderPicker);
+    }
+    if (codeBuddyTuiProviderStartBtn) {
+        codeBuddyTuiProviderStartBtn.addEventListener("click", async () => {
+            if (!selectedCodeBuddyTuiProvider) {
+                if (codeBuddyTuiProviderErrorEl) {
+                    codeBuddyTuiProviderErrorEl.style.display = "block";
+                    codeBuddyTuiProviderErrorEl.textContent = I18N.codeBuddyTuiProviderRequired;
+                }
+                return;
+            }
+            const providerId = selectedCodeBuddyTuiProvider;
+            closeCodeBuddyTuiProviderPicker();
+            await startTui("codebuddy", "", providerId);
+        });
+    }
     document.body.addEventListener("click", (evt) => {
         const target = evt.target;
         if (!(target instanceof HTMLElement)) return;

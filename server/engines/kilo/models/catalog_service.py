@@ -6,7 +6,7 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
@@ -34,6 +34,7 @@ class KiloModelCatalog:
         self._cache: dict[str, Any] = {}
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
+        self._refresh_guard: Callable[[], bool] | None = None
         self.scheduler = AsyncIOScheduler()
         self._job_added = False
 
@@ -191,11 +192,19 @@ class KiloModelCatalog:
                     self._job_added = True
                     self.scheduler.start()
 
+    def set_refresh_guard(self, guard: Callable[[], bool]) -> None:
+        self._refresh_guard = guard
+
+    def _refresh_allowed(self) -> bool:
+        return self._refresh_guard is None or self._refresh_guard()
+
     def stop(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
 
     async def _scheduled_refresh(self) -> None:
+        if not self._refresh_allowed():
+            return
         await self.refresh(reason="interval")
 
     def _resolve_probe_timeout_seconds(self) -> int:
@@ -303,6 +312,8 @@ class KiloModelCatalog:
         return [dedup[key] for key in sorted(dedup.keys())]
 
     async def refresh(self, *, reason: str = "manual") -> None:
+        if not self._refresh_allowed():
+            return
         async with self._refresh_lock:
             _ = reason
             timeout_sec = self._resolve_probe_timeout_seconds()

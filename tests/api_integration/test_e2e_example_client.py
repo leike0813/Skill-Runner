@@ -526,6 +526,53 @@ class FakeBackendQwen(FakeBackend):
         }
 
 
+class FakeBackendCodeBuddy(FakeBackend):
+    async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
+        assert skill_id == "demo-skill"
+        return {
+            "id": "demo-skill",
+            "name": "Demo Skill",
+            "version": "1.0.0",
+            "engines": ["codebuddy"],
+            "execution_modes": ["auto", "interactive"],
+            "runtime": {"default_options": {"hard_timeout_seconds": 1800}},
+        }
+
+    async def get_engine_detail(self, engine: str) -> dict[str, Any]:
+        if engine != "codebuddy":
+            return {"engine": engine, "models": []}
+        return {
+            "engine": "codebuddy",
+            "credential_statuses": [
+                {"provider_id": "codebuddy-cn", "credential_state": "present"},
+                {"provider_id": "codebuddy-global", "credential_state": "present"},
+            ],
+            "models": [
+                {
+                    "id": "codebuddy-cn/shared-model",
+                    "provider_id": "codebuddy-cn",
+                    "provider": "codebuddy-cn",
+                    "model": "shared-model",
+                    "display_name": "CN Shared",
+                },
+                {
+                    "id": "codebuddy-global/shared-model",
+                    "provider_id": "codebuddy-global",
+                    "provider": "codebuddy-global",
+                    "model": "shared-model",
+                    "display_name": "Global Shared",
+                },
+                {
+                    "id": "codebuddy-cn/cn-only",
+                    "provider_id": "codebuddy-cn",
+                    "provider": "codebuddy-cn",
+                    "model": "cn-only",
+                    "display_name": "CN only",
+                },
+            ],
+        }
+
+
 class FakeBackendClaudeCustomProviders(FakeBackend):
     async def get_skill_detail(self, skill_id: str) -> dict[str, Any]:
         assert skill_id == "demo-skill"
@@ -1082,6 +1129,122 @@ async def test_e2e_example_client_qwen_provider_model_payload(tmp_path: Path):
         assert fake_backend.create_payloads[-1]["provider_id"] == "qwen-oauth"
         assert fake_backend.create_payloads[-1]["model"] == "coder-model"
         assert fake_backend.create_payloads[-1]["effort"] == "default"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _codebuddy_form_data(**updates: str) -> dict[str, str]:
+    payload = {
+        "engine": "codebuddy",
+        "provider": "",
+        "model_value": "",
+        "effort": "default",
+        "execution_mode": "auto",
+        "input__prompt": "hello",
+        "parameter__top_k": "3",
+        "runtime__hard_timeout_seconds": "1800",
+    }
+    payload.update(updates)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_e2e_codebuddy_form_requires_provider_before_model() -> None:
+    app = create_app()
+    fake_backend = FakeBackendCodeBuddy()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(app, "GET", "/skills/demo-skill/run")
+        assert response.status_code == 200
+        assert 'data-provider-required="true"' in response.text
+        assert 'data-provider-filtered="true"' in response.text
+        assert 'id="model_value" name="model_value" data-provider-filtered="true" disabled' in response.text
+        assert "codebuddy-cn" in response.text
+        assert "codebuddy-global" in response.text
+        assert 'const selectedProvider = ""' in response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["", "unknown-provider"])
+async def test_e2e_codebuddy_rejects_missing_or_unknown_provider(provider: str) -> None:
+    app = create_app()
+    fake_backend = FakeBackendCodeBuddy()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data=_codebuddy_form_data(provider=provider),
+            files={"file__input_file": ("input.txt", b"data", "text/plain")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+        assert fake_backend.create_payloads == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_codebuddy_allows_provider_with_backend_default_model() -> None:
+    app = create_app()
+    fake_backend = FakeBackendCodeBuddy()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data=_codebuddy_form_data(provider="codebuddy-global"),
+            files={"file__input_file": ("input.txt", b"data", "text/plain")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert fake_backend.create_payloads[-1]["provider_id"] == "codebuddy-global"
+        assert "model" not in fake_backend.create_payloads[-1]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_codebuddy_disambiguates_same_model_by_provider() -> None:
+    app = create_app()
+    fake_backend = FakeBackendCodeBuddy()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data=_codebuddy_form_data(provider="codebuddy-global", model_value="shared-model"),
+            files={"file__input_file": ("input.txt", b"data", "text/plain")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert fake_backend.create_payloads[-1]["provider_id"] == "codebuddy-global"
+        assert fake_backend.create_payloads[-1]["model"] == "shared-model"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_e2e_codebuddy_rejects_provider_model_mismatch() -> None:
+    app = create_app()
+    fake_backend = FakeBackendCodeBuddy()
+    _install_backend_override(app, fake_backend)
+    try:
+        response = await _request(
+            app,
+            "POST",
+            "/skills/demo-skill/run",
+            data=_codebuddy_form_data(provider="codebuddy-global", model_value="cn-only"),
+            files={"file__input_file": ("input.txt", b"data", "text/plain")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+        assert fake_backend.create_payloads == []
     finally:
         app.dependency_overrides.clear()
 

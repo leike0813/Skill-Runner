@@ -359,7 +359,7 @@ Container startup now writes structured bootstrap diagnostics to:
 
 By default, container bootstrap only ensures `opencode,codex`. Override with
 `SKILL_RUNNER_BOOTSTRAP_ENGINES=all`, `none`, or a comma-separated subset such as
-`gemini,qwen`.
+`qwen,kilo`. Gemini is deprecated and is not an installable bootstrap target.
 
 If startup prints `Failed to install <engine>: exit=1` or later warns
 `opencode CLI not found`, inspect the two files above first. The report includes

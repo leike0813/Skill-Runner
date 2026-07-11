@@ -400,6 +400,99 @@ def test_ui_shell_manager_rejects_custom_model_for_non_claude_engine(tmp_path: P
         manager.start_session("codex", custom_model="openrouter/qwen-3")
 
 
+@pytest.mark.parametrize("provider_id", [None, "", "invalid"])
+def test_ui_shell_manager_codebuddy_requires_canonical_provider_without_spawning(
+    tmp_path: Path,
+    patch_fake_popen,
+    provider_id: str | None,
+) -> None:
+    manager = _new_manager(tmp_path)
+    with pytest.raises(UiShellValidationError):
+        manager.start_session("codebuddy", provider_id=provider_id)
+    assert patch_fake_popen == []
+
+
+@pytest.mark.parametrize("state", ["missing", "expired"])
+def test_ui_shell_manager_codebuddy_requires_present_credential_without_spawning(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+    state: str,
+) -> None:
+    manager = _new_manager(tmp_path)
+    monkeypatch.setattr(
+        "server.engines.codebuddy.ui_shell_launch_handler.codebuddy_credential_store.project_status",
+        lambda _provider_id: SimpleNamespace(credential_state=state),
+    )
+    with pytest.raises(UiShellValidationError, match=state):
+        manager.start_session("codebuddy", provider_id="codebuddy-cn")
+    assert patch_fake_popen == []
+
+
+def test_ui_shell_manager_codebuddy_uses_managed_provider_environment_and_strict_mcp(
+    tmp_path: Path,
+    patch_fake_popen,
+    monkeypatch,
+) -> None:
+    manager = _new_manager(tmp_path)
+    credential = SimpleNamespace(token="managed-secret", user_id="managed-user")
+    monkeypatch.setattr(
+        "server.engines.codebuddy.ui_shell_launch_handler.codebuddy_credential_store.project_status",
+        lambda _provider_id: SimpleNamespace(credential_state="present"),
+    )
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.project_status",
+        lambda _provider_id: SimpleNamespace(credential_state="present"),
+    )
+    monkeypatch.setattr(
+        "server.engines.codebuddy.managed_environment.codebuddy_credential_store.get",
+        lambda _provider_id: credential,
+    )
+    monkeypatch.setenv("CODEBUDDY_API_KEY", "host-secret")
+    monkeypatch.setenv("CODEBUDDY_BASE_URL", "https://host.invalid")
+
+    started = manager.start_session("codebuddy", provider_id="codebuddy-global")
+
+    assert started["provider_id"] == "codebuddy-global"
+    assert "managed-secret" not in json.dumps(started)
+    session_dir = Path(started["session_dir"])
+    settings = json.loads((session_dir / ".codebuddy" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["permissions"] == {
+        "defaultMode": "plan",
+        "deny": ["*"],
+        "disableAutoMode": "disable",
+        "disableBypassPermissionsMode": "disable",
+        "subagentPermissionMode": "plan",
+    }
+    assert settings["disableAllHooks"] is True
+    assert json.loads((session_dir / ".codebuddy" / "mcp.json").read_text(encoding="utf-8")) == {
+        "mcpServers": {}
+    }
+    popen_args, popen_kwargs = patch_fake_popen[0]
+    command = list(cast(list[str], popen_args[0]))
+    engine_args = command[command.index("--") + 2 :]
+    assert engine_args[:2] == ["--setting-sources", "project"]
+    assert "--mcp-config" in engine_args
+    assert "--strict-mcp-config" in engine_args
+    assert "-p" not in engine_args
+    assert "--output-format" not in engine_args
+    assert "--permission-mode" not in engine_args
+    assert popen_kwargs["env"]["CODEBUDDY_AUTH_TOKEN"] == "managed-secret"
+    assert popen_kwargs["env"]["CODEBUDDY_INTERNET_ENVIRONMENT"] == "public"
+    assert "CODEBUDDY_API_KEY" not in popen_kwargs["env"]
+    assert "CODEBUDDY_BASE_URL" not in popen_kwargs["env"]
+
+
+def test_ui_shell_manager_rejects_provider_for_other_engines(
+    tmp_path: Path,
+    patch_fake_popen,
+) -> None:
+    manager = _new_manager(tmp_path)
+    with pytest.raises(UiShellValidationError, match="provider_id"):
+        manager.start_session("codex", provider_id="codebuddy-cn")
+    assert patch_fake_popen == []
+
+
 def test_ui_shell_manager_gemini_session_enforces_sandbox_and_disables_shell(
     tmp_path: Path,
     monkeypatch,

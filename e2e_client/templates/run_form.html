@@ -29,13 +29,13 @@
         </div>
         <div style="margin-bottom: 14px;">
             <label for="provider"><strong>{{ t("client.run_form_provider", default="Provider") }}</strong></label><br>
-            <select id="provider" name="provider" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 200px; background:#fff;">
+            <select id="provider" name="provider" data-provider-required="{{ 'true' if provider_required else 'false' }}" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 200px; background:#fff;">
             </select>
             <div class="muted">{{ t("client.run_form_provider_hint", default="Providers are derived from the selected engine model catalog.") }}</div>
         </div>
         <div style="margin-bottom: 14px;">
             <label for="model_value"><strong>{{ t("client.run_form_model", default="Model") }}</strong></label><br>
-            <select id="model_value" name="model_value" style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 280px; background:#fff;">
+            <select id="model_value" name="model_value" data-provider-filtered="true" {% if provider_required and not selected_provider %}disabled{% endif %} style="padding:8px; border-radius:8px; border:1px solid var(--neutral-200); min-width: 280px; background:#fff;">
                 <option value="">{{ t("client.run_form_backend_default", default="(Backend default)") }}</option>
             </select>
             <input type="hidden" id="model" name="model" value="{{ selected_model }}">
@@ -143,6 +143,7 @@
     };
     const engineModels = {{ engine_models_by_engine | tojson }};
     const selectedProvider = {{ selected_provider | tojson }};
+    const selectedEngine = {{ selected_engine | tojson }};
     const selectedModel = {{ selected_model | tojson }};
     const selectedEffort = {{ selected_effort | tojson }};
     const runSource = {{ run_source | tojson }};
@@ -161,6 +162,7 @@
     const interactiveSection = document.getElementById("runtime_interactive_section");
     const interactiveAutoReply = document.getElementById("runtime__interactive_auto_reply");
     const timeoutGroup = document.getElementById("runtime_timeout_group");
+    let allowInitialModelSelection = true;
 
     function normalizeText(value) {
         return typeof value === "string" ? value.trim() : "";
@@ -197,6 +199,14 @@
         return rows.filter((row) => row && typeof row.id === "string");
     }
 
+    function allRows(engine) {
+        return Array.isArray(engineModels[engine]) ? engineModels[engine] : [];
+    }
+
+    function providerRequired(engine) {
+        return allRows(engine).some((row) => row && row._provider_required === true);
+    }
+
     function supportedEffortsFromRow(row) {
         const raw = Array.isArray(row && row.supported_effort) ? row.supported_effort : [];
         const efforts = [];
@@ -228,7 +238,8 @@
 
     function renderProviders() {
         const engine = engineSelect.value;
-        const rows = normalizeRows(engine);
+        const rows = allRows(engine);
+        const currentProvider = providerSelect.value || "";
         const seen = new Set();
         let providers = [];
         for (const row of rows) {
@@ -245,6 +256,13 @@
             }
         }
         providerSelect.innerHTML = "";
+        const required = providerRequired(engine);
+        if (required) {
+            const blank = document.createElement("option");
+            blank.value = "";
+            blank.textContent = I18N.notApplicable;
+            providerSelect.appendChild(blank);
+        }
         if (!providers.length) {
             const option = document.createElement("option");
             option.value = "";
@@ -258,24 +276,31 @@
             option.textContent = provider;
             providerSelect.appendChild(option);
         }
-        const desired = providerSelect.value || selectedProvider || providers[0];
+        const desired = currentProvider || (engine === selectedEngine ? selectedProvider : "") || (required ? "" : providers[0]);
         if ([...providerSelect.options].some((item) => item.value === desired)) {
             providerSelect.value = desired;
         } else {
-            providerSelect.value = providers[0];
+            providerSelect.value = required ? "" : providers[0];
         }
+        providerSelect.dataset.providerRequired = required ? "true" : "false";
     }
 
     function renderModels() {
         const engine = engineSelect.value;
         const rows = normalizeRows(engine);
         const selectedProviderValue = providerSelect.value || "";
-        const current = modelHidden.value || selectedModel || "";
+        const current = modelHidden.value || (allowInitialModelSelection ? selectedModel : "") || "";
         modelSelect.innerHTML = "";
         const defaultOption = document.createElement("option");
         defaultOption.value = "";
         defaultOption.textContent = I18N.backendDefault;
         modelSelect.appendChild(defaultOption);
+        const requiresProvider = providerRequired(engine);
+        modelSelect.disabled = requiresProvider && !selectedProviderValue;
+        if (modelSelect.disabled) {
+            modelHidden.value = "";
+            return;
+        }
         for (const row of rows) {
             const rowProvider = providerFromRow(row);
             const rowModel = modelNameFromRow(row);
@@ -327,6 +352,9 @@
     }
 
     engineSelect.addEventListener("change", () => {
+        allowInitialModelSelection = false;
+        modelHidden.value = "";
+        effortSelect.value = "default";
         renderProviders();
         renderModels();
         renderEfforts();
@@ -353,6 +381,9 @@
         interactiveAutoReply.addEventListener("change", updateRuntimeOptionVisibility);
     }
     providerSelect.addEventListener("change", () => {
+        allowInitialModelSelection = false;
+        modelHidden.value = "";
+        effortSelect.value = "default";
         renderModels();
         renderEfforts();
     });
@@ -364,6 +395,7 @@
     renderProviders();
     renderModels();
     renderEfforts();
+    allowInitialModelSelection = false;
     updateRuntimeOptionVisibility();
 })();
 </script>
