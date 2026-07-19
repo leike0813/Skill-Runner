@@ -651,6 +651,26 @@
       "title": "Observabilité des Runs"
     },
     "settings": {
+      "plugin_update": {
+        "check": "Rechercher des mises à jour",
+        "check_failed": "Échec de la recherche de mise à jour",
+        "checking": "Recherche de mises à jour…",
+        "failed": "L’opération de mise à jour du plugin a échoué.",
+        "install": "Installer la mise à jour",
+        "install_failed": "Échec de l’installation de la mise à jour",
+        "installed": "La mise à jour du plugin a été installée.",
+        "installing": "Installation de la mise à jour…",
+        "network_error": "Erreur réseau ou service",
+        "source": "Source",
+        "source_builtin": "Intégré",
+        "source_managed": "Mise à jour téléchargée",
+        "subtitle": "Consulter le plugin actif, rechercher puis installer explicitement ses mises à jour.",
+        "title": "Plugin Zotero Bridge CLI",
+        "up_to_date": "Le plugin est à jour.",
+        "update_available": "Une mise à jour est disponible. Vérifiez-la avant de l’installer.",
+        "version": "Version actuelle",
+        "version_unknown": "Inconnue"
+      },
       "logging": {
         "dir_max_bytes": "Taille max du dossier",
         "file_basename": "Nom de base du fichier",

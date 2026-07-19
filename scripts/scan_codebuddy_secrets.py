@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import re
 import stat
+import sys
 from pathlib import Path
 
 
@@ -24,10 +25,14 @@ def _load_secrets(path: Path | None) -> tuple[str, ...]:
 
 def _iter_files(paths: list[Path]):
     for path in paths:
+        if not path.exists():
+            raise FileNotFoundError(f"artifact path does not exist: {path}")
         if path.is_file():
             yield path
         elif path.is_dir():
             yield from (item for item in path.rglob("*") if item.is_file())
+        else:
+            raise OSError(f"artifact path is not readable: {path}")
 
 
 def main() -> int:
@@ -36,24 +41,25 @@ def main() -> int:
     parser.add_argument("--secret-file", type=Path)
     parser.add_argument("--allowed-vault", type=Path)
     args = parser.parse_args()
-    secrets = _load_secrets(args.secret_file)
-    allowed_vault = args.allowed_vault.resolve() if args.allowed_vault else None
-    findings: list[tuple[Path, str]] = []
-    for path in _iter_files(args.paths):
-        try:
+    try:
+        secrets = _load_secrets(args.secret_file)
+        allowed_vault = args.allowed_vault.resolve() if args.allowed_vault else None
+        findings: list[tuple[Path, str]] = []
+        for path in _iter_files(args.paths):
             resolved = path.resolve()
             if allowed_vault is not None and resolved == allowed_vault:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            raise RuntimeError(f"unable to scan artifact: {path}") from exc
-        for secret in secrets:
-            if secret in text:
-                findings.append((path, "exact_secret"))
-                break
-        for name, pattern in PATTERNS.items():
-            if pattern.search(text):
-                findings.append((path, name))
+            for secret in secrets:
+                if secret in text:
+                    findings.append((path, "exact_secret"))
+                    break
+            for name, pattern in PATTERNS.items():
+                if pattern.search(text):
+                    findings.append((path, name))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"CodeBuddy secret scan failed: {exc}", file=sys.stderr)
+        return 2
     for path, rule in sorted(set(findings)):
         print(f"{path}\t{rule}")
     return 1 if findings else 0

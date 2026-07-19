@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, Request, UploadFile  # type: ignore[import-not-found]
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile  # type: ignore[import-not-found]
 
 from ..config import config
 from ..logging_config import get_logging_settings_payload, reload_logging_from_settings
@@ -43,6 +43,7 @@ from ..models import (
     ManagementMcpServerListResponse,
     ManagementMcpServerUpsertRequest,
     ManagementMcpServerView,
+    ManagementPluginUpdateResponse,
     RecoveryState,
     RunStatus,
     SkillManifest,
@@ -54,6 +55,11 @@ from ..engines.codebuddy.auth.provider_registry import require_provider
 from ..services.engine_management.engine_custom_provider_service import engine_custom_provider_service
 from ..services.engine_management.auth_import_service import auth_import_service, AuthImportError
 from ..services.engine_management.auth_import_validator_registry import AuthImportValidationError
+from ..services.engine_management.zotero_bridge_bundle_auto_update import (
+    ZoteroBridgeBundleUpdateConflict,
+    ZoteroBridgeBundleUpdateError,
+    zotero_bridge_bundle_auto_update_manager,
+)
 from ..services.orchestration.runtime_observability_ports import install_runtime_observability_ports
 from ..services.orchestration.runtime_protocol_ports import install_runtime_protocol_ports
 from ..runtime.observability.run_observability import run_observability_service
@@ -76,6 +82,7 @@ from ..services.platform.system_settings_service import (
 from ..services.platform.system_log_explorer_service import system_log_explorer_service
 from ..services.skill.skill_registry import is_builtin_skill_path, skill_registry
 from ..services.orchestration.run_workspace_layout import require_layout_from_record
+from ..services.ui.ui_auth import require_ui_basic_auth
 from . import jobs as jobs_router
 
 
@@ -117,6 +124,67 @@ def _build_system_settings_response() -> ManagementSystemSettingsResponse:
         ),
         reset_confirmation_text=DATA_RESET_CONFIRMATION_TEXT,
     )
+
+
+def _build_plugin_update_response() -> ManagementPluginUpdateResponse:
+    return ManagementPluginUpdateResponse.model_validate(
+        zotero_bridge_bundle_auto_update_manager.management_status()
+    )
+
+
+@router.get(
+    "/system/plugins/zotero-bridge-cli",
+    response_model=ManagementPluginUpdateResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def get_zotero_bridge_plugin_status():
+    return _build_plugin_update_response()
+
+
+@router.post(
+    "/system/plugins/zotero-bridge-cli/check",
+    response_model=ManagementPluginUpdateResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def check_zotero_bridge_plugin_update():
+    try:
+        await zotero_bridge_bundle_auto_update_manager.check_update()
+    except ZoteroBridgeBundleUpdateError as exc:
+        logger.exception(
+            "management.zotero_bridge_plugin check failed",
+            extra={
+                "component": "router.management",
+                "action": "zotero_bridge_plugin_check",
+                "error_type": type(exc).__name__,
+                "fallback": "keep_active_bundle",
+            },
+        )
+        raise HTTPException(status_code=500, detail="Plugin update check failed") from exc
+    return _build_plugin_update_response()
+
+
+@router.post(
+    "/system/plugins/zotero-bridge-cli/install",
+    response_model=ManagementPluginUpdateResponse,
+    dependencies=[Depends(require_ui_basic_auth)],
+)
+async def install_zotero_bridge_plugin_update():
+    try:
+        await zotero_bridge_bundle_auto_update_manager.install_update()
+    except ZoteroBridgeBundleUpdateConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ZoteroBridgeBundleUpdateError as exc:
+        logger.exception(
+            "management.zotero_bridge_plugin install failed",
+            extra={
+                "component": "router.management",
+                "action": "zotero_bridge_plugin_install",
+                "error_type": type(exc).__name__,
+                "fallback": "keep_active_bundle",
+            },
+        )
+        raise HTTPException(status_code=500, detail="Plugin update installation failed") from exc
+    return _build_plugin_update_response()
 
 
 @router.get("/system/settings", response_model=ManagementSystemSettingsResponse)

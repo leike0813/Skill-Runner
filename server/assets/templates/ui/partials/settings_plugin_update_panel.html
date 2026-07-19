@@ -1,0 +1,27 @@
+<div id="settings-plugin-update-panel" class="card">
+    <h2>{{ t("ui.settings.plugin_update.title", default="Zotero Bridge CLI Plugin") }}</h2>
+    <div class="muted">{{ t("ui.settings.plugin_update.subtitle", default="Inspect the active plugin and explicitly check for and install updates.") }}</div>
+
+    <div class="readonly-grid">
+        <div class="readonly-item">
+            <div class="readonly-label">{{ t("ui.settings.plugin_update.version", default="Current Version") }}</div>
+            <div id="plugin-update-version" class="readonly-value">{{ plugin_update_status.version or t("ui.settings.plugin_update.version_unknown", default="Unknown") }}</div>
+        </div>
+        <div class="readonly-item">
+            <div class="readonly-label">{{ t("ui.settings.plugin_update.source", default="Source") }}</div>
+            <div id="plugin-update-source" class="readonly-value">
+                {% if plugin_update_status.source == "managed" %}
+                {{ t("ui.settings.plugin_update.source_managed", default="Downloaded update") }}
+                {% else %}
+                {{ t("ui.settings.plugin_update.source_builtin", default="Built-in") }}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+        <button id="plugin-update-check-btn" class="btn btn-secondary" type="button">{{ t("ui.settings.plugin_update.check", default="Check for Updates") }}</button>
+        <button id="plugin-update-install-btn" class="btn btn-primary" type="button" {% if not plugin_update_status.available_commit %}disabled{% endif %}>{{ t("ui.settings.plugin_update.install", default="Install Update") }}</button>
+    </div>
+    <div id="plugin-update-result" class="status-box" aria-live="polite"></div>
+</div>

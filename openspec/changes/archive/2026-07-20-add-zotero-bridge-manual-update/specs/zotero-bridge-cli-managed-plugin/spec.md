@@ -55,6 +55,8 @@ The system SHALL expose separate check and install operations for administrators
 - **THEN** the system serializes them through the same update manager lock
 - **AND** installing a commit that is already active succeeds idempotently
 
+## ADDED Requirements
+
 ### Requirement: Zotero Bridge CLI bundle MUST use a canonical validated descriptor
 
 The system SHALL normalize each supported bundle manifest into one immutable descriptor containing version, wrapper and profile paths, connection environment names, and platform binary SHA256 metadata. Validation, installation, and status projection SHALL consume that descriptor.

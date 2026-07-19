@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -54,3 +57,19 @@ def test_execution_adapter_builds_post_auth_redactor_from_provider_credential(mo
     assert "provider-token" not in output
     assert "provider-user" not in output
     assert len(output.encode("utf-8")) == len(source.encode("utf-8"))
+
+
+def test_secret_scan_fails_closed_for_missing_input(tmp_path: Path) -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "scripts/scan_codebuddy_secrets.py",
+            str(tmp_path / "missing-artifact.json"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode != 0
+    assert "does not exist" in proc.stderr

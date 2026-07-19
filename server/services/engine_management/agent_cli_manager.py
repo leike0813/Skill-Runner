@@ -48,7 +48,10 @@ from server.services.engine_management.runtime_profile import (
     get_runtime_profile,
 )
 from server.services.engine_management.zotero_bridge_cli_bundle import (
+    ZoteroBridgeBundleError,
     ensure_zotero_bridge_managed_plugin,
+    read_zotero_bridge_bundle_state,
+    write_zotero_bridge_bundle_state,
 )
 from server.services.platform.subprocess_text import run_text
 
@@ -266,11 +269,46 @@ class AgentCliManager:
                 self._ensure_json_file(bootstrap_path, bootstrap_payload)
             self._apply_layout_normalizer(engine, bootstrap_path, bootstrap_payload)
             self._ensure_bootstrap_sidecars(engine)
-        ensure_zotero_bridge_managed_plugin(
-            self.profile,
-            engines=self.supported_engines(),
-        )
+        self._ensure_zotero_bridge_plugin()
         self._sync_claude_agent_home_mcp()
+
+    def _ensure_zotero_bridge_plugin(self) -> None:
+        try:
+            ensure_zotero_bridge_managed_plugin(
+                self.profile,
+                engines=self.supported_engines(),
+            )
+        except (ZoteroBridgeBundleError, OSError) as exc:
+            logger.warning(
+                "Zotero Bridge CLI plugin bootstrap failed; continuing engine layout",
+                extra={
+                    "component": "orchestration.agent_cli_manager",
+                    "action": "ensure_zotero_bridge_plugin",
+                    "error_type": type(exc).__name__,
+                },
+                exc_info=True,
+            )
+            try:
+                previous_state = read_zotero_bridge_bundle_state(self.profile)
+                write_zotero_bridge_bundle_state(
+                    self.profile,
+                    {
+                        **previous_state,
+                        "status": "failed",
+                        "error_code": "bundle_bootstrap_failed",
+                        "error_message": str(exc),
+                        "failed_at": _utc_now_iso(),
+                    },
+                )
+            except OSError:
+                logger.warning(
+                    "Failed to record Zotero Bridge CLI plugin bootstrap state",
+                    extra={
+                        "component": "orchestration.agent_cli_manager",
+                        "action": "record_zotero_bridge_plugin_failure",
+                    },
+                    exc_info=True,
+                )
 
     def _sync_claude_agent_home_mcp(self) -> None:
         try:

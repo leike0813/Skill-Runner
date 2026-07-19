@@ -60,6 +60,9 @@ from ..services.engine_management.engine_custom_provider_service import (
     engine_custom_provider_service,
 )
 from ..services.engine_management.model_registry import model_registry
+from ..services.engine_management.zotero_bridge_bundle_auto_update import (
+    zotero_bridge_bundle_auto_update_manager,
+)
 from ..services.orchestration.runtime_observability_ports import (
     install_runtime_observability_ports,
 )
@@ -581,6 +584,9 @@ async def ui_settings(request: Request):
         name="ui/settings.html",
         context={
             "logging_settings": get_logging_settings_payload(),
+            "plugin_update_status": (
+                zotero_bridge_bundle_auto_update_manager.management_status()
+            ),
             "reset_confirmation_text": DATA_RESET_CONFIRMATION_TEXT,
             "engine_auth_session_log_persistence_enabled": bool(
                 config.SYSTEM.ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED

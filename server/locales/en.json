@@ -660,6 +660,26 @@
       "title": "Run Observability"
     },
     "settings": {
+      "plugin_update": {
+        "check": "Check for Updates",
+        "check_failed": "Update check failed",
+        "checking": "Checking for updates…",
+        "failed": "The plugin update operation failed.",
+        "install": "Install Update",
+        "install_failed": "Update installation failed",
+        "installed": "The plugin update was installed.",
+        "installing": "Installing update…",
+        "network_error": "Network or service error",
+        "source": "Source",
+        "source_builtin": "Built-in",
+        "source_managed": "Downloaded update",
+        "subtitle": "Inspect the active plugin and explicitly check for and install updates.",
+        "title": "Zotero Bridge CLI Plugin",
+        "up_to_date": "The plugin is up to date.",
+        "update_available": "An update is available. Review and install it when ready.",
+        "version": "Current Version",
+        "version_unknown": "Unknown"
+      },
       "logging": {
         "dir_max_bytes": "Directory Max Bytes",
         "file_basename": "File Basename",

@@ -104,6 +104,9 @@
 ### System 管理
 - `GET /v1/management/system/settings`：获取系统设置（日志配置、鉴权会话日志持久化开关、数据重置确认文本）
 - `PUT /v1/management/system/settings`：更新系统设置（当前支持日志级别配置）
+- `GET /v1/management/system/plugins/zotero-bridge-cli`：读取当前 Zotero Bridge CLI 插件版本、来源与更新状态
+- `POST /v1/management/system/plugins/zotero-bridge-cli/check`：只查询远端是否存在更新
+- `POST /v1/management/system/plugins/zotero-bridge-cli/install`：安装最近一次查询确认的更新
 - `GET /v1/management/system/logs/query`：查询系统日志与 bootstrap 日志（关键词/级别/时间范围/分页）
 - `POST /v1/management/system/reset-data`：执行数据重置（**破坏性操作**，需确认文本）
 
@@ -236,6 +239,46 @@
 **错误码**:
 - `400`: 日志级别验证失败（如非法级别名）。
 - `500`: 文件系统写入错误。
+
+### Zotero Bridge CLI 插件状态与手动更新
+
+以下接口均位于 UI Basic Auth 保护域：
+
+- `GET /v1/management/system/plugins/zotero-bridge-cli`
+- `POST /v1/management/system/plugins/zotero-bridge-cli/check`
+- `POST /v1/management/system/plugins/zotero-bridge-cli/install`
+
+GET 仅读取本地状态，不访问网络。`check` 只比较配置分支的远端 commit，
+不会下载或激活 bundle；存在更新时返回 `update_status=update_available` 和
+`available_commit`。`install` 只安装最近一次查询确认、且仍与远端分支一致的
+commit。
+
+三条接口成功时均返回 `ManagementPluginUpdateResponse`：
+
+```json
+{
+  "plugin_id": "zotero-bridge-cli",
+  "version": "0.3.0",
+  "source": "builtin",
+  "current_commit": null,
+  "auto_update_enabled": true,
+  "update_status": "update_available",
+  "available_commit": "def456",
+  "checked_at": "2026-07-19T10:00:00Z",
+  "installed_at": null,
+  "error_code": null,
+  "error_message": null
+}
+```
+
+`source` 仅为 `builtin` 或 `managed`，以实际生效 bundle 为准。响应不会暴露
+bundle/cache 路径或原始 state 内容。关闭后台自动更新不会禁用手动操作。
+
+**错误码**:
+
+- `401`：UI Basic Auth 已启用但凭据缺失或无效。
+- `409`：没有已确认候选，或候选分支在查询后发生移动。
+- `500`：远端查询、bundle 下载、校验或安装失败；原 active bundle 保持可用。
 
 ### 查询系统日志（System Console）
 `GET /v1/management/system/logs/query`
@@ -1335,7 +1378,10 @@
 ### System Console 页面
 `GET /ui/settings`
 
-返回 System Console 页面，提供日志级别配置、日志浏览（system/bootstrap）与数据重置等管理操作 GUI（后端通过 `/v1/management/system/*` 实现）。
+返回 System Console 页面。页面顶部展示 Zotero Bridge CLI 当前版本与来源，
+并提供“检查更新 → 安装更新”的两阶段手动操作；其下继续提供日志级别配置、
+日志浏览（system/bootstrap）与数据重置等管理操作 GUI（后端通过
+`/v1/management/system/*` 实现）。
 
 ### Engine 管理页面
 `GET /ui/engines`

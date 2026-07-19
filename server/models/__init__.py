@@ -88,6 +88,7 @@ from .management import (
     ManagementMcpServerListResponse,
     ManagementMcpServerUpsertRequest,
     ManagementMcpServerView,
+    ManagementPluginUpdateResponse,
     ManagementRunConversationState,
     ManagementRunFilePreviewResponse,
     ManagementRunFilesResponse,

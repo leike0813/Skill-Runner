@@ -9,9 +9,14 @@ from server.config import config
 from server.engines.claude.adapter.state_paths import active_claude_state_path
 from server.engines.claude.adapter.sandbox_probe import load_claude_sandbox_probe
 from server.engines.codex.adapter.sandbox_probe import load_codex_sandbox_probe
+from server.services.engine_management import agent_cli_manager as agent_cli_manager_module
 from server.services.engine_management.agent_cli_manager import AgentCliManager
 from server.services.engine_management.agent_cli_manager import CommandResult
 from server.services.engine_management.runtime_profile import RuntimeProfile
+from server.services.engine_management.zotero_bridge_cli_bundle import (
+    ZoteroBridgeBundleError,
+    read_zotero_bridge_bundle_state,
+)
 from server.services.mcp import (
     clear_mcp_registry_cache,
     mcp_secret_store,
@@ -67,6 +72,54 @@ def _install_fake_managed_claude(profile: RuntimeProfile, *, helper_mode: int = 
         helper_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         helper_path.chmod(helper_mode)
     return package_root
+
+
+@pytest.fixture(autouse=True)
+def _isolate_zotero_bridge_bootstrap(monkeypatch) -> None:
+    monkeypatch.setattr(
+        agent_cli_manager_module,
+        "ensure_zotero_bridge_managed_plugin",
+        lambda _profile, *, engines: None,
+    )
+
+
+def test_ensure_layout_bootstraps_zotero_bridge_plugin(tmp_path: Path, monkeypatch) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+    calls: list[tuple[RuntimeProfile, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        agent_cli_manager_module,
+        "ensure_zotero_bridge_managed_plugin",
+        lambda profile, *, engines: calls.append((profile, tuple(engines))),
+    )
+
+    manager.ensure_layout()
+
+    assert calls == [(manager.profile, manager.supported_engines())]
+
+
+def test_ensure_layout_records_zotero_failure_and_keeps_core_layout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manager = AgentCliManager(_build_profile(tmp_path))
+
+    def _fail_plugin(_profile: RuntimeProfile, *, engines: tuple[str, ...]) -> None:
+        raise ZoteroBridgeBundleError("unsupported bundle schema")
+
+    monkeypatch.setattr(
+        agent_cli_manager_module,
+        "ensure_zotero_bridge_managed_plugin",
+        _fail_plugin,
+    )
+
+    manager.ensure_layout()
+
+    assert (manager.profile.agent_home / ".codex" / "config.toml").is_file()
+    assert (manager.profile.agent_home / ".config" / "opencode" / "opencode.json").is_file()
+    state = read_zotero_bridge_bundle_state(manager.profile)
+    assert state["status"] == "failed"
+    assert state["error_code"] == "bundle_bootstrap_failed"
+    assert state["error_message"] == "unsupported bundle schema"
 
 
 def test_ensure_layout_creates_default_config_files(tmp_path):

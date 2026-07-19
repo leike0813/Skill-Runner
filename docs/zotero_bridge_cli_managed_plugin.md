@@ -9,7 +9,11 @@ built-in bundle shipped with the service:
 plugins/zotero-bridge-cli-bundle
 ```
 
-The bundle provides `manifest.json`, platform binaries under `bin/`, the global wrapper skill at `skills/zotero-bridge-cli/`, and `assets/profile.template.json`.
+The bundle publishes a `host-bridge.surface-release.v1` manifest. Skill Runner
+reads the release version from `surface.version`, platform binaries and SHA256
+values from `releaseSet.cli.binaries`, the global wrapper skill from
+`skills/zotero-bridge-cli/`, and the profile template from
+`skills/zotero-bridge-cli/assets/profile.template.json`.
 
 ## Automatic Bundle Updates
 
@@ -30,10 +34,12 @@ startup_delay_sec=30
 timeout_sec=30
 ```
 
-The updater validates the bundle manifest, wrapper skill, profile template, and
-current platform binary SHA256 before activating a version. Update failures do
-not block service startup or agent runs. The runtime keeps using the previous
-active managed bundle, or the built-in fallback when no managed bundle is active.
+The updater normalizes the manifest into one immutable descriptor, then validates
+the wrapper skill, profile template, and current platform binary SHA256 before
+copying any install artifact or activating a version. Unknown schemas, unsafe
+paths, missing artifacts, and hash mismatches fail closed. Update failures do not
+block service startup or agent runs. The runtime keeps using the previous active
+managed bundle, or the built-in fallback when no managed bundle is active.
 
 Update status is recorded at:
 
@@ -43,6 +49,27 @@ Update status is recorded at:
 
 `scripts/skill-runnerctl doctor --json`, `preflight --json`, and `status --json`
 include this state as read-only diagnostics.
+
+## Manual Updates in System Console
+
+Authenticated administrators can inspect and update the active plugin from
+`GET /ui/settings`. The plugin card appears above the logging settings and shows:
+
+- the active bundle version from `manifest.json` `surface.version`;
+- `Built-in` when the runtime uses the bundled fallback, or `Downloaded update`
+  when a valid managed bundle is active.
+
+Manual updates are deliberately two-phase. **Check for Updates** only compares
+the configured remote branch head with the active managed commit and records a
+candidate; it does not download or activate bundle content. **Install Update**
+rechecks the branch head, then downloads, validates, installs, and activates the
+previously checked commit. If the branch moved, installation is rejected and a
+new check is required.
+
+The automatic-update setting controls only the background loop. Manual check
+and install operations remain available when automatic updates are disabled.
+Automatic and manual operations share one manager lock and the same validation,
+installation, state, and fallback implementation.
 
 ## Bootstrap Behavior
 
@@ -59,7 +86,10 @@ On Windows, bootstrap installs:
 <SKILL_RUNNER_NPM_PREFIX>/bin/zotero-bridge.cmd
 ```
 
-The binary hash must match the manifest `sha256`. A mismatch fails the install step before the managed executable is written.
+The binary hash must match the manifest `sha256`. Bundle parsing and validation
+finish before the wrapper skill, managed profile, or executable is copied. If
+plugin bootstrap fails, Skill Runner records a structured plugin failure and
+continues preparing the other agent engines.
 
 Local deployment uses the prefix prepared by `scripts/skill-runnerctl`. Docker deployment uses `/opt/cache/skill-runner/npm/bin`, which is already on PATH in the image.
 

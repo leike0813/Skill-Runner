@@ -13,7 +13,6 @@ from server.config import config
 from server.config_registry import keys
 from server.services.engine_management.runtime_profile import RuntimeProfile, get_runtime_profile
 from server.services.engine_management.zotero_bridge_cli_bundle import (
-    ZoteroBridgeBundleError,
     ensure_zotero_bridge_managed_plugin,
     managed_bundle_store_root,
     managed_bundle_versions_root,
@@ -21,6 +20,7 @@ from server.services.engine_management.zotero_bridge_cli_bundle import (
     validate_zotero_bridge_bundle_root,
     write_managed_bundle_current,
     write_zotero_bridge_bundle_state,
+    zotero_bridge_bundle_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,14 @@ class ZoteroBridgeBundleAutoUpdateConfig:
     interval_sec: int
     startup_delay_sec: int
     timeout_sec: int
+
+
+class ZoteroBridgeBundleUpdateError(RuntimeError):
+    """Raised when a manual bundle update operation fails."""
+
+
+class ZoteroBridgeBundleUpdateConflict(ZoteroBridgeBundleUpdateError):
+    """Raised when no checked candidate can be installed safely."""
 
 
 class ZoteroBridgeBundleAutoUpdateManager:
@@ -81,7 +89,50 @@ class ZoteroBridgeBundleAutoUpdateManager:
                 state = read_zotero_bridge_bundle_state(self.profile)
                 state["status"] = "disabled"
                 return state
-            return await asyncio.to_thread(self._check_once_sync, cfg)
+            return await asyncio.to_thread(self._check_and_install_sync, cfg)
+
+    async def check_update(self) -> dict[str, Any]:
+        """Check for an update without downloading or activating it."""
+        async with self._lock:
+            return await asyncio.to_thread(self._check_update_sync, self.load_config())
+
+    async def install_update(self) -> dict[str, Any]:
+        """Install the candidate recorded by the latest successful check."""
+        async with self._lock:
+            return await asyncio.to_thread(self._install_update_sync, self.load_config())
+
+    def management_status(self) -> dict[str, Any]:
+        """Return the stable, path-free status projection used by management APIs."""
+        cfg = self.load_config()
+        bundle = zotero_bridge_bundle_status(self.profile)
+        state = bundle.get("state") if isinstance(bundle.get("state"), dict) else {}
+        raw_status = str(state.get("status") or "idle")
+        status = raw_status if raw_status in {
+            "checking",
+            "up_to_date",
+            "update_available",
+            "installing",
+            "installed",
+            "failed",
+        } else "idle"
+        error_code = _optional_string(state.get("error_code"))
+        return {
+            "plugin_id": "zotero-bridge-cli",
+            "version": _optional_string(bundle.get("version")),
+            "source": "managed" if bundle.get("source") == "managed" else "builtin",
+            "current_commit": _optional_string(bundle.get("current_commit")),
+            "auto_update_enabled": cfg.enabled,
+            "update_status": status,
+            "available_commit": _optional_string(state.get("available_commit")),
+            "checked_at": _optional_string(state.get("checked_at")),
+            "installed_at": _optional_string(state.get("installed_at")),
+            "error_code": error_code,
+            "error_message": (
+                "Plugin update failed. Check the server logs for details."
+                if error_code
+                else None
+            ),
+        }
 
     async def _run_loop(self) -> None:
         try:
@@ -103,7 +154,19 @@ class ZoteroBridgeBundleAutoUpdateManager:
         except asyncio.CancelledError:
             raise
 
-    def _check_once_sync(self, cfg: ZoteroBridgeBundleAutoUpdateConfig) -> dict[str, Any]:
+    def _check_and_install_sync(
+        self,
+        cfg: ZoteroBridgeBundleAutoUpdateConfig,
+    ) -> dict[str, Any]:
+        try:
+            state = self._check_update_sync(cfg)
+            if state.get("status") == "update_available":
+                return self._install_update_sync(cfg)
+            return state
+        except ZoteroBridgeBundleUpdateError:
+            return read_zotero_bridge_bundle_state(self.profile)
+
+    def _check_update_sync(self, cfg: ZoteroBridgeBundleAutoUpdateConfig) -> dict[str, Any]:
         started_at = _utc_now_iso()
         previous_state = read_zotero_bridge_bundle_state(self.profile)
         checking_state = {
@@ -112,12 +175,13 @@ class ZoteroBridgeBundleAutoUpdateManager:
             "source_repository": cfg.repository,
             "source_branch": cfg.branch,
             "checked_at": started_at,
+            "available_commit": None,
         }
         write_zotero_bridge_bundle_state(self.profile, checking_state)
 
         try:
             remote_commit = self._remote_head(cfg)
-            active_commit = previous_state.get("active_commit")
+            active_commit = zotero_bridge_bundle_status(self.profile).get("current_commit")
             if active_commit == remote_commit:
                 state = {
                     **previous_state,
@@ -126,13 +190,74 @@ class ZoteroBridgeBundleAutoUpdateManager:
                     "source_branch": cfg.branch,
                     "checked_at": _utc_now_iso(),
                     "remote_commit": remote_commit,
+                    "available_commit": None,
+                    "error_code": None,
+                    "error_message": None,
+                }
+                write_zotero_bridge_bundle_state(self.profile, state)
+                return state
+            state = {
+                **previous_state,
+                "status": "update_available",
+                "source_repository": cfg.repository,
+                "source_branch": cfg.branch,
+                "checked_at": _utc_now_iso(),
+                "remote_commit": remote_commit,
+                "available_commit": remote_commit,
+                "error_code": None,
+                "error_message": None,
+            }
+            write_zotero_bridge_bundle_state(self.profile, state)
+            return state
+        except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+            self._record_failure(previous_state, cfg, exc, action="check_update", clear_candidate=True)
+            raise ZoteroBridgeBundleUpdateError("Zotero Bridge bundle update check failed") from exc
+
+    def _install_update_sync(self, cfg: ZoteroBridgeBundleAutoUpdateConfig) -> dict[str, Any]:
+        previous_state = read_zotero_bridge_bundle_state(self.profile)
+        candidate = previous_state.get("available_commit")
+        if not isinstance(candidate, str) or not candidate:
+            raise ZoteroBridgeBundleUpdateConflict("No checked plugin update is available")
+
+        installing_state = {
+            **previous_state,
+            "status": "installing",
+            "error_code": None,
+            "error_message": None,
+        }
+        write_zotero_bridge_bundle_state(self.profile, installing_state)
+        try:
+            remote_commit = self._remote_head(cfg)
+            if remote_commit != candidate:
+                conflict = ZoteroBridgeBundleUpdateConflict(
+                    "The checked plugin update changed; check for updates again"
+                )
+                self._record_failure(
+                    previous_state,
+                    cfg,
+                    conflict,
+                    action="install_update",
+                    clear_candidate=True,
+                )
+                raise conflict
+
+            active_commit = zotero_bridge_bundle_status(self.profile).get("current_commit")
+            if active_commit == candidate:
+                state = {
+                    **previous_state,
+                    "status": "installed",
+                    "active_commit": candidate,
+                    "checked_at": previous_state.get("checked_at") or _utc_now_iso(),
+                    "installed_at": previous_state.get("installed_at") or _utc_now_iso(),
+                    "remote_commit": candidate,
+                    "available_commit": None,
                     "error_code": None,
                     "error_message": None,
                 }
                 write_zotero_bridge_bundle_state(self.profile, state)
                 return state
 
-            bundle_root = self._ensure_version_dir(cfg, remote_commit)
+            bundle_root = self._ensure_version_dir(cfg, candidate)
             validate_zotero_bridge_bundle_root(bundle_root)
             ensure_zotero_bridge_managed_plugin(
                 self.profile,
@@ -141,44 +266,66 @@ class ZoteroBridgeBundleAutoUpdateManager:
             )
             write_managed_bundle_current(
                 self.profile,
-                active_commit=remote_commit,
+                active_commit=candidate,
                 active_bundle_root=bundle_root,
             )
             state = {
                 "status": "installed",
-                "active_commit": remote_commit,
+                "active_commit": candidate,
                 "active_bundle_root": str(bundle_root),
                 "source_repository": cfg.repository,
                 "source_branch": cfg.branch,
-                "checked_at": _utc_now_iso(),
+                "checked_at": previous_state.get("checked_at") or _utc_now_iso(),
                 "installed_at": _utc_now_iso(),
-                "remote_commit": remote_commit,
+                "remote_commit": candidate,
+                "available_commit": None,
                 "error_code": None,
                 "error_message": None,
             }
             write_zotero_bridge_bundle_state(self.profile, state)
             return state
+        except ZoteroBridgeBundleUpdateConflict:
+            raise
         except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError) as exc:
-            state = {
-                **previous_state,
-                "status": "failed",
-                "source_repository": cfg.repository,
-                "source_branch": cfg.branch,
-                "checked_at": _utc_now_iso(),
-                "error_code": type(exc).__name__,
-                "error_message": str(exc),
-            }
-            write_zotero_bridge_bundle_state(self.profile, state)
-            logger.warning(
-                "Zotero Bridge bundle auto-update failed; keeping previous bundle",
-                extra={
-                    "component": "engine_management.zotero_bridge_bundle_auto_update",
-                    "action": "check_once",
-                    "error_type": type(exc).__name__,
-                },
-                exc_info=True,
+            self._record_failure(
+                previous_state,
+                cfg,
+                exc,
+                action="install_update",
+                clear_candidate=False,
             )
-            return state
+            raise ZoteroBridgeBundleUpdateError("Zotero Bridge bundle update installation failed") from exc
+
+    def _record_failure(
+        self,
+        previous_state: dict[str, Any],
+        cfg: ZoteroBridgeBundleAutoUpdateConfig,
+        exc: BaseException,
+        *,
+        action: str,
+        clear_candidate: bool,
+    ) -> None:
+        state = {
+            **previous_state,
+            "status": "failed",
+            "source_repository": cfg.repository,
+            "source_branch": cfg.branch,
+            "checked_at": _utc_now_iso(),
+            "error_code": type(exc).__name__,
+            "error_message": str(exc),
+        }
+        if clear_candidate:
+            state["available_commit"] = None
+        write_zotero_bridge_bundle_state(self.profile, state)
+        logger.warning(
+            "Zotero Bridge bundle update failed; keeping previous bundle",
+            extra={
+                "component": "engine_management.zotero_bridge_bundle_auto_update",
+                "action": action,
+                "error_type": type(exc).__name__,
+            },
+            exc_info=True,
+        )
 
     def _remote_head(self, cfg: ZoteroBridgeBundleAutoUpdateConfig) -> str:
         proc = self._run_git(
@@ -269,6 +416,13 @@ class ZoteroBridgeBundleAutoUpdateManager:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 zotero_bridge_bundle_auto_update_manager = ZoteroBridgeBundleAutoUpdateManager()

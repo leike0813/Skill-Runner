@@ -21,6 +21,9 @@ from server.models import (
     SkillManifest,
 )
 from server.services.platform.data_reset_service import DATA_RESET_CONFIRMATION_TEXT
+from server.services.engine_management.zotero_bridge_bundle_auto_update import (
+    ZoteroBridgeBundleUpdateConflict,
+)
 
 
 async def _request(method: str, path: str, **kwargs):
@@ -1019,6 +1022,119 @@ async def test_management_get_system_settings(monkeypatch):
     assert body["logging"]["read_only"]["dir"] == "/tmp/logs"
     assert body["engine_auth_session_log_persistence_enabled"] is False
     assert body["reset_confirmation_text"] == DATA_RESET_CONFIRMATION_TEXT
+
+
+def _plugin_update_status(**overrides):  # noqa: ANN003
+    payload = {
+        "plugin_id": "zotero-bridge-cli",
+        "version": "0.3.0",
+        "source": "builtin",
+        "current_commit": None,
+        "auto_update_enabled": True,
+        "update_status": "idle",
+        "available_commit": None,
+        "checked_at": None,
+        "installed_at": None,
+        "error_code": None,
+        "error_message": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_management_zotero_bridge_plugin_status_is_stable_and_path_free(monkeypatch):
+    manager = SimpleNamespace(
+        management_status=lambda: _plugin_update_status(),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.zotero_bridge_bundle_auto_update_manager",
+        manager,
+    )
+
+    response = await _request("GET", "/v1/management/system/plugins/zotero-bridge-cli")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "0.3.0"
+    assert body["source"] == "builtin"
+    assert "bundle_root" not in body
+    assert "state_path" not in body
+
+
+@pytest.mark.asyncio
+async def test_management_zotero_bridge_plugin_check_returns_candidate(monkeypatch):
+    check_update = AsyncMock(return_value={"status": "update_available"})
+    manager = SimpleNamespace(
+        check_update=check_update,
+        management_status=lambda: _plugin_update_status(
+            update_status="update_available",
+            available_commit="def456",
+        ),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.zotero_bridge_bundle_auto_update_manager",
+        manager,
+    )
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/plugins/zotero-bridge-cli/check",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["update_status"] == "update_available"
+    check_update.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_management_zotero_bridge_plugin_install_maps_conflict(monkeypatch):
+    install_update = AsyncMock(
+        side_effect=ZoteroBridgeBundleUpdateConflict("candidate changed")
+    )
+    manager = SimpleNamespace(
+        install_update=install_update,
+        management_status=lambda: _plugin_update_status(),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.zotero_bridge_bundle_auto_update_manager",
+        manager,
+    )
+
+    response = await _request(
+        "POST",
+        "/v1/management/system/plugins/zotero-bridge-cli/install",
+    )
+
+    assert response.status_code == 409
+    install_update.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_management_zotero_bridge_plugin_routes_require_ui_auth(monkeypatch):
+    monkeypatch.setattr("server.services.ui.ui_auth.validate_ui_basic_auth_config", lambda: None)
+    monkeypatch.setattr("server.services.ui.ui_auth.is_ui_basic_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        "server.services.ui.ui_auth.get_ui_basic_auth_credentials",
+        lambda: ("admin", "secret"),
+    )
+    monkeypatch.setattr(
+        "server.routers.management.zotero_bridge_bundle_auto_update_manager",
+        SimpleNamespace(management_status=lambda: _plugin_update_status()),
+    )
+
+    unauthenticated = await _request(
+        "GET",
+        "/v1/management/system/plugins/zotero-bridge-cli",
+    )
+    authenticated = await _request(
+        "GET",
+        "/v1/management/system/plugins/zotero-bridge-cli",
+        auth=("admin", "secret"),
+    )
+
+    assert unauthenticated.status_code == 401
+    assert authenticated.status_code == 200
 
 
 @pytest.mark.asyncio

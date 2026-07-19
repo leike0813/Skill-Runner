@@ -208,6 +208,22 @@ async def test_ui_settings_contains_logging_and_reset_controls(monkeypatch):
         "server.routers.ui.config",
         SimpleNamespace(SYSTEM=SimpleNamespace(ENGINE_AUTH_SESSION_LOG_PERSISTENCE_ENABLED=False)),
     )
+    monkeypatch.setattr(
+        "server.routers.ui.zotero_bridge_bundle_auto_update_manager.management_status",
+        lambda: {
+            "plugin_id": "zotero-bridge-cli",
+            "version": "0.3.0",
+            "source": "builtin",
+            "current_commit": None,
+            "auto_update_enabled": True,
+            "update_status": "idle",
+            "available_commit": None,
+            "checked_at": None,
+            "installed_at": None,
+            "error_code": None,
+            "error_message": None,
+        },
+    )
 
     response = await _request("GET", "/ui/settings")
     assert response.status_code == 200
@@ -220,6 +236,13 @@ async def test_ui_settings_contains_logging_and_reset_controls(monkeypatch):
     assert "/v1/management/system/logs/query" in response.text
     assert "/v1/management/system/reset-data" in response.text
     assert "/v1/management/system/settings" in response.text
+    assert "/v1/management/system/plugins/zotero-bridge-cli" in response.text
+    assert 'id="plugin-update-check-btn"' in response.text
+    assert 'id="plugin-update-install-btn"' in response.text
+    assert 'id="plugin-update-result" class="status-box" aria-live="polite"' in response.text
+    assert response.text.index('id="settings-plugin-update-panel"') < response.text.index(
+        'id="logging-settings-form"'
+    )
     assert DATA_RESET_CONFIRMATION_TEXT in response.text
     assert 'id="reset-include-engine-auth-sessions"' not in response.text
 

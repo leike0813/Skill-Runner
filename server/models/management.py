@@ -145,6 +145,30 @@ class ManagementSystemSettingsUpdateRequest(BaseModel):
     logging: ManagementLoggingEditableSettings
 
 
+class ManagementPluginUpdateResponse(BaseModel):
+    """Stable Zotero Bridge CLI plugin status exposed to management clients."""
+
+    plugin_id: Literal["zotero-bridge-cli"]
+    version: Optional[str] = None
+    source: Literal["builtin", "managed"]
+    current_commit: Optional[str] = None
+    auto_update_enabled: bool
+    update_status: Literal[
+        "idle",
+        "checking",
+        "up_to_date",
+        "update_available",
+        "installing",
+        "installed",
+        "failed",
+    ]
+    available_commit: Optional[str] = None
+    checked_at: Optional[str] = None
+    installed_at: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
 class ManagementSystemLogItem(BaseModel):
     """Single log row returned by management system log explorer."""
 

@@ -651,6 +651,26 @@
       "title": "Run 観測"
     },
     "settings": {
+      "plugin_update": {
+        "check": "更新を確認",
+        "check_failed": "更新の確認に失敗しました",
+        "checking": "更新を確認しています…",
+        "failed": "プラグインの更新操作に失敗しました。",
+        "install": "更新をインストール",
+        "install_failed": "更新のインストールに失敗しました",
+        "installed": "プラグインの更新をインストールしました。",
+        "installing": "更新をインストールしています…",
+        "network_error": "ネットワークまたはサービスエラー",
+        "source": "ソース",
+        "source_builtin": "内蔵",
+        "source_managed": "ダウンロード済み更新",
+        "subtitle": "有効なプラグインを確認し、更新の確認とインストールを明示的に実行します。",
+        "title": "Zotero Bridge CLI プラグイン",
+        "up_to_date": "プラグインは最新です。",
+        "update_available": "更新があります。確認してからインストールしてください。",
+        "version": "現在のバージョン",
+        "version_unknown": "不明"
+      },
       "logging": {
         "dir_max_bytes": "ディレクトリ最大サイズ",
         "file_basename": "ファイルベース名",

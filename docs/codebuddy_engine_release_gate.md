@@ -6,7 +6,7 @@ Runs use a generated `CODEBUDDY.md`, system-owned settings, and a strict run-loc
 
 Credentials are stored in the service-local vault and management responses expose only `missing`, `present`, or `expired` status projections. Missing, expired, and runtime 401 failures reuse canonical waiting-auth and automatically requeue after successful browser authentication. The inline TUI requires an explicit present provider and uses session-local enforced Plan/deny-all settings plus an empty strict MCP source.
 
-## Release record
+## Archived release record
 
 Automated contract, parser, management, golden, and secret-scan validation passed on 2026-07-11. The operator also confirmed successful manual validation for both `codebuddy-cn` and `codebuddy-global`, covering:
 
@@ -16,4 +16,6 @@ Automated contract, parser, management, golden, and secret-scan validation passe
 - provider-qualified inline TUI startup with managed credentials and strict MCP isolation;
 - raw token scan of auth and run evidence.
 
-The machine-readable record is `artifacts/codebuddy_release_gate.json`. It intentionally leaves `cli_version` null because no verified version value was supplied with the operator attestation; no version is inferred from the pinned model snapshot.
+The canonical machine-readable record is `artifacts/archive/codebuddy_release_gate.json`. It is an immutable historical attestation: the external provider checks and operator evidence cannot be regenerated from the current repository alone, and the archived `passed` values do not describe the current environment. Use `scripts/verify_codebuddy_release_record.sh` when an explicit audit of that record is required.
+
+The archived record intentionally leaves `cli_version` null because no verified version value was supplied with the operator attestation; no version is inferred from the pinned model snapshot.

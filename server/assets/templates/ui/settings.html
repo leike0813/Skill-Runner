@@ -180,6 +180,7 @@
         {% include "ui/partials/page_header.html" %}
     </div>
 
+    {% include "ui/partials/settings_plugin_update_panel.html" %}
     {% include "ui/partials/settings_logging_panel.html" %}
     {% include "ui/partials/settings_log_explorer_panel.html" %}
     {% include "ui/partials/settings_reset_panel.html" %}
@@ -223,12 +224,31 @@
         logLoadMore: {{ t("ui.settings.log_explorer.load_more", default="Load more") | tojson }},
         logNoMore: {{ t("ui.settings.log_explorer.no_more", default="No more logs") | tojson }},
         logSummaryPrefix: {{ t("ui.settings.log_explorer.summary_prefix", default="Matched") | tojson }},
+        pluginVersionUnknown: {{ t("ui.settings.plugin_update.version_unknown", default="Unknown") | tojson }},
+        pluginSourceBuiltin: {{ t("ui.settings.plugin_update.source_builtin", default="Built-in") | tojson }},
+        pluginSourceManaged: {{ t("ui.settings.plugin_update.source_managed", default="Downloaded update") | tojson }},
+        pluginChecking: {{ t("ui.settings.plugin_update.checking", default="Checking for updates…") | tojson }},
+        pluginInstalling: {{ t("ui.settings.plugin_update.installing", default="Installing update…") | tojson }},
+        pluginUpToDate: {{ t("ui.settings.plugin_update.up_to_date", default="The plugin is up to date.") | tojson }},
+        pluginUpdateAvailable: {{ t("ui.settings.plugin_update.update_available", default="An update is available. Review and install it when ready.") | tojson }},
+        pluginInstalled: {{ t("ui.settings.plugin_update.installed", default="The plugin update was installed.") | tojson }},
+        pluginFailed: {{ t("ui.settings.plugin_update.failed", default="The plugin update operation failed.") | tojson }},
+        pluginCheckFailed: {{ t("ui.settings.plugin_update.check_failed", default="Update check failed") | tojson }},
+        pluginInstallFailed: {{ t("ui.settings.plugin_update.install_failed", default="Update installation failed") | tojson }},
+        pluginNetworkError: {{ t("ui.settings.plugin_update.network_error", default="Network or service error") | tojson }},
     };
     const settingsEndpoint = "/v1/management/system/settings";
     const resetEndpoint = "/v1/management/system/reset-data";
     const logsEndpoint = "/v1/management/system/logs/query";
+    const pluginEndpoint = "/v1/management/system/plugins/zotero-bridge-cli";
+    const initialPluginStatus = {{ plugin_update_status | tojson }};
     const loggingForm = document.getElementById("logging-settings-form");
     const loggingResult = document.getElementById("logging-settings-result");
+    const pluginVersionEl = document.getElementById("plugin-update-version");
+    const pluginSourceEl = document.getElementById("plugin-update-source");
+    const pluginCheckBtn = document.getElementById("plugin-update-check-btn");
+    const pluginInstallBtn = document.getElementById("plugin-update-install-btn");
+    const pluginResultEl = document.getElementById("plugin-update-result");
     const confirmationText = {{ reset_confirmation_text | tojson }};
     const openBtn = document.getElementById("danger-reset-open-btn");
     const modal = document.getElementById("danger-reset-modal");
@@ -248,10 +268,73 @@
     const logLoadMoreBtn = document.getElementById("log-query-load-more-btn");
     let logCursor = 0;
     let logTotalMatched = 0;
+    let pluginBusy = false;
+    let pluginUpdateAvailable = false;
 
     function setStatus(target, text, kind) {
         target.className = "status-box " + kind;
         target.textContent = text;
+    }
+
+    function pluginStatusMessage(status) {
+        if (status === "up_to_date") return I18N.pluginUpToDate;
+        if (status === "update_available") return I18N.pluginUpdateAvailable;
+        if (status === "installed") return I18N.pluginInstalled;
+        if (status === "failed") return I18N.pluginFailed;
+        return "";
+    }
+
+    function refreshPluginButtons() {
+        pluginCheckBtn.disabled = pluginBusy;
+        pluginInstallBtn.disabled = pluginBusy || !pluginUpdateAvailable;
+    }
+
+    function renderPluginStatus(data, announce) {
+        const payload = data && typeof data === "object" ? data : {};
+        pluginVersionEl.textContent = payload.version || I18N.pluginVersionUnknown;
+        pluginSourceEl.textContent = payload.source === "managed"
+            ? I18N.pluginSourceManaged
+            : I18N.pluginSourceBuiltin;
+        pluginUpdateAvailable = Boolean(payload.available_commit);
+        refreshPluginButtons();
+        if (announce) {
+            const message = pluginStatusMessage(payload.update_status);
+            if (message) {
+                setStatus(
+                    pluginResultEl,
+                    message,
+                    payload.update_status === "failed" ? "error" : "success"
+                );
+            }
+        }
+    }
+
+    async function runPluginOperation(action) {
+        const isInstall = action === "install";
+        pluginBusy = true;
+        refreshPluginButtons();
+        setStatus(
+            pluginResultEl,
+            isInstall ? I18N.pluginInstalling : I18N.pluginChecking,
+            "success"
+        );
+        try {
+            const response = await fetch(`${pluginEndpoint}/${action}`, { method: "POST" });
+            const data = await response.json();
+            if (!response.ok) {
+                const fallback = isInstall ? I18N.pluginInstallFailed : I18N.pluginCheckFailed;
+                const message = typeof data.detail === "string" ? data.detail : fallback;
+                setStatus(pluginResultEl, `${fallback}: ${message}`, "error");
+                return;
+            }
+            renderPluginStatus(data, true);
+        } catch (_error) {
+            const fallback = isInstall ? I18N.pluginInstallFailed : I18N.pluginCheckFailed;
+            setStatus(pluginResultEl, `${fallback}: ${I18N.pluginNetworkError}`, "error");
+        } finally {
+            pluginBusy = false;
+            refreshPluginButtons();
+        }
     }
 
     function setLogSummary(count, total) {
@@ -381,6 +464,16 @@
                 setStatus(loggingResult, I18N.saveFailedNetwork, "error");
             }
         });
+    }
+
+    if (pluginCheckBtn && pluginInstallBtn) {
+        pluginCheckBtn.addEventListener("click", function () {
+            runPluginOperation("check");
+        });
+        pluginInstallBtn.addEventListener("click", function () {
+            runPluginOperation("install");
+        });
+        renderPluginStatus(initialPluginStatus, true);
     }
 
     function closeModal() {

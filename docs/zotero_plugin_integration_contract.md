@@ -6,7 +6,8 @@
 
 - 后端运行时优先使用 `<SKILL_RUNNER_AGENT_CACHE_DIR>/plugin-bundles/zotero-bridge-cli-bundle` 中的受管 Zotero Bridge CLI bundle；内置 `plugins/zotero-bridge-cli-bundle` 作为 fallback。
 - 服务启动后后台自动跟踪 `https://github.com/leike0813/zotero-agents` 的 `host-bridge/zotero-bridge-cli-bundle` 分支，校验通过后激活新 bundle。
-- 部署/bootstrap 会从当前解析到的 bundle `manifest.json` 选择当前平台的 `zotero-bridge` CLI，校验 SHA256 后安装到 `SKILL_RUNNER_NPM_PREFIX/bin`。
+- bundle 使用 `host-bridge.surface-release.v1` manifest：版本来自 `surface.version`，平台 CLI 与 SHA256 来自 `releaseSet.cli.binaries`，profile template 位于 `skills/zotero-bridge-cli/assets/profile.template.json`。
+- 部署/bootstrap 会先将 manifest 规范化为统一 descriptor，再校验 wrapper skill、profile template、当前平台 CLI 及 SHA256；全部校验完成后才写入 managed agent home、profile 与 `SKILL_RUNNER_NPM_PREFIX/bin`。
 - 本地部署沿用 `scripts/skill-runnerctl` 注入的 managed prefix PATH；Docker 部署沿用镜像内 `/opt/cache/skill-runner/npm/bin` PATH。
 - agent subprocess 通过 `ZOTERO_BRIDGE_BIN` 获得 managed `zotero-bridge` 可执行文件的绝对路径。
 - wrapper skill 从 bundle `skills/zotero-bridge-cli/` 同步到各 managed agent home 的全局 skill 目录，不作为 run-local skill 复制。
@@ -14,7 +15,8 @@
 - profile 不保存固定 endpoint 或 token；请求方通过 `runtime_options.env` 注入 `ZOTERO_BRIDGE_ENDPOINT`、`ZOTERO_BRIDGE_TOKEN`、`ZOTERO_BRIDGE_CONNECTION_MODE`。
 - agent 使用 PATH 上的 `zotero-bridge` 命令访问 Zotero Bridge，不依赖 run-local shim。
 - 不得打印、保存或回显 bearer token。
-- Zotero 插件无需显式触发 bundle 更新；`skill-runnerctl doctor --json`、`preflight --json` 和 `status --json` 会返回只读更新状态。
+- Zotero bundle 无效时，bootstrap 会记录结构化插件失败并继续准备其他 engine；直接调用 bundle validator 或 installer 仍会返回失败。
+- 外部 Zotero 插件无需显式触发 bundle 更新；`skill-runnerctl doctor --json`、`preflight --json` 和 `status --json` 会返回只读更新状态。管理员可在 System Console 查看当前版本与来源，并按“检查更新 → 安装更新”两阶段主动更新。
 
 更多部署细节见 [Zotero Bridge CLI Managed Plugin](zotero_bridge_cli_managed_plugin.md)。
 
