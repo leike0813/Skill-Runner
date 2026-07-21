@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .common import (
     AdapterTurnOutcome,
@@ -264,6 +264,108 @@ class InteractionReplyResponse(BaseModel):
     status: RunStatus
     accepted: bool
     mode: Literal["interaction", "auth"] = "interaction"
+
+
+class InteractionFileBinding(BaseModel):
+    """Binds one multipart file index to a declared pending slot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slot: str = Field(min_length=1)
+    file_index: int = Field(ge=0)
+
+    @field_validator("slot")
+    @classmethod
+    def normalize_slot(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("slot must not be blank")
+        return normalized
+
+
+class InteractionFileReplyMetadata(BaseModel):
+    """Strict JSON metadata carried by an interaction file reply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interaction_id: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1)
+    message: Optional[str] = None
+    bindings: List[InteractionFileBinding] = Field(min_length=1)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("idempotency_key must not be blank")
+        return normalized
+
+
+class InteractionManagedFile(BaseModel):
+    """Private managed file reference supplied only to the resumed agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slot: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    size_bytes: int = Field(ge=1)
+
+
+class InteractionPublicFile(BaseModel):
+    """Privacy-safe file summary for events and replay surfaces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slot: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    size_bytes: int = Field(ge=1)
+
+
+class InteractionFileResponse(BaseModel):
+    """Private canonical continuation response for uploaded files."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["interaction_files"] = "interaction_files"
+    message: Optional[str] = None
+    files: List[InteractionManagedFile] = Field(min_length=1)
+
+
+class InteractionFilePublicSummary(BaseModel):
+    """Public projection of an interaction file response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["interaction_files"] = "interaction_files"
+    message: Optional[str] = None
+    files: List[InteractionPublicFile] = Field(min_length=1)
+
+
+class InteractionFileManifestEntry(BaseModel):
+    """Internal manifest entry for one managed file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slot: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    size_bytes: int = Field(ge=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class InteractionFileManifest(BaseModel):
+    """Internal receipt-scoped manifest stored with managed files."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(min_length=1)
+    interaction_id: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1)
+    receipt_token: str = Field(min_length=1)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    files: List[InteractionFileManifestEntry] = Field(min_length=1)
 
 
 class AuthSessionStatusResponse(BaseModel):

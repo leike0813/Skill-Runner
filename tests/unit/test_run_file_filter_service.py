@@ -22,3 +22,10 @@ def test_run_explorer_path_rejects_filtered_ancestors():
     service = RunFileFilterService()
     assert service.path_allowed_for_run_explorer("workspace/node_modules/pkg/index.js") is False
     assert service.path_allowed_for_run_explorer("artifacts/result.txt") is True
+
+
+def test_managed_interaction_files_are_hidden_from_debug_and_explorer():
+    service = RunFileFilterService()
+    managed = "uploads/.interaction-replies/demo.1/17/token/paper.pdf"
+    assert service.include_in_debug_bundle(managed) is False
+    assert service.path_allowed_for_run_explorer(managed) is False

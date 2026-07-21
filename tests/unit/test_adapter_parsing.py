@@ -7,7 +7,12 @@ from server.engines.codex.adapter.execution_adapter import CodexExecutionAdapter
 from server.engines.opencode.adapter.execution_adapter import OpencodeExecutionAdapter
 from server.engines.qwen.adapter.execution_adapter import QwenExecutionAdapter
 from server.models import EngineSessionHandle, EngineSessionHandleType
-from server.models import AdapterTurnOutcome
+from server.models import AdapterTurnOutcome, InteractionKind
+
+
+def test_adapter_normalization_preserves_upload_files_kind():
+    adapter = CodexExecutionAdapter()
+    assert adapter._normalize_interaction_kind("upload_files") == InteractionKind.UPLOAD_FILES
 
 
 def test_gemini_parse_output_from_envelope():

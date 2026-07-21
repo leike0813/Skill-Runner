@@ -20,6 +20,7 @@ def test_snapshot_service_ignores_internal_prefixes(tmp_path: Path):
     _write(run_dir / ".gemini" / "settings.json", "x")
     _write(run_dir / ".iflow" / "settings.json", "x")
     _write(run_dir / "opencode.json", "{}")
+    _write(run_dir / "uploads" / ".interaction-replies" / "demo.1" / "17" / "token" / "file", "secret")
 
     snapshot = RunFilesystemSnapshotService().capture_filesystem_snapshot(run_dir)
 
@@ -31,3 +32,4 @@ def test_snapshot_service_ignores_internal_prefixes(tmp_path: Path):
     assert ".gemini/settings.json" not in snapshot
     assert ".iflow/settings.json" not in snapshot
     assert "opencode.json" not in snapshot
+    assert not any(path.startswith("uploads/.interaction-replies/") for path in snapshot)

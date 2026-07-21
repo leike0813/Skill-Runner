@@ -47,7 +47,8 @@
   },
   "requested_protocols": [
     "skillrunner.job.v1",
-    "skillrunner.sequence.v1"
+    "skillrunner.sequence.v1",
+    "skillrunner.interaction-files.v1"
   ]
 }
 ```
@@ -62,7 +63,13 @@
   },
   "protocols": {
     "skillrunner.job.v1": { "supported": true },
-    "skillrunner.sequence.v1": { "supported": false }
+    "skillrunner.sequence.v1": { "supported": false },
+    "skillrunner.interaction-files.v1": {
+      "supported": true,
+      "max_files": 8,
+      "max_file_bytes": 33554432,
+      "max_total_bytes": 67108864
+    }
   }
 }
 ```
@@ -72,6 +79,7 @@
 - 第一版声明支持 `skillrunner.job.v1`。
 - 当前后端尚未原生支持整段 sequence workflow 执行，因此 `skillrunner.sequence.v1.supported=false`。
 - `requested_protocols` 中出现未知协议不会导致 500；未知协议返回 `supported=false`。
+- `skillrunner.interaction-files.v1` 仅在显式请求时返回；三个限额来自上传校验使用的同一 policy。
 - 认证策略与现有 management/system 接口一致。
 
 ---
@@ -888,7 +896,7 @@ bundle/cache 路径或原始 state 内容。关闭后台自动更新不会禁用
 ```
 
 无待决问题时返回 `pending: null`，并保留当前状态。
-`kind` 当前支持：`choose_one`、`confirm`、`fill_fields`、`open_text`、`risk_ack`。
+`kind` 当前支持：`choose_one`、`confirm`、`fill_fields`、`open_text`、`upload_files`、`risk_ack`。
 对外 `PendingInteraction` 形状当前保持不变；目标方向是将其稳定投影自合法 pending JSON 分支。
 若某回合未命中合法 pending/final branch 且 soft completion 也不成立，系统仍可能进入 `waiting_user`，但 payload 只会是默认 fallback 版本。
 
@@ -922,6 +930,24 @@ bundle/cache 路径或原始 state 内容。关闭后台自动更新不会禁用
 - `404`: `request_id` 或 `run` 不存在。
 - `409`: 非 `waiting_user` 状态提交、`interaction_id` 过期/不匹配、或 `idempotency_key` 冲突。
 - `SESSION_RESUME_FAILED`: `resumable` 路径下无法提取/使用会话句柄（Codex `thread_id`、Gemini `session_id`、iFlow `session-id`）。
+
+### 提交交互文件回复 (Reply Interaction with Files)
+`POST /v1/jobs/{request_id}/interaction/reply/files`
+
+请求为 `multipart/form-data`：一个名为 `metadata` 的 JSON part，以及一个或多个按出现顺序编号的重复 `files` part。`metadata` 结构：
+
+```json
+{
+  "interaction_id": 17,
+  "idempotency_key": "17-mabc123",
+  "message": "optional",
+  "bindings": [{"slot": "paper", "file_index": 0}]
+}
+```
+
+`slot` 必须匹配当前 pending 的 `ui_hints.files[].name`。每个文件必须恰好绑定一次，required slot 不得缺失。服务端按握手广告的同一 policy 分块校验文件数、单文件和总字节数；空文件拒绝。成功返回现有 `InteractionReplyResponse`，状态为 `queued`。
+
+错误语义：multipart/JSON 结构错误为 `400`，metadata、binding 或空文件错误为 `422`，限额错误为 `413`，stale/state/idempotency 冲突为 `409`，request 不存在为 `404`。客户端 filename 和 MIME 均不作为存储路径或可信内容判断。
 
 ### 会话中导入鉴权文件 (Auth Import In Conversation)
 `POST /v1/jobs/{request_id}/interaction/auth/import`

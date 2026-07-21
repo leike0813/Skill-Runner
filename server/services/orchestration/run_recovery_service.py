@@ -151,6 +151,10 @@ class RunRecoveryService:
                 options["__interactive_reply_interaction_id"] = payload.get("interaction_id")
             if "response" in payload:
                 options["__interactive_reply_payload"] = payload.get("response")
+            if "observability_response" in payload and payload.get("observability_response") is not None:
+                options["__interactive_reply_observability_payload"] = payload.get(
+                    "observability_response"
+                )
             if isinstance(payload.get("resolution_mode"), str):
                 options["__interactive_resolution_mode"] = payload.get("resolution_mode")
         task = resume_run_job(

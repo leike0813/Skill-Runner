@@ -10,12 +10,14 @@ Exposes endpoints for:
 import logging
 import contextlib
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form, Query, Request  # type: ignore[import-not-found]
+from pydantic import ValidationError
 from typing import Any
 from ..config import config
 from ..models import (
@@ -25,6 +27,7 @@ from ..models import (
     DispatchPhase,
     ExecutionMode,
     InteractionPendingResponse,
+    InteractionFileReplyMetadata,
     InteractionReplyRequest,
     InteractionReplyResponse,
     PendingOwner,
@@ -71,6 +74,10 @@ from ..services.platform.runtime_preamble_options import (
     sanitize_runtime_options_preamble,
 )
 from ..services.orchestration.run_store import run_store
+from ..services.orchestration.run_interaction_file_service import (
+    InteractionFileReplyError,
+    run_interaction_file_service,
+)
 from ..services.orchestration.run_cleanup_manager import run_cleanup_manager
 from ..services.orchestration.run_audit_contract_service import run_audit_contract_service
 from ..services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
@@ -322,6 +329,7 @@ def _copy_tree(src: Path, dst: Path) -> None:
         if path.is_dir():
             continue
         rel = path.relative_to(src)
+        _reject_reserved_interaction_reply_path(rel)
         target = dst / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(path.read_bytes())
@@ -334,12 +342,21 @@ def _ensure_copy_tree_targets_are_files(src: Path, dst: Path) -> None:
         if path.is_dir():
             continue
         rel = path.relative_to(src)
+        _reject_reserved_interaction_reply_path(rel)
         target = dst / rel
         if target.exists() and target.is_dir():
             raise HTTPException(
                 status_code=422,
                 detail=f"workspace file binding target_path already exists as a directory: {rel.as_posix()}",
             )
+
+
+def _reject_reserved_interaction_reply_path(rel: Path) -> None:
+    if rel.parts and rel.parts[0] == ".interaction-replies":
+        raise HTTPException(
+            status_code=422,
+            detail="uploads/.interaction-replies is reserved for managed interaction replies",
+        )
 
 @router.post("", response_model=RunCreateResponse)
 async def create_run(request: RunCreateRequest, background_tasks: BackgroundTasks):
@@ -1214,6 +1231,50 @@ async def reply_interaction(
         background_tasks=background_tasks,
         run_store_backend=run_store,
     )
+
+
+@router.post(
+    "/{request_id}/interaction/reply/files",
+    response_model=InteractionReplyResponse,
+)
+async def reply_interaction_files(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    metadata: list[str] = Form(...),
+    files: list[UploadFile] = File(...),
+):
+    if len(metadata) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_METADATA_PART_COUNT", "message": "exactly one metadata part is required"},
+        )
+    try:
+        decoded_metadata = json.loads(metadata[0])
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_METADATA_JSON", "message": "metadata must be valid JSON"},
+        ) from exc
+    try:
+        parsed_metadata = InteractionFileReplyMetadata.model_validate(decoded_metadata)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_FILE_METADATA", "message": "metadata is invalid"},
+        ) from exc
+    try:
+        return await run_interaction_file_service.submit_files(
+            request_id=request_id,
+            metadata=parsed_metadata,
+            uploads=files,
+            background_tasks=background_tasks,
+            run_store_backend=run_store,
+        )
+    except InteractionFileReplyError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
 
 
 @router.post("/{request_id}/interaction/auth/import", response_model=InteractionReplyResponse)

@@ -330,11 +330,23 @@ class RunStoreDatabase:
                 state TEXT NOT NULL,
                 idempotency_key TEXT,
                 reply_json TEXT,
+                reply_public_json TEXT,
+                reply_fingerprint TEXT,
+                reply_receipt_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (request_id, interaction_id)
             )
             """
+        )
+        await self._ensure_columns(
+            conn,
+            "request_interactions",
+            {
+                "reply_public_json": "TEXT",
+                "reply_fingerprint": "TEXT",
+                "reply_receipt_json": "TEXT",
+            },
         )
         await conn.execute(
             """

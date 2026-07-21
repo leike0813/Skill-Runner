@@ -48,8 +48,9 @@ Schema 文件：
 - FCMP envelope `meta` 至少包含 `attempt`，可包含 `local_seq`（attempt 内局部序号）
 
 2. `interaction.reply.accepted`
-- `interaction_id`, `resolution_mode=user_reply`, `accepted_at`, `response_preview?`
+- `interaction_id`, `resolution_mode=user_reply`, `accepted_at`, `response_preview?`, `response_summary?`
 - 该 FCMP 必须由 schema-backed orchestrator event `interaction.reply.accepted` 翻译得到，不允许由 reply endpoint 直接发布。
+- 文件 continuation 是含 workspace-relative `path` 的内部 DTO；公开 summary 只允许 `slot`、`name`、`size_bytes`。History、chat、event 与 audit preview 必须使用公开 DTO，receipt/manifest/fingerprint 不进入公开投影。
 
 3. `auth.required` / `auth.challenge.updated`
 - payload 复用 `pending_auth`

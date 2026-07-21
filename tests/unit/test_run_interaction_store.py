@@ -1,4 +1,5 @@
 import sqlite3
+import asyncio
 
 import pytest
 
@@ -40,6 +41,82 @@ async def test_run_interaction_store_reply_idempotency_and_consume(tmp_path):
     assert first == "accepted"
     assert second == "idempotent"
     assert consumed == {"answer": "yes"}
+
+
+@pytest.mark.asyncio
+async def test_run_interaction_store_persists_file_fingerprint_public_response_and_receipt(tmp_path):
+    database = RunStoreDatabase(tmp_path / "runs.db")
+    store = RunInteractionStore(database)
+    await store.set_pending_interaction(
+        "req-1",
+        {"interaction_id": 17, "kind": "upload_files", "prompt": "Upload"},
+    )
+    private = {
+        "kind": "interaction_files",
+        "files": [{"slot": "paper", "name": "paper.pdf", "path": "uploads/x", "size_bytes": 3}],
+    }
+    public = {
+        "kind": "interaction_files",
+        "files": [{"slot": "paper", "name": "paper.pdf", "size_bytes": 3}],
+    }
+    receipt = {"request_id": "req-1", "status": "queued", "accepted": True, "mode": "interaction"}
+
+    first = await store.submit_interaction_reply(
+        "req-1",
+        17,
+        private,
+        "key-1",
+        public_response=public,
+        idempotency_fingerprint="a" * 64,
+        receipt=receipt,
+    )
+    replay = await store.submit_interaction_reply(
+        "req-1",
+        17,
+        {**private, "files": [{**private["files"][0], "path": "uploads/random-replay"}]},
+        "key-1",
+        public_response=public,
+        idempotency_fingerprint="a" * 64,
+        receipt=receipt,
+    )
+    conflict = await store.submit_interaction_reply(
+        "req-1",
+        17,
+        private,
+        "key-1",
+        idempotency_fingerprint="b" * 64,
+    )
+    record = await store.get_interaction_reply_record("req-1", 17, "key-1")
+
+    assert first == "accepted"
+    assert replay == "idempotent"
+    assert conflict == "idempotency_conflict"
+    assert record is not None
+    assert record["response"] == private
+    assert record["public_response"] == public
+    assert record["receipt"] == receipt
+
+
+@pytest.mark.asyncio
+async def test_run_interaction_store_concurrent_file_replies_have_one_winner(tmp_path):
+    database = RunStoreDatabase(tmp_path / "runs.db")
+    store = RunInteractionStore(database)
+    await store.set_pending_interaction(
+        "req-1",
+        {"interaction_id": 19, "kind": "upload_files", "prompt": "Upload"},
+    )
+
+    async def submit(key: str, fingerprint: str) -> str:
+        return await store.submit_interaction_reply(
+            "req-1",
+            19,
+            {"kind": "interaction_files", "key": key},
+            key,
+            idempotency_fingerprint=fingerprint,
+        )
+
+    results = await asyncio.gather(submit("key-a", "a" * 64), submit("key-b", "b" * 64))
+    assert sorted(results) == ["accepted", "stale"]
 
 
 @pytest.mark.asyncio

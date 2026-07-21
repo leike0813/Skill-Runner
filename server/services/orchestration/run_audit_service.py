@@ -257,7 +257,10 @@ class RunAuditService:
         stdout_text = process_raw_stdout
         stderr_text = process_raw_stderr
         pty_text = f"{stdout_text}{stderr_text}"
-        stdin_payload = options.get("__interactive_reply_payload")
+        stdin_payload = options.get(
+            "__interactive_reply_observability_payload",
+            options.get("__interactive_reply_payload"),
+        )
         if stdin_payload is None:
             stdin_text = ""
         else:

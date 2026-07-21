@@ -368,21 +368,53 @@ class RunInteractionStore:
     async def get_interaction_reply(
         self, request_id: str, interaction_id: int, idempotency_key: str
     ) -> Optional[Any]:
+        record = await self.get_interaction_reply_record(
+            request_id,
+            interaction_id,
+            idempotency_key,
+        )
+        return record.get("response") if record is not None else None
+
+    async def get_interaction_reply_record(
+        self,
+        request_id: str,
+        interaction_id: int,
+        idempotency_key: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
         await self._database.ensure_initialized()
         async with self._database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """
-                SELECT reply_json
+                SELECT payload_json, state, idempotency_key, reply_json,
+                       reply_public_json, reply_fingerprint, reply_receipt_json
                 FROM request_interactions
-                WHERE request_id = ? AND interaction_id = ? AND idempotency_key = ?
+                WHERE request_id = ? AND interaction_id = ?
                 """,
-                (request_id, interaction_id, idempotency_key),
+                (request_id, interaction_id),
             )
             row = await cursor.fetchone()
-        if not row or row["reply_json"] is None:
+        if not row:
             return None
-        return json.loads(row["reply_json"])
+        if idempotency_key is not None and row["idempotency_key"] != idempotency_key:
+            return None
+        return {
+            "payload": json.loads(row["payload_json"]),
+            "state": row["state"],
+            "idempotency_key": row["idempotency_key"],
+            "response": json.loads(row["reply_json"]) if row["reply_json"] else None,
+            "public_response": (
+                json.loads(row["reply_public_json"])
+                if row["reply_public_json"]
+                else None
+            ),
+            "fingerprint": row["reply_fingerprint"],
+            "receipt": (
+                json.loads(row["reply_receipt_json"])
+                if row["reply_receipt_json"]
+                else None
+            ),
+        }
 
     async def consume_interaction_reply(self, request_id: str, interaction_id: int) -> Optional[Any]:
         await self._database.ensure_initialized()
@@ -416,13 +448,17 @@ class RunInteractionStore:
         interaction_id: int,
         response: Any,
         idempotency_key: Optional[str],
+        *,
+        public_response: Any = None,
+        idempotency_fingerprint: str | None = None,
+        receipt: Dict[str, Any] | None = None,
     ) -> str:
         await self._database.ensure_initialized()
         async with self._database.connect() as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute(
                 """
-                SELECT state, idempotency_key, reply_json
+                SELECT state, idempotency_key, reply_json, reply_fingerprint
                 FROM request_interactions
                 WHERE request_id = ? AND interaction_id = ?
                 """,
@@ -437,26 +473,38 @@ class RunInteractionStore:
             existing_reply = json.loads(row["reply_json"]) if row["reply_json"] is not None else None
             if state != "pending":
                 if idempotency_key and existing_key == idempotency_key:
+                    if idempotency_fingerprint is not None:
+                        if row["reply_fingerprint"] == idempotency_fingerprint:
+                            return "idempotent"
+                        return "idempotency_conflict"
                     if existing_reply == response:
                         return "idempotent"
                     return "idempotency_conflict"
                 return "stale"
 
             now = datetime.utcnow().isoformat()
-            await conn.execute(
+            update_cursor = await conn.execute(
                 """
                 UPDATE request_interactions
-                SET state = ?, idempotency_key = ?, reply_json = ?, updated_at = ?
-                WHERE request_id = ? AND interaction_id = ?
+                SET state = ?, idempotency_key = ?, reply_json = ?,
+                    reply_public_json = ?, reply_fingerprint = ?, reply_receipt_json = ?,
+                    updated_at = ?
+                WHERE request_id = ? AND interaction_id = ? AND state = 'pending'
                 """,
                 (
                     "answered",
                     idempotency_key,
                     json.dumps(response, sort_keys=True),
+                    json.dumps(public_response, sort_keys=True) if public_response is not None else None,
+                    idempotency_fingerprint,
+                    json.dumps(receipt, sort_keys=True) if receipt is not None else None,
                     now,
                     request_id,
                     interaction_id,
                 ),
             )
+            if update_cursor.rowcount != 1:
+                await conn.rollback()
+                return "stale"
             await conn.commit()
             return "accepted"

@@ -20,7 +20,7 @@ class RunFilesystemSnapshotService:
         return tuple(dict.fromkeys((*keys.ENGINE_KEYS, *keys.LEGACY_READONLY_ENGINE_KEYS)))
 
     def _build_ignored_prefixes(self) -> tuple[str, ...]:
-        ignored = {".audit/", ".state/", ".git/"}
+        ignored = {".audit/", ".state/", ".git/", "uploads/.interaction-replies/"}
         for engine in self._readonly_engine_keys():
             profile_path = (
                 Path(config.SYSTEM.ROOT) / "server" / "engines" / engine / "adapter" / "adapter_profile.json"

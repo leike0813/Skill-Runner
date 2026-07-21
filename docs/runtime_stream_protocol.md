@@ -152,7 +152,11 @@ terminal 示例：
     "interaction_id": 7,
     "resolution_mode": "user_reply",
     "accepted_at": "2026-02-24T12:35:10.000000",
-    "response_preview": "用户回复文本摘要"
+    "response_preview": "Uploaded files: paper.pdf",
+    "response_summary": {
+      "kind": "interaction_files",
+      "files": [{"slot": "paper", "name": "paper.pdf", "size_bytes": 12345}]
+    }
   }
 }
 ```
@@ -160,6 +164,8 @@ terminal 示例：
 说明：
 
 - canonical 发布路径为：`POST /interaction/reply` -> orchestrator `interaction.reply.accepted` -> FCMP `interaction.reply.accepted`。
+- multipart 文件回复从 `/interaction/reply/files` 汇入同一路径；可选 `response_summary` 只含 slot、清理后的 display name 与 size。
+- event、history、transcript 与日志不得包含 managed/absolute path、SHA-256、临时目录或 multipart bytes。
 - `user.input.required.data.prompt` 保留为语义化提示文本；
 - 不应写入无意义占位值（例如 `"Provide next user turn"`）。
 - `interaction_id` 为 attempt-scoped identity；消费或对账时必须结合来源 attempt 解释。

@@ -1251,6 +1251,10 @@ def test_fcmp_emits_auth_completion_transition(tmp_path: Path):
 
 
 def test_translate_orchestrator_interaction_reply_accepted_to_fcmp_pair() -> None:
+    public_summary = {
+        "kind": "interaction_files",
+        "files": [{"slot": "paper", "name": "paper.pdf", "size_bytes": 3}],
+    }
     specs = translate_orchestrator_event_to_fcmp_specs(
         engine="gemini",
         type_name="interaction.reply.accepted",
@@ -1259,6 +1263,7 @@ def test_translate_orchestrator_interaction_reply_accepted_to_fcmp_pair() -> Non
             "resolution_mode": "user_reply",
             "accepted_at": "2026-03-04T00:00:05Z",
             "response_preview": "男，38，程序员",
+            "response_summary": public_summary,
         },
         updated_at="2026-03-04T00:00:05Z",
         default_attempt_number=2,
@@ -1272,6 +1277,8 @@ def test_translate_orchestrator_interaction_reply_accepted_to_fcmp_pair() -> Non
     assert accepted["interaction_id"] == 7
     assert accepted["resolution_mode"] == "user_reply"
     assert accepted["response_preview"] == "男，38，程序员"
+    assert accepted["response_summary"] == public_summary
+    assert "path" not in str(accepted)
     state_changed = specs[1]["data"]
     assert state_changed["from"] == "waiting_user"
     assert state_changed["to"] == "queued"

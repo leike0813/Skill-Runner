@@ -173,6 +173,39 @@ async def test_system_handshake_reports_job_protocol_and_backend_version():
 
 
 @pytest.mark.asyncio
+async def test_system_handshake_reports_interaction_file_policy_only_when_requested():
+    requested = await _request(
+        "POST",
+        "/v1/system/handshake",
+        json={
+            "schema": "zotero-agents.skillrunner-handshake.request.v1",
+            "client": {"name": "zotero-agents", "version": "0.5.4"},
+            "requested_protocols": ["skillrunner.interaction-files.v1"],
+        },
+    )
+    legacy_default = await _request(
+        "POST",
+        "/v1/system/handshake",
+        json={
+            "schema": "zotero-agents.skillrunner-handshake.request.v1",
+            "client": {"name": "legacy", "version": "0.1.0"},
+            "requested_protocols": [],
+        },
+    )
+
+    assert requested.status_code == 200
+    capability = requested.json()["protocols"]["skillrunner.interaction-files.v1"]
+    assert capability == {
+        "supported": True,
+        "max_files": int(config.SYSTEM.INTERACTION_FILES.MAX_FILES),
+        "max_file_bytes": int(config.SYSTEM.INTERACTION_FILES.MAX_FILE_BYTES),
+        "max_total_bytes": int(config.SYSTEM.INTERACTION_FILES.MAX_TOTAL_BYTES),
+    }
+    assert "skillrunner.interaction-files.v1" not in legacy_default.json()["protocols"]
+    assert legacy_default.json()["protocols"]["skillrunner.job.v1"] == {"supported": True}
+
+
+@pytest.mark.asyncio
 async def test_system_handshake_reports_sequence_unsupported_and_unknown_false():
     res = await _request(
         "POST",

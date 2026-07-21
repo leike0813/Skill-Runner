@@ -131,6 +131,38 @@ def validate_resume_command(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def validate_interaction_file_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="interaction_file_reply_metadata",
+        schema_name="interaction_file_reply_metadata",
+    )
+
+
+def validate_interaction_file_continuation(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="interaction_file_continuation_response",
+        schema_name="interaction_file_continuation_response",
+    )
+
+
+def validate_interaction_file_public_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="interaction_file_public_response",
+        schema_name="interaction_file_public_response",
+    )
+
+
+def validate_interaction_file_manifest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_payload(
+        payload,
+        def_name="interaction_file_manifest",
+        schema_name="interaction_file_manifest",
+    )
+
+
 def validate_current_run_projection(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _validate_payload(
         payload,

@@ -41,6 +41,7 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 from .logging_config import setup_logging
 from .models import (
     PROTOCOL_SKILLRUNNER_JOB_V1,
+    PROTOCOL_SKILLRUNNER_INTERACTION_FILES_V1,
     PROTOCOL_SKILLRUNNER_SEQUENCE_V1,
     SystemHandshakeBackend,
     SystemHandshakeRequest,
@@ -59,6 +60,9 @@ from .routers import (
     ui,
 )
 from .services.engine_management.runtime_profile import get_runtime_profile
+from .services.orchestration.run_interaction_file_service import (
+    run_interaction_file_service,
+)
 from .i18n import SUPPORTED_LANGUAGES, get_language, get_translator
 from .version import get_backend_version
 
@@ -287,21 +291,37 @@ async def system_ping() -> Response:
     return Response(status_code=204)
 
 
-@app.post("/v1/system/handshake", response_model=SystemHandshakeResponse)
+@app.post(
+    "/v1/system/handshake",
+    response_model=SystemHandshakeResponse,
+    response_model_exclude_none=True,
+)
 async def system_handshake(request: SystemHandshakeRequest) -> SystemHandshakeResponse:
     supported_protocols = {
         PROTOCOL_SKILLRUNNER_JOB_V1: True,
         PROTOCOL_SKILLRUNNER_SEQUENCE_V1: False,
+        PROTOCOL_SKILLRUNNER_INTERACTION_FILES_V1: True,
     }
     requested_protocols = list(dict.fromkeys(request.requested_protocols))
     if not requested_protocols:
-        requested_protocols = list(supported_protocols)
-    protocols = {
-        protocol_id: SystemProtocolCapability(
-            supported=bool(supported_protocols.get(protocol_id, False))
-        )
-        for protocol_id in requested_protocols
-    }
+        requested_protocols = [
+            PROTOCOL_SKILLRUNNER_JOB_V1,
+            PROTOCOL_SKILLRUNNER_SEQUENCE_V1,
+        ]
+    protocols: dict[str, SystemProtocolCapability] = {}
+    for protocol_id in requested_protocols:
+        if protocol_id == PROTOCOL_SKILLRUNNER_INTERACTION_FILES_V1:
+            policy = run_interaction_file_service.get_policy()
+            protocols[protocol_id] = SystemProtocolCapability(
+                supported=True,
+                max_files=policy.max_files,
+                max_file_bytes=policy.max_file_bytes,
+                max_total_bytes=policy.max_total_bytes,
+            )
+        else:
+            protocols[protocol_id] = SystemProtocolCapability(
+                supported=bool(supported_protocols.get(protocol_id, False))
+            )
     return SystemHandshakeResponse(
         backend=SystemHandshakeBackend(version=get_backend_version()),
         protocols=protocols,

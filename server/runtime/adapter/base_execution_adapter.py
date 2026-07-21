@@ -1443,6 +1443,7 @@ class EngineExecutionAdapter:
             InteractionKind.CONFIRM.value,
             InteractionKind.FILL_FIELDS.value,
             InteractionKind.OPEN_TEXT.value,
+            InteractionKind.UPLOAD_FILES.value,
             InteractionKind.RISK_ACK.value,
         }
         if kind_name not in allowed:

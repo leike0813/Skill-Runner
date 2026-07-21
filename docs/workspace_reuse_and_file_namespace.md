@@ -72,9 +72,12 @@ New runner-owned files use actual persisted paths:
 ```text
 result/<safeSkillId>.<n>/result.json
 .audit/<safeSkillId>.<n>/input_manifest.json
+uploads/.interaction-replies/<safeSkillId>.<n>/<interaction-id>/<receipt-token>/
 ```
 
 `result/result.json` is only a legacy fallback for historical runs. New reused-workspace runs do not maintain it as a latest alias.
+
+Managed interaction reply files belong to the current logical request namespace even when the physical workspace is reused. Continuations expose only workspace-relative POSIX paths. The reserved subtree is readable by the resumed agent through those paths but excluded from run explorer, preview, debug bundle, and filesystem snapshot surfaces.
 
 ## Cache Lineage
 

@@ -5,6 +5,10 @@ from server.runtime.protocol.schema_registry import (
     validate_current_run_projection,
     validate_fcmp_event,
     validate_interaction_history_entry,
+    validate_interaction_file_continuation,
+    validate_interaction_file_manifest,
+    validate_interaction_file_metadata,
+    validate_interaction_file_public_response,
     validate_orchestrator_event,
     validate_pending_auth,
     validate_pending_auth_method_selection,
@@ -13,6 +17,78 @@ from server.runtime.protocol.schema_registry import (
     validate_resume_command,
     validate_terminal_run_result,
 )
+
+
+def test_validate_interaction_file_contracts_separate_private_and_public_paths() -> None:
+    metadata = {
+        "interaction_id": 17,
+        "idempotency_key": "17-key",
+        "message": "Read this",
+        "bindings": [{"slot": "paper", "file_index": 0}],
+    }
+    private = {
+        "kind": "interaction_files",
+        "message": "Read this",
+        "files": [
+            {
+                "slot": "paper",
+                "name": "paper.pdf",
+                "path": "uploads/.interaction-replies/demo.1/17/token/file.pdf",
+                "size_bytes": 3,
+            }
+        ],
+    }
+    public = {
+        "kind": "interaction_files",
+        "message": "Read this",
+        "files": [{"slot": "paper", "name": "paper.pdf", "size_bytes": 3}],
+    }
+    manifest = {
+        "request_id": "req-1",
+        "interaction_id": 17,
+        "idempotency_key": "17-key",
+        "receipt_token": "token",
+        "fingerprint": "a" * 64,
+        "files": [
+            {
+                **private["files"][0],
+                "sha256": "b" * 64,
+            }
+        ],
+    }
+
+    assert validate_interaction_file_metadata(metadata) == metadata
+    assert validate_interaction_file_continuation(private) == private
+    assert validate_interaction_file_public_response(public) == public
+    assert validate_interaction_file_manifest(manifest) == manifest
+    with pytest.raises(ProtocolSchemaViolation):
+        validate_interaction_file_public_response(private)
+
+
+def test_interaction_history_rejects_private_file_continuation() -> None:
+    entry = {
+        "interaction_id": 17,
+        "source_attempt": 1,
+        "event_type": "reply",
+        "payload": {
+            "response": {
+                "kind": "interaction_files",
+                "files": [
+                    {
+                        "slot": "paper",
+                        "name": "paper.pdf",
+                        "path": "uploads/private",
+                        "size_bytes": 3,
+                    }
+                ],
+            },
+            "source_attempt": 1,
+            "resolution_mode": "user_reply",
+        },
+        "created_at": "2026-07-21T00:00:00+00:00",
+    }
+    with pytest.raises(ProtocolSchemaViolation):
+        validate_interaction_history_entry(entry)
 
 
 def test_validate_fcmp_event_accepts_state_changed_payload():

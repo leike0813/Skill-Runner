@@ -10,6 +10,7 @@ HANDSHAKE_RESPONSE_SCHEMA = "zotero-agents.skillrunner-handshake.response.v1"
 BACKEND_NAME = "Skill-Runner"
 PROTOCOL_SKILLRUNNER_JOB_V1 = "skillrunner.job.v1"
 PROTOCOL_SKILLRUNNER_SEQUENCE_V1 = "skillrunner.sequence.v1"
+PROTOCOL_SKILLRUNNER_INTERACTION_FILES_V1 = "skillrunner.interaction-files.v1"
 
 
 class SystemHandshakeClient(BaseModel):
@@ -40,6 +41,9 @@ class SystemProtocolCapability(BaseModel):
     """Support state for one stable protocol id."""
 
     supported: bool
+    max_files: int | None = Field(default=None, ge=1)
+    max_file_bytes: int | None = Field(default=None, ge=1)
+    max_total_bytes: int | None = Field(default=None, ge=1)
 
 
 class SystemHandshakeResponse(BaseModel):

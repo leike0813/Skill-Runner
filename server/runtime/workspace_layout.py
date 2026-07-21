@@ -48,6 +48,10 @@ class RunWorkspaceLayout:
     def bundle_dir(self) -> Path:
         return self.workspace_dir / "bundle" / self.namespace
 
+    @property
+    def interaction_reply_files_dir(self) -> Path:
+        return self.workspace_dir / "uploads" / ".interaction-replies" / self.namespace
+
     def bundle_path(self, *, debug: bool = False) -> Path:
         filename = "run_bundle_debug.zip" if debug else "run_bundle.zip"
         return self.bundle_dir / filename

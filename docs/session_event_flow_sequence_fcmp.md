@@ -65,7 +65,12 @@ sequenceDiagram
     P-->>C: chat_event(conversation.state.changed running->waiting_user)
     P-->>C: chat_event(user.input.required)
 
-    C->>API: POST /interaction/reply
+    alt ordinary JSON reply
+      C->>API: POST /interaction/reply
+    else managed file reply
+      C->>API: POST /interaction/reply/files (metadata + files)
+      API->>API: validate slots and limits; atomically publish managed files
+    end
     API->>O: interaction.reply.accepted
     O->>P: interaction.reply.accepted
     P-->>C: chat_event(interaction.reply.accepted)
@@ -81,6 +86,8 @@ sequenceDiagram
       P-->>C: chat_event(conversation.state.changed queued->failed)
     end
 ```
+
+文件路由只是输入适配器：存储失败保持 pending 未消费；成功后与 JSON reply 汇合到同一 canonical acceptance。两条入口都只产生既有 `interaction.reply.accepted` 与 `conversation.state.changed(waiting_user->queued)`，并且只安排一次 resume。
 
 ## 3) strict=false 超时自动决策流
 

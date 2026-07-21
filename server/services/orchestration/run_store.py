@@ -620,6 +620,18 @@ class RunStore:
     ) -> Optional[Any]:
         return await self._interaction_store.get_interaction_reply(request_id, interaction_id, idempotency_key)
 
+    async def get_interaction_reply_record(
+        self,
+        request_id: str,
+        interaction_id: int,
+        idempotency_key: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        return await self._interaction_store.get_interaction_reply_record(
+            request_id,
+            interaction_id,
+            idempotency_key,
+        )
+
     async def consume_interaction_reply(self, request_id: str, interaction_id: int) -> Optional[Any]:
         return await self._interaction_store.consume_interaction_reply(request_id, interaction_id)
 
@@ -629,12 +641,19 @@ class RunStore:
         interaction_id: int,
         response: Any,
         idempotency_key: Optional[str],
+        *,
+        public_response: Any = None,
+        idempotency_fingerprint: str | None = None,
+        receipt: Dict[str, Any] | None = None,
     ) -> str:
         return await self._interaction_store.submit_interaction_reply(
             request_id,
             interaction_id,
             response,
             idempotency_key,
+            public_response=public_response,
+            idempotency_fingerprint=idempotency_fingerprint,
+            receipt=receipt,
         )
 
     def _resume_ticket_from_row(self, row: aiosqlite.Row) -> Dict[str, Any]:

@@ -20,6 +20,17 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_bounded_positive_int(name: str, default: int, maximum: int) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = default if raw is None else int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < 1 or value > maximum:
+        raise ValueError(f"{name} must be between 1 and {maximum}")
+    return value
+
+
 def _is_container_runtime() -> bool:
     if os.path.exists("/.dockerenv"):
         return True
@@ -120,6 +131,22 @@ _C.SYSTEM.RUNS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "runs")
 _C.SYSTEM.WORKSPACES_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "workspaces")
 _C.SYSTEM.REQUESTS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "requests")
 _C.SYSTEM.TMP_UPLOADS_DIR = os.path.join(_C.SYSTEM.DATA_DIR, "tmp_uploads")
+_C.SYSTEM.INTERACTION_FILES = CN()
+_C.SYSTEM.INTERACTION_FILES.MAX_FILES = _env_bounded_positive_int(
+    "SKILL_RUNNER_INTERACTION_FILES_MAX_FILES",
+    8,
+    8,
+)
+_C.SYSTEM.INTERACTION_FILES.MAX_FILE_BYTES = _env_bounded_positive_int(
+    "SKILL_RUNNER_INTERACTION_FILES_MAX_FILE_BYTES",
+    32 * 1024 * 1024,
+    32 * 1024 * 1024,
+)
+_C.SYSTEM.INTERACTION_FILES.MAX_TOTAL_BYTES = _env_bounded_positive_int(
+    "SKILL_RUNNER_INTERACTION_FILES_MAX_TOTAL_BYTES",
+    64 * 1024 * 1024,
+    64 * 1024 * 1024,
+)
 _C.SYSTEM.TEMP_SKILL_PACKAGE_CACHE_DIR = os.environ.get(
     "TEMP_SKILL_PACKAGE_CACHE_DIR",
     os.path.join(_C.SYSTEM.DATA_DIR, "temp_skill_package_cache"),

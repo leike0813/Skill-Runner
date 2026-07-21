@@ -38,6 +38,7 @@ _PREAMBLE_SKIP_OPTION_KEYS = {
     "__prompt_override",
     "__repair_round_index",
     "__interactive_reply_payload",
+    "__interactive_reply_observability_payload",
     "__interactive_reply_interaction_id",
     "__attempt_number_override",
 }

@@ -103,6 +103,7 @@ def make_fcmp_reply_accepted(
     interaction_id: Optional[int],
     accepted_at: Optional[str],
     response_preview: Optional[str] = None,
+    response_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "interaction_id": interaction_id,
@@ -111,6 +112,8 @@ def make_fcmp_reply_accepted(
     }
     if isinstance(response_preview, str):
         payload["response_preview"] = response_preview
+    if isinstance(response_summary, dict):
+        payload["response_summary"] = response_summary
     return payload
 
 

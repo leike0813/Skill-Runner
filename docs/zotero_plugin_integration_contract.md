@@ -313,7 +313,7 @@ warning（可继续）：
 3. `skill-runnerctl preflight --json`（`exit_code!=0` 则中止自动启动并展示 blocking）
 4. `skill-runnerctl up --mode local --json`
 5. `POST /v1/local-runtime/lease/acquire`（使用 `up` 返回的实际 `host/port/url`，不要硬编码端口）
-6. `POST /v1/system/handshake` 查询协议能力；旧后端没有该接口时，插件可按 legacy 逻辑仅视为支持 `skillrunner.job.v1`
+6. `POST /v1/system/handshake` 查询 `skillrunner.job.v1` 及按需查询 `skillrunner.interaction-files.v1`；文件选择 UI 必须使用后端返回的实际限额
 7. 按 `heartbeat_interval_seconds` 定时 `heartbeat`
 8. 插件退出时 `release`
 9. 可选 `skill-runnerctl down --mode local --json`
@@ -334,7 +334,8 @@ warning（可继续）：
   },
   "requested_protocols": [
     "skillrunner.job.v1",
-    "skillrunner.sequence.v1"
+    "skillrunner.sequence.v1",
+    "skillrunner.interaction-files.v1"
   ]
 }
 ```
@@ -349,7 +350,13 @@ warning（可继续）：
   },
   "protocols": {
     "skillrunner.job.v1": { "supported": true },
-    "skillrunner.sequence.v1": { "supported": false }
+    "skillrunner.sequence.v1": { "supported": false },
+    "skillrunner.interaction-files.v1": {
+      "supported": true,
+      "max_files": 8,
+      "max_file_bytes": 33554432,
+      "max_total_bytes": 67108864
+    }
   }
 }
 ```
@@ -360,6 +367,7 @@ warning（可继续）：
 - `skillrunner.job.v1` 是第一版支持的任务提交协议。
 - 当前后端不原生支持整段 sequence workflow 执行，因此 `skillrunner.sequence.v1.supported=false`。
 - 未知协议不得导致 500，可返回 `supported=false`。
+- `skillrunner.interaction-files.v1` 仅在显式请求时返回，三个限额与 multipart reply 的实际校验 policy 完全一致。
 - 协议 ID 是稳定契约；后续新增语义必须新增 ID，不能复用旧 ID 改行为。
 
 ## 7) 卸载契约（跨平台）

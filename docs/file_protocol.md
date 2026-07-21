@@ -230,3 +230,15 @@
 - `GET /v1/jobs/{request_id}/bundle/debug`：下载 debug bundle。
   - 保留更宽范围的运行期排障文件。
 - 单文件 artifact 下载接口已废弃；统一通过 bundle / debug bundle 获取产物。
+
+## 9. Interaction reply 文件
+
+`POST /v1/jobs/{request_id}/interaction/reply/files` 接收当前 `waiting_user` 的 `upload_files` continuation。服务端严格校验 metadata、`ui_hints.files[].name` slot、required binding、文件数以及分块读取的单文件/总字节数。
+
+文件先写入同父临时目录并计算 SHA-256，完整 manifest 写入后原子提升到：
+
+```text
+uploads/.interaction-replies/<request-namespace>/<interaction-id>/<receipt-token>/
+```
+
+`.interaction-replies` 是服务端保留子树，初始上传不得占用。客户端 filename 只用于清理后的 display name，实际存储名由服务端生成。Agent continuation 只取得相对 workspace 的 POSIX path；事件、history、transcript、日志、run explorer、bundle 和 filesystem snapshot 均不暴露该路径或 hash。

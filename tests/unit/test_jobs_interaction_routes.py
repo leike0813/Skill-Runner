@@ -1,13 +1,16 @@
 import json
+import io
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
-from fastapi import BackgroundTasks, HTTPException
+httpx = pytest.importorskip("httpx")
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 
 from server.config import config
+from server.main import app
 from server.models import (
     AuthMethod,
     AuthMethodSelection,
@@ -162,6 +165,237 @@ async def test_get_interaction_pending_returns_pending(monkeypatch, temp_config_
     assert response.pending is not None
     assert response.pending.interaction_id == 1
     assert response.pending.kind.value == "choose_one"
+
+
+@pytest.mark.asyncio
+async def test_interaction_file_reply_publishes_managed_file_and_replays_once(
+    monkeypatch,
+    temp_config_dirs,
+):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = str(request_record["run_id"])
+    layout = require_layout_from_record(request_record)
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_USER)
+    await store.set_pending_interaction(
+        request_id,
+        {
+            "interaction_id": 17,
+            "kind": "upload_files",
+            "prompt": "Upload the paper",
+            "ui_hints": {
+                "kind": "upload_files",
+                "files": [{"name": "paper", "required": True, "accept": ".pdf"}],
+            },
+        },
+    )
+    metadata = json.dumps(
+        {
+            "interaction_id": 17,
+            "idempotency_key": "17-key",
+            "message": "Please read it",
+            "bindings": [{"slot": "paper", "file_index": 0}],
+        }
+    )
+    first_tasks = BackgroundTasks()
+    first = await jobs_router.reply_interaction_files(
+        request_id=request_id,
+        background_tasks=first_tasks,
+        metadata=[metadata],
+        files=[UploadFile(filename="../folder\\paper.pdf", file=io.BytesIO(b"pdf"))],
+    )
+    record = await store.get_interaction_reply_record(request_id, 17, "17-key")
+    assert record is not None
+    managed = record["response"]["files"][0]
+    managed_path = layout.workspace_dir / managed["path"]
+
+    replay_tasks = BackgroundTasks()
+    replay = await jobs_router.reply_interaction_files(
+        request_id=request_id,
+        background_tasks=replay_tasks,
+        metadata=[metadata],
+        files=[UploadFile(filename="paper.pdf", file=io.BytesIO(b"pdf"))],
+    )
+
+    assert first.status == RunStatus.QUEUED
+    assert replay == first
+    assert managed["name"] == "paper.pdf"
+    assert managed_path.read_bytes() == b"pdf"
+    assert "path" not in record["public_response"]["files"][0]
+    assert len(first_tasks.tasks) == 1
+    assert replay_tasks.tasks == []
+    event_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in layout.audit_dir.glob("orchestrator_events.*.jsonl")
+    )
+    assert "response_summary" in event_text
+    assert managed["path"] not in event_text
+    receipt_dirs = [path for path in layout.interaction_reply_files_dir.rglob("*") if path.is_dir()]
+    assert not any(path.name.startswith(".tmp-") for path in receipt_dirs)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await jobs_router.reply_interaction_files(
+            request_id=request_id,
+            background_tasks=BackgroundTasks(),
+            metadata=[metadata],
+            files=[UploadFile(filename="paper.pdf", file=io.BytesIO(b"different"))],
+        )
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_interaction_file_reply_rejects_unknown_slot_without_consuming_pending(
+    monkeypatch,
+    temp_config_dirs,
+):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = str(request_record["run_id"])
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_USER)
+    await store.set_pending_interaction(
+        request_id,
+        {
+            "interaction_id": 18,
+            "kind": "upload_files",
+            "prompt": "Upload the paper",
+            "ui_hints": {
+                "kind": "upload_files",
+                "files": [{"name": "paper", "required": True}],
+            },
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await jobs_router.reply_interaction_files(
+            request_id=request_id,
+            background_tasks=BackgroundTasks(),
+            metadata=[json.dumps(
+                {
+                    "interaction_id": 18,
+                    "idempotency_key": "18-key",
+                    "bindings": [{"slot": "unknown", "file_index": 0}],
+                }
+            )],
+            files=[UploadFile(filename="paper.pdf", file=io.BytesIO(b"pdf"))],
+        )
+    assert exc_info.value.status_code == 422
+    assert await store.get_pending_interaction(request_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_interaction_file_reply_real_multipart_smoke(
+    monkeypatch,
+    temp_config_dirs,
+):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = str(request_record["run_id"])
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_USER)
+    await store.set_pending_interaction(
+        request_id,
+        {
+            "interaction_id": 21,
+            "kind": "upload_files",
+            "prompt": "Upload",
+            "ui_hints": {
+                "kind": "upload_files",
+                "files": [{"name": "paper", "required": True}],
+            },
+        },
+    )
+    resume = AsyncMock()
+    monkeypatch.setattr(interaction_service_module.job_orchestrator, "run_job", resume)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            f"/v1/jobs/{request_id}/interaction/reply/files",
+            data={
+                "metadata": json.dumps(
+                    {
+                        "interaction_id": 21,
+                        "idempotency_key": "21-smoke",
+                        "bindings": [{"slot": "paper", "file_index": 0}],
+                    }
+                )
+            },
+            files=[("files", ("paper.pdf", b"smoke", "application/pdf"))],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "request_id": request_id,
+        "status": "queued",
+        "accepted": True,
+        "mode": "interaction",
+    }
+    resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_interaction_file_reply_enforces_stream_limit_and_rejects_empty_file(
+    monkeypatch,
+    temp_config_dirs,
+):
+    store, request_id = await _create_interactive_request(monkeypatch, temp_config_dirs)
+    request_record = await store.get_request(request_id)
+    assert request_record is not None
+    run_id = str(request_record["run_id"])
+    await _write_status(store, request_id, run_id, RunStatus.WAITING_USER)
+    await store.set_pending_interaction(
+        request_id,
+        {
+            "interaction_id": 22,
+            "kind": "upload_files",
+            "prompt": "Upload",
+            "ui_hints": {
+                "kind": "upload_files",
+                "files": [{"name": "paper", "required": True}],
+            },
+        },
+    )
+    original_limit = int(config.SYSTEM.INTERACTION_FILES.MAX_FILE_BYTES)
+    config.defrost()
+    config.SYSTEM.INTERACTION_FILES.MAX_FILE_BYTES = 4
+    config.freeze()
+    try:
+        with pytest.raises(HTTPException) as too_large:
+            await jobs_router.reply_interaction_files(
+                request_id=request_id,
+                background_tasks=BackgroundTasks(),
+                metadata=[json.dumps(
+                    {
+                        "interaction_id": 22,
+                        "idempotency_key": "22-large",
+                        "bindings": [{"slot": "paper", "file_index": 0}],
+                    }
+                )],
+                files=[UploadFile(filename="paper.pdf", file=io.BytesIO(b"12345"))],
+            )
+    finally:
+        config.defrost()
+        config.SYSTEM.INTERACTION_FILES.MAX_FILE_BYTES = original_limit
+        config.freeze()
+
+    with pytest.raises(HTTPException) as empty:
+        await jobs_router.reply_interaction_files(
+            request_id=request_id,
+            background_tasks=BackgroundTasks(),
+            metadata=[json.dumps(
+                {
+                    "interaction_id": 22,
+                    "idempotency_key": "22-empty",
+                    "bindings": [{"slot": "paper", "file_index": 0}],
+                }
+            )],
+            files=[UploadFile(filename="paper.pdf", file=io.BytesIO(b""))],
+        )
+
+    assert too_large.value.status_code == 413
+    assert empty.value.status_code == 422
+    assert await store.get_pending_interaction(request_id) is not None
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from server.runtime.adapter.types import RuntimeStreamParseResult, RuntimeStream
 from server.runtime.chat_replay.structured_output_display import derive_assistant_final_display
 from server.runtime.common.ask_user_text import normalize_interaction_text
 from server.runtime.protocol.contracts import RuntimeParserResolverPort
+from server.runtime.protocol.interaction_response import safe_interaction_response_preview
 from server.models import (
     ConversationEventEnvelope,
     FcmpEventType,
@@ -78,16 +79,8 @@ def _normalize_prompt_text(text: str) -> str:
 
 
 def _extract_response_preview(payload: Mapping[str, Any]) -> Optional[str]:
-    response_obj = payload.get("response")
-    if isinstance(response_obj, dict):
-        text_obj = response_obj.get("text")
-        if isinstance(text_obj, str):
-            normalized = text_obj.strip()
-            return normalized or None
-    if isinstance(response_obj, str):
-        normalized = response_obj.strip()
-        return normalized or None
-    return None
+    response_obj = payload.get("response_summary", payload.get("response"))
+    return safe_interaction_response_preview(response_obj)
 
 
 def parse_engine_logs(
@@ -849,6 +842,11 @@ def translate_orchestrator_event_to_fcmp_specs(
                 interaction_id=interaction_id,
                 accepted_at=accepted_at,
                 response_preview=response_preview,
+                response_summary=(
+                    data.get("response_summary")
+                    if isinstance(data.get("response_summary"), dict)
+                    else None
+                ),
             ),
         )
         push(
@@ -1473,6 +1471,12 @@ def build_fcmp_events(
                     interaction_id=interaction_id,
                     accepted_at=resolved_at,
                     response_preview=_extract_response_preview(payload),
+                    response_summary=(
+                        payload.get("response")
+                        if isinstance(payload.get("response"), dict)
+                        and payload.get("response", {}).get("kind") == "interaction_files"
+                        else None
+                    ),
                 ),
             )
             push(

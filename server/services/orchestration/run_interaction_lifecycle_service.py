@@ -99,7 +99,10 @@ class RunInteractionLifecycleService:
                 interaction_id=interaction_id,
                 event_type="reply",
                 payload={
-                    "response": resume_command["response"],
+                    "response": options.get(
+                        "__interactive_reply_observability_payload",
+                        resume_command["response"],
+                    ),
                     "source_attempt": int(options.get("__interactive_source_attempt") or 1),
                     "resolution_mode": resume_command["resolution_mode"],
                     "resolved_at": datetime.utcnow().isoformat(),
@@ -242,7 +245,14 @@ class RunInteractionLifecycleService:
             "single_select": "choose_one",
         }
         kind_name = alias_map.get(kind_name, kind_name)
-        allowed = {"choose_one", "confirm", "fill_fields", "open_text", "risk_ack"}
+        allowed = {
+            "choose_one",
+            "confirm",
+            "fill_fields",
+            "open_text",
+            "upload_files",
+            "risk_ack",
+        }
         if kind_name not in allowed:
             return "open_text"
         return kind_name

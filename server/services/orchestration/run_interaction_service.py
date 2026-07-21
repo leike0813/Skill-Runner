@@ -32,6 +32,7 @@ from server.runtime.observability.run_source_adapter import (
 from server.runtime.logging.run_context import bind_run_logging_context
 from server.runtime.logging.structured_trace import log_event
 from server.runtime.protocol.factories import make_resume_command
+from server.runtime.protocol.interaction_response import safe_interaction_response_preview
 from server.runtime.protocol.schema_registry import ProtocolSchemaViolation, validate_resume_command
 from server.runtime.session.statechart import waiting_reply_target_status
 from server.services.orchestration.run_service_log_mirror import RunServiceLogMirrorSession
@@ -43,6 +44,7 @@ from server.services.orchestration.run_execution_core import resolve_conversatio
 from server.services.orchestration.run_projection_service import run_projection_service
 from server.services.orchestration.run_store import run_store
 from server.services.orchestration.run_workspace_layout import (
+    RunWorkspaceLayout,
     require_layout_from_record,
 )
 from server.services.orchestration.workspace_manager import workspace_manager
@@ -52,15 +54,12 @@ logger = logging.getLogger(__name__)
 
 
 class RunInteractionService:
-    async def _resolve_request_and_run_dir(
+    async def resolve_request_and_layout(
         self,
         *,
-        source_adapter: RunSourceAdapter | None,
         request_id: str,
         run_store_backend: Any = run_store,
-    ) -> tuple[dict[str, Any], Path]:
-        if source_adapter is not None:
-            return await get_request_and_run_dir(source_adapter, request_id)
+    ) -> tuple[dict[str, Any], RunWorkspaceLayout]:
         request_record = await maybe_await(run_store_backend.get_request(request_id))
         if not request_record:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -73,6 +72,21 @@ class RunInteractionService:
             raise HTTPException(status_code=500, detail="Run workspace layout is unavailable") from exc
         if not layout.workspace_dir.exists():
             raise HTTPException(status_code=500, detail="Run workspace directory is unavailable")
+        return request_record, layout
+
+    async def _resolve_request_and_run_dir(
+        self,
+        *,
+        source_adapter: RunSourceAdapter | None,
+        request_id: str,
+        run_store_backend: Any = run_store,
+    ) -> tuple[dict[str, Any], Path]:
+        if source_adapter is not None:
+            return await get_request_and_run_dir(source_adapter, request_id)
+        request_record, layout = await self.resolve_request_and_layout(
+            request_id=request_id,
+            run_store_backend=run_store_backend,
+        )
         return request_record, layout.workspace_dir
 
     async def get_pending(
@@ -137,6 +151,8 @@ class RunInteractionService:
         request: InteractionReplyRequest,
         background_tasks: BackgroundTasks,
         run_store_backend: Any = run_store,
+        idempotency_fingerprint: str | None = None,
+        observability_response: Any = None,
     ) -> InteractionReplyResponse:
         resolved_source = source_adapter or installed_run_source_adapter
         request_record, run_dir = await self._resolve_request_and_run_dir(
@@ -326,15 +342,38 @@ class RunInteractionService:
                 )
                 raise HTTPException(status_code=409, detail="stale interaction")
 
+            next_status = waiting_reply_target_status()
+            first_receipt = InteractionReplyResponse(
+                request_id=request_id,
+                status=next_status,
+                accepted=True,
+            )
+            persistence_options: dict[str, Any] = {}
+            if observability_response is not None:
+                persistence_options["public_response"] = observability_response
+            if idempotency_fingerprint is not None:
+                persistence_options["idempotency_fingerprint"] = idempotency_fingerprint
+                persistence_options["receipt"] = first_receipt.model_dump(mode="json")
             reply_state = await maybe_await(
                 run_store_backend.submit_interaction_reply(
                     request_id=request_id,
                     interaction_id=request.interaction_id,
                     response=request.response,
                     idempotency_key=request.idempotency_key,
+                    **persistence_options,
                 )
             )
             if reply_state == "idempotent":
+                if idempotency_fingerprint is not None and request.interaction_id is not None:
+                    stored = await maybe_await(
+                        run_store_backend.get_interaction_reply_record(
+                            request_id,
+                            request.interaction_id,
+                            request.idempotency_key,
+                        )
+                    )
+                    if isinstance(stored, dict) and isinstance(stored.get("receipt"), dict):
+                        return InteractionReplyResponse.model_validate(stored["receipt"])
                 return InteractionReplyResponse(request_id=request_id, status=status, accepted=True)
             if reply_state == "idempotency_conflict":
                 log_event(
@@ -387,8 +426,6 @@ class RunInteractionService:
                 mode=request.mode,
             )
 
-            next_status = waiting_reply_target_status()
-
             await run_projection_service.write_non_terminal_projection(
                 run_dir=run_dir,
                 request_id=request_id,
@@ -433,6 +470,8 @@ class RunInteractionService:
                 "__interactive_source_attempt": source_attempt,
                 "__attempt_number_override": source_attempt + 1,
             }
+            if observability_response is not None:
+                merged_options["__interactive_reply_observability_payload"] = observability_response
             resume_ticket = await maybe_await(
                 run_store_backend.issue_resume_ticket(
                     request_id,
@@ -443,6 +482,7 @@ class RunInteractionService:
                         "interaction_id": request.interaction_id,
                         "resolution_mode": resume_command["resolution_mode"],
                         "response": resume_command["response"],
+                        "observability_response": observability_response,
                     },
                 )
             )
@@ -467,17 +507,24 @@ class RunInteractionService:
                 run_store_backend=run_store_backend,
             )
             accepted_at = datetime.now().astimezone().isoformat()
+            accepted_event_data: dict[str, Any] = {
+                "interaction_id": request.interaction_id,
+                "resolution_mode": "user_reply",
+                "accepted_at": accepted_at,
+                "response_preview": safe_interaction_response_preview(
+                    observability_response
+                    if observability_response is not None
+                    else request.response
+                ),
+            }
+            if observability_response is not None:
+                accepted_event_data["response_summary"] = observability_response
             append_orchestrator_event(
                 run_dir=run_dir,
                 attempt_number=source_attempt + 1,
                 category="interaction",
                 type_name=OrchestratorEventType.INTERACTION_REPLY_ACCEPTED.value,
-                data={
-                    "interaction_id": request.interaction_id,
-                    "resolution_mode": "user_reply",
-                    "accepted_at": accepted_at,
-                    "response_preview": _extract_response_preview(request.response),
-                },
+                data=accepted_event_data,
             )
             ticket_dispatched = await maybe_await(
                 run_store_backend.mark_resume_ticket_dispatched(
@@ -782,15 +829,3 @@ def _coerce_conversation_mode(raw: Any) -> ClientConversationMode | None:
 
 
 run_interaction_service = RunInteractionService()
-
-
-def _extract_response_preview(response: Any) -> str | None:
-    if isinstance(response, dict):
-        text_obj = response.get("text")
-        if isinstance(text_obj, str):
-            normalized = text_obj.strip()
-            return normalized or None
-    if isinstance(response, str):
-        normalized = response.strip()
-        return normalized or None
-    return None
