@@ -6,7 +6,7 @@
 
 - 后端运行时优先使用 `<SKILL_RUNNER_AGENT_CACHE_DIR>/plugin-bundles/zotero-bridge-cli-bundle` 中的受管 Zotero Bridge CLI bundle；内置 `plugins/zotero-bridge-cli-bundle` 作为 fallback。
 - 服务启动后后台自动跟踪 `https://github.com/leike0813/zotero-agents` 的 `host-bridge/zotero-bridge-cli-bundle` 分支，校验通过后激活新 bundle。
-- bundle 使用 `host-bridge.surface-release.v1` manifest：版本来自 `surface.version`，平台 CLI 与 SHA256 来自 `releaseSet.cli.binaries`，profile template 位于 `skills/zotero-bridge-cli/assets/profile.template.json`。
+- bundle 使用 `host-bridge.surface-release.v1` 或 `host-bridge.surface-release.v2` manifest：版本来自 `surface.version`，平台 CLI 与 SHA256 来自 `releaseSet.cli.binaries`，profile template 位于 `skills/zotero-bridge-cli/assets/profile.template.json`。
 - 部署/bootstrap 会先将 manifest 规范化为统一 descriptor，再校验 wrapper skill、profile template、当前平台 CLI 及 SHA256；全部校验完成后才写入 managed agent home、profile 与 `SKILL_RUNNER_NPM_PREFIX/bin`。
 - 本地部署沿用 `scripts/skill-runnerctl` 注入的 managed prefix PATH；Docker 部署沿用镜像内 `/opt/cache/skill-runner/npm/bin` PATH。
 - agent subprocess 通过 `ZOTERO_BRIDGE_BIN` 获得 managed `zotero-bridge` 可执行文件的绝对路径。

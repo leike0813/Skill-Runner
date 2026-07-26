@@ -23,7 +23,11 @@ ZOTERO_BRIDGE_CONNECTION_MODE_ENV = "ZOTERO_BRIDGE_CONNECTION_MODE"
 ZOTERO_BRIDGE_PROFILE_RELATIVE_PATH = Path("zotero-bridge") / "bridge-profile.json"
 WRAPPER_SKILL_ID = "zotero-bridge-cli"
 LEGACY_BUNDLE_SCHEMA = "zotero-bridge-cli-bundle.v1"
-SURFACE_RELEASE_SCHEMA = "host-bridge.surface-release.v1"
+SURFACE_RELEASE_V1_SCHEMA = "host-bridge.surface-release.v1"
+SURFACE_RELEASE_V2_SCHEMA = "host-bridge.surface-release.v2"
+SUPPORTED_SURFACE_RELEASE_SCHEMAS = frozenset(
+    {SURFACE_RELEASE_V1_SCHEMA, SURFACE_RELEASE_V2_SCHEMA}
+)
 SURFACE_WRAPPER_SKILL_RELATIVE_PATH = Path("skills") / WRAPPER_SKILL_ID
 SURFACE_PROFILE_TEMPLATE_RELATIVE_PATH = (
     SURFACE_WRAPPER_SKILL_RELATIVE_PATH / "assets" / "profile.template.json"
@@ -437,8 +441,8 @@ def load_zotero_bridge_bundle_descriptor(
     schema = manifest.get("schema")
     if schema == LEGACY_BUNDLE_SCHEMA:
         return _adapt_legacy_bundle_manifest(manifest)
-    if schema == SURFACE_RELEASE_SCHEMA:
-        return _adapt_surface_release_manifest(manifest)
+    if schema in SUPPORTED_SURFACE_RELEASE_SCHEMAS:
+        return _adapt_surface_release_manifest(manifest, schema=schema)
     raise ZoteroBridgeBundleError(f"Unsupported Zotero Bridge manifest schema: {schema!r}")
 
 
@@ -472,6 +476,8 @@ def _adapt_legacy_bundle_manifest(
 
 def _adapt_surface_release_manifest(
     manifest: Mapping[str, Any],
+    *,
+    schema: str,
 ) -> ZoteroBridgeBundleDescriptor:
     release_set = _required_mapping(manifest, "releaseSet", context="manifest")
     cli = _required_mapping(release_set, "cli", context="releaseSet")
@@ -481,7 +487,7 @@ def _adapt_surface_release_manifest(
             "Zotero Bridge manifest is missing releaseSet.cli.binaries"
         )
     return ZoteroBridgeBundleDescriptor(
-        schema=SURFACE_RELEASE_SCHEMA,
+        schema=schema,
         version=_surface_version(manifest, required=True),
         wrapper_skill_relative_path=SURFACE_WRAPPER_SKILL_RELATIVE_PATH,
         profile_template_relative_path=SURFACE_PROFILE_TEMPLATE_RELATIVE_PATH,

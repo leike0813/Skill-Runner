@@ -9,7 +9,8 @@ built-in bundle shipped with the service:
 plugins/zotero-bridge-cli-bundle
 ```
 
-The bundle publishes a `host-bridge.surface-release.v1` manifest. Skill Runner
+The bundle publishes a `host-bridge.surface-release.v1` or
+`host-bridge.surface-release.v2` manifest. Skill Runner
 reads the release version from `surface.version`, platform binaries and SHA256
 values from `releaseSet.cli.binaries`, the global wrapper skill from
 `skills/zotero-bridge-cli/`, and the profile template from

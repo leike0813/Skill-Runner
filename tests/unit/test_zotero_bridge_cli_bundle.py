@@ -50,12 +50,13 @@ def _write_fake_bundle(
     platform_keys: tuple[str, ...] = ("linux-x64", "win32-x64"),
 ) -> tuple[Path, str]:
     bundle = root / "bundle"
+    is_surface_release = manifest_schema.startswith("surface")
     skill_root = bundle / "skills" / "zotero-bridge-cli"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Zotero Bridge CLI\n", encoding="utf-8")
     profile_template = (
         skill_root / "assets" / "profile.template.json"
-        if manifest_schema == "surface"
+        if is_surface_release
         else bundle / "assets" / "profile.template.json"
     )
     profile_template.parent.mkdir(parents=True)
@@ -86,16 +87,20 @@ def _write_fake_bundle(
                 "platform": platform_key,
                 "binary": (
                     binary_name
-                    if manifest_schema == "surface"
+                    if is_surface_release
                     else f"bin/{platform_key}/{binary_name}"
                 ),
                 "sha256": digest,
                 "bytes": binary.stat().st_size,
             }
         )
-    if manifest_schema == "surface":
+    if is_surface_release:
         manifest = {
-            "schema": "host-bridge.surface-release.v1",
+            "schema": (
+                "host-bridge.surface-release.v2"
+                if manifest_schema == "surface-v2"
+                else "host-bridge.surface-release.v1"
+            ),
             "surface": {"version": version},
             "releaseSet": {"cli": {"binaries": entries}},
         }
@@ -117,7 +122,7 @@ def _write_fake_bundle(
         }
     if version is not None:
         manifest["surface"] = {"version": version}
-    elif manifest_schema == "surface":
+    elif is_surface_release:
         manifest["surface"] = {}
     (bundle / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return bundle, digests.get("linux-x64", next(iter(digests.values())))
@@ -140,12 +145,22 @@ def test_resolve_bundle_platform_key(system: str, machine: str, expected: str | 
 
 
 @pytest.mark.parametrize(
-    ("manifest_schema", "expected_profile"),
+    ("manifest_schema", "expected_profile", "expected_schema"),
     [
-        ("legacy", Path("assets/profile.template.json")),
+        (
+            "legacy",
+            Path("assets/profile.template.json"),
+            "zotero-bridge-cli-bundle.v1",
+        ),
         (
             "surface",
             Path("skills/zotero-bridge-cli/assets/profile.template.json"),
+            "host-bridge.surface-release.v1",
+        ),
+        (
+            "surface-v2",
+            Path("skills/zotero-bridge-cli/assets/profile.template.json"),
+            "host-bridge.surface-release.v2",
         ),
     ],
 )
@@ -153,6 +168,7 @@ def test_bundle_descriptor_normalizes_supported_manifest_schemas(
     tmp_path: Path,
     manifest_schema: str,
     expected_profile: Path,
+    expected_schema: str,
 ) -> None:
     bundle, digest = _write_fake_bundle(tmp_path, manifest_schema=manifest_schema)
 
@@ -160,6 +176,7 @@ def test_bundle_descriptor_normalizes_supported_manifest_schemas(
     binary = descriptor.binary_for("linux-x64")
 
     assert descriptor.version == "0.3.0"
+    assert descriptor.schema == expected_schema
     assert descriptor.wrapper_skill_relative_path == Path("skills/zotero-bridge-cli")
     assert descriptor.profile_template_relative_path == expected_profile
     assert binary is not None
@@ -167,7 +184,7 @@ def test_bundle_descriptor_normalizes_supported_manifest_schemas(
     assert binary.sha256 == digest
 
 
-@pytest.mark.parametrize("manifest_schema", ["legacy", "surface"])
+@pytest.mark.parametrize("manifest_schema", ["legacy", "surface", "surface-v2"])
 def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(
     tmp_path: Path,
     manifest_schema: str,
@@ -210,7 +227,7 @@ def test_ensure_zotero_bridge_installs_posix_cli_profile_and_global_skills(
         ) == "# Zotero Bridge CLI\n"
 
 
-@pytest.mark.parametrize("manifest_schema", ["legacy", "surface"])
+@pytest.mark.parametrize("manifest_schema", ["legacy", "surface", "surface-v2"])
 def test_ensure_zotero_bridge_installs_windows_exe_and_cmd_shim(
     tmp_path: Path,
     manifest_schema: str,
@@ -235,7 +252,7 @@ def test_ensure_zotero_bridge_installs_windows_exe_and_cmd_shim(
     assert "zotero-bridge.exe" in shim.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("manifest_schema", ["legacy", "surface"])
+@pytest.mark.parametrize("manifest_schema", ["legacy", "surface", "surface-v2"])
 def test_ensure_zotero_bridge_rejects_sha_mismatch(
     tmp_path: Path,
     manifest_schema: str,
@@ -245,7 +262,7 @@ def test_ensure_zotero_bridge_rejects_sha_mismatch(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entries = (
         manifest["releaseSet"]["cli"]["binaries"]
-        if manifest_schema == "surface"
+        if manifest_schema.startswith("surface")
         else manifest["cli"]["platforms"]
     )
     entries[0]["sha256"] = "0" * 64

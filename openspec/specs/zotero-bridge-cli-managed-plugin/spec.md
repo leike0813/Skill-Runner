@@ -59,8 +59,8 @@ The system SHALL expose separate check and install operations for administrators
 
 The system SHALL normalize each supported bundle manifest into one immutable descriptor containing version, wrapper and profile paths, connection environment names, and platform binary SHA256 metadata. Validation, installation, and status projection SHALL consume that descriptor.
 
-#### Scenario: current surface release is installed
-- **WHEN** a `host-bridge.surface-release.v1` bundle is selected
+#### Scenario: supported surface release is installed
+- **WHEN** a `host-bridge.surface-release.v1` or `host-bridge.surface-release.v2` bundle is selected
 - **THEN** the descriptor reads version from `surface.version`
 - **AND** reads binary metadata from `releaseSet.cli.binaries`
 - **AND** resolves the wrapper and profile template under `skills/zotero-bridge-cli`
